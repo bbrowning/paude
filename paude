@@ -95,13 +95,11 @@ setup_mounts() {
         MOUNT_ARGS+=(-v "$GCLOUD_DIR:/home/paude/.config/gcloud:ro")
     fi
 
-    if [[ ! -d "$HOME/.claude" ]]; then
-        mkdir -p "$HOME/.claude"
-    fi
-    CLAUDE_DIR="$(resolve_path "$HOME/.claude")"
-    if [[ -n "$CLAUDE_DIR" && -d "$CLAUDE_DIR" ]]; then
-        MOUNT_ARGS+=(-v "$CLAUDE_DIR:/home/paude/.claude:rw")
-        MOUNT_ARGS+=(-v "$CLAUDE_DIR:$CLAUDE_DIR:rw")
+    if [[ -d "$HOME/.claude" ]]; then
+        CLAUDE_DIR="$(resolve_path "$HOME/.claude")"
+        if [[ -n "$CLAUDE_DIR" && -d "$CLAUDE_DIR" ]]; then
+            MOUNT_ARGS+=(-v "$CLAUDE_DIR:/tmp/claude.seed:ro")
+        fi
     fi
 
     GITCONFIG="$(resolve_path "$HOME/.gitconfig")"

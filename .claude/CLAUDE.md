@@ -18,9 +18,8 @@ Two files comprise the entire project:
 The script mounts these paths from host to container:
 - Current working directory at same path (rw) - preserves real paths for trust prompts
 - `~/.config/gcloud` → `/home/paude/.config/gcloud` (ro) - Vertex AI credentials
-- `~/.claude` → `/home/paude/.claude` (rw) - Claude Code config directory
-- `~/.claude` → `~/.claude` at host path (rw) - enables plugins with hardcoded paths
-- `~/.claude.json` → `/home/paude/.claude.json` (rw) - Claude Code legacy settings (text style, etc.)
+- `~/.claude` → `/tmp/claude.seed` (ro) - copied into container on startup
+- `~/.claude.json` → `/tmp/claude.json.seed` (ro) - copied into container on startup
 - `~/.gitconfig` → `/home/paude/.gitconfig` (ro) - Git identity
 
 ## Security Model
@@ -28,6 +27,7 @@ The script mounts these paths from host to container:
 - No SSH keys mounted - prevents `git push` via SSH
 - No GitHub CLI config mounted - prevents `gh` operations
 - gcloud credentials are read-only
+- Claude config directories are copied in, not mounted - prevents poisoning host config
 - Non-root user inside container
 
 ## Testing Changes
