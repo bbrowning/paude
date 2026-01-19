@@ -19,6 +19,7 @@ The script mounts these paths from host to container:
 - Current working directory at same path (rw) - preserves real paths for trust prompts
 - `~/.config/gcloud` → `/home/paude/.config/gcloud` (ro) - Vertex AI credentials
 - `~/.claude` → `/tmp/claude.seed` (ro) - copied into container on startup
+- `~/.claude/plugins` → same host path (ro) - plugins use hardcoded paths
 - `~/.claude.json` → `/tmp/claude.json.seed` (ro) - copied into container on startup
 - `~/.gitconfig` → `/home/paude/.gitconfig` (ro) - Git identity
 

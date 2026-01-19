@@ -99,6 +99,10 @@ setup_mounts() {
         CLAUDE_DIR="$(resolve_path "$HOME/.claude")"
         if [[ -n "$CLAUDE_DIR" && -d "$CLAUDE_DIR" ]]; then
             MOUNT_ARGS+=(-v "$CLAUDE_DIR:/tmp/claude.seed:ro")
+            # Mount plugins at original host path for hardcoded plugin references
+            if [[ -d "$CLAUDE_DIR/plugins" ]]; then
+                MOUNT_ARGS+=(-v "$CLAUDE_DIR/plugins:$CLAUDE_DIR/plugins:ro")
+            fi
         fi
     fi
 
