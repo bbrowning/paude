@@ -164,10 +164,8 @@ setup_proxy() {
     }
     trap cleanup EXIT INT TERM
 
-    # Explicit DNS needed because --internal network has no DNS
     podman run -d --rm --name "$PROXY_NAME" \
         --network "$INTERNAL_NETWORK,podman" \
-        --dns 8.8.8.8 --dns 8.8.4.4 \
         "$PROXY_IMAGE" >/dev/null
 
     sleep 1
