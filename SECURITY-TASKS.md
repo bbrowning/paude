@@ -16,7 +16,7 @@ This file tracks security improvements needed before running Claude Code autonom
 
 ## Progress Summary
 
-- **CRITICAL**: 3 completed, 3 remaining
+- **CRITICAL**: 4 completed, 2 remaining
 - **HIGH**: 0 completed, 4 remaining
 - **MEDIUM**: 0 completed, 2 remaining
 
@@ -85,65 +85,74 @@ touch ~/.config/gcloud/test.txt  # Should fail (read-only)
 
 ---
 
-### ⚠️ TASK 4: Network Exfiltration Prevention [PENDING]
+### ✅ TASK 4: Network Exfiltration Prevention [COMPLETED]
 
-**Status**: PENDING
+**Status**: COMPLETED
+**Completed**: Proxy sidecar with domain allowlist
 **Threat**: Claude can send any file to attacker-controlled servers via curl/wget/WebFetch
 **Impact**: COMPLETE DATA BREACH - all workspace files, secrets, source code stolen
 
-**Current State**: Container has unrestricted internet access
+**Mitigation Implemented**:
+- Proxy sidecar architecture with domain-based allowlist
+- Claude container on internal network (no direct internet access)
+- Proxy container bridges internal and external networks
+- Only Google/Vertex AI domains permitted through proxy
+- Opt-in: `--allow-network` flag bypasses proxy for full access
 
-**Mitigation Options** (choose one or combine):
-
-**Option A: Complete Network Isolation** (Recommended for maximum security)
-```bash
-# Pros: Zero exfiltration risk, simplest implementation
-# Cons: No package installation, no web searches, no API calls
-
-# Modify paude script line 102:
-exec podman run --rm -it \
-    --network=none \
-    -w "$WORKSPACE_DIR" \
-    ...
+**Architecture**:
+```
+┌─────────────────────────────────────────────────────┐
+│  paude-internal (--internal, no internet)           │
+│  ┌───────────┐      ┌─────────────────────────────┐ │
+│  │  Claude   │─────▶│  Proxy (squid allowlist)    │─┼──▶ *.googleapis.com
+│  │ Container │      │  paude-internal + podman    │ │    *.google.com
+│  └───────────┘      └─────────────────────────────┘ │
+└─────────────────────────────────────────────────────┘
 ```
 
-**Option B: Allowlist-Based Egress Filtering** (Balanced approach)
+**Allowed Domains** (in proxy/squid.conf):
+- `*.googleapis.com` - Vertex AI API
+- `*.google.com` - Google auth
+- `accounts.google.com` - OAuth
+- `oauth2.googleapis.com` - Token refresh
+- `*.gstatic.com` - Google static assets
+
+**Workflow Pattern**:
+- **Execution mode** (default): `./paude` - proxy-filtered network, only Vertex AI
+- **Research mode**: `./paude --allow-network` - full network, treat outputs carefully
+
+**Files Added**:
+- `proxy/Dockerfile` - Proxy container image
+- `proxy/squid.conf` - Allowlist configuration
+
+**Verification**:
 ```bash
-# Pros: Allow specific trusted domains (npm, pypi, github)
-# Cons: Complex setup, requires podman network + firewall rules
-
-# 1. Create custom network with DNS
-podman network create --subnet 10.89.0.0/24 paude-net
-
-# 2. Set up iptables rules allowing only specific domains
-# 3. Modify paude to use --network=paude-net
-```
-
-**Option C: Transparent Proxy with Logging** (Audit-focused)
-```bash
-# Pros: Full audit trail, can review exfiltration attempts
-# Cons: Doesn't prevent exfiltration, complex setup
-
-# Use mitmproxy or squid to log all HTTP/HTTPS traffic
-```
-
-**Testing Plan**:
-```bash
+# Test default (proxy-filtered):
 ./paude
-# Inside container, test that exfiltration is blocked:
-curl https://evil.com  # Should fail
-wget https://attacker.net  # Should fail
+# Inside container:
+curl https://evil.com  # Should fail - blocked by proxy
+curl https://example.com  # Should fail - not in allowlist
+# Vertex AI calls work via gcloud/Claude Code
 
-# If using Option B, verify allowed domains work:
-npm install lodash  # Should succeed
-curl https://registry.npmjs.org  # Should succeed
+# Test with network enabled:
+./paude --allow-network
+# Should print warning, full network access
+curl https://example.com  # Should succeed
 ```
+
+**Implementation Notes**:
+- Hardcoded DNS (8.8.8.8, 8.8.4.4) required because `--internal` network has no DNS
+- Network order `$INTERNAL_NETWORK,podman` works; reverse order breaks DNS
+- `podman kill` used for instant cleanup (no graceful shutdown delay)
+- Script refactored into functions for maintainability
 
 **Acceptance Criteria**:
-- [ ] Claude Code cannot send HTTP/HTTPS requests to arbitrary domains
-- [ ] Legitimate development workflows still function (if using Option B)
-- [ ] Clear error messages when network is blocked
-- [ ] Documentation updated with network policy
+- [x] Claude Code can only reach Google/Vertex AI domains by default
+- [x] Arbitrary HTTP/HTTPS requests blocked by proxy
+- [x] Explicit opt-in via --allow-network flag
+- [x] Proxy lifecycle tied to Claude container (cleanup on exit)
+- [x] Concurrent sessions supported (unique proxy per session)
+- [x] Documentation updated with architecture
 
 ---
 
