@@ -8,5 +8,7 @@ RUN npm install -g @anthropic-ai/claude-code
 
 RUN useradd -m -s /bin/bash paude
 
+COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
+
 USER paude
-ENTRYPOINT ["claude"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

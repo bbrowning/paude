@@ -109,12 +109,11 @@ setup_mounts() {
         MOUNT_ARGS+=(-v "$GITCONFIG:/home/paude/.gitconfig:ro")
     fi
 
-    if [[ ! -f "$HOME/.claude.json" ]]; then
-        echo '{}' > "$HOME/.claude.json"
-    fi
-    CLAUDE_JSON="$(resolve_path "$HOME/.claude.json")"
-    if [[ -n "$CLAUDE_JSON" && -f "$CLAUDE_JSON" ]]; then
-        MOUNT_ARGS+=(-v "$CLAUDE_JSON:/home/paude/.claude.json:rw")
+    if [[ -f "$HOME/.claude.json" ]]; then
+        CLAUDE_JSON="$(resolve_path "$HOME/.claude.json")"
+        if [[ -n "$CLAUDE_JSON" && -f "$CLAUDE_JSON" ]]; then
+            MOUNT_ARGS+=(-v "$CLAUDE_JSON:/tmp/claude.json.seed:ro")
+        fi
     fi
 }
 
