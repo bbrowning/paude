@@ -180,13 +180,26 @@ run_claude() {
     local network_args=()
     local proxy_env=()
 
-    if [[ "$YOLO_MODE" == "true" ]]; then
+    if [[ "$YOLO_MODE" == "true" && "$ALLOW_NETWORK" == "true" ]]; then
+        echo "" >&2
+        echo "╔══════════════════════════════════════════════════════════════════╗" >&2
+        echo "║  WARNING: MAXIMUM RISK MODE                                      ║" >&2
+        echo "║                                                                  ║" >&2
+        echo "║  --yolo + --allow-network = Claude can exfiltrate any file      ║" >&2
+        echo "║  to the internet without confirmation. Only use if you trust    ║" >&2
+        echo "║  the task completely.                                           ║" >&2
+        echo "╚══════════════════════════════════════════════════════════════════╝" >&2
+        echo "" >&2
+        CLAUDE_ARGS=("--dangerously-skip-permissions" "${CLAUDE_ARGS[@]}")
+    elif [[ "$YOLO_MODE" == "true" ]]; then
         echo "Warning: YOLO mode enabled. Claude can edit files and run commands without confirmation." >&2
         CLAUDE_ARGS=("--dangerously-skip-permissions" "${CLAUDE_ARGS[@]}")
+    elif [[ "$ALLOW_NETWORK" == "true" ]]; then
+        echo "Warning: Network access enabled. Data exfiltration is possible." >&2
     fi
 
     if [[ "$ALLOW_NETWORK" == "true" ]]; then
-        echo "Warning: Network access enabled. Data exfiltration is possible." >&2
+        :  # No proxy setup needed
     else
         network_args=(--network "$INTERNAL_NETWORK")
         proxy_env=(
