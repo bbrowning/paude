@@ -6,22 +6,79 @@ PROXY_IMAGE="paude-proxy:latest"
 INTERNAL_NETWORK="paude-internal"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Parse paude-specific flags before passing to claude
+show_help() {
+    cat <<'EOF'
+paude - Run Claude Code in a secure Podman container
+
+USAGE:
+    paude [OPTIONS] [-- CLAUDE_ARGS...]
+
+OPTIONS:
+    -h, --help          Show this help message and exit
+    -V, --version       Show paude version and exit
+    --yolo              Enable YOLO mode (skip all permission prompts)
+                        Claude can edit files and run commands without confirmation
+    --allow-network     Allow unrestricted network access
+                        By default, network is restricted to Vertex AI endpoints only
+
+CLAUDE OPTIONS:
+    All arguments after -- are passed directly to claude.
+    Run 'paude -- --help' to see claude's options.
+
+EXAMPLES:
+    paude                           Start interactive claude session
+    paude --yolo                    Start with YOLO mode (no permission prompts)
+    paude -- -p "What is 2+2?"      Run claude with a prompt
+    paude --yolo -- -p "Fix bugs"   YOLO mode with a prompt
+    paude -- --help                 Show claude's help
+
+SECURITY:
+    By default, paude runs with network restricted to Google/Anthropic APIs only.
+    Use --allow-network to permit all network access (enables data exfiltration).
+    Combining --yolo with --allow-network is maximum risk mode.
+
+EOF
+}
+
+show_version() {
+    echo "paude 0.1.0"
+}
+
+# Parse paude-specific flags before -- separator
 ALLOW_NETWORK=false
 YOLO_MODE=false
 CLAUDE_ARGS=()
+PARSING_PAUDE_ARGS=true
+
 for arg in "$@"; do
-    case "$arg" in
-        --allow-network)
-            ALLOW_NETWORK=true
-            ;;
-        --yolo)
-            YOLO_MODE=true
-            ;;
-        *)
-            CLAUDE_ARGS+=("$arg")
-            ;;
-    esac
+    if [[ "$PARSING_PAUDE_ARGS" == "true" ]]; then
+        case "$arg" in
+            --)
+                PARSING_PAUDE_ARGS=false
+                ;;
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            -V|--version)
+                show_version
+                exit 0
+                ;;
+            --allow-network)
+                ALLOW_NETWORK=true
+                ;;
+            --yolo)
+                YOLO_MODE=true
+                ;;
+            *)
+                # Unknown paude option - could be claude arg without --
+                # For backwards compatibility, pass through to claude
+                CLAUDE_ARGS+=("$arg")
+                ;;
+        esac
+    else
+        CLAUDE_ARGS+=("$arg")
+    fi
 done
 
 resolve_path() {
