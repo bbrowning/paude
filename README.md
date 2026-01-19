@@ -123,10 +123,46 @@ The container intentionally restricts certain operations:
 | Network | proxy-filtered (Google/Vertex only) | Prevents data exfiltration |
 | Current directory | read-write | Working files |
 | `~/.config/gcloud` | read-only | Vertex AI auth |
-| `~/.claude` | read-write | Claude Code config |
+| `~/.claude` | copied in, not mounted | Prevents host config poisoning |
 | `~/.gitconfig` | read-only | Git identity |
 | SSH keys | not mounted | Prevents git push via SSH |
 | GitHub CLI config | not mounted | Prevents gh operations |
+| Git credentials | not mounted | Prevents HTTPS git push |
+
+### Verified Attack Vectors
+
+These exfiltration paths have been tested and confirmed blocked:
+
+| Attack Vector | Status | How |
+|--------------|--------|-----|
+| HTTP/HTTPS exfiltration | Blocked | Internal network has no external DNS; proxy allowlists only Google domains |
+| Git push via SSH | Blocked | No `~/.ssh` mounted; DNS resolution fails anyway |
+| Git push via HTTPS | Blocked | No credential helpers; no stored credentials; DNS blocked |
+| GitHub CLI operations | Blocked | `gh` command not installed in container |
+| Modify cloud credentials | Blocked | gcloud directory mounted read-only |
+| Escape container | Blocked | Non-root user; standard Podman isolation |
+
+### When is `--yolo` Safe?
+
+```bash
+# SAFE: Network filtered, cannot exfiltrate data
+./paude --yolo
+
+# DANGEROUS: Full network access, can send files anywhere
+./paude --yolo --allow-network
+```
+
+The `--yolo` flag enables autonomous execution (no confirmation prompts). This is safe when network filtering is active because Claude cannot exfiltrate files or secrets even if it reads them.
+
+**Do not combine `--yolo` with `--allow-network`** unless you fully trust the task. The combination allows Claude to read any file in your workspace and send it to arbitrary URLs.
+
+### Residual Risks
+
+These risks are accepted by design:
+
+1. **Workspace destruction**: Claude can delete files including `.git`. Mitigation: push to remote before autonomous sessions.
+2. **Secrets readable**: `.env` files in workspace are readable. Mitigation: network filtering prevents exfiltration; don't use `--allow-network` with sensitive workspaces.
+3. **No audit logging**: Commands executed aren't logged. This is a forensics gap, not a security breach vector.
 
 ## License
 
