@@ -1,0 +1,105 @@
+#!/bin/bash
+set -e
+
+IMAGE_NAME="paude:latest"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if ! command -v podman &> /dev/null; then
+    echo "Error: podman is not installed or not in PATH" >&2
+    echo "Please install podman: https://podman.io/getting-started/installation" >&2
+    exit 1
+fi
+
+if ! podman image exists "$IMAGE_NAME" 2>/dev/null; then
+    echo "Building $IMAGE_NAME image..."
+    podman build -t "$IMAGE_NAME" "$SCRIPT_DIR"
+fi
+
+ENV_ARGS=()
+for var in CLAUDE_CODE_USE_VERTEX ANTHROPIC_VERTEX_PROJECT_ID GOOGLE_CLOUD_PROJECT; do
+    if [[ -n "${!var}" ]]; then
+        ENV_ARGS+=(-e "$var=${!var}")
+    fi
+done
+
+for var in $(compgen -v | grep '^CLOUDSDK_AUTH'); do
+    ENV_ARGS+=(-e "$var=${!var}")
+done
+
+resolve_path() {
+    local path="$1"
+    if [[ -e "$path" ]]; then
+        cd -P "$(dirname "$path")" 2>/dev/null && echo "$(pwd -P)/$(basename "$path")"
+    fi
+}
+
+WORKSPACE_DIR="$(pwd -P)"
+
+MOUNT_ARGS=(
+    -v "$WORKSPACE_DIR:$WORKSPACE_DIR:rw"
+)
+
+GCLOUD_DIR="$(resolve_path "$HOME/.config/gcloud")"
+if [[ -n "$GCLOUD_DIR" && -d "$GCLOUD_DIR" ]]; then
+    MOUNT_ARGS+=(-v "$GCLOUD_DIR:/home/paude/.config/gcloud:ro")
+fi
+
+if [[ ! -d "$HOME/.claude" ]]; then
+    mkdir -p "$HOME/.claude"
+fi
+CLAUDE_DIR="$(resolve_path "$HOME/.claude")"
+if [[ -n "$CLAUDE_DIR" && -d "$CLAUDE_DIR" ]]; then
+    MOUNT_ARGS+=(-v "$CLAUDE_DIR:/home/paude/.claude:rw")
+fi
+
+GITCONFIG="$(resolve_path "$HOME/.gitconfig")"
+if [[ -n "$GITCONFIG" && -f "$GITCONFIG" ]]; then
+    MOUNT_ARGS+=(-v "$GITCONFIG:/home/paude/.gitconfig:ro")
+fi
+
+if [[ ! -f "$HOME/.claude.json" ]]; then
+    echo '{}' > "$HOME/.claude.json"
+fi
+CLAUDE_JSON="$(resolve_path "$HOME/.claude.json")"
+if [[ -n "$CLAUDE_JSON" && -f "$CLAUDE_JSON" ]]; then
+    MOUNT_ARGS+=(-v "$CLAUDE_JSON:/home/paude/.claude.json:rw")
+fi
+
+show_macos_volume_help() {
+    local volume_path
+    volume_path=$(echo "$WORKSPACE_DIR" | cut -d'/' -f1-3)
+
+    echo "" >&2
+    echo "Podman on macOS only mounts /Users by default." >&2
+    echo "To use paths under $volume_path, recreate your Podman machine with:" >&2
+    echo "" >&2
+    echo "  podman machine stop" >&2
+    echo "  podman machine rm" >&2
+    echo "  podman machine init \\" >&2
+    echo "    --volume /Users:/Users \\" >&2
+    echo "    --volume /private:/private \\" >&2
+    echo "    --volume /var/folders:/var/folders \\" >&2
+    echo "    --volume $volume_path:$volume_path" >&2
+    echo "  podman machine start" >&2
+    echo "" >&2
+    echo "Note: This will remove your existing Podman machine. Container images" >&2
+    echo "will need to be rebuilt/pulled after recreating the machine." >&2
+}
+
+if [[ "$(uname)" == "Darwin" && ! "$WORKSPACE_DIR" =~ ^/Users/ ]]; then
+    test_output=$(podman run --rm \
+        -v "$WORKSPACE_DIR:$WORKSPACE_DIR:rw" \
+        "$IMAGE_NAME" \
+        --version 2>&1) || {
+        echo "$test_output" >&2
+        show_macos_volume_help
+        exit 1
+    }
+fi
+
+exec podman run --rm -it \
+    -w "$WORKSPACE_DIR" \
+    "${ENV_ARGS[@]}" \
+    "${MOUNT_ARGS[@]}" \
+    "$IMAGE_NAME" \
+    "$@"
