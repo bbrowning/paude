@@ -8,11 +8,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Parse paude-specific flags before passing to claude
 ALLOW_NETWORK=false
+YOLO_MODE=false
 CLAUDE_ARGS=()
 for arg in "$@"; do
     case "$arg" in
         --allow-network)
             ALLOW_NETWORK=true
+            ;;
+        --yolo)
+            YOLO_MODE=true
             ;;
         *)
             CLAUDE_ARGS+=("$arg")
@@ -175,6 +179,11 @@ setup_proxy() {
 run_claude() {
     local network_args=()
     local proxy_env=()
+
+    if [[ "$YOLO_MODE" == "true" ]]; then
+        echo "Warning: YOLO mode enabled. Claude can edit files and run commands without confirmation." >&2
+        CLAUDE_ARGS=("--dangerously-skip-permissions" "${CLAUDE_ARGS[@]}")
+    fi
 
     if [[ "$ALLOW_NETWORK" == "true" ]]; then
         echo "Warning: Network access enabled. Data exfiltration is possible." >&2

@@ -30,6 +30,12 @@ A Podman wrapper that runs [Claude Code](https://claude.ai/code) inside a contai
 # Enable full network access for web searches and package installation
 ./paude --allow-network
 
+# Enable autonomous mode (no confirmation prompts for edits/commands)
+./paude --yolo
+
+# Combine flags for full autonomous mode with network access
+./paude --yolo --allow-network
+
 # Pass arguments to Claude Code
 ./paude --help
 ./paude -p "explain this code"
@@ -44,7 +50,13 @@ Paude encourages separating research from execution for security:
 **Execution mode** (default): `./paude`
 - Network filtered via proxy - only Google/Vertex AI domains accessible
 - Claude Code API calls work, but arbitrary exfiltration blocked
-- Safe for autonomous file modifications, refactoring, builds
+- Claude prompts for confirmation before edits and commands
+
+**Autonomous mode**: `./paude --yolo`
+- Same network filtering as execution mode
+- Claude edits files and runs commands without confirmation prompts
+- Passes `--dangerously-skip-permissions` to Claude Code inside the container
+- Your host machine's Claude environment is unaffected (container isolation)
 
 **Research mode**: `./paude --allow-network`
 - Full network access for web searches, documentation, package installation
@@ -88,7 +100,7 @@ podman machine start
 
 The container has full read-write access to your working directory. This means Claude Code can create, modify, or delete any files in your project, including the `.git` directory.
 
-**Your protection is git itself.** Push important work to a remote before running with `--dangerously-skip-permissions`:
+**Your protection is git itself.** Push important work to a remote before running in autonomous mode (`--yolo`):
 
 ```bash
 # Before autonomous sessions, push your work
