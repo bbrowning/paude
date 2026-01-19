@@ -24,6 +24,9 @@ A Podman wrapper that runs [Claude Code](https://claude.ai/code) inside a contai
 ## Usage
 
 ```bash
+# Show paude help (options, examples, security notes)
+./paude --help
+
 # Run Claude Code interactively (network filtered to Vertex AI only)
 ./paude
 
@@ -36,10 +39,13 @@ A Podman wrapper that runs [Claude Code](https://claude.ai/code) inside a contai
 # Combine flags for full autonomous mode with network access
 ./paude --yolo --allow-network
 
-# Pass arguments to Claude Code
-./paude --help
-./paude -p "explain this code"
+# Pass arguments to Claude Code (use -- separator)
+./paude -- --help
+./paude -- -p "explain this code"
+./paude --yolo -- -p "refactor this function"
 ```
+
+Arguments before `--` are interpreted by paude. Arguments after `--` are passed directly to Claude Code.
 
 The container images are built automatically on first run.
 

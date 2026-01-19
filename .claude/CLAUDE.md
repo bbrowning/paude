@@ -43,6 +43,13 @@ podman rmi paude:latest
 ./paude --help
 ```
 
+## Documentation Requirements
+
+When adding or changing user-facing features (flags, options, behavior):
+1. Update `README.md` with the new usage patterns
+2. Update the `show_help()` function in `paude` if adding new flags
+3. Keep examples consistent between README and help output
+
 ## macOS Considerations
 
 Paths outside `/Users/` require Podman machine configuration. The script detects this and provides guidance when volume mounts fail.
