@@ -84,6 +84,24 @@ podman machine init \
 podman machine start
 ```
 
+## Workspace Protection
+
+The container has full read-write access to your working directory. This means Claude Code can create, modify, or delete any files in your project, including the `.git` directory.
+
+**Your protection is git itself.** Push important work to a remote before running with `--dangerously-skip-permissions`:
+
+```bash
+# Before autonomous sessions, push your work
+git push origin main
+
+# Your remote can be GitHub, GitLab, or a local bare repo
+git clone --bare . /backup/myproject.git
+git remote add backup /backup/myproject.git
+git push backup main
+```
+
+If something goes wrong, recovery is a clone away. This matches how git is designed to work - every remote is a complete backup.
+
 ## Security Model
 
 The container intentionally restricts certain operations:
