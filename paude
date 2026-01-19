@@ -131,6 +131,25 @@ check_macos_volumes() {
     fi
 }
 
+check_git_safety() {
+    if [[ ! -d "$WORKSPACE_DIR/.git" ]]; then
+        echo "Warning: No git repository in workspace." >&2
+        echo "  Without git, deleted/modified files cannot be recovered." >&2
+        echo "  Consider: git init && git add -A && git commit -m 'Initial commit'" >&2
+        echo "" >&2
+        return
+    fi
+
+    local remotes
+    remotes=$(git -C "$WORKSPACE_DIR" remote 2>/dev/null)
+    if [[ -z "$remotes" ]]; then
+        echo "Warning: Git repository has no remotes configured." >&2
+        echo "  Without a remote, your work has no off-machine backup." >&2
+        echo "  Consider: git remote add origin <url> && git push -u origin main" >&2
+        echo "" >&2
+    fi
+}
+
 setup_proxy() {
     if ! podman network exists "$INTERNAL_NETWORK" 2>/dev/null; then
         echo "Creating $INTERNAL_NETWORK network..."
@@ -186,6 +205,7 @@ build_images
 setup_environment
 setup_mounts
 check_macos_volumes
+check_git_safety
 
 if [[ "$ALLOW_NETWORK" == "false" ]]; then
     setup_proxy

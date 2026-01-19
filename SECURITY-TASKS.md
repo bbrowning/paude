@@ -179,6 +179,11 @@ Technical solutions (overlay mounts, snapshots, bind mount tricks) were evaluate
 - Remote can be GitHub, GitLab, or a local bare repo
 - Recovery = clone from remote
 
+**Pre-flight Check Added** (paude script):
+- Warns if workspace has no git repository
+- Warns if git repository has no remotes configured
+- Non-blocking: shows warning and continues
+
 **Residual Risk**: Uncommitted and unpushed work is at risk. This is acceptable because:
 - Same risk exists with laptop failure, disk corruption, etc.
 - Users already understand "push = safe"
@@ -188,6 +193,7 @@ Technical solutions (overlay mounts, snapshots, bind mount tricks) were evaluate
 - [x] Recovery process documented (push to remote, clone to recover)
 - [x] User responsibility clearly stated
 - [x] No complex infrastructure required
+- [x] Pre-flight warning for missing git repo or remotes
 
 ---
 
