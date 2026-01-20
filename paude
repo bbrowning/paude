@@ -3,7 +3,7 @@ set -e
 
 # Version and registry configuration
 PAUDE_VERSION="0.1.0"
-PAUDE_REGISTRY="${PAUDE_REGISTRY:-ghcr.io/bbrowning}"
+PAUDE_REGISTRY="${PAUDE_REGISTRY:-docker.io/bbrowning}"
 
 INTERNAL_NETWORK="paude-internal"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -161,7 +161,7 @@ ensure_images() {
             echo "Pulling $IMAGE_NAME..."
             if ! podman pull "$IMAGE_NAME"; then
                 echo "Error: Failed to pull $IMAGE_NAME" >&2
-                echo "Check your network connection or run 'podman login ghcr.io' if authentication is required." >&2
+                echo "Check your network connection or run 'podman login' if authentication is required." >&2
                 exit 1
             fi
         fi
@@ -171,7 +171,7 @@ ensure_images() {
                 echo "Pulling $PROXY_IMAGE..."
                 if ! podman pull "$PROXY_IMAGE"; then
                     echo "Error: Failed to pull $PROXY_IMAGE" >&2
-                    echo "Check your network connection or run 'podman login ghcr.io' if authentication is required." >&2
+                    echo "Check your network connection or run 'podman login' if authentication is required." >&2
                     exit 1
                 fi
             fi

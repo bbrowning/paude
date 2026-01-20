@@ -6,7 +6,7 @@
 #   make release V=x.y.z - Tag, update version, build, and push
 #   make clean          - Remove local images
 
-REGISTRY ?= ghcr.io/bbrowning
+REGISTRY ?= docker.io/bbrowning
 IMAGE_NAME = paude
 PROXY_IMAGE_NAME = paude-proxy
 
@@ -30,7 +30,7 @@ help:
 	@echo "  make publish        - Build multi-arch images and push to registry"
 	@echo "  make release V=x.y.z - Full release: tag git, update script, build, push"
 	@echo "  make clean          - Remove local paude images"
-	@echo "  make login          - Authenticate with GitHub Container Registry"
+	@echo "  make login          - Authenticate with container registry"
 	@echo ""
 	@echo "Current settings:"
 	@echo "  REGISTRY=$(REGISTRY)"
@@ -45,11 +45,10 @@ build:
 run:
 	PAUDE_DEV=1 ./paude
 
-# Login to GitHub Container Registry
+# Login to container registry
 login:
 	@echo "Logging in to $(REGISTRY)..."
-	@echo "You'll need a GitHub Personal Access Token with 'write:packages' scope"
-	podman login ghcr.io
+	podman login docker.io
 
 # Build and push multi-arch images
 publish: check-version

@@ -69,19 +69,18 @@ paude/
 
 ## Releasing
 
-Releases are published to GitHub Container Registry (ghcr.io/bbrowning).
+Releases are published to Docker Hub (docker.io/bbrowning).
 
 ### One-Time Setup
 
-Create a GitHub Personal Access Token with `write:packages` scope:
-
-1. Go to https://github.com/settings/tokens
-2. Generate new token (classic) with `write:packages` scope
-3. Login to the registry:
+Authenticate with your container registry:
 
 ```bash
-make login
-# Enter your GitHub username and the PAT as password
+# For Docker Hub (default)
+podman login docker.io
+
+# For other registries, override REGISTRY when publishing
+make publish VERSION=0.2.0 REGISTRY=ghcr.io/yourusername
 ```
 
 ### Release Process
@@ -118,8 +117,8 @@ git push origin main --tags
 2. `make publish VERSION=x.y.z`:
    - Verifies script version matches VERSION
    - Builds multi-arch images (amd64 + arm64)
-   - Pushes to ghcr.io/bbrowning/paude:x.y.z
-   - Pushes to ghcr.io/bbrowning/paude:latest
+   - Pushes to docker.io/bbrowning/paude:x.y.z
+   - Pushes to docker.io/bbrowning/paude:latest
    - Same for paude-proxy image
 
 ### Verifying a Release
@@ -133,7 +132,7 @@ cd /tmp
 
 # Run without PAUDE_DEV (should pull from registry)
 ./paude-test --version
-# Output should show: mode: installed (pulling from ghcr.io/bbrowning)
+# Output should show: mode: installed (pulling from docker.io/bbrowning)
 
 # Clean up
 rm /tmp/paude-test
