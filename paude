@@ -8,6 +8,12 @@ PAUDE_REGISTRY="${PAUDE_REGISTRY:-docker.io/bbrowning}"
 INTERNAL_NETWORK="paude-internal"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Export script dir for library modules (they need to find containers/paude/entrypoint.sh)
+PAUDE_SCRIPT_DIR="$SCRIPT_DIR"
+
+# Source library modules
+source "$SCRIPT_DIR/lib/config.sh"
+
 # Dev mode: set PAUDE_DEV=1 to build images locally instead of pulling from registry
 if [[ "${PAUDE_DEV:-0}" == "1" ]]; then
     DEV_MODE=true
@@ -33,6 +39,8 @@ OPTIONS:
                         Claude can edit files and run commands without confirmation
     --allow-network     Allow unrestricted network access
                         By default, network is restricted to Vertex AI endpoints only
+    --rebuild           Force rebuild of workspace container image
+                        Use when devcontainer.json has changed
 
 CLAUDE OPTIONS:
     All arguments after -- are passed directly to claude.
@@ -65,6 +73,7 @@ show_version() {
 # Parse paude-specific flags before -- separator
 ALLOW_NETWORK=false
 YOLO_MODE=false
+FORCE_REBUILD=false
 CLAUDE_ARGS=()
 PARSING_PAUDE_ARGS=true
 
@@ -87,6 +96,9 @@ for arg in "$@"; do
                 ;;
             --yolo)
                 YOLO_MODE=true
+                ;;
+            --rebuild)
+                FORCE_REBUILD=true
                 ;;
             *)
                 # Unknown paude option - could be claude arg without --
@@ -135,9 +147,34 @@ check_requirements() {
     fi
 }
 
+prepare_build_dir() {
+    PAUDE_BUILD_DIR="${TMPDIR:-/tmp}/paude-build-$$"
+    mkdir -p "$PAUDE_BUILD_DIR"
+    # Copy entrypoint to build context
+    cp "$SCRIPT_DIR/containers/paude/entrypoint.sh" "$PAUDE_BUILD_DIR/"
+}
+
+cleanup_build_dir() {
+    if [[ -n "$PAUDE_BUILD_DIR" && -d "$PAUDE_BUILD_DIR" ]]; then
+        rm -rf "$PAUDE_BUILD_DIR"
+    fi
+}
+
 ensure_images() {
+    if needs_custom_build; then
+        ensure_custom_image
+    else
+        ensure_default_image
+    fi
+
+    # Proxy image logic remains the same
+    if [[ "$ALLOW_NETWORK" == "false" ]]; then
+        ensure_proxy_image
+    fi
+}
+
+ensure_default_image() {
     if [[ "$DEV_MODE" == "true" ]]; then
-        # Dev mode: build locally if not present
         if ! podman image exists "$IMAGE_NAME" 2>/dev/null; then
             echo "Building $IMAGE_NAME image..."
             if ! podman build -t "$IMAGE_NAME" "$SCRIPT_DIR/containers/paude"; then
@@ -145,35 +182,139 @@ ensure_images() {
                 exit 1
             fi
         fi
-
-        if [[ "$ALLOW_NETWORK" == "false" ]]; then
-            if ! podman image exists "$PROXY_IMAGE" 2>/dev/null; then
-                echo "Building $PROXY_IMAGE image..."
-                if ! podman build -t "$PROXY_IMAGE" "$SCRIPT_DIR/containers/proxy"; then
-                    echo "Error: Failed to build $PROXY_IMAGE" >&2
-                    exit 1
-                fi
-            fi
-        fi
     else
-        # Installed mode: pull from registry if not present
         if ! podman image exists "$IMAGE_NAME" 2>/dev/null; then
             echo "Pulling $IMAGE_NAME..."
             if ! podman pull "$IMAGE_NAME"; then
                 echo "Error: Failed to pull $IMAGE_NAME" >&2
-                echo "Check your network connection or run 'podman login' if authentication is required." >&2
                 exit 1
             fi
         fi
+    fi
+}
 
-        if [[ "$ALLOW_NETWORK" == "false" ]]; then
-            if ! podman image exists "$PROXY_IMAGE" 2>/dev/null; then
-                echo "Pulling $PROXY_IMAGE..."
-                if ! podman pull "$PROXY_IMAGE"; then
-                    echo "Error: Failed to pull $PROXY_IMAGE" >&2
-                    echo "Check your network connection or run 'podman login' if authentication is required." >&2
-                    exit 1
+ensure_custom_image() {
+    # Source hash module
+    source "$SCRIPT_DIR/lib/hash.sh"
+    source "$SCRIPT_DIR/lib/features.sh"
+
+    local config_hash
+    config_hash=$(compute_config_hash)
+    local custom_image="paude-workspace:$config_hash"
+
+    # Check if image already exists and rebuild not forced
+    if podman image exists "$custom_image" 2>/dev/null && [[ "$FORCE_REBUILD" != "true" ]]; then
+        echo "Using cached workspace image: $custom_image" >&2
+        IMAGE_NAME="$custom_image"
+        return 0
+    fi
+
+    echo "Building workspace image..." >&2
+    prepare_build_dir
+    trap cleanup_build_dir EXIT
+
+    # Parse features
+    parse_features
+
+    if [[ -n "$PAUDE_BASE_IMAGE" ]]; then
+        # Generate Dockerfile for image-based config
+        generate_workspace_dockerfile "$PAUDE_BASE_IMAGE" "$PAUDE_BUILD_DIR" > "$PAUDE_BUILD_DIR/Dockerfile"
+
+        # Add feature installations before USER directive if we have features
+        if has_features; then
+            local features_block
+            features_block=$(generate_features_dockerfile)
+            if [[ -n "$features_block" ]]; then
+                # Insert features before "USER paude" line using a temp file
+                local tmp_dockerfile="$PAUDE_BUILD_DIR/Dockerfile.tmp"
+                awk -v features="$features_block" '/^USER paude$/{print features}1' "$PAUDE_BUILD_DIR/Dockerfile" > "$tmp_dockerfile"
+                mv "$tmp_dockerfile" "$PAUDE_BUILD_DIR/Dockerfile"
+                # Copy features to build context
+                if [[ -d "$FEATURE_CACHE_DIR" ]]; then
+                    cp -r "$FEATURE_CACHE_DIR" "$PAUDE_BUILD_DIR/features"
                 fi
+            fi
+        fi
+
+        echo "  → Using base: $PAUDE_BASE_IMAGE" >&2
+        if ! podman build \
+            --build-arg "BASE_IMAGE=$PAUDE_BASE_IMAGE" \
+            -t "$custom_image" \
+            "$PAUDE_BUILD_DIR"; then
+            echo "Error: Failed to build workspace image" >&2
+            exit 1
+        fi
+    elif [[ -n "$PAUDE_DOCKERFILE" ]]; then
+        if [[ ! -f "$PAUDE_DOCKERFILE" ]]; then
+            echo "Error: Dockerfile not found: $PAUDE_DOCKERFILE" >&2
+            exit 1
+        fi
+
+        echo "  → Building from: $PAUDE_DOCKERFILE" >&2
+
+        # Build user's image first
+        local user_image="paude-user-base:$config_hash"
+        local build_context="${PAUDE_BUILD_CONTEXT:-$(dirname "$PAUDE_DOCKERFILE")}"
+        local build_args
+        build_args=$(parse_build_args)
+
+        echo "  → Building user Dockerfile..." >&2
+        if ! podman build \
+            -t "$user_image" \
+            -f "$PAUDE_DOCKERFILE" \
+            $build_args \
+            "$build_context"; then
+            echo "Error: Failed to build user Dockerfile" >&2
+            exit 1
+        fi
+
+        # Now generate and build paude wrapper
+        generate_workspace_dockerfile "$user_image" "$PAUDE_BUILD_DIR" > "$PAUDE_BUILD_DIR/Dockerfile"
+
+        # Add feature installations if we have features
+        if has_features; then
+            local features_block
+            features_block=$(generate_features_dockerfile)
+            if [[ -n "$features_block" ]]; then
+                local tmp_dockerfile="$PAUDE_BUILD_DIR/Dockerfile.tmp"
+                awk -v features="$features_block" '/^USER paude$/{print features}1' "$PAUDE_BUILD_DIR/Dockerfile" > "$tmp_dockerfile"
+                mv "$tmp_dockerfile" "$PAUDE_BUILD_DIR/Dockerfile"
+                if [[ -d "$FEATURE_CACHE_DIR" ]]; then
+                    cp -r "$FEATURE_CACHE_DIR" "$PAUDE_BUILD_DIR/features"
+                fi
+            fi
+        fi
+
+        echo "  → Adding paude requirements..." >&2
+        if ! podman build \
+            --build-arg "BASE_IMAGE=$user_image" \
+            -t "$custom_image" \
+            "$PAUDE_BUILD_DIR"; then
+            echo "Error: Failed to build workspace image" >&2
+            exit 1
+        fi
+    fi
+
+    echo "Build complete (cached as $custom_image)" >&2
+    IMAGE_NAME="$custom_image"
+}
+
+ensure_proxy_image() {
+    if [[ "$DEV_MODE" == "true" ]]; then
+        if ! podman image exists "$PROXY_IMAGE" 2>/dev/null; then
+            echo "Building $PROXY_IMAGE image..."
+            if ! podman build -t "$PROXY_IMAGE" "$SCRIPT_DIR/containers/proxy"; then
+                echo "Error: Failed to build $PROXY_IMAGE" >&2
+                exit 1
+            fi
+        fi
+    else
+        if ! podman image exists "$PROXY_IMAGE" 2>/dev/null; then
+            echo "Pulling $PROXY_IMAGE..."
+            if ! podman pull "$PROXY_IMAGE"; then
+                echo "Error: Failed to pull $PROXY_IMAGE" >&2
+                echo "Check your network connection or run 'podman login' if authentication is required." >&2
+                exit 1
             fi
         fi
     fi
@@ -193,7 +334,7 @@ setup_environment() {
 }
 
 setup_mounts() {
-    WORKSPACE_DIR="$(pwd -P)"
+    # WORKSPACE_DIR is set early in main execution for config detection
 
     MOUNT_ARGS=(
         -v "$WORKSPACE_DIR:$WORKSPACE_DIR:rw"
@@ -326,11 +467,40 @@ run_claude() {
         )
     fi
 
+    # Parse container env from config
+    parse_container_env
+
+    # Parse post-create command from config
+    parse_post_create_command
+
+    # Check if postCreateCommand needs to run
+    local workspace_marker="$WORKSPACE_DIR/.paude-initialized"
+
+    if [[ -n "$PAUDE_POST_CREATE_COMMAND" && ! -f "$workspace_marker" ]]; then
+        echo "Running postCreateCommand: $PAUDE_POST_CREATE_COMMAND" >&2
+
+        if ! podman run --rm \
+            -w "$WORKSPACE_DIR" \
+            "${network_args[@]}" \
+            "${proxy_env[@]}" \
+            "${ENV_ARGS[@]}" \
+            "${PAUDE_CONTAINER_ENV[@]}" \
+            "${MOUNT_ARGS[@]}" \
+            "$IMAGE_NAME" \
+            /bin/bash -c "$PAUDE_POST_CREATE_COMMAND"; then
+            echo "Warning: postCreateCommand failed" >&2
+        else
+            # Mark as initialized only on success
+            touch "$workspace_marker"
+        fi
+    fi
+
     podman run --rm -it \
         -w "$WORKSPACE_DIR" \
         "${network_args[@]}" \
         "${proxy_env[@]}" \
         "${ENV_ARGS[@]}" \
+        "${PAUDE_CONTAINER_ENV[@]}" \
         "${MOUNT_ARGS[@]}" \
         "$IMAGE_NAME" \
         "${CLAUDE_ARGS[@]}"
@@ -338,6 +508,16 @@ run_claude() {
 
 # Main execution
 check_requirements
+
+# Setup workspace dir early (needed for config detection)
+WORKSPACE_DIR="$(pwd -P)"
+
+# Detect and parse configuration
+detect_config "$WORKSPACE_DIR"
+if has_custom_config; then
+    parse_config || exit 1
+fi
+
 ensure_images
 setup_environment
 setup_mounts

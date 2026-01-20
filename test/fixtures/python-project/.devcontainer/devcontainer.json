@@ -1,0 +1,4 @@
+{
+    "image": "python:3.11-slim",
+    "postCreateCommand": "pip install --user pytest"
+}

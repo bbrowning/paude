@@ -187,6 +187,81 @@ These risks are accepted by design:
 2. **Secrets readable**: `.env` files in workspace are readable. Mitigation: network filtering prevents exfiltration; don't use `--allow-network` with sensitive workspaces.
 3. **No audit logging**: Commands executed aren't logged. This is a forensics gap, not a security breach vector.
 
+## Custom Container Environments (BYOC)
+
+Paude supports custom container configurations via devcontainer.json or paude.json. This allows you to use paude with any project type (Python, Go, Rust, etc.) while maintaining security guarantees.
+
+### Using devcontainer.json
+
+Create `.devcontainer/devcontainer.json` in your project:
+
+```json
+{
+    "image": "python:3.11-slim",
+    "postCreateCommand": "pip install -r requirements.txt"
+}
+```
+
+Or with a custom Dockerfile:
+
+```json
+{
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": ".."
+    }
+}
+```
+
+### Using paude.json (simpler)
+
+Create `paude.json` at project root:
+
+```json
+{
+    "base": "python:3.11-slim",
+    "packages": ["make", "gcc"],
+    "setup": "pip install -r requirements.txt"
+}
+```
+
+### Supported Properties
+
+| Property | Description |
+|----------|-------------|
+| `image` | Base container image |
+| `build.dockerfile` | Path to custom Dockerfile |
+| `build.context` | Build context directory |
+| `build.args` | Build arguments for Dockerfile |
+| `features` | Dev container features (ghcr.io OCI artifacts) |
+| `postCreateCommand` | Run after first start |
+| `containerEnv` | Environment variables |
+
+### Unsupported Properties (Security)
+
+These properties are ignored for security reasons:
+- `mounts` - paude controls mounts
+- `runArgs` - paude controls run arguments
+- `privileged` - never allowed
+- `capAdd` - never allowed
+- `forwardPorts` - paude controls networking
+- `remoteUser` - paude controls user
+
+### Caching and Rebuilding
+
+Custom images are cached based on a hash of the configuration. To force a rebuild after changing your config:
+
+```bash
+paude --rebuild
+```
+
+### Example Configurations
+
+See the `examples/` directory for sample configurations:
+- `examples/python/` - Python project with pytest
+- `examples/node/` - Node.js project
+- `examples/go/` - Go project
+
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and release instructions.
