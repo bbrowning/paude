@@ -10,7 +10,24 @@ A Podman wrapper that runs [Claude Code](https://claude.ai/code) inside a contai
 - Git read operations work (clone, pull, local commits) - push blocked by design
 - Persists Claude Code settings between sessions
 
-## Requirements
+## Installation
+
+### Quick Install
+
+Download the latest release and add it to your PATH:
+
+```bash
+# Download the paude script
+curl -LO https://github.com/bbrowning/paude/releases/latest/download/paude
+chmod +x paude
+
+# Move to a directory in your PATH (e.g., ~/.local/bin)
+mv paude ~/.local/bin/
+
+# Container images are pulled automatically on first run
+```
+
+### Requirements
 
 - [Podman](https://podman.io/getting-started/installation) installed
 - Google Cloud SDK configured (`gcloud auth application-default login`)
@@ -25,29 +42,29 @@ A Podman wrapper that runs [Claude Code](https://claude.ai/code) inside a contai
 
 ```bash
 # Show paude help (options, examples, security notes)
-./paude --help
+paude --help
 
 # Run Claude Code interactively (network filtered to Vertex AI only)
-./paude
+paude
 
 # Enable full network access for web searches and package installation
-./paude --allow-network
+paude --allow-network
 
 # Enable autonomous mode (no confirmation prompts for edits/commands)
-./paude --yolo
+paude --yolo
 
 # Combine flags for full autonomous mode with network access
-./paude --yolo --allow-network
+paude --yolo --allow-network
 
 # Pass arguments to Claude Code (use -- separator)
-./paude -- --help
-./paude -- -p "explain this code"
-./paude --yolo -- -p "refactor this function"
+paude -- --help
+paude -- -p "explain this code"
+paude --yolo -- -p "refactor this function"
 ```
 
 Arguments before `--` are interpreted by paude. Arguments after `--` are passed directly to Claude Code.
 
-The container images are built automatically on first run.
+Container images are pulled automatically on first run. For development, run from the cloned repo to build images locally.
 
 ## Workflow: Research vs Execution
 
@@ -169,6 +186,10 @@ These risks are accepted by design:
 1. **Workspace destruction**: Claude can delete files including `.git`. Mitigation: push to remote before autonomous sessions.
 2. **Secrets readable**: `.env` files in workspace are readable. Mitigation: network filtering prevents exfiltration; don't use `--allow-network` with sensitive workspaces.
 3. **No audit logging**: Commands executed aren't logged. This is a forensics gap, not a security breach vector.
+
+## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and release instructions.
 
 ## License
 
