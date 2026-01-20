@@ -21,12 +21,13 @@ LATEST_PROXY_IMAGE = $(REGISTRY)/$(PROXY_IMAGE_NAME):latest
 # Architectures for multi-arch builds
 PLATFORMS = linux/amd64,linux/arm64
 
-.PHONY: build run publish release clean login help
+.PHONY: build run publish release clean login help test
 
 help:
 	@echo "Paude build targets:"
 	@echo "  make build          - Build images locally for current arch"
 	@echo "  make run            - Run paude in dev mode (builds locally)"
+	@echo "  make test           - Run tests (no container daemon required)"
 	@echo "  make publish        - Build multi-arch images and push to registry"
 	@echo "  make release VERSION=x.y.z - Full release: tag git, update script, build, push"
 	@echo "  make clean          - Remove local paude images"
@@ -44,6 +45,10 @@ build:
 # Run paude in dev mode (builds images locally)
 run:
 	PAUDE_DEV=1 ./paude
+
+# Run tests (no container daemon required)
+test:
+	@bash tests/run_tests.sh
 
 # Login to container registry
 login:
