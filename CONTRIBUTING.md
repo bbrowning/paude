@@ -43,6 +43,15 @@ make clean     # Remove local images
 
 ### Testing Changes
 
+Run the test suite before submitting changes:
+
+```bash
+# Run all tests
+make test           # Main script tests (48 tests)
+make test-config    # Config module tests
+make test-hash      # Hash module tests
+```
+
 After modifying the Dockerfile or proxy configuration:
 
 ```bash
@@ -57,7 +66,11 @@ make run
 
 ```
 paude/
-├── paude              # Main script (bash)
+├── paude                  # Main script (bash)
+├── lib/                   # Bash library modules
+│   ├── config.sh          # Configuration detection/parsing
+│   ├── hash.sh            # Config hash for image caching
+│   └── features.sh        # Dev container feature support
 ├── containers/
 │   ├── paude/
 │   │   ├── Dockerfile     # Claude Code container image
@@ -66,7 +79,19 @@ paude/
 │       ├── Dockerfile     # Squid proxy container image
 │       ├── entrypoint.sh  # Proxy container entrypoint
 │       └── squid.conf     # Proxy allowlist configuration
-├── Makefile           # Build and release automation
+├── tests/                 # Main script test suite
+├── test/                  # Library module unit tests
+│   ├── test_config.sh     # Config module tests
+│   ├── test_hash.sh       # Hash module tests
+│   └── fixtures/          # Test fixtures
+├── examples/              # Example configurations
+│   ├── python/            # Python devcontainer example
+│   ├── node/              # Node.js devcontainer example
+│   └── go/                # Go devcontainer example
+├── docs/
+│   └── features/          # Feature development documentation
+│       └── byoc/          # BYOC feature docs (research, plan, tasks)
+├── Makefile               # Build and release automation
 └── README.md
 ```
 
@@ -147,3 +172,21 @@ rm /tmp/paude-test
 - Keep functions focused and well-named
 - Simple single-line comments; avoid decorative comment blocks
 - Match the style of surrounding code
+
+## Adding New Features
+
+For significant features, follow the structured development process:
+
+1. Create documentation in `docs/features/<feature-name>/`:
+   - `RESEARCH.md` - Background research and prior art
+   - `PLAN.md` - Design decisions and phased approach
+   - `TASKS.md` - Implementation tasks with acceptance criteria
+   - `README.md` - Overview and verification checklist
+
+2. Implement in phases (MVP first, then enhancements)
+
+3. Add tests for new library modules in `test/`
+
+4. Update README.md and this file with user-facing changes
+
+See `docs/features/byoc/` for an example of this process.

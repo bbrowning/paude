@@ -8,11 +8,17 @@ Paude is a Podman wrapper that runs Claude Code inside a container for isolated,
 
 ## Architecture
 
-The project consists of a main script and container definitions:
+The project consists of a main script, library modules, and container definitions:
 
-- `paude` - Bash script that validates environment, builds the container image if needed, and runs Claude Code with proper volume mounts and environment variables
-- `containers/paude/` - Main container artifacts (Dockerfile, entrypoint.sh) for Claude Code (Node.js 22 slim + git + Claude Code as non-root user)
+- `paude` - Main bash script that validates environment, builds container images, and runs Claude Code
+- `lib/` - Bash library modules sourced by the main script
+  - `config.sh` - Configuration detection and parsing (devcontainer.json, paude.json)
+  - `hash.sh` - Deterministic hash computation for image caching
+  - `features.sh` - Dev container feature download and installation
+- `containers/paude/` - Main container artifacts (Dockerfile, entrypoint.sh) for Claude Code
 - `containers/proxy/` - Proxy container artifacts (Dockerfile, entrypoint.sh, squid.conf) for network filtering
+- `tests/` - Test suite for the main paude script
+- `test/` - Unit tests for library modules
 
 ## Volume Mounts
 
@@ -35,6 +41,11 @@ The script mounts these paths from host to container:
 ## Testing Changes
 
 ```bash
+# Run the test suite
+make test           # Main paude script tests (48 tests)
+make test-config    # Config module unit tests
+make test-hash      # Hash module unit tests
+
 # Rebuild images after container changes
 make clean
 make run
@@ -54,4 +65,22 @@ When adding or changing user-facing features (flags, options, behavior):
 ## macOS Considerations
 
 Paths outside `/Users/` require Podman machine configuration. The script detects this and provides guidance when volume mounts fail.
+
+## Feature Development Process
+
+When developing new features, follow this structured approach:
+
+1. **Create feature documentation** in `docs/features/<feature-name>/`:
+   - `RESEARCH.md` - Background research, prior art, compatibility considerations
+   - `PLAN.md` - High-level design decisions, security considerations, phased approach
+   - `TASKS.md` - Detailed implementation tasks with acceptance criteria
+   - `README.md` - Feature overview and verification checklist
+
+2. **Implementation phases**: Break work into logical phases (MVP first, then enhancements)
+
+3. **Testing**: Add unit tests in `test/` for new library modules
+
+4. **Documentation**: Update README.md and CONTRIBUTING.md with user-facing changes
+
+Example: See `docs/features/byoc/` for the BYOC (Bring Your Own Container) feature documentation.
 
