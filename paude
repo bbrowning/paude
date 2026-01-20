@@ -274,8 +274,19 @@ setup_proxy() {
     }
     trap cleanup EXIT INT TERM
 
+    # Get DNS from podman machine (works on macOS where containers run in a VM)
+    local dns_env=()
+    if podman machine inspect &>/dev/null; then
+        local vm_dns
+        vm_dns=$(podman machine ssh grep nameserver /etc/resolv.conf 2>/dev/null | awk '{print $2}' | head -1)
+        if [[ -n "$vm_dns" ]]; then
+            dns_env=(-e "SQUID_DNS=$vm_dns")
+        fi
+    fi
+
     podman run -d --rm --name "$PROXY_NAME" \
         --network "$INTERNAL_NETWORK,podman" \
+        "${dns_env[@]}" \
         "$PROXY_IMAGE" >/dev/null
 
     sleep 1
