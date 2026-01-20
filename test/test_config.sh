@@ -71,6 +71,8 @@ test_paude_json() {
 
 test_dockerfile_path() {
     local tmpdir=$(mktemp -d)
+    # Resolve to canonical path (on macOS, /var -> /private/var)
+    local tmpdir_canonical=$(cd "$tmpdir" && pwd -P)
     mkdir -p "$tmpdir/.devcontainer"
     echo '{"build": {"dockerfile": "Dockerfile", "context": ".."}}' > "$tmpdir/.devcontainer/devcontainer.json"
     echo 'FROM ubuntu:22.04' > "$tmpdir/.devcontainer/Dockerfile"
@@ -79,7 +81,7 @@ test_dockerfile_path() {
     parse_config
 
     assert_equals "$tmpdir/.devcontainer/Dockerfile" "$PAUDE_DOCKERFILE" "Resolves dockerfile path"
-    assert_equals "$tmpdir" "$PAUDE_BUILD_CONTEXT" "Resolves build context"
+    assert_equals "$tmpdir_canonical" "$PAUDE_BUILD_CONTEXT" "Resolves build context"
 
     rm -rf "$tmpdir"
 }
