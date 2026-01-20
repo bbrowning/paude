@@ -3,7 +3,7 @@
 # Usage:
 #   make build          - Build images locally (dev/testing)
 #   make publish        - Build multi-arch and push to registry
-#   make release V=x.y.z - Tag, update version, build, and push
+#   make release VERSION=x.y.z - Tag, update version, build, and push
 #   make clean          - Remove local images
 
 REGISTRY ?= docker.io/bbrowning
@@ -28,7 +28,7 @@ help:
 	@echo "  make build          - Build images locally for current arch"
 	@echo "  make run            - Run paude in dev mode (builds locally)"
 	@echo "  make publish        - Build multi-arch images and push to registry"
-	@echo "  make release V=x.y.z - Full release: tag git, update script, build, push"
+	@echo "  make release VERSION=x.y.z - Full release: tag git, update script, build, push"
 	@echo "  make clean          - Remove local paude images"
 	@echo "  make login          - Authenticate with container registry"
 	@echo ""
@@ -90,33 +90,33 @@ check-version:
 	@SCRIPT_VERSION=$$(grep '^PAUDE_VERSION=' paude | cut -d'"' -f2); \
 	if [ "$$SCRIPT_VERSION" != "$(VERSION)" ]; then \
 		echo "Error: Script version ($$SCRIPT_VERSION) doesn't match VERSION ($(VERSION))"; \
-		echo "Run 'make release V=$(VERSION)' first to update the script"; \
+		echo "Run 'make release VERSION=$(VERSION)' first to update the script"; \
 		exit 1; \
 	fi
 
 # Full release process
 release:
-	@if [ -z "$(V)" ]; then \
-		echo "Usage: make release V=x.y.z"; \
-		echo "Example: make release V=0.2.0"; \
+	@if [ "$(VERSION)" = "dev" ]; then \
+		echo "Usage: make release VERSION=x.y.z"; \
+		echo "Example: make release VERSION=0.2.0"; \
 		exit 1; \
 	fi
-	@echo "=== Releasing v$(V) ==="
+	@echo "=== Releasing v$(VERSION) ==="
 	@echo ""
 	# Update version in paude script
-	sed -i.bak 's/^PAUDE_VERSION=.*/PAUDE_VERSION="$(V)"/' paude && rm -f paude.bak
+	sed -i.bak 's/^PAUDE_VERSION=.*/PAUDE_VERSION="$(VERSION)"/' paude && rm -f paude.bak
 	# Commit the version change
 	git add paude
-	git commit -m "Release v$(V)"
+	git commit -m "Release v$(VERSION)"
 	# Create git tag
-	git tag -a "v$(V)" -m "Release v$(V)"
+	git tag -a "v$(VERSION)" -m "Release v$(VERSION)"
 	@echo ""
 	@echo "Version updated and tagged. Now run:"
-	@echo "  make publish VERSION=$(V)"
+	@echo "  make publish VERSION=$(VERSION)"
 	@echo "  git push origin main --tags"
 	@echo ""
 	@echo "Then create a GitHub release at:"
-	@echo "  https://github.com/bbrowning/paude/releases/new?tag=v$(V)"
+	@echo "  https://github.com/bbrowning/paude/releases/new?tag=v$(VERSION)"
 	@echo "and attach the 'paude' script."
 
 # Remove local images

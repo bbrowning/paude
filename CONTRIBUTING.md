@@ -92,7 +92,7 @@ git pull origin main
 git status  # Should be clean
 
 # 2. Run the release target (updates version in script, creates git tag)
-make release V=0.2.0
+make release VERSION=0.2.0
 
 # 3. Build multi-arch images and push to registry
 make publish VERSION=0.2.0
@@ -109,7 +109,7 @@ git push origin main --tags
 
 ### What the Release Does
 
-1. `make release V=x.y.z`:
+1. `make release VERSION=x.y.z`:
    - Updates `PAUDE_VERSION` in the paude script
    - Commits the change
    - Creates an annotated git tag `vx.y.z`
