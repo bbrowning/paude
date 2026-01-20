@@ -38,8 +38,8 @@ help:
 
 # Build images locally (single arch, for development)
 build:
-	podman build -t $(IMAGE_NAME):latest .
-	podman build -t $(PROXY_IMAGE_NAME):latest ./proxy
+	podman build -t $(IMAGE_NAME):latest ./containers/paude
+	podman build -t $(PROXY_IMAGE_NAME):latest ./containers/proxy
 
 # Run paude in dev mode (builds images locally)
 run:
@@ -57,23 +57,23 @@ publish: check-version
 	# Build and push paude image
 	-podman manifest rm $(FULL_IMAGE) 2>/dev/null
 	podman manifest create $(FULL_IMAGE)
-	podman build --platform $(PLATFORMS) --manifest $(FULL_IMAGE) .
+	podman build --platform $(PLATFORMS) --manifest $(FULL_IMAGE) ./containers/paude
 	podman manifest push $(FULL_IMAGE) $(FULL_IMAGE)
 	# Tag as latest
 	-podman manifest rm $(LATEST_IMAGE) 2>/dev/null
 	podman manifest create $(LATEST_IMAGE)
-	podman build --platform $(PLATFORMS) --manifest $(LATEST_IMAGE) .
+	podman build --platform $(PLATFORMS) --manifest $(LATEST_IMAGE) ./containers/paude
 	podman manifest push $(LATEST_IMAGE) $(LATEST_IMAGE)
 	@echo ""
 	# Build and push proxy image
 	-podman manifest rm $(FULL_PROXY_IMAGE) 2>/dev/null
 	podman manifest create $(FULL_PROXY_IMAGE)
-	podman build --platform $(PLATFORMS) --manifest $(FULL_PROXY_IMAGE) ./proxy
+	podman build --platform $(PLATFORMS) --manifest $(FULL_PROXY_IMAGE) ./containers/proxy
 	podman manifest push $(FULL_PROXY_IMAGE) $(FULL_PROXY_IMAGE)
 	# Tag as latest
 	-podman manifest rm $(LATEST_PROXY_IMAGE) 2>/dev/null
 	podman manifest create $(LATEST_PROXY_IMAGE)
-	podman build --platform $(PLATFORMS) --manifest $(LATEST_PROXY_IMAGE) ./proxy
+	podman build --platform $(PLATFORMS) --manifest $(LATEST_PROXY_IMAGE) ./containers/proxy
 	podman manifest push $(LATEST_PROXY_IMAGE) $(LATEST_PROXY_IMAGE)
 	@echo ""
 	@echo "Published:"

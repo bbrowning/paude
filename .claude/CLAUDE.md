@@ -8,10 +8,11 @@ Paude is a Podman wrapper that runs Claude Code inside a container for isolated,
 
 ## Architecture
 
-Two files comprise the entire project:
+The project consists of a main script and container definitions:
 
 - `paude` - Bash script that validates environment, builds the container image if needed, and runs Claude Code with proper volume mounts and environment variables
-- `Dockerfile` - Defines the container image (Node.js 22 slim + git + Claude Code as non-root user)
+- `containers/paude/` - Main container artifacts (Dockerfile, entrypoint.sh) for Claude Code (Node.js 22 slim + git + Claude Code as non-root user)
+- `containers/proxy/` - Proxy container artifacts (Dockerfile, entrypoint.sh, squid.conf) for network filtering
 
 ## Volume Mounts
 
@@ -34,13 +35,13 @@ The script mounts these paths from host to container:
 ## Testing Changes
 
 ```bash
-# Rebuild image after Dockerfile changes
-podman rmi paude:latest
-./paude
+# Rebuild images after container changes
+make clean
+make run
 
 # Test basic functionality
-./paude --version
-./paude --help
+PAUDE_DEV=1 ./paude --version
+PAUDE_DEV=1 ./paude --help
 ```
 
 ## Documentation Requirements

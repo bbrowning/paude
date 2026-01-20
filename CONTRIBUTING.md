@@ -58,11 +58,14 @@ make run
 ```
 paude/
 ├── paude              # Main script (bash)
-├── Dockerfile         # Claude Code container image
-├── entrypoint.sh      # Container entrypoint
-├── proxy/
-│   ├── Dockerfile     # Squid proxy container image
-│   └── squid.conf     # Proxy allowlist configuration
+├── containers/
+│   ├── paude/
+│   │   ├── Dockerfile     # Claude Code container image
+│   │   └── entrypoint.sh  # Container entrypoint
+│   └── proxy/
+│       ├── Dockerfile     # Squid proxy container image
+│       ├── entrypoint.sh  # Proxy container entrypoint
+│       └── squid.conf     # Proxy allowlist configuration
 ├── Makefile           # Build and release automation
 └── README.md
 ```

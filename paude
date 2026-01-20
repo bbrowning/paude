@@ -140,7 +140,7 @@ ensure_images() {
         # Dev mode: build locally if not present
         if ! podman image exists "$IMAGE_NAME" 2>/dev/null; then
             echo "Building $IMAGE_NAME image..."
-            if ! podman build -t "$IMAGE_NAME" "$SCRIPT_DIR"; then
+            if ! podman build -t "$IMAGE_NAME" "$SCRIPT_DIR/containers/paude"; then
                 echo "Error: Failed to build $IMAGE_NAME" >&2
                 exit 1
             fi
@@ -149,7 +149,7 @@ ensure_images() {
         if [[ "$ALLOW_NETWORK" == "false" ]]; then
             if ! podman image exists "$PROXY_IMAGE" 2>/dev/null; then
                 echo "Building $PROXY_IMAGE image..."
-                if ! podman build -t "$PROXY_IMAGE" "$SCRIPT_DIR/proxy"; then
+                if ! podman build -t "$PROXY_IMAGE" "$SCRIPT_DIR/containers/proxy"; then
                     echo "Error: Failed to build $PROXY_IMAGE" >&2
                     exit 1
                 fi

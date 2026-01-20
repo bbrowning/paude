@@ -102,7 +102,7 @@ By default, paude runs a proxy sidecar that filters network access:
 └─────────────────────────────────────────────────────┘
 ```
 
-The allowlist (`proxy/squid.conf`) permits only domains required for Vertex AI authentication and API calls. Edit this file to add additional allowed domains if needed.
+The allowlist (`containers/proxy/squid.conf`) permits only domains required for Vertex AI authentication and API calls. Edit this file to add additional allowed domains if needed.
 
 ## macOS Setup
 
