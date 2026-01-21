@@ -21,17 +21,24 @@ LATEST_PROXY_IMAGE = $(REGISTRY)/$(PROXY_IMAGE_NAME):latest
 # Architectures for multi-arch builds
 PLATFORMS = linux/amd64,linux/arm64
 
-.PHONY: build run publish release clean login help test
+.PHONY: build run publish release clean login help test install lint format typecheck test-python
 
 help:
 	@echo "Paude build targets:"
 	@echo "  make build          - Build images locally for current arch"
 	@echo "  make run            - Run paude in dev mode (builds locally)"
-	@echo "  make test           - Run tests (no container daemon required)"
+	@echo "  make test           - Run all tests (Python + bash)"
 	@echo "  make publish        - Build multi-arch images and push to registry"
 	@echo "  make release VERSION=x.y.z - Full release: tag git, update script, build, push"
 	@echo "  make clean          - Remove local paude images"
 	@echo "  make login          - Authenticate with container registry"
+	@echo ""
+	@echo "Python development targets:"
+	@echo "  make install        - Install Python package with dev dependencies"
+	@echo "  make lint           - Run ruff linter on Python code"
+	@echo "  make format         - Format Python code with ruff"
+	@echo "  make typecheck      - Run mypy type checker"
+	@echo "  make test-python    - Run Python tests only"
 	@echo ""
 	@echo "Current settings:"
 	@echo "  REGISTRY=$(REGISTRY)"
@@ -47,13 +54,33 @@ run:
 	PAUDE_DEV=1 ./paude
 
 # Run all tests (no container daemon required)
-test:
+test: test-python
 	@bash tests/run_tests.sh
 	@echo ""
 	@echo "=== Running unit tests ==="
 	@bash test/test_config.sh
 	@echo ""
 	@bash test/test_hash.sh
+
+# Python development targets
+install:
+	pip install -e ".[dev]"
+
+lint:
+	ruff check src tests
+
+format:
+	ruff format src tests
+
+typecheck:
+	mypy src
+
+test-python:
+	@if command -v pytest >/dev/null 2>&1; then \
+		pytest --cov=paude --cov-report=term-missing; \
+	else \
+		echo "pytest not installed - skipping Python tests"; \
+	fi
 
 # Login to container registry
 login:

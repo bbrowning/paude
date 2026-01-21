@@ -12,9 +12,25 @@ A Podman wrapper that runs [Claude Code](https://claude.ai/code) inside a contai
 
 ## Installation
 
-### Quick Install
+### Using pip
 
-Download the latest release and add it to your PATH:
+```bash
+pip install paude
+```
+
+### From source
+
+```bash
+git clone https://github.com/bbrowning/paude
+cd paude
+uv venv --python 3.12 --seed
+source .venv/bin/activate
+pip install -e .
+```
+
+### Bash script (legacy)
+
+Download the bash script directly:
 
 ```bash
 # Download the paude script
@@ -30,6 +46,7 @@ mv paude ~/.local/bin/
 ### Requirements
 
 - [Podman](https://podman.io/getting-started/installation) installed
+- Python 3.11+ (for the Python package)
 - Google Cloud SDK configured (`gcloud auth application-default login`)
 - Vertex AI environment variables set:
   ```bash

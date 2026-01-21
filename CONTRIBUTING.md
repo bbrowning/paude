@@ -5,6 +5,7 @@
 ### Prerequisites
 
 - [Podman](https://podman.io/getting-started/installation) installed
+- Python 3.11+ (for the Python implementation)
 - Google Cloud SDK configured for Vertex AI (see README.md)
 - Git
 
@@ -13,6 +14,20 @@
 ```bash
 git clone https://github.com/bbrowning/paude.git
 cd paude
+```
+
+### Python Development Setup
+
+The paude CLI is implemented in Python. To set up the development environment:
+
+```bash
+# Create a virtual environment (recommended)
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install in development mode with all dev dependencies
+make install
+# or: pip install -e ".[dev]"
 ```
 
 ### Dev Mode
@@ -46,15 +61,21 @@ make clean     # Remove local images
 **All new features must include tests.** Run the test suite before submitting changes:
 
 ```bash
-make test    # Runs all tests
+make test        # Runs all tests (Python + bash)
+make test-python # Run Python tests only
+make lint        # Check code style with ruff
+make typecheck   # Run mypy type checker
+make format      # Format code with ruff
 ```
 
 Test locations:
-- `tests/` - Integration tests for CLI flags, argument parsing, mounts
+- `tests/` - Python tests (pytest) for Python implementation
+- `tests/` - Integration tests for CLI flags, argument parsing, mounts (bash)
 - `test/` - Unit tests for library modules (config.sh, hash.sh, features.sh)
 
-When adding a new CLI flag, add tests in `tests/test_cli_args.sh`.
-When adding a new library module, add tests in `test/test_<module>.sh`.
+When adding Python functionality, add tests in `tests/test_<module>.py`.
+When adding a new CLI flag, add tests in `tests/test_cli.py`.
+When adding a new bash library module, add tests in `test/test_<module>.sh`.
 
 After modifying the Dockerfile or proxy configuration:
 
@@ -70,11 +91,31 @@ make run
 
 ```
 paude/
-├── paude                  # Main script (bash)
-├── lib/                   # Bash library modules
-│   ├── config.sh          # Configuration detection/parsing
-│   ├── hash.sh            # Config hash for image caching
-│   └── features.sh        # Dev container feature support
+├── src/paude/             # Python implementation
+│   ├── __init__.py        # Package with version
+│   ├── __main__.py        # Entry point: python -m paude
+│   ├── cli.py             # Typer CLI
+│   ├── config/            # Configuration parsing
+│   │   ├── detector.py    # Config file detection
+│   │   ├── parser.py      # Config file parsing
+│   │   ├── models.py      # Data models
+│   │   └── dockerfile.py  # Dockerfile generation
+│   ├── container/         # Container management
+│   │   ├── podman.py      # Podman wrapper
+│   │   ├── image.py       # Image management
+│   │   ├── network.py     # Network management
+│   │   └── runner.py      # Container execution
+│   ├── features/          # Dev container features
+│   │   ├── downloader.py  # Feature downloading
+│   │   └── installer.py   # Feature installation
+│   ├── mounts.py          # Volume mount builder
+│   ├── environment.py     # Environment variables
+│   ├── hash.py            # Config hashing
+│   ├── platform.py        # Platform-specific code
+│   ├── utils.py           # Utilities
+│   └── dry_run.py         # Dry-run output
+├── paude                  # Bash wrapper script (legacy)
+├── lib/                   # Bash library modules (legacy)
 ├── containers/
 │   ├── paude/
 │   │   ├── Dockerfile     # Claude Code container image
@@ -83,18 +124,12 @@ paude/
 │       ├── Dockerfile     # Squid proxy container image
 │       ├── entrypoint.sh  # Proxy container entrypoint
 │       └── squid.conf     # Proxy allowlist configuration
-├── tests/                 # Main script test suite
-├── test/                  # Library module unit tests
-│   ├── test_config.sh     # Config module tests
-│   ├── test_hash.sh       # Hash module tests
-│   └── fixtures/          # Test fixtures
+├── tests/                 # Python tests (pytest) + bash integration tests
+├── test/                  # Bash unit tests for library modules
 ├── examples/              # Example configurations
-│   ├── python/            # Python devcontainer example
-│   ├── node/              # Node.js devcontainer example
-│   └── go/                # Go devcontainer example
 ├── docs/
 │   └── features/          # Feature development documentation
-│       └── byoc/          # BYOC feature docs (research, plan, tasks)
+├── pyproject.toml         # Python project configuration
 ├── Makefile               # Build and release automation
 └── README.md
 ```
@@ -172,7 +207,17 @@ rm /tmp/paude-test
 
 ## Code Style
 
-- Bash scripts: Use shellcheck-compatible patterns
+### Python
+
+- Use type hints throughout (Python 3.11+ syntax: `list[str]` not `List[str]`)
+- Run `make lint` before committing (uses ruff)
+- Run `make format` to auto-format code
+- Run `make typecheck` to verify types (uses mypy in strict mode)
+- Follow existing patterns in the codebase
+
+### Bash
+
+- Use shellcheck-compatible patterns
 - Keep functions focused and well-named
 - Simple single-line comments; avoid decorative comment blocks
 - Match the style of surrounding code

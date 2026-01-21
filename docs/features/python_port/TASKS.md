@@ -1270,44 +1270,44 @@ if config_file.exists():
 
 As tasks are completed, update this section:
 
-- [ ] PREREQ-1: Update paude.json (MUST BE DONE ON HOST)
-- [ ] TASK-1.1: Create Python Project Structure
-- [ ] TASK-1.2: Create pyproject.toml
-- [ ] TASK-1.3: Update .gitignore for Python
-- [ ] TASK-1.4: Create Initial Test
-- [ ] TASK-1.5: Verify Tooling
-- [ ] TASK-2.1: Implement CLI with Typer
-- [ ] TASK-2.2: Create CLI Tests
-- [ ] TASK-3.1: Create Config Data Models
-- [ ] TASK-3.2: Create Config Detector
-- [ ] TASK-3.3: Create Config Parser
-- [ ] TASK-3.4: Create Dockerfile Generator
-- [ ] TASK-3.5: Create Config Tests
-- [ ] TASK-4.1: Implement Hash Computation
-- [ ] TASK-4.2: Create Hash Tests
-- [ ] TASK-5.1: Create Feature Downloader
-- [ ] TASK-5.2: Create Feature Installer
-- [ ] TASK-5.3: Create Features Tests
-- [ ] TASK-6.1: Implement Mount Builder
-- [ ] TASK-6.2: Create Mount Tests
-- [ ] TASK-7.1: Implement Environment Builder
-- [ ] TASK-7.2: Create Environment Tests
-- [ ] TASK-8.1: Implement Platform Module
-- [ ] TASK-8.2: Create Platform Tests
-- [ ] TASK-9.1: Implement Utilities
-- [ ] TASK-9.2: Create Utility Tests
-- [ ] TASK-10.1: Create Podman Wrapper
-- [ ] TASK-10.2: Create Image Manager
-- [ ] TASK-10.3: Create Network Manager
-- [ ] TASK-10.4: Create Container Runner
-- [ ] TASK-10.5: Create Container Tests
-- [ ] TASK-11.1: Implement Dry-Run Output
-- [ ] TASK-11.2: Create Dry-Run Tests
-- [ ] TASK-12.1: Wire Everything Together
-- [ ] TASK-12.2: Create Integration Tests
-- [ ] TASK-13.1: Update README.md
-- [ ] TASK-13.2: Update CLAUDE.md
-- [ ] TASK-13.3: Create CONTRIBUTING.md
-- [ ] TASK-14.1: Update Makefile for Python
-- [ ] TASK-15.1: Run Full Test Suite
-- [ ] TASK-15.2: Manual Verification
+- [x] PREREQ-1: Update paude.json (MUST BE DONE ON HOST)
+- [x] TASK-1.1: Create Python Project Structure
+- [x] TASK-1.2: Create pyproject.toml
+- [x] TASK-1.3: Update .gitignore for Python
+- [x] TASK-1.4: Create Initial Test
+- [x] TASK-1.5: Verify Tooling
+- [x] TASK-2.1: Implement CLI with Typer
+- [x] TASK-2.2: Create CLI Tests
+- [x] TASK-3.1: Create Config Data Models
+- [x] TASK-3.2: Create Config Detector
+- [x] TASK-3.3: Create Config Parser
+- [x] TASK-3.4: Create Dockerfile Generator
+- [x] TASK-3.5: Create Config Tests
+- [x] TASK-4.1: Implement Hash Computation
+- [x] TASK-4.2: Create Hash Tests
+- [x] TASK-5.1: Create Feature Downloader
+- [x] TASK-5.2: Create Feature Installer
+- [x] TASK-5.3: Create Features Tests
+- [x] TASK-6.1: Implement Mount Builder
+- [x] TASK-6.2: Create Mount Tests
+- [x] TASK-7.1: Implement Environment Builder
+- [x] TASK-7.2: Create Environment Tests
+- [x] TASK-8.1: Implement Platform Module
+- [x] TASK-8.2: Create Platform Tests
+- [x] TASK-9.1: Implement Utilities
+- [x] TASK-9.2: Create Utility Tests
+- [x] TASK-10.1: Create Podman Wrapper
+- [x] TASK-10.2: Create Image Manager
+- [x] TASK-10.3: Create Network Manager
+- [x] TASK-10.4: Create Container Runner
+- [x] TASK-10.5: Create Container Tests
+- [x] TASK-11.1: Implement Dry-Run Output
+- [x] TASK-11.2: Create Dry-Run Tests
+- [x] TASK-12.1: Wire Everything Together
+- [x] TASK-12.2: Create Integration Tests
+- [x] TASK-13.1: Update README.md
+- [x] TASK-13.2: Update CLAUDE.md
+- [x] TASK-13.3: Update CONTRIBUTING.md
+- [x] TASK-14.1: Update Makefile for Python
+- [x] TASK-15.1: Run Full Test Suite
+- [x] TASK-15.2: Manual Verification

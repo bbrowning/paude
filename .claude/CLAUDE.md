@@ -8,17 +8,45 @@ Paude is a Podman wrapper that runs Claude Code inside a container for isolated,
 
 ## Architecture
 
-The project consists of a main script, library modules, and container definitions:
+The project has a Python implementation with container definitions:
 
-- `paude` - Main bash script that validates environment, builds container images, and runs Claude Code
-- `lib/` - Bash library modules sourced by the main script
-  - `config.sh` - Configuration detection and parsing (devcontainer.json, paude.json)
-  - `hash.sh` - Deterministic hash computation for image caching
-  - `features.sh` - Dev container feature download and installation
-- `containers/paude/` - Main container artifacts (Dockerfile, entrypoint.sh) for Claude Code
-- `containers/proxy/` - Proxy container artifacts (Dockerfile, entrypoint.sh, squid.conf) for network filtering
-- `tests/` - Test suite for the main paude script
-- `test/` - Unit tests for library modules
+### Python Package (`src/paude/`)
+
+```
+src/paude/
+├── __init__.py        # Package with version
+├── __main__.py        # Entry point: python -m paude
+├── cli.py             # Typer CLI
+├── config/            # Configuration parsing
+│   ├── detector.py    # Config file detection
+│   ├── parser.py      # Config file parsing
+│   ├── models.py      # Data models (PaudeConfig, FeatureSpec)
+│   └── dockerfile.py  # Dockerfile generation
+├── container/         # Container management
+│   ├── podman.py      # Podman subprocess wrapper
+│   ├── image.py       # Image building and pulling
+│   ├── network.py     # Network management
+│   └── runner.py      # Container execution
+├── features/          # Dev container features
+│   ├── downloader.py  # Feature downloading
+│   └── installer.py   # Feature installation
+├── mounts.py          # Volume mount builder
+├── environment.py     # Environment variables
+├── hash.py            # Config hashing for caching
+├── platform.py        # Platform-specific code (macOS)
+├── utils.py           # Utilities
+└── dry_run.py         # Dry-run output
+```
+
+### Container Definitions
+
+- `containers/paude/` - Main container (Dockerfile, entrypoint.sh) for Claude Code
+- `containers/proxy/` - Proxy container (Dockerfile, squid.conf) for network filtering
+
+### Legacy Bash Implementation
+
+- `paude` - Bash script (legacy, still functional)
+- `lib/` - Bash library modules
 
 ## Volume Mounts
 
@@ -43,8 +71,15 @@ The script mounts these paths from host to container:
 **All new features must include tests.** This is a hard requirement.
 
 ```bash
-# Run all tests (must pass before merging)
+# Run all tests (Python + bash)
 make test
+
+# Python tests only
+make test-python
+
+# Linting and type checking
+make lint
+make typecheck
 
 # Rebuild images after container changes
 make clean
@@ -57,17 +92,19 @@ PAUDE_DEV=1 ./paude --help
 
 ### Test Locations
 
-- `tests/` - Integration tests for CLI flags, argument parsing, mounts
-- `test/` - Unit tests for library modules (config.sh, hash.sh, features.sh)
+- `tests/` - Python tests (pytest) for the Python implementation
+- `tests/` - Bash integration tests for CLI flags, argument parsing
+- `test/` - Bash unit tests for library modules
 
-When adding a new CLI flag, add tests in `tests/test_cli_args.sh`.
-When adding a new library module, add tests in `test/test_<module>.sh`.
+When adding Python functionality, add tests in `tests/test_<module>.py`.
+When adding a new CLI flag, add tests in `tests/test_cli.py`.
+When adding a new bash library module, add tests in `test/test_<module>.sh`.
 
 ## Documentation Requirements
 
 When adding or changing user-facing features (flags, options, behavior):
 1. Update `README.md` with the new usage patterns
-2. Update the `show_help()` function in `paude` if adding new flags
+2. Update the `show_help()` function in `src/paude/cli.py` if adding new flags
 3. Keep examples consistent between README and help output
 
 ## macOS Considerations
@@ -87,11 +124,11 @@ When developing new features, follow this structured approach:
 2. **Implementation phases**: Break work into logical phases (MVP first, then enhancements)
 
 3. **Testing** (required): Add tests for all new functionality
-   - CLI flags/options → `tests/test_cli_args.sh`
-   - Library modules → `test/test_<module>.sh`
+   - Python code → `tests/test_<module>.py`
+   - CLI flags → `tests/test_cli.py`
    - Run `make test` to verify all tests pass
 
 4. **Documentation**: Update README.md and CONTRIBUTING.md with user-facing changes
 
-Example: See `docs/features/byoc/` for the BYOC (Bring Your Own Container) feature documentation.
-
+Example: See `docs/features/byoc/` for the BYOC feature documentation.
+Example: See `docs/features/python_port/` for the Python port documentation.
