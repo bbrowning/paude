@@ -5,6 +5,8 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 class TestImageExists:
     """Tests for image_exists."""
@@ -175,12 +177,8 @@ class TestContainerRunner:
         )
 
         runner = ContainerRunner()
-        try:
+        with pytest.raises(ProxyStartError, match="container name already in use"):
             runner.run_proxy("test:proxy", "test-network")
-            assert False, "Expected ProxyStartError"
-        except ProxyStartError as e:
-            # The error message should include the stderr from podman
-            assert "container name already in use" in str(e)
 
     @patch("paude.container.runner.subprocess.run")
     def test_stop_container_uses_kill_for_immediate_exit(self, mock_run):

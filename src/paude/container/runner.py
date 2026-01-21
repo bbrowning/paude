@@ -46,17 +46,21 @@ class ContainerRunner:
         """
         # Show warnings for dangerous modes (matches bash behavior)
         if yolo and allow_network:
-            print("", file=sys.stderr)
-            print("╔══════════════════════════════════════════════════════════════════╗", file=sys.stderr)
-            print("║  WARNING: MAXIMUM RISK MODE                                      ║", file=sys.stderr)
-            print("║                                                                  ║", file=sys.stderr)
-            print("║  --yolo + --allow-network = Claude can exfiltrate any file      ║", file=sys.stderr)
-            print("║  to the internet without confirmation. Only use if you trust    ║", file=sys.stderr)
-            print("║  the task completely.                                           ║", file=sys.stderr)
-            print("╚══════════════════════════════════════════════════════════════════╝", file=sys.stderr)
-            print("", file=sys.stderr)
+            warning = """
+╔══════════════════════════════════════════════════════╗
+║  WARNING: MAXIMUM RISK MODE                          ║
+║                                                      ║
+║  --yolo + --allow-network = Claude can exfiltrate    ║
+║  any file to the internet without confirmation.      ║
+║  Only use if you trust the task completely.          ║
+╚══════════════════════════════════════════════════════╝
+"""
+            print(warning, file=sys.stderr)
         elif yolo:
-            msg = "Warning: YOLO mode enabled. Claude can edit files and run commands without confirmation."
+            msg = (
+                "Warning: YOLO mode enabled. "
+                "Claude can edit files and run commands without confirmation."
+            )
             print(msg, file=sys.stderr)
         elif allow_network:
             msg = "Warning: Network access enabled. Data exfiltration is possible."

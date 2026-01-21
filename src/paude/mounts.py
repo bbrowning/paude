@@ -124,7 +124,11 @@ def build_venv_mounts(workspace: Path, venv_mode: VenvMode) -> list[str]:
     for venv_path in venvs:
         resolved = resolve_path(venv_path)
         if resolved:
-            mounts.extend(["--mount", f"type=tmpfs,destination={resolved},notmpcopyup,tmpfs-mode=1777"])
+            mount_spec = (
+                f"type=tmpfs,destination={resolved},"
+                "notmpcopyup,tmpfs-mode=1777"
+            )
+            mounts.extend(["--mount", mount_spec])
 
     return mounts
 

@@ -76,11 +76,12 @@ def get_podman_machine_dns() -> str | None:
 
     try:
         # First check if a podman machine exists (matches bash behavior)
-        result = subprocess.run(
+        inspect_result = subprocess.run(
             ["podman", "machine", "inspect"],
             capture_output=True,
+            text=True,
         )
-        if result.returncode != 0:
+        if inspect_result.returncode != 0:
             return None
 
         # Get DNS IP from inside the podman VM's resolv.conf
