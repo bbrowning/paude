@@ -255,6 +255,16 @@ Custom images are cached based on a hash of the configuration. To force a rebuil
 paude --rebuild
 ```
 
+### Verifying Configuration
+
+Use `--dry-run` to verify your configuration without building or running anything:
+
+```bash
+paude --dry-run
+```
+
+This shows the detected configuration, base image, packages, and the Dockerfile that would be generated. Useful for debugging paude.json or devcontainer.json issues.
+
 ### Example Configurations
 
 See [`examples/README.md`](examples/README.md) for detailed instructions on running paude with different container environments. Sample configurations include:

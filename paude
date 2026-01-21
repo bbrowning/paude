@@ -41,6 +41,8 @@ OPTIONS:
                         By default, network is restricted to Vertex AI endpoints only
     --rebuild           Force rebuild of workspace container image
                         Use when devcontainer.json has changed
+    --dry-run           Show configuration and what would be done, then exit
+                        Useful for verifying paude.json or devcontainer.json
 
 CLAUDE OPTIONS:
     All arguments after -- are passed directly to claude.
@@ -70,10 +72,80 @@ show_version() {
     fi
 }
 
+show_dry_run() {
+    echo "=== Paude Dry Run ==="
+    echo ""
+    echo "Workspace: $WORKSPACE_DIR"
+    echo ""
+
+    if [[ -n "$PAUDE_CONFIG_FILE" ]]; then
+        echo "Configuration:"
+        echo "  File: $PAUDE_CONFIG_FILE"
+        echo "  Type: $PAUDE_CONFIG_TYPE"
+        echo ""
+    else
+        echo "Configuration: none (using default paude image)"
+        echo ""
+    fi
+
+    if [[ -n "$PAUDE_BASE_IMAGE" ]]; then
+        echo "Base image: $PAUDE_BASE_IMAGE"
+    elif [[ -n "$PAUDE_DOCKERFILE" ]]; then
+        echo "Dockerfile: $PAUDE_DOCKERFILE"
+        if [[ -n "$PAUDE_BUILD_CONTEXT" ]]; then
+            echo "Build context: $PAUDE_BUILD_CONTEXT"
+        fi
+    else
+        echo "Image: $IMAGE_NAME (default)"
+    fi
+    echo ""
+
+    if [[ ${#PAUDE_PACKAGES[@]} -gt 0 ]]; then
+        echo "Additional packages:"
+        for pkg in "${PAUDE_PACKAGES[@]}"; do
+            echo "  - $pkg"
+        done
+        echo ""
+    fi
+
+    if [[ -n "$PAUDE_POST_CREATE_COMMAND" ]]; then
+        echo "Setup command: $PAUDE_POST_CREATE_COMMAND"
+        echo ""
+    fi
+
+    if needs_custom_build; then
+        # Source hash module to show what the image tag would be
+        source "$SCRIPT_DIR/lib/hash.sh"
+        local config_hash
+        config_hash=$(compute_config_hash)
+        local custom_image="paude-workspace:$config_hash"
+
+        echo "Would build: $custom_image"
+        if podman image exists "$custom_image" 2>/dev/null; then
+            echo "  (image already cached)"
+        else
+            echo "  (image would be built)"
+        fi
+        echo ""
+
+        echo "Generated Dockerfile:"
+        echo "---"
+        generate_workspace_dockerfile "$PAUDE_BASE_IMAGE"
+        echo "---"
+    fi
+
+    echo ""
+    echo "Flags:"
+    echo "  --yolo: $YOLO_MODE"
+    echo "  --allow-network: $ALLOW_NETWORK"
+    echo "  --rebuild: $FORCE_REBUILD"
+}
+
 # Parse paude-specific flags before -- separator
 ALLOW_NETWORK=false
 YOLO_MODE=false
 FORCE_REBUILD=false
+DRY_RUN=false
 CLAUDE_ARGS=()
 PARSING_PAUDE_ARGS=true
 
@@ -99,6 +171,9 @@ for arg in "$@"; do
                 ;;
             --rebuild)
                 FORCE_REBUILD=true
+                ;;
+            --dry-run)
+                DRY_RUN=true
                 ;;
             *)
                 # Unknown paude option - could be claude arg without --
@@ -507,7 +582,6 @@ run_claude() {
 }
 
 # Main execution
-check_requirements
 
 # Setup workspace dir early (needed for config detection)
 WORKSPACE_DIR="$(pwd -P)"
@@ -518,6 +592,13 @@ if has_custom_config; then
     parse_config || exit 1
 fi
 
+# Handle dry-run mode (doesn't require podman)
+if [[ "$DRY_RUN" == "true" ]]; then
+    show_dry_run
+    exit 0
+fi
+
+check_requirements
 ensure_images
 setup_environment
 setup_mounts

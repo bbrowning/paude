@@ -1,0 +1,13 @@
+{
+    "base": "node:22-slim",
+    "packages": [
+        "git",
+        "curl",
+        "wget",
+        "dnsutils",
+        "iputils-ping",
+        "jq",
+        "perl",
+        "make"
+    ]
+}

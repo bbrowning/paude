@@ -77,6 +77,64 @@ test_version_custom_registry() {
     assert_contains "$output" "ghcr.io/test" "--version shows custom registry"
 }
 
+# Test --dry-run flag
+test_dry_run_no_config() {
+    local tmpdir
+    tmpdir=$(create_test_workspace)
+
+    local output
+    output=$(cd "$tmpdir" && "$PROJECT_ROOT/paude" --dry-run 2>&1)
+    local exit_code=$?
+
+    assert_exit_code "$exit_code" 0 "--dry-run exits with code 0"
+    assert_contains "$output" "Paude Dry Run" "--dry-run shows header"
+    assert_contains "$output" "Workspace:" "--dry-run shows workspace"
+    assert_contains "$output" "none (using default paude image)" "--dry-run shows no config"
+
+    cleanup_test_workspace "$tmpdir"
+}
+
+test_dry_run_with_paude_json() {
+    local tmpdir
+    tmpdir=$(create_test_workspace)
+
+    # Create a test paude.json
+    cat > "$tmpdir/paude.json" <<'EOF'
+{
+    "base": "python:3.11-slim",
+    "packages": ["make", "gcc"]
+}
+EOF
+
+    local output
+    output=$(cd "$tmpdir" && "$PROJECT_ROOT/paude" --dry-run 2>&1)
+    local exit_code=$?
+
+    assert_exit_code "$exit_code" 0 "--dry-run with paude.json exits with code 0"
+    assert_contains "$output" "paude.json" "--dry-run detects paude.json"
+    assert_contains "$output" "python:3.11-slim" "--dry-run shows base image"
+    assert_contains "$output" "make" "--dry-run shows packages"
+    assert_contains "$output" "gcc" "--dry-run shows all packages"
+    assert_contains "$output" "Generated Dockerfile:" "--dry-run shows generated Dockerfile"
+
+    cleanup_test_workspace "$tmpdir"
+}
+
+test_dry_run_shows_flags() {
+    local output
+    output=$("$PROJECT_ROOT/paude" --dry-run --yolo --allow-network 2>&1)
+
+    assert_contains "$output" "--yolo: true" "--dry-run shows yolo flag state"
+    assert_contains "$output" "--allow-network: true" "--dry-run shows network flag state"
+}
+
+test_help_shows_dry_run() {
+    local output
+    output=$("$PROJECT_ROOT/paude" --help 2>&1)
+
+    assert_contains "$output" "--dry-run" "--help shows --dry-run option"
+}
+
 # Run all tests
 test_help_short_flag
 test_help_long_flag
@@ -85,3 +143,7 @@ test_version_long_flag
 test_version_dev_mode
 test_version_installed_mode
 test_version_custom_registry
+test_dry_run_no_config
+test_dry_run_with_paude_json
+test_dry_run_shows_flags
+test_help_shows_dry_run

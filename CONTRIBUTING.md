@@ -43,11 +43,18 @@ make clean     # Remove local images
 
 ### Testing Changes
 
-Run the test suite before submitting changes:
+**All new features must include tests.** Run the test suite before submitting changes:
 
 ```bash
-make test    # Runs all tests (64 total)
+make test    # Runs all tests
 ```
+
+Test locations:
+- `tests/` - Integration tests for CLI flags, argument parsing, mounts
+- `test/` - Unit tests for library modules (config.sh, hash.sh, features.sh)
+
+When adding a new CLI flag, add tests in `tests/test_cli_args.sh`.
+When adding a new library module, add tests in `test/test_<module>.sh`.
 
 After modifying the Dockerfile or proxy configuration:
 
@@ -182,7 +189,10 @@ For significant features, follow the structured development process:
 
 2. Implement in phases (MVP first, then enhancements)
 
-3. Add tests for new library modules in `test/`
+3. **Add tests** (required):
+   - CLI flags/options → `tests/test_cli_args.sh`
+   - Library modules → `test/test_<module>.sh`
+   - Run `make test` to verify all tests pass
 
 4. Update README.md and this file with user-facing changes
 

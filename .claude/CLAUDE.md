@@ -40,8 +40,10 @@ The script mounts these paths from host to container:
 
 ## Testing Changes
 
+**All new features must include tests.** This is a hard requirement.
+
 ```bash
-# Run all tests
+# Run all tests (must pass before merging)
 make test
 
 # Rebuild images after container changes
@@ -52,6 +54,14 @@ make run
 PAUDE_DEV=1 ./paude --version
 PAUDE_DEV=1 ./paude --help
 ```
+
+### Test Locations
+
+- `tests/` - Integration tests for CLI flags, argument parsing, mounts
+- `test/` - Unit tests for library modules (config.sh, hash.sh, features.sh)
+
+When adding a new CLI flag, add tests in `tests/test_cli_args.sh`.
+When adding a new library module, add tests in `test/test_<module>.sh`.
 
 ## Documentation Requirements
 
@@ -76,7 +86,10 @@ When developing new features, follow this structured approach:
 
 2. **Implementation phases**: Break work into logical phases (MVP first, then enhancements)
 
-3. **Testing**: Add unit tests in `test/` for new library modules
+3. **Testing** (required): Add tests for all new functionality
+   - CLI flags/options → `tests/test_cli_args.sh`
+   - Library modules → `test/test_<module>.sh`
+   - Run `make test` to verify all tests pass
 
 4. **Documentation**: Update README.md and CONTRIBUTING.md with user-facing changes
 
