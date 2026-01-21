@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from paude import __version__
 from paude.config.models import PaudeConfig
 from paude.container.podman import image_exists, run_podman
 from paude.hash import compute_config_hash
@@ -22,6 +23,7 @@ class ImageManager:
         self.script_dir = script_dir
         self.dev_mode = os.environ.get("PAUDE_DEV", "0") == "1"
         self.registry = os.environ.get("PAUDE_REGISTRY", "docker.io/bbrowning")
+        self.version = __version__
 
     def ensure_default_image(self) -> str:
         """Ensure the default paude image is available.
@@ -29,17 +31,31 @@ class ImageManager:
         Returns:
             Image tag to use.
         """
+        import sys
+
         if self.dev_mode and self.script_dir:
-            # Build locally in dev mode
-            tag = "paude:dev"
-            dockerfile = self.script_dir / "containers" / "paude" / "Dockerfile"
-            context = self.script_dir / "containers" / "paude"
-            self.build_image(dockerfile, tag, context)
+            # Build locally in dev mode (matches bash: paude:latest)
+            tag = "paude:latest"
+            if not image_exists(tag):
+                print(f"Building {tag} image...", file=sys.stderr)
+                dockerfile = self.script_dir / "containers" / "paude" / "Dockerfile"
+                context = self.script_dir / "containers" / "paude"
+                self.build_image(dockerfile, tag, context)
             return tag
         else:
-            # Pull from registry
-            tag = f"{self.registry}/paude:latest"
-            self.pull_image(tag)
+            # Pull from registry with version tag (matches bash)
+            tag = f"{self.registry}/paude:{self.version}"
+            if not image_exists(tag):
+                print(f"Pulling {tag}...", file=sys.stderr)
+                try:
+                    run_podman("pull", tag, capture=False)
+                except Exception:
+                    print(
+                        "Check your network connection or run 'podman login' "
+                        "if authentication is required.",
+                        file=sys.stderr,
+                    )
+                    raise
             return tag
 
     def ensure_custom_image(
@@ -56,6 +72,10 @@ class ImageManager:
         Returns:
             Image tag to use.
         """
+        import shutil
+        import sys
+        import tempfile
+
         # Compute hash for image tag
         base_path = Path(__file__).parent.parent.parent.parent
         entrypoint = base_path / "containers" / "paude" / "entrypoint.sh"
@@ -72,16 +92,57 @@ class ImageManager:
 
         # Check if we need to build
         if not force_rebuild and image_exists(tag):
+            print(f"Using cached workspace image: {tag}", file=sys.stderr)
             return tag
+
+        print("Building workspace image...", file=sys.stderr)
+
+        # Determine the base image to use
+        base_image: str
+
+        if config.dockerfile:
+            # Verify Dockerfile exists (matches bash behavior)
+            if not config.dockerfile.exists():
+                raise FileNotFoundError(
+                    f"Dockerfile not found: {config.dockerfile}"
+                )
+
+            # Build user's Dockerfile first to create intermediate image
+            user_image = f"paude-user-base:{config_hash}"
+            build_context = config.build_context or config.dockerfile.parent
+            print(f"  → Building from: {config.dockerfile}", file=sys.stderr)
+
+            # Build user's Dockerfile
+            user_build_args = dict(config.build_args)
+            self.build_image(
+                config.dockerfile, user_image, build_context, user_build_args
+            )
+            base_image = user_image
+            print("  → Adding paude requirements...", file=sys.stderr)
+        elif config.base_image:
+            base_image = config.base_image
+            print(f"  → Using base: {base_image}", file=sys.stderr)
+        else:
+            base_image = "node:22-slim"
 
         # Generate and build the workspace Dockerfile
         from paude.config.dockerfile import generate_workspace_dockerfile
 
         dockerfile_content = generate_workspace_dockerfile(config)
 
-        # Write temporary Dockerfile
-        import tempfile
+        # Add features if present (matches bash behavior)
+        if config.features:
+            from paude.features.installer import generate_features_dockerfile
 
+            features_block = generate_features_dockerfile(config.features)
+            if features_block:
+                # Insert features before "USER paude" line
+                dockerfile_content = dockerfile_content.replace(
+                    "\nUSER paude",
+                    f"{features_block}\nUSER paude",
+                )
+
+        # Write temporary Dockerfile
         with tempfile.TemporaryDirectory() as tmpdir:
             dockerfile_path = Path(tmpdir) / "Dockerfile"
             dockerfile_path.write_text(dockerfile_content)
@@ -95,11 +156,19 @@ class ImageManager:
                 entrypoint_dest.write_text("#!/bin/bash\nexec claude \"$@\"\n")
             entrypoint_dest.chmod(0o755)
 
-            # Build
-            build_args = {"BASE_IMAGE": config.base_image or "node:22-slim"}
-            build_args.update(config.build_args)
+            # Copy features to build context if present
+            if config.features:
+                from paude.features.downloader import FEATURE_CACHE_DIR
+
+                if FEATURE_CACHE_DIR.exists():
+                    features_dest = Path(tmpdir) / "features"
+                    shutil.copytree(FEATURE_CACHE_DIR, features_dest)
+
+            # Build with the determined base image
+            build_args = {"BASE_IMAGE": base_image}
             self.build_image(dockerfile_path, tag, Path(tmpdir), build_args)
 
+        print(f"Build complete (cached as {tag})", file=sys.stderr)
         return tag
 
     def ensure_proxy_image(self) -> str:
@@ -108,15 +177,31 @@ class ImageManager:
         Returns:
             Image tag to use.
         """
+        import sys
+
         if self.dev_mode and self.script_dir:
-            tag = "paude-proxy:dev"
-            dockerfile = self.script_dir / "containers" / "proxy" / "Dockerfile"
-            context = self.script_dir / "containers" / "proxy"
-            self.build_image(dockerfile, tag, context)
+            # Build locally in dev mode (matches bash: paude-proxy:latest)
+            tag = "paude-proxy:latest"
+            if not image_exists(tag):
+                print(f"Building {tag} image...", file=sys.stderr)
+                dockerfile = self.script_dir / "containers" / "proxy" / "Dockerfile"
+                context = self.script_dir / "containers" / "proxy"
+                self.build_image(dockerfile, tag, context)
             return tag
         else:
-            tag = f"{self.registry}/paude-proxy:latest"
-            self.pull_image(tag)
+            # Pull from registry with version tag (matches bash)
+            tag = f"{self.registry}/paude-proxy:{self.version}"
+            if not image_exists(tag):
+                print(f"Pulling {tag}...", file=sys.stderr)
+                try:
+                    run_podman("pull", tag, capture=False)
+                except Exception:
+                    print(
+                        "Check your network connection or run 'podman login' "
+                        "if authentication is required.",
+                        file=sys.stderr,
+                    )
+                    raise
             return tag
 
     def build_image(
@@ -140,12 +225,3 @@ class ImageManager:
                 cmd.extend(["--build-arg", f"{key}={value}"])
         cmd.append(str(context))
         run_podman(*cmd, capture=False)
-
-    def pull_image(self, image: str) -> None:
-        """Pull a container image.
-
-        Args:
-            image: Image to pull.
-        """
-        if not image_exists(image):
-            run_podman("pull", image, capture=False)

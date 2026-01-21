@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 
@@ -20,13 +21,14 @@ def detect_config(workspace: Path) -> Path | None:
         Path to the config file if found, None otherwise.
     """
     candidates = [
-        workspace / ".devcontainer" / "devcontainer.json",
-        workspace / ".devcontainer.json",
-        workspace / "paude.json",
+        (workspace / ".devcontainer" / "devcontainer.json", "devcontainer"),
+        (workspace / ".devcontainer.json", "devcontainer"),
+        (workspace / "paude.json", "paude"),
     ]
 
-    for candidate in candidates:
+    for candidate, config_type in candidates:
         if candidate.exists():
+            print(f"Detected {config_type} config: {candidate}", file=sys.stderr)
             return candidate
 
     return None

@@ -14,7 +14,7 @@ class TestGenerateFeatureInstallLayer:
 
     def test_creates_correct_copy_command(self, tmp_path: Path):
         """generate_feature_install_layer creates correct COPY command."""
-        feature_dir = tmp_path / "test-feature"
+        feature_dir = tmp_path / "abc123hash"
         feature_dir.mkdir()
         (feature_dir / "install.sh").write_text("#!/bin/bash\necho 'installing'")
         (feature_dir / "devcontainer-feature.json").write_text(
@@ -22,8 +22,8 @@ class TestGenerateFeatureInstallLayer:
         )
 
         result = generate_feature_install_layer(feature_dir, {})
-        assert f"COPY --from=features {feature_dir}" in result
-        assert "/tmp/features/test-feature" in result
+        # COPY uses relative path from build context: features/<hash>/
+        assert "COPY features/abc123hash/ /tmp/features/test-feature/" in result
 
     def test_creates_correct_run_command(self, tmp_path: Path):
         """generate_feature_install_layer creates correct RUN command."""

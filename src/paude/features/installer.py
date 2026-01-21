@@ -42,7 +42,10 @@ def generate_feature_install_layer(feature_path: Path, options: dict[str, Any]) 
         env_vars = " ".join(env_parts) + " "
 
     # Generate COPY and RUN
-    lines.append(f"COPY --from=features {feature_path} /tmp/features/{feature_id}")
+    # Use relative path from build context (features/<hash>/)
+    # The feature cache is copied to build context as "features/"
+    feature_hash = feature_path.name  # The hash directory name
+    lines.append(f"COPY features/{feature_hash}/ /tmp/features/{feature_id}/")
     if env_vars:
         lines.append(f"RUN cd /tmp/features/{feature_id} && {env_vars}./install.sh")
     else:

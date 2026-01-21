@@ -95,6 +95,8 @@ def _parse_devcontainer(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
                 features.append(FeatureSpec(url=feature_url, options=options))
             else:
                 features.append(FeatureSpec(url=feature_url, options={}))
+        if features:
+            print(f"Found {len(features)} feature(s)", file=sys.stderr)
 
     # Parse postCreateCommand
     post_create_command: str | None = None

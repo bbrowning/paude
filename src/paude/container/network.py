@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 from paude.container.podman import network_exists, run_podman
 
 
@@ -15,6 +17,7 @@ class NetworkManager:
             name: Network name.
         """
         if not network_exists(name):
+            print(f"Creating {name} network...", file=sys.stderr)
             run_podman("network", "create", "--internal", name)
 
     def remove_network(self, name: str) -> None:

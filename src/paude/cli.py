@@ -249,13 +249,26 @@ def main(
             raise typer.Exit(1) from None
 
     # Run postCreateCommand if present and this is first run
-    if config and config.post_create_command:
+    # Uses .paude-initialized marker to track if command has run
+    workspace_marker = workspace / ".paude-initialized"
+    if config and config.post_create_command and not workspace_marker.exists():
         typer.echo(f"Running postCreateCommand: {config.post_create_command}")
         success = runner.run_post_create(
-            image, mounts, env, config.post_create_command, network_name
+            image=image,
+            mounts=mounts,
+            env=env,
+            command=config.post_create_command,
+            workdir=str(workspace),
+            network=network_name,
         )
         if not success:
             typer.echo("Warning: postCreateCommand failed", err=True)
+        else:
+            # Mark as initialized only on success (matches bash behavior)
+            try:
+                workspace_marker.touch()
+            except OSError:
+                pass  # Ignore if we can't create marker
 
     # Run Claude
     try:

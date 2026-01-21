@@ -60,22 +60,6 @@ class TestImageManager:
         assert "-t" in call_args
         assert "test:tag" in call_args
 
-    @patch("paude.container.image.run_podman")
-    @patch("paude.container.image.image_exists")
-    def test_pull_image_calls_podman_pull(self, mock_exists, mock_run):
-        """pull_image calls podman pull."""
-        mock_exists.return_value = False
-        from paude.container.image import ImageManager
-
-        manager = ImageManager()
-        manager.pull_image("test:tag")
-
-        mock_run.assert_called_once()
-        call_args = mock_run.call_args[0]
-        assert "pull" in call_args
-        assert "test:tag" in call_args
-
-
 class TestContainerRunner:
     """Tests for ContainerRunner."""
 

@@ -44,12 +44,22 @@ class ContainerRunner:
         Returns:
             Exit code from the container.
         """
-        # Show warnings for dangerous modes
-        if yolo:
-            msg = "Warning: YOLO mode - Claude can modify files without prompts"
-            print(msg, file=sys.stderr)
+        # Show warnings for dangerous modes (matches bash behavior)
         if yolo and allow_network:
-            msg = "Warning: YOLO + allow-network is maximum risk mode"
+            print("", file=sys.stderr)
+            print("╔══════════════════════════════════════════════════════════════════╗", file=sys.stderr)
+            print("║  WARNING: MAXIMUM RISK MODE                                      ║", file=sys.stderr)
+            print("║                                                                  ║", file=sys.stderr)
+            print("║  --yolo + --allow-network = Claude can exfiltrate any file      ║", file=sys.stderr)
+            print("║  to the internet without confirmation. Only use if you trust    ║", file=sys.stderr)
+            print("║  the task completely.                                           ║", file=sys.stderr)
+            print("╚══════════════════════════════════════════════════════════════════╝", file=sys.stderr)
+            print("", file=sys.stderr)
+        elif yolo:
+            msg = "Warning: YOLO mode enabled. Claude can edit files and run commands without confirmation."
+            print(msg, file=sys.stderr)
+        elif allow_network:
+            msg = "Warning: Network access enabled. Data exfiltration is possible."
             print(msg, file=sys.stderr)
 
         cmd = [
@@ -135,6 +145,10 @@ class ContainerRunner:
         if result.returncode != 0:
             stderr = result.stderr.decode("utf-8", errors="replace")
             raise ProxyStartError(f"Failed to start proxy: {stderr}")
+
+        # Give proxy time to initialize (matches bash sleep 1)
+        time.sleep(1)
+
         return container_name
 
     def run_post_create(
@@ -143,6 +157,7 @@ class ContainerRunner:
         mounts: list[str],
         env: dict[str, str],
         command: str,
+        workdir: str,
         network: str | None = None,
     ) -> bool:
         """Run the postCreateCommand.
@@ -152,6 +167,7 @@ class ContainerRunner:
             mounts: Volume mount arguments.
             env: Environment variables.
             command: Command to run.
+            workdir: Working directory for the command.
             network: Optional network.
 
         Returns:
@@ -161,6 +177,8 @@ class ContainerRunner:
             "podman",
             "run",
             "--rm",
+            "-w",
+            workdir,
         ]
 
         if network:
@@ -171,7 +189,8 @@ class ContainerRunner:
         for key, value in env.items():
             cmd.extend(["-e", f"{key}={value}"])
 
-        cmd.extend([image, "sh", "-c", command])
+        # Use /bin/bash to match bash implementation
+        cmd.extend([image, "/bin/bash", "-c", command])
 
         result = subprocess.run(cmd)
         return result.returncode == 0
