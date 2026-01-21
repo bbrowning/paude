@@ -21,7 +21,7 @@ LATEST_PROXY_IMAGE = $(REGISTRY)/$(PROXY_IMAGE_NAME):latest
 # Architectures for multi-arch builds
 PLATFORMS = linux/amd64,linux/arm64
 
-.PHONY: build run publish release clean login help test test-config test-hash
+.PHONY: build run publish release clean login help test
 
 help:
 	@echo "Paude build targets:"
@@ -46,17 +46,14 @@ build:
 run:
 	PAUDE_DEV=1 ./paude
 
-# Run tests (no container daemon required)
+# Run all tests (no container daemon required)
 test:
 	@bash tests/run_tests.sh
-
-# Run BYOC config module tests
-test-config:
-	bash test/test_config.sh
-
-# Run BYOC hash module tests
-test-hash:
-	bash test/test_hash.sh
+	@echo ""
+	@echo "=== Running unit tests ==="
+	@bash test/test_config.sh
+	@echo ""
+	@bash test/test_hash.sh
 
 # Login to container registry
 login:

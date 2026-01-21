@@ -41,10 +41,8 @@ The script mounts these paths from host to container:
 ## Testing Changes
 
 ```bash
-# Run the test suite
-make test           # Main paude script tests (48 tests)
-make test-config    # Config module unit tests
-make test-hash      # Hash module unit tests
+# Run all tests
+make test
 
 # Rebuild images after container changes
 make clean

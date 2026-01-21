@@ -46,10 +46,7 @@ make clean     # Remove local images
 Run the test suite before submitting changes:
 
 ```bash
-# Run all tests
-make test           # Main script tests (48 tests)
-make test-config    # Config module tests
-make test-hash      # Hash module tests
+make test    # Runs all tests (64 total)
 ```
 
 After modifying the Dockerfile or proxy configuration:
