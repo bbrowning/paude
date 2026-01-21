@@ -135,10 +135,31 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
 
     Returns:
         Parsed configuration.
+
+    Raises:
+        ConfigError: If venv config is invalid.
     """
     base_image = data.get("base")
     packages = data.get("packages", [])
     setup_command = data.get("setup")
+
+    venv_config = data.get("venv", "auto")
+    if venv_config not in ("auto", "none") and not isinstance(venv_config, list):
+        raise ConfigError(
+            "Invalid venv config: expected 'auto', 'none', or list of directories"
+        )
+    if isinstance(venv_config, list):
+        for item in venv_config:
+            if not isinstance(item, str):
+                raise ConfigError(
+                    "Invalid venv config: list items must be strings"
+                )
+
+    pip_install = data.get("pip_install", False)
+    if not isinstance(pip_install, (bool, str)):
+        raise ConfigError(
+            "Invalid pip_install config: expected boolean or string command"
+        )
 
     return PaudeConfig(
         config_file=config_file,
@@ -146,6 +167,8 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
         base_image=base_image,
         packages=packages,
         post_create_command=setup_command,
+        venv=venv_config,
+        pip_install=pip_install,
     )
 
 

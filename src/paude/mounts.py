@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+from paude.config import VenvMode
 
 
 def resolve_path(path: Path) -> Path | None:
@@ -80,3 +83,81 @@ def build_mounts(workspace: Path, home: Path) -> list[str]:
         mounts.extend(["-v", f"{resolved_claude_json}:/tmp/claude.json.seed:ro"])
 
     return mounts
+
+
+def build_venv_mounts(workspace: Path, venv_mode: VenvMode) -> list[str]:
+    """Build tmpfs mounts to shadow Python venv directories.
+
+    These mounts should be added AFTER the workspace mount so they overlay
+    the venv directories with empty tmpfs mounts. This allows the container
+    to create its own venv without conflicting with the host venv.
+
+    Args:
+        workspace: Path to the workspace directory.
+        venv_mode: "auto" to detect venvs, "none" to disable,
+                   or list of directory names to shadow.
+
+    Returns:
+        List of mount arguments for podman (["--mount", "type=tmpfs,...", ...]).
+    """
+    from paude.venv import find_venvs, is_venv
+
+    if venv_mode == "none":
+        return []
+
+    if venv_mode == "auto":
+        venvs = find_venvs(workspace)
+    else:
+        venvs = []
+        for name in venv_mode:
+            candidate = workspace / name
+            if candidate.exists() and is_venv(candidate):
+                venvs.append(candidate)
+
+    if not venvs:
+        return []
+
+    venv_names = [v.name for v in venvs]
+    print(f"Shadowing venv: {', '.join(venv_names)}", file=sys.stderr)
+
+    mounts: list[str] = []
+    for venv_path in venvs:
+        resolved = resolve_path(venv_path)
+        if resolved:
+            mounts.extend(["--mount", f"type=tmpfs,destination={resolved},notmpcopyup,tmpfs-mode=1777"])
+
+    return mounts
+
+
+def get_venv_paths(workspace: Path, venv_mode: VenvMode) -> list[Path]:
+    """Get list of venv paths that will be shadowed.
+
+    Args:
+        workspace: Path to the workspace directory.
+        venv_mode: "auto" to detect venvs, "none" to disable,
+                   or list of directory names to shadow.
+
+    Returns:
+        List of resolved venv paths.
+    """
+    from paude.venv import find_venvs, is_venv
+
+    if venv_mode == "none":
+        return []
+
+    if venv_mode == "auto":
+        venvs = find_venvs(workspace)
+    else:
+        venvs = []
+        for name in venv_mode:
+            candidate = workspace / name
+            if candidate.exists() and is_venv(candidate):
+                venvs.append(candidate)
+
+    result = []
+    for venv_path in venvs:
+        resolved = resolve_path(venv_path)
+        if resolved:
+            result.append(resolved)
+
+    return result

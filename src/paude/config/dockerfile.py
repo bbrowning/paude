@@ -76,6 +76,20 @@ RUN if ! command -v node >/dev/null 2>&1; then \\
         "RUN id paude >/dev/null 2>&1 || useradd -m -s /bin/bash paude 2>/dev/null || adduser -D -s /bin/bash paude"
     )
 
+    if config.pip_install:
+        lines.append("")
+        lines.append("# Build-time pip install for venv isolation")
+        lines.append("COPY . /opt/workspace-src")
+        lines.append("RUN python3 -m venv /opt/venv")
+
+        if isinstance(config.pip_install, str):
+            pip_cmd = config.pip_install
+        else:
+            pip_cmd = "pip install -e /opt/workspace-src"
+
+        lines.append(f"RUN /opt/venv/bin/{pip_cmd}")
+        lines.append("RUN chown -R paude:paude /opt/venv")
+
     lines.append("")
     lines.append("# Copy entrypoint")
     lines.append("COPY entrypoint.sh /usr/local/bin/entrypoint.sh")

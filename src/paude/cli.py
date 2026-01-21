@@ -154,7 +154,7 @@ def main(
     from paude.config import detect_config, parse_config
     from paude.container import ContainerRunner, ImageManager, NetworkManager
     from paude.environment import build_environment, build_proxy_environment
-    from paude.mounts import build_mounts
+    from paude.mounts import build_mounts, build_venv_mounts, get_venv_paths
     from paude.platform import check_macos_volumes, get_podman_machine_dns
     from paude.utils import check_git_safety, check_requirements
 
@@ -206,8 +206,10 @@ def main(
 
     # Ensure images
     try:
-        if config and (config.base_image or config.dockerfile):
-            image = image_manager.ensure_custom_image(config, force_rebuild=rebuild)
+        if config and (config.base_image or config.dockerfile or config.pip_install):
+            image = image_manager.ensure_custom_image(
+                config, force_rebuild=rebuild, workspace=workspace
+            )
         else:
             image = image_manager.ensure_default_image()
     except Exception as e:
@@ -216,11 +218,23 @@ def main(
 
     # Build mounts and environment
     mounts = build_mounts(workspace, home)
+
+    # Add venv shadow mounts (must come after workspace mount)
+    venv_mode = config.venv if config else "auto"
+    venv_mounts = build_venv_mounts(workspace, venv_mode)
+    mounts.extend(venv_mounts)
+
     env = build_environment()
 
     # Add container env from config
     if config and config.container_env:
         env.update(config.container_env)
+
+    # Add PAUDE_VENV_PATHS when pip_install is enabled
+    if config and config.pip_install:
+        venv_paths = get_venv_paths(workspace, config.venv)
+        if venv_paths:
+            env["PAUDE_VENV_PATHS"] = ":".join(str(p) for p in venv_paths)
 
     # Check macOS volumes
     if not check_macos_volumes(workspace, image):

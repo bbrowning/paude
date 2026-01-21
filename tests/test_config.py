@@ -139,6 +139,94 @@ class TestParseConfig:
         with pytest.raises(ConfigError):
             parse_config(config_file)
 
+    def test_parses_venv_auto(self, tmp_path: Path):
+        """parse_config handles venv: auto."""
+        config_file = tmp_path / "paude.json"
+        config_file.write_text(json.dumps({"venv": "auto"}))
+
+        config = parse_config(config_file)
+        assert config.venv == "auto"
+
+    def test_parses_venv_none(self, tmp_path: Path):
+        """parse_config handles venv: none."""
+        config_file = tmp_path / "paude.json"
+        config_file.write_text(json.dumps({"venv": "none"}))
+
+        config = parse_config(config_file)
+        assert config.venv == "none"
+
+    def test_parses_venv_list(self, tmp_path: Path):
+        """parse_config handles venv as list of directories."""
+        config_file = tmp_path / "paude.json"
+        config_file.write_text(json.dumps({"venv": [".venv", "my-custom-venv"]}))
+
+        config = parse_config(config_file)
+        assert config.venv == [".venv", "my-custom-venv"]
+
+    def test_venv_defaults_to_auto(self, tmp_path: Path):
+        """parse_config defaults venv to auto when not specified."""
+        config_file = tmp_path / "paude.json"
+        config_file.write_text(json.dumps({"base": "python:3.11"}))
+
+        config = parse_config(config_file)
+        assert config.venv == "auto"
+
+    def test_venv_invalid_value_raises_error(self, tmp_path: Path):
+        """parse_config raises error for invalid venv value."""
+        config_file = tmp_path / "paude.json"
+        config_file.write_text(json.dumps({"venv": "invalid"}))
+
+        with pytest.raises(ConfigError, match="Invalid venv config"):
+            parse_config(config_file)
+
+    def test_venv_list_with_non_string_raises_error(self, tmp_path: Path):
+        """parse_config raises error for venv list with non-string item."""
+        config_file = tmp_path / "paude.json"
+        config_file.write_text(json.dumps({"venv": [".venv", 123]}))
+
+        with pytest.raises(ConfigError, match="list items must be strings"):
+            parse_config(config_file)
+
+    def test_parses_pip_install_true(self, tmp_path: Path):
+        """parse_config handles pip_install: true."""
+        config_file = tmp_path / "paude.json"
+        config_file.write_text(json.dumps({"pip_install": True}))
+
+        config = parse_config(config_file)
+        assert config.pip_install is True
+
+    def test_parses_pip_install_false(self, tmp_path: Path):
+        """parse_config handles pip_install: false."""
+        config_file = tmp_path / "paude.json"
+        config_file.write_text(json.dumps({"pip_install": False}))
+
+        config = parse_config(config_file)
+        assert config.pip_install is False
+
+    def test_parses_pip_install_custom_command(self, tmp_path: Path):
+        """parse_config handles pip_install as custom command string."""
+        config_file = tmp_path / "paude.json"
+        config_file.write_text(json.dumps({"pip_install": "pip install -r requirements.txt"}))
+
+        config = parse_config(config_file)
+        assert config.pip_install == "pip install -r requirements.txt"
+
+    def test_pip_install_defaults_to_false(self, tmp_path: Path):
+        """parse_config defaults pip_install to False when not specified."""
+        config_file = tmp_path / "paude.json"
+        config_file.write_text(json.dumps({"base": "python:3.11"}))
+
+        config = parse_config(config_file)
+        assert config.pip_install is False
+
+    def test_pip_install_invalid_value_raises_error(self, tmp_path: Path):
+        """parse_config raises error for invalid pip_install value."""
+        config_file = tmp_path / "paude.json"
+        config_file.write_text(json.dumps({"pip_install": ["invalid"]}))
+
+        with pytest.raises(ConfigError, match="Invalid pip_install config"):
+            parse_config(config_file)
+
     def test_warns_unsupported_properties(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
         """parse_config logs warnings for unsupported properties."""
         config_file = tmp_path / ".devcontainer.json"
@@ -199,3 +287,30 @@ class TestGenerateWorkspaceDockerfile:
 
         assert "FROM ${BASE_IMAGE}" in dockerfile
         assert "ENTRYPOINT" in dockerfile
+
+    def test_pip_install_true_generates_editable_install(self):
+        """generate_workspace_dockerfile with pip_install=True uses editable install."""
+        config = PaudeConfig(pip_install=True)
+        dockerfile = generate_workspace_dockerfile(config)
+
+        assert "COPY . /opt/workspace-src" in dockerfile
+        assert "RUN python3 -m venv /opt/venv" in dockerfile
+        assert "/opt/venv/bin/pip install -e /opt/workspace-src" in dockerfile
+        assert "RUN chown -R paude:paude /opt/venv" in dockerfile
+
+    def test_pip_install_custom_command(self):
+        """generate_workspace_dockerfile with pip_install string uses custom command."""
+        config = PaudeConfig(pip_install="pip install -r requirements.txt")
+        dockerfile = generate_workspace_dockerfile(config)
+
+        assert "COPY . /opt/workspace-src" in dockerfile
+        assert "RUN python3 -m venv /opt/venv" in dockerfile
+        assert "/opt/venv/bin/pip install -r requirements.txt" in dockerfile
+
+    def test_pip_install_false_no_venv_setup(self):
+        """generate_workspace_dockerfile with pip_install=False has no venv setup."""
+        config = PaudeConfig(pip_install=False)
+        dockerfile = generate_workspace_dockerfile(config)
+
+        assert "/opt/workspace-src" not in dockerfile
+        assert "/opt/venv" not in dockerfile

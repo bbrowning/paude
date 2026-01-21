@@ -62,12 +62,14 @@ class ImageManager:
         self,
         config: PaudeConfig,
         force_rebuild: bool = False,
+        workspace: Path | None = None,
     ) -> str:
         """Ensure a custom workspace image is available.
 
         Args:
             config: Parsed paude configuration.
             force_rebuild: Force rebuild even if image exists.
+            workspace: Path to the workspace directory (for pip_install).
 
         Returns:
             Image tag to use.
@@ -87,6 +89,8 @@ class ImageManager:
             config.dockerfile,
             config.base_image,
             entrypoint,
+            workspace=workspace,
+            pip_install=config.pip_install,
         )
         tag = f"paude-workspace:{config_hash}"
 
@@ -163,6 +167,21 @@ class ImageManager:
                 if FEATURE_CACHE_DIR.exists():
                     features_dest = Path(tmpdir) / "features"
                     shutil.copytree(FEATURE_CACHE_DIR, features_dest)
+
+            # Copy workspace source for pip_install
+            if config.pip_install and workspace:
+                print("  → Copying workspace for pip install...", file=sys.stderr)
+                for item in workspace.iterdir():
+                    if item.name.startswith("."):
+                        continue
+                    dest = Path(tmpdir) / item.name
+                    if item.is_dir():
+                        shutil.copytree(item, dest, ignore=shutil.ignore_patterns(
+                            "__pycache__", "*.pyc", ".git", ".venv", "venv",
+                            "*.egg-info", "build", "dist"
+                        ))
+                    else:
+                        shutil.copy2(item, dest)
 
             # Build with the determined base image
             build_args = {"BASE_IMAGE": base_image}

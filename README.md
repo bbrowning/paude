@@ -136,6 +136,82 @@ podman machine init \
 podman machine start
 ```
 
+## Python Virtual Environments
+
+Paude automatically detects Python virtual environment directories (`.venv`, `venv`, `.virtualenv`, `env`, `.env`) and shadows them with empty tmpfs mounts. This allows you to:
+
+- Use your host venv on your Mac
+- Create a separate container venv inside paude
+- Share source code between both
+
+### How It Works
+
+```
+Host (.venv exists):         Container (.venv is empty tmpfs):
+~/project/.venv/             ~/project/.venv/  <- empty, create new venv here
+~/project/src/       <---->  ~/project/src/    <- shared
+```
+
+When a venv is detected, you'll see: `Shadowing venv: .venv`
+
+### Automatic Setup
+
+Add to your `paude.json` to auto-create the venv:
+
+```json
+{
+  "setup": "python -m venv .venv && .venv/bin/pip install -r requirements.txt"
+}
+```
+
+Or with uv for faster setup:
+
+```json
+{
+  "setup": "uv venv && uv pip install -r requirements.txt"
+}
+```
+
+### Configuration
+
+Venv isolation is controlled via the `venv` field in `paude.json`:
+
+```json
+{"venv": "auto"}              // Default: auto-detect and shadow
+{"venv": "none"}              // Disable: share venvs (will be broken)
+{"venv": [".venv", "my-env"]} // Manual: specific directories to shadow
+```
+
+### Build-Time Dependencies with pip_install
+
+For projects where you want dependencies pre-installed in the container image, use the `pip_install` option:
+
+```json
+{
+  "pip_install": true,
+  "venv": "auto"
+}
+```
+
+This creates a venv at `/opt/venv` during image build with your dependencies installed. At runtime, the shadowed venv directories are symlinked to `/opt/venv`, giving you instant access to pre-installed packages.
+
+Options:
+- `pip_install: true` - Runs `pip install -e .` (editable install from pyproject.toml)
+- `pip_install: "pip install -r requirements.txt"` - Custom install command
+- `pip_install: false` (default) - No build-time install
+
+The image hash includes `pyproject.toml` and `requirements.txt`, so the image is automatically rebuilt when dependencies change.
+
+Example with requirements.txt:
+
+```json
+{
+  "base": "python:3.11-slim",
+  "pip_install": "pip install -r requirements.txt",
+  "venv": "auto"
+}
+```
+
 ## Workspace Protection
 
 The container has full read-write access to your working directory. This means Claude Code can create, modify, or delete any files in your project, including the `.git` directory.
@@ -253,6 +329,8 @@ Create `paude.json` at project root:
 | `features` | Dev container features (ghcr.io OCI artifacts) |
 | `postCreateCommand` | Run after first start |
 | `containerEnv` | Environment variables |
+| `venv` | Venv isolation: `"auto"`, `"none"`, or list of directories (paude.json only) |
+| `pip_install` | Build-time pip install: `true`, `false`, or custom command (paude.json only) |
 
 ### Unsupported Properties (Security)
 
