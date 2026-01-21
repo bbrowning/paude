@@ -257,10 +257,11 @@ paude --rebuild
 
 ### Example Configurations
 
-See the `examples/` directory for sample configurations:
-- `examples/python/` - Python project with pytest
-- `examples/node/` - Node.js project
-- `examples/go/` - Go project
+See [`examples/README.md`](examples/README.md) for detailed instructions on running paude with different container environments. Sample configurations include:
+
+- `examples/python/` - Python 3.11 with pytest
+- `examples/node/` - Node.js 20
+- `examples/go/` - Go 1.21
 
 ## Development
 
