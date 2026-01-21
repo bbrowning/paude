@@ -2,7 +2,7 @@
 set -e
 
 # Version and registry configuration
-PAUDE_VERSION="0.2.0"
+PAUDE_VERSION="0.3.0"
 PAUDE_REGISTRY="${PAUDE_REGISTRY:-docker.io/bbrowning}"
 
 INTERNAL_NETWORK="paude-internal"
