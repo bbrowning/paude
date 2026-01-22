@@ -171,8 +171,11 @@ spec:
           value: "1"
       resources:
         requests:
-          memory: "1Gi"
-          cpu: "500m"
+          memory: "4Gi"
+          cpu: "1"
+        limits:
+          memory: "8Gi"
+          cpu: "4"
   restartPolicy: Never
 ```
 
@@ -308,9 +311,10 @@ def attach_session(self, session_id: str) -> int:
 
 **File:** `containers/paude/entrypoint-tmux.sh`
 
-**Description:** Entrypoint script that manages tmux sessions.
+**Description:** Entrypoint script that manages tmux sessions and handles OpenShift-specific setup.
 
 **Acceptance Criteria:**
+- [ ] Configure git safe.directory for arbitrary UID support (fixes "dubious ownership" error)
 - [ ] Check if tmux session "claude" exists
 - [ ] If exists, attach to it
 - [ ] If not, create new session with claude command
@@ -322,6 +326,10 @@ def attach_session(self, session_id: str) -> int:
 #!/bin/bash
 set -e
 
+# Fix git "dubious ownership" error when running as arbitrary UID (OpenShift restricted SCC)
+# Git 2.35.2+ refuses to operate if file ownership doesn't match running UID
+git config --global --add safe.directory '*'
+
 SESSION_NAME="claude"
 
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
@@ -332,6 +340,10 @@ else
     exec tmux new-session -s "$SESSION_NAME" "claude $*"
 fi
 ```
+
+**Note:** The `safe.directory '*'` setting is required because OpenShift's restricted SCC
+runs containers with arbitrary UIDs that don't match file ownership. Without this,
+Git 2.35.2+ will refuse to operate with "fatal: detected dubious ownership" error.
 
 ---
 
@@ -498,67 +510,105 @@ Attaching to session abc123...
 
 ## Phase 6: File Synchronization
 
-### Task 6.1: Create Mutagen Wrapper
+**Note:** Mutagen was originally considered but lacks native Kubernetes transport
+([no plans for k8s support](https://github.com/mutagen-io/mutagen/issues/268)).
+DevSpace sync is recommended; oc rsync provides a simpler fallback.
 
-**File:** `src/paude/sync/mutagen.py`
+### Task 6.1: Create Sync Abstraction
 
-**Description:** Wrapper for mutagen CLI operations.
+**File:** `src/paude/sync/__init__.py`
+
+**Description:** Define abstract interface for file synchronization backends.
 
 **Acceptance Criteria:**
-- [ ] `MutagenSync` class with methods:
-  - `start(local_path, remote_spec, name)` - create sync session
-  - `stop(name)` - terminate session
-  - `status(name)` - get sync status
-  - `flush(name)` - force immediate sync
-  - `list()` - list all sessions
-- [ ] Handle mutagen not installed error
-- [ ] Parse mutagen JSON output
+- [ ] Create `Syncer` Protocol with methods:
+  - `start(local_path, pod_name, remote_path)` - start sync session
+  - `stop()` - terminate session
+  - `status()` - get sync status
+  - `is_available()` - check if sync tool is installed
+- [ ] Export from `__init__.py`
+- [ ] Factory function to select best available syncer
 
 ---
 
-### Task 6.2: Configure Mutagen for Kubernetes
+### Task 6.2: Implement DevSpace Sync Wrapper
 
-**File:** `src/paude/sync/mutagen.py`
+**File:** `src/paude/sync/devspace.py`
 
-**Description:** Configure mutagen to sync with Kubernetes pod.
+**Description:** Wrapper for DevSpace sync CLI operations.
 
 **Acceptance Criteria:**
-- [ ] Build remote spec: `kubernetes://pod-name/path`
-- [ ] Configure two-way-resolved mode (local wins)
-- [ ] Set ignore patterns: `.git/objects`, `__pycache__`, `.venv`, `node_modules`
-- [ ] Configure labels for session management
-- [ ] Handle connection failures
+- [ ] `DevSpaceSync` class implementing `Syncer` protocol
+- [ ] `is_available()` checks for devspace CLI
+- [ ] `start()` runs `devspace sync` command with:
+  - Local path to pod path mapping
+  - Exclude patterns: `.git/objects`, `__pycache__`, `.venv`, `node_modules`
+  - Initial sync strategy: prefer local
+- [ ] `stop()` terminates sync process
+- [ ] `status()` returns sync state
+- [ ] Handle devspace not installed error gracefully
 
-**Mutagen Command:**
+**DevSpace Command:**
 ```bash
-mutagen sync create \
-  --name=paude-abc123 \
-  --sync-mode=two-way-resolved \
-  --ignore=".git/objects" \
-  --ignore="__pycache__" \
-  --ignore=".venv" \
-  --ignore="node_modules" \
-  /local/path \
-  kubernetes://pod-name:/workspace
+devspace sync \
+  --local-path=/local/path \
+  --container-path=/workspace \
+  --pod=paude-session-abc123 \
+  --namespace=paude \
+  --exclude=.git/objects \
+  --exclude=__pycache__ \
+  --exclude=.venv \
+  --exclude=node_modules \
+  --initial-sync=preferLocal
 ```
 
 ---
 
-### Task 6.3: Integrate Sync with Session Lifecycle
+### Task 6.3: Implement oc rsync Fallback
 
-**File:** `src/paude/backends/openshift.py`
+**File:** `src/paude/sync/oc_rsync.py`
 
-**Description:** Start/stop mutagen sync with session.
+**Description:** Fallback syncer using built-in oc rsync command.
 
 **Acceptance Criteria:**
-- [ ] Start mutagen sync after pod is ready
-- [ ] Wait for initial sync before attaching
-- [ ] Stop mutagen sync when session stops
-- [ ] Handle sync errors gracefully
+- [ ] `OcRsyncSync` class implementing `Syncer` protocol
+- [ ] `is_available()` always True (oc rsync is part of oc CLI)
+- [ ] `start()` runs two `oc rsync --watch` processes:
+  - Local → Pod (push changes)
+  - Pod → Local (pull changes)
+- [ ] Exclude patterns via rsync exclude file
+- [ ] `stop()` terminates both processes
+- [ ] `status()` returns running state of processes
+- [ ] Log warning that oc rsync is less robust than DevSpace
+
+**oc rsync Commands:**
+```bash
+# Push local changes to pod
+oc rsync --watch --exclude=.git/objects /local/path/ pod-name:/workspace/
+
+# Pull pod changes to local (separate process)
+oc rsync --watch --exclude=.git/objects pod-name:/workspace/ /local/path/
+```
 
 ---
 
-### Task 6.4: Add Workspace PVC
+### Task 6.4: Integrate Sync with Session Lifecycle
+
+**File:** `src/paude/backends/openshift.py`
+
+**Description:** Start/stop file sync with session.
+
+**Acceptance Criteria:**
+- [ ] Select syncer: DevSpace if available, else oc rsync
+- [ ] Start sync after pod is ready
+- [ ] Wait for initial sync before attaching
+- [ ] Stop sync when session stops
+- [ ] Handle sync errors gracefully
+- [ ] Store syncer reference in session state
+
+---
+
+### Task 6.5: Add Workspace PVC
 
 **File:** `src/paude/backends/openshift.py`
 
@@ -572,7 +622,7 @@ mutagen sync create \
 
 ---
 
-### Task 6.5: Add Sync CLI Commands
+### Task 6.6: Add Sync CLI Commands
 
 **File:** `src/paude/cli.py`
 
@@ -580,8 +630,9 @@ mutagen sync create \
 
 **Acceptance Criteria:**
 - [ ] `paude sync --status` - show sync status
-- [ ] `paude sync --flush` - force immediate sync
+- [ ] `paude sync --flush` - force immediate sync (DevSpace only)
 - [ ] Error if no active session
+- [ ] Show which sync backend is being used
 
 ---
 
@@ -837,7 +888,7 @@ spec:
 - [ ] Clear error for "namespace doesn't exist"
 - [ ] Clear error for "image push failed"
 - [ ] Clear error for "pod failed to start"
-- [ ] Clear error for "mutagen not installed"
+- [ ] Clear error for "devspace not installed" (suggest oc rsync fallback)
 - [ ] Cleanup partial resources on failure
 
 ---
@@ -863,7 +914,7 @@ spec:
 **Description:** Comprehensive user guide for OpenShift backend.
 
 **Acceptance Criteria:**
-- [ ] Prerequisites (oc CLI, mutagen, cluster access)
+- [ ] Prerequisites (oc CLI, devspace optional, cluster access)
 - [ ] One-time setup instructions
 - [ ] Basic usage examples
 - [ ] Configuration options
@@ -893,8 +944,7 @@ spec:
 
 **Acceptance Criteria:**
 - [ ] Read from paude.json backend.resources
-- [ ] Default: 500m CPU, 1Gi memory request
-- [ ] Default: 2 CPU, 4Gi memory limit
+- [ ] Default: 1 CPU, 4Gi memory request; 4 CPU, 8Gi memory limit
 - [ ] Validate resource specifications
 
 ---

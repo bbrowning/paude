@@ -24,7 +24,7 @@ OpenShift backend provides the same security guarantees as local Podman:
 Each phase delivers working functionality. Later phases add polish and advanced features.
 
 ### 4. Minimal New Dependencies
-- Mutagen: Required for file sync (user installs)
+- DevSpace: Required for file sync (user installs), or use built-in oc rsync
 - tmux: Bundled in container image
 - oc CLI: User already has (for OpenShift access)
 
@@ -89,7 +89,8 @@ src/paude/
 │   └── openshift.py     # New OpenShift backend
 ├── sync/
 │   ├── __init__.py
-│   └── mutagen.py       # Mutagen wrapper
+│   ├── devspace.py      # DevSpace sync wrapper
+│   └── oc_rsync.py      # oc rsync fallback
 ├── container/           # Existing (becomes Podman-specific)
 │   ├── podman.py
 │   ├── image.py
@@ -115,14 +116,14 @@ User runs: paude --backend=openshift
                         ├─ Create NetworkPolicies (egress deny + allow proxy)
                         ├─ Create paude session Pod
                         ├─ Wait for pod ready
-                        ├─ Start mutagen sync
+                        ├─ Start file sync (DevSpace or oc rsync)
                         └─ Attach via oc exec + tmux new-session
 
 User works in Claude Code...
 
 User disconnects (Ctrl+b d OR network drop):
   ├─ tmux session continues running in pod
-  ├─ mutagen continues syncing
+  ├─ file sync continues (if using DevSpace)
   └─ Pods remain running (both paude and squid-proxy)
 
 User runs: paude --backend=openshift (or paude attach)
@@ -242,22 +243,38 @@ Pushing to registry...
 Starting session...
 ```
 
-### Phase 6: File Synchronization (Mutagen)
+### Phase 6: File Synchronization
 
 **Goal:** Real-time bidirectional file sync.
 
+**Note:** Mutagen was originally considered but lacks native Kubernetes transport.
+DevSpace sync is recommended; oc rsync provides a simpler fallback.
+
 **Scope:**
-- Create `MutagenSync` wrapper class
-- Start mutagen sync on session start
-- Stop mutagen sync on session stop
+- Create sync abstraction supporting multiple backends
+- Implement DevSpace sync wrapper (preferred)
+- Implement oc rsync fallback (simpler, built-in)
+- Start sync on session start, stop on session stop
 - Handle sync conflicts (local wins by default)
 - Add `paude sync` command for manual sync trigger
 - Exclude patterns (.git/objects, .venv, node_modules)
 
+**DevSpace sync approach:**
+- Use `devspace sync` standalone command
+- Client-only, injects helper via kubectl cp
+- Bidirectional with file watching
+- Requires user to install devspace CLI
+
+**oc rsync fallback:**
+- Built into oc CLI (no extra install)
+- One-way only; run two processes for bidirectional
+- Use `--watch` for continuous sync
+- Simpler but less robust than DevSpace
+
 **User experience:**
 ```bash
 paude --backend=openshift
-# Files sync automatically
+# Files sync automatically (DevSpace or oc rsync)
 # Edit locally, changes appear in pod
 # Git commit in pod, changes sync back
 
@@ -327,12 +344,12 @@ paude --backend=openshift --allow-network
     "registry": "image-registry.openshift-image-registry.svc:5000",
     "resources": {
       "requests": {
-        "cpu": "500m",
-        "memory": "1Gi"
+        "cpu": "1",
+        "memory": "4Gi"
       },
       "limits": {
-        "cpu": "2",
-        "memory": "4Gi"
+        "cpu": "4",
+        "memory": "8Gi"
       }
     },
     "timeout": {
@@ -422,7 +439,7 @@ rules:
 - Backend interface implementations
 - Pod spec generation
 - Secret/ConfigMap creation
-- Mutagen command building
+- Sync command building (DevSpace/oc rsync)
 
 ### Integration Tests
 - Against local OpenShift (CRC)
@@ -440,8 +457,11 @@ rules:
 | Dependency | Purpose | User Action Required |
 |------------|---------|---------------------|
 | oc CLI | OpenShift operations | Install if using OpenShift |
-| mutagen | File synchronization | Install (brew install mutagen) |
+| devspace | File synchronization (preferred) | Install (brew install devspace) |
 | tmux | Session persistence | Bundled in container |
+
+**Note:** DevSpace is optional - oc rsync (built into oc CLI) can be used as a fallback,
+though it requires running two processes for bidirectional sync.
 
 ## Rollback Plan
 

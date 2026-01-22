@@ -20,30 +20,45 @@ This document captures research findings for adding OpenShift/Kubernetes support
 
 ### 1. File Synchronization
 
-**Recommendation: Mutagen**
+**Recommendation: DevSpace sync (or oc rsync for simpler cases)**
 
 | Solution | Bidirectional | K8s Native | Git Safe | Maintained | License |
 |----------|---------------|------------|----------|------------|---------|
-| **Mutagen** | Yes (4 modes) | Planned | With care | Yes (Docker) | MIT |
-| rsync | No (needs wrapper) | Via wrapper | Risky | Yes | GPL v3 |
+| **DevSpace** | Yes | Yes | With care | Yes (Loft Labs) | Apache 2.0 |
+| oc rsync | No (one-way) | Yes | Risky | Yes (OpenShift) | Apache 2.0 |
+| Mutagen | Yes (4 modes) | **No** | With care | Yes (Docker) | MIT |
 | ksync | Yes (Syncthing) | Yes | Problematic | No (archived) | Apache 2.0 |
-| lsyncd | No | No | Risky | No | GPL v2+ |
 | DevPod | N/A (remote edit) | Yes | Safe | Yes | MPL-2.0 |
 
-**Mutagen key features:**
-- Bidirectional sync with `two-way-safe` mode (conflicts preserved)
-- Uses system OpenSSH for security
-- Delta transfers minimize bandwidth
-- MIT license, actively maintained by Docker
+**Why not Mutagen?**
+- Mutagen has **no native kubectl/Kubernetes transport**
+- [PR #92](https://github.com/mutagen-io/mutagen/pull/92) for kubectl transport was closed without merge (2021)
+- Maintainer stated [no plans for k8s support](https://github.com/mutagen-io/mutagen/issues/268)
+- Would require custom wrapper scripts to work with OpenShift
+
+**DevSpace sync key features:**
+- Client-only binary, no server-side component
+- Injects helper binary into container via kubectl cp
+- Bidirectional sync with file watching
+- No special container privileges required
+- Active: v6.3.18 (Sep 2025), 4.9k GitHub stars, CNCF project
+- Works with any container that has `tar` command
 
 **Integration approach:**
-- Mutagen requires an agent in the container (small Go binary)
-- Transport over kubectl exec or SSH tunnel
-- Session lifecycle managed by paude CLI
+- Use `devspace sync` standalone command (doesn't require full DevSpace workflow)
+- Or extract sync component for direct integration
+- Alternative: wrap `oc rsync --watch` in both directions (simpler but less robust)
+
+**oc rsync as fallback:**
+- Built into OpenShift CLI (`oc rsync --watch`)
+- One-way only; need two processes for bidirectional
+- Simpler but less sophisticated than DevSpace
+- Good for initial MVP, upgrade to DevSpace later
 
 **Caveats:**
-- No native kubectl transport yet (use SSH or custom wrapper)
-- Git directory sync needs `two-way-resolved` mode with local priority
+- DevSpace sync requires `tar` in container (we have it)
+- Git directory sync needs careful exclude patterns (.git/objects, etc.)
+- Large binary files may impact performance
 
 ### 2. Session Management
 
@@ -468,7 +483,7 @@ For workspace files in OpenShift, two options:
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| File sync | Mutagen | Best bidirectional sync, MIT license, actively maintained |
+| File sync | DevSpace sync (or oc rsync) | Native k8s support; Mutagen lacks kubectl transport |
 | Session management | tmux | Simple, reliable, survives network drops |
 | Network filtering | Separate pods + NetworkPolicy | Required for Podman-equivalent isolation; sidecar shares network namespace |
 | Proxy deployment | Squid in separate pod + Service | NetworkPolicy can restrict paude pod to only reach squid Service |
@@ -476,17 +491,77 @@ For workspace files in OpenShift, two options:
 | Storage | PVC | Persistent workspace across pod restarts |
 | UID handling | Support arbitrary UIDs | Compatible with restricted SCC |
 
+## Known Issues and Mitigations
+
+### Git "Dubious Ownership" Error
+
+**Problem:** Git 2.35.2+ refuses to operate when file ownership doesn't match the running UID.
+This occurs with OpenShift's restricted SCC which runs containers as arbitrary UIDs.
+
+```
+fatal: detected dubious ownership in repository at '/workspace'
+```
+
+**Solution:** Configure git to trust the workspace directory on container startup:
+```bash
+git config --global --add safe.directory '*'
+# Or more restrictively:
+git config --global --add safe.directory /workspace
+```
+
+Add this to the container entrypoint or as an init command.
+
+**References:**
+- [GitLab CI dubious ownership on OpenShift](https://medium.com/@guillem.riera/gitlab-ci-secret-detection-job-fails-due-to-git-repository-dubious-ownership-on-openshift-84adde387ef6)
+- [Dev Containers dubious ownership](https://www.kenmuse.com/blog/avoiding-dubious-ownership-in-dev-containers/)
+
+### oc exec 4-Hour Idle Timeout
+
+**Problem:** `kubectl exec` / `oc exec` connections time out after 4 hours of inactivity
+due to `streamingConnectionIdleTimeout` default.
+
+**Impact:** Long-running sessions may disconnect unexpectedly.
+
+**Mitigations:**
+1. **tmux** - Session continues in pod; user can reattach (our approach)
+2. **Cluster config** - Admin can set `streamingConnectionIdleTimeout: 0` in kubelet config
+3. **Load balancer** - May have separate idle timeout settings
+
+**References:**
+- [Kubernetes issue #66661](https://github.com/kubernetes/kubernetes/issues/66661)
+- [Red Hat solution for oc command timeouts](https://access.redhat.com/solutions/4759941)
+
+### Resource Requirements
+
+**Claude Code requirements:**
+- Minimum: 4GB RAM
+- Recommended: 8GB RAM, 4 CPUs
+- [Reports of high CPU/memory usage](https://github.com/anthropics/claude-code/issues/5771) during builds
+
+**Recommended pod resources:**
+```yaml
+resources:
+  requests:
+    memory: "4Gi"    # Increased from 1Gi
+    cpu: "1"         # Increased from 500m
+  limits:
+    memory: "8Gi"    # Increased from 4Gi
+    cpu: "4"         # Increased from 2
+```
+
 ## Open Questions
 
-1. **Mutagen transport**: Use SSH tunnel to pod or custom kubectl transport wrapper?
-2. **Session timeout**: How long should idle pods run before auto-cleanup?
-3. **Multi-cluster support**: How to handle kubeconfig context switching?
-4. **Resource limits**: Default CPU/memory for paude pods?
+1. **Session timeout**: How long should idle pods run before auto-cleanup?
+2. **Multi-cluster support**: How to handle kubeconfig context switching?
+3. **DevSpace reliability**: Monitor for sync hanging issues during implementation
 
 ## References
 
-- [Mutagen Documentation](https://mutagen.io/documentation/)
+- [DevSpace File Synchronization](https://www.devspace.sh/docs/5.x/configuration/development/file-synchronization)
+- [DevSpace GitHub](https://github.com/loft-sh/devspace) - CNCF project, actively maintained
+- [oc rsync documentation](https://docs.okd.io/latest/nodes/containers/nodes-containers-copying-files.html)
 - [tmux Manual](https://github.com/tmux/tmux/wiki)
 - [OpenShift SCCs](https://docs.openshift.com/container-platform/4.14/authentication/managing-security-context-constraints.html)
 - [OVN-Kubernetes EgressFirewall](https://docs.openshift.com/container-platform/4.14/networking/openshift_network_security/egress_firewall/configuring-egress-firewall-ovn.html)
 - [OpenShift Internal Registry](https://docs.openshift.com/container-platform/4.14/registry/accessing-the-registry.html)
+- [Mutagen k8s transport issue](https://github.com/mutagen-io/mutagen/issues/268) - No plans for native support
