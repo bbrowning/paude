@@ -41,34 +41,16 @@ def generate_workspace_dockerfile(config: PaudeConfig) -> str:
     lines.append("""# Install required system packages
 RUN if command -v apt-get >/dev/null 2>&1; then \\
         apt-get update && \\
-        apt-get install -y --no-install-recommends git curl ca-certificates && \\
+        apt-get install -y --no-install-recommends git curl ca-certificates bash && \\
         rm -rf /var/lib/apt/lists/*; \\
     elif command -v apk >/dev/null 2>&1; then \\
-        apk add --no-cache git curl ca-certificates; \\
+        apk add --no-cache git curl ca-certificates bash; \\
     elif command -v yum >/dev/null 2>&1; then \\
-        yum install -y git curl ca-certificates && \\
+        yum install -y git curl ca-certificates bash && \\
         yum clean all; \\
     else \\
         echo "Warning: Unknown package manager, git may not be available" >&2; \\
     fi""")
-
-    lines.append("")
-    lines.append("""# Install Node.js if not present (required for claude-code)
-RUN if ! command -v node >/dev/null 2>&1; then \\
-        if command -v apt-get >/dev/null 2>&1; then \\
-            curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \\
-            apt-get install -y nodejs && \\
-            rm -rf /var/lib/apt/lists/*; \\
-        elif command -v apk >/dev/null 2>&1; then \\
-            apk add --no-cache nodejs npm; \\
-        else \\
-            echo "Error: Cannot install Node.js - unsupported base image" >&2 && exit 1; \\
-        fi \\
-    fi""")
-
-    lines.append("")
-    lines.append("# Install Claude Code")
-    lines.append("RUN npm install -g @anthropic-ai/claude-code")
 
     lines.append("")
     lines.append("# Create paude user if it doesn't exist")
@@ -76,9 +58,24 @@ RUN if ! command -v node >/dev/null 2>&1; then \\
         "RUN id paude >/dev/null 2>&1 || useradd -m -s /bin/bash paude 2>/dev/null || adduser -D -s /bin/bash paude"
     )
 
+    lines.append("")
+    lines.append("# Install Claude Code using native installer (as paude user)")
+    lines.append("USER paude")
+    lines.append("WORKDIR /home/paude")
+    lines.append("RUN curl -fsSL https://claude.ai/install.sh | bash")
+
+    lines.append("")
+    lines.append("# Disable auto-updates (version controlled by image rebuild)")
+    lines.append("ENV DISABLE_AUTOUPDATER=1")
+
+    lines.append("")
+    lines.append("# Ensure claude is in PATH")
+    lines.append('ENV PATH="/home/paude/.local/bin:$PATH"')
+
     if config.pip_install:
         lines.append("")
         lines.append("# Build-time pip install for venv isolation")
+        lines.append("USER root")
         lines.append("COPY . /opt/workspace-src")
         lines.append("RUN python3 -m venv /opt/venv")
 
@@ -91,12 +88,14 @@ RUN if ! command -v node >/dev/null 2>&1; then \\
         lines.append("RUN chown -R paude:paude /opt/venv")
 
     lines.append("")
-    lines.append("# Copy entrypoint")
+    lines.append("# Copy entrypoint (requires root)")
+    lines.append("USER root")
     lines.append("COPY entrypoint.sh /usr/local/bin/entrypoint.sh")
     lines.append("RUN chmod +x /usr/local/bin/entrypoint.sh")
 
     lines.append("")
     lines.append("USER paude")
+    lines.append("WORKDIR /home/paude")
     lines.append("ENTRYPOINT [\"/usr/local/bin/entrypoint.sh\"]")
 
     return "\n".join(lines)

@@ -266,7 +266,7 @@ class TestGenerateWorkspaceDockerfile:
 
         assert "ARG BASE_IMAGE" in dockerfile
         assert "FROM ${BASE_IMAGE}" in dockerfile
-        assert "npm install -g @anthropic-ai/claude-code" in dockerfile
+        assert "curl -fsSL https://claude.ai/install.sh | bash" in dockerfile
         assert "USER paude" in dockerfile
 
     def test_includes_packages_when_present(self):

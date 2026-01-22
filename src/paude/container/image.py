@@ -127,7 +127,7 @@ class ImageManager:
             base_image = config.base_image
             print(f"  → Using base: {base_image}", file=sys.stderr)
         else:
-            base_image = "node:22-slim"
+            base_image = "debian:bookworm-slim"
 
         # Generate and build the workspace Dockerfile
         from paude.config.dockerfile import generate_workspace_dockerfile
