@@ -132,3 +132,10 @@ When developing new features, follow this structured approach:
 
 Example: See `docs/features/byoc/` for the BYOC feature documentation.
 Example: See `docs/features/python_port/` for the Python port documentation.
+
+## Issue Tracking During Development
+
+When discovering bugs, usability issues, or technical debt unrelated to the current task:
+1. Add them to `KNOWN_ISSUES.md` at the project root (create if it doesn't exist)
+2. Include: description, reproduction steps if known, and discovery context
+3. Continue with the original task
