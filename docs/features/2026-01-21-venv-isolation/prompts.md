@@ -14,7 +14,7 @@ Python projects that use a virtual environment cannot be shared between my host 
   Python projects with virtual environments should work seamlessly both on macOS host AND inside the paude container. The solution: detect venv directories and shadow them with tmpfs mounts so the container gets an empty directory to create its own venv.
 
   ## Reference
-  Read docs/features/venv-isolation/ for the design. The TASKS.md has acceptance criteria.
+  Read docs/features/2026-01-21-venv-isolation/ for the design. The TASKS.md has acceptance criteria.
 
   ## Success Criteria
   After each phase, run 'make test' - all tests must pass before moving on.

@@ -115,11 +115,14 @@ Paths outside `/Users/` require Podman machine configuration. The script detects
 
 When developing new features, follow this structured approach:
 
-1. **Create feature documentation** in `docs/features/<feature-name>/`:
-   - `RESEARCH.md` - Background research, prior art, compatibility considerations
-   - `PLAN.md` - High-level design decisions, security considerations, phased approach
-   - `TASKS.md` - Detailed implementation tasks with acceptance criteria
-   - `README.md` - Feature overview and verification checklist
+1. **Create feature documentation** in `docs/features/`:
+   - Use `PENDING-<feature-name>/` for features in planning (not yet implemented)
+   - After implementation, rename to `YYYY-MM-DD-<feature-name>/` using the implementation date
+   - Include these files:
+     - `RESEARCH.md` - Background research, prior art, compatibility considerations
+     - `PLAN.md` - High-level design decisions, security considerations, phased approach
+     - `TASKS.md` - Detailed implementation tasks with acceptance criteria
+     - `README.md` - Feature overview and verification checklist
 
 2. **Implementation phases**: Break work into logical phases (MVP first, then enhancements)
 
@@ -130,8 +133,10 @@ When developing new features, follow this structured approach:
 
 4. **Documentation**: Update README.md and CONTRIBUTING.md with user-facing changes
 
-Example: See `docs/features/byoc/` for the BYOC feature documentation.
-Example: See `docs/features/python_port/` for the Python port documentation.
+5. **Rename folder**: After implementation, rename from `PENDING-<feature-name>/` to `YYYY-MM-DD-<feature-name>/`
+
+Example: See `docs/features/2026-01-21-byoc/` for an implemented feature.
+Example: See `docs/features/PENDING-config-layering/` for a feature in planning.
 
 ## Issue Tracking During Development
 

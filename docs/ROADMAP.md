@@ -384,7 +384,7 @@ Commands:
 **Theme: Configuration Flexibility**
 **Status: Designed**
 
-Already researched. See [docs/features/config-layering/](features/config-layering/).
+Already researched. See [docs/features/PENDING-config-layering/](features/PENDING-config-layering/).
 
 Summary:
 - devcontainer.json for container setup (reuse ecosystem)
@@ -927,4 +927,4 @@ Feature proposals should include:
 - Security implications
 - Acceptance criteria
 
-Create docs in `docs/features/<feature-name>/` following the RESEARCH/PLAN/TASKS pattern.
+Create docs in `docs/features/PENDING-<feature-name>/` following the RESEARCH/PLAN/TASKS pattern. After implementation, rename to `YYYY-MM-DD-<feature-name>/`.
