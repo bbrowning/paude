@@ -10,6 +10,8 @@ A Podman wrapper that runs [Claude Code](https://claude.ai/code) inside a contai
 - Git read operations work (clone, pull, local commits) - push blocked by design
 - Persists Claude Code settings between sessions
 
+**Status**: Paude is a work-in-progress. See the [roadmap](docs/ROADMAP.md) for planned features and priorities.
+
 ## Installation
 
 ### Using pip
