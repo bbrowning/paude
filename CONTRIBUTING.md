@@ -39,10 +39,10 @@ When developing, use `PAUDE_DEV=1` to build images locally instead of pulling fr
 make run
 
 # Or manually
-PAUDE_DEV=1 ./paude
+PAUDE_DEV=1 paude
 
 # Check which mode you're in
-PAUDE_DEV=1 ./paude --version
+PAUDE_DEV=1 paude --version
 # Output: paude 0.1.0
 #         mode: development (PAUDE_DEV=1, building locally)
 ```
@@ -61,21 +61,17 @@ make clean     # Remove local images
 **All new features must include tests.** Run the test suite before submitting changes:
 
 ```bash
-make test        # Runs all tests (Python + bash)
-make test-python # Run Python tests only
+make test        # Run all tests
 make lint        # Check code style with ruff
 make typecheck   # Run mypy type checker
 make format      # Format code with ruff
 ```
 
 Test locations:
-- `tests/` - Python tests (pytest) for Python implementation
-- `tests/` - Integration tests for CLI flags, argument parsing, mounts (bash)
-- `test/` - Unit tests for library modules (config.sh, hash.sh, features.sh)
+- `tests/` - Python tests (pytest)
 
 When adding Python functionality, add tests in `tests/test_<module>.py`.
 When adding a new CLI flag, add tests in `tests/test_cli.py`.
-When adding a new bash library module, add tests in `test/test_<module>.sh`.
 
 After modifying the Dockerfile or proxy configuration:
 
@@ -114,8 +110,6 @@ paude/
 │   ├── platform.py        # Platform-specific code
 │   ├── utils.py           # Utilities
 │   └── dry_run.py         # Dry-run output
-├── paude                  # Bash wrapper script (legacy)
-├── lib/                   # Bash library modules (legacy)
 ├── containers/
 │   ├── paude/
 │   │   ├── Dockerfile     # Claude Code container image
@@ -124,8 +118,7 @@ paude/
 │       ├── Dockerfile     # Squid proxy container image
 │       ├── entrypoint.sh  # Proxy container entrypoint
 │       └── squid.conf     # Proxy allowlist configuration
-├── tests/                 # Python tests (pytest) + bash integration tests
-├── test/                  # Bash unit tests for library modules
+├── tests/                 # Python tests (pytest)
 ├── examples/              # Example configurations
 ├── docs/
 │   └── features/          # Feature development documentation
@@ -158,7 +151,7 @@ git checkout main
 git pull origin main
 git status  # Should be clean
 
-# 2. Run the release target (updates version in script, creates git tag)
+# 2. Update version in pyproject.toml and create git tag
 make release VERSION=0.2.0
 
 # 3. Build multi-arch images and push to registry
@@ -170,19 +163,17 @@ git push origin main --tags
 # 5. Create GitHub release
 #    Go to: https://github.com/bbrowning/paude/releases/new?tag=v0.2.0
 #    - Title: v0.2.0
-#    - Attach the 'paude' script as a release asset
 #    - Add release notes describing changes
 ```
 
 ### What the Release Does
 
 1. `make release VERSION=x.y.z`:
-   - Updates `PAUDE_VERSION` in the paude script
+   - Updates version in pyproject.toml
    - Commits the change
    - Creates an annotated git tag `vx.y.z`
 
 2. `make publish VERSION=x.y.z`:
-   - Verifies script version matches VERSION
    - Builds multi-arch images (amd64 + arm64)
    - Pushes to docker.io/bbrowning/paude:x.y.z
    - Pushes to docker.io/bbrowning/paude:latest
@@ -193,34 +184,21 @@ git push origin main --tags
 After publishing, test the installed experience:
 
 ```bash
-# Copy script to a directory outside the repo
-cp paude /tmp/paude-test
-cd /tmp
+# Install from PyPI
+pip install paude
 
-# Run without PAUDE_DEV (should pull from registry)
-./paude-test --version
-# Output should show: mode: installed (pulling from docker.io/bbrowning)
-
-# Clean up
-rm /tmp/paude-test
+# Test basic commands
+paude --version
+paude --help
 ```
 
 ## Code Style
-
-### Python
 
 - Use type hints throughout (Python 3.11+ syntax: `list[str]` not `List[str]`)
 - Run `make lint` before committing (uses ruff)
 - Run `make format` to auto-format code
 - Run `make typecheck` to verify types (uses mypy in strict mode)
 - Follow existing patterns in the codebase
-
-### Bash
-
-- Use shellcheck-compatible patterns
-- Keep functions focused and well-named
-- Simple single-line comments; avoid decorative comment blocks
-- Match the style of surrounding code
 
 ## Adding New Features
 
@@ -235,8 +213,7 @@ For significant features, follow the structured development process:
 2. Implement in phases (MVP first, then enhancements)
 
 3. **Add tests** (required):
-   - CLI flags/options → `tests/test_cli_args.sh`
-   - Library modules → `test/test_<module>.sh`
+   - Add tests in `tests/test_<module>.py`
    - Run `make test` to verify all tests pass
 
 4. Update README.md and this file with user-facing changes

@@ -49,9 +49,9 @@ PYTHONPATH=$(pwd)/src:$PYTHONPATH pytest tests
 
 ### Proposed Fix Options
 
-1. **Update Makefile**: Modify `make test-python` to always set PYTHONPATH to the local source:
+1. **Update Makefile**: Modify `make test` to always set PYTHONPATH to the local source:
    ```makefile
-   test-python:
+   test:
        PYTHONPATH=$(PWD)/src:$$PYTHONPATH pytest --cov=paude --cov-report=term-missing
    ```
 
@@ -78,6 +78,6 @@ PYTHONPATH=$(pwd)/src:$PYTHONPATH pytest tests
 
 ### Related Files
 
-- `Makefile` (test-python target)
+- `Makefile` (test target)
 - `pyproject.toml` (pytest configuration)
 - `containers/paude/Dockerfile` (if container build is involved)

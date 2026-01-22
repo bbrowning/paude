@@ -8,7 +8,7 @@ Paude is a Podman wrapper that runs Claude Code inside a container for isolated,
 
 ## Architecture
 
-The project has a Python implementation with container definitions:
+The project consists of a Python implementation with container definitions:
 
 ### Python Package (`src/paude/`)
 
@@ -43,11 +43,6 @@ src/paude/
 - `containers/paude/` - Main container (Dockerfile, entrypoint.sh) for Claude Code
 - `containers/proxy/` - Proxy container (Dockerfile, squid.conf) for network filtering
 
-### Legacy Bash Implementation
-
-- `paude` - Bash script (legacy, still functional)
-- `lib/` - Bash library modules
-
 ## Volume Mounts
 
 The script mounts these paths from host to container:
@@ -71,11 +66,8 @@ The script mounts these paths from host to container:
 **All new features must include tests.** This is a hard requirement.
 
 ```bash
-# Run all tests (Python + bash)
+# Run all tests
 make test
-
-# Python tests only
-make test-python
 
 # Linting and type checking
 make lint
@@ -86,19 +78,16 @@ make clean
 make run
 
 # Test basic functionality
-PAUDE_DEV=1 ./paude --version
-PAUDE_DEV=1 ./paude --help
+PAUDE_DEV=1 paude --version
+PAUDE_DEV=1 paude --help
 ```
 
 ### Test Locations
 
-- `tests/` - Python tests (pytest) for the Python implementation
-- `tests/` - Bash integration tests for CLI flags, argument parsing
-- `test/` - Bash unit tests for library modules
+- `tests/` - Python tests (pytest)
 
 When adding Python functionality, add tests in `tests/test_<module>.py`.
 When adding a new CLI flag, add tests in `tests/test_cli.py`.
-When adding a new bash library module, add tests in `test/test_<module>.sh`.
 
 ## Documentation Requirements
 

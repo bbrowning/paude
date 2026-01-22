@@ -21,24 +21,23 @@ LATEST_PROXY_IMAGE = $(REGISTRY)/$(PROXY_IMAGE_NAME):latest
 # Architectures for multi-arch builds
 PLATFORMS = linux/amd64,linux/arm64
 
-.PHONY: build run publish release clean login help test install lint format typecheck test-python
+.PHONY: build run publish release clean login help test install lint format typecheck
 
 help:
 	@echo "Paude build targets:"
 	@echo "  make build          - Build images locally for current arch"
 	@echo "  make run            - Run paude in dev mode (builds locally)"
-	@echo "  make test           - Run all tests (Python + bash)"
+	@echo "  make test           - Run all tests"
 	@echo "  make publish        - Build multi-arch images and push to registry"
-	@echo "  make release VERSION=x.y.z - Full release: tag git, update script, build, push"
+	@echo "  make release VERSION=x.y.z - Full release: tag git, update version, build, push"
 	@echo "  make clean          - Remove local paude images"
 	@echo "  make login          - Authenticate with container registry"
 	@echo ""
-	@echo "Python development targets:"
+	@echo "Development targets:"
 	@echo "  make install        - Install Python package with dev dependencies"
-	@echo "  make lint           - Run ruff linter on Python code"
-	@echo "  make format         - Format Python code with ruff"
+	@echo "  make lint           - Run ruff linter"
+	@echo "  make format         - Format code with ruff"
 	@echo "  make typecheck      - Run mypy type checker"
-	@echo "  make test-python    - Run Python tests only"
 	@echo ""
 	@echo "Current settings:"
 	@echo "  REGISTRY=$(REGISTRY)"
@@ -51,18 +50,13 @@ build:
 
 # Run paude in dev mode (builds images locally)
 run:
-	PAUDE_DEV=1 ./paude
+	PAUDE_DEV=1 paude
 
-# Run all tests (no container daemon required)
-test: test-python
-	@bash tests/run_tests.sh
-	@echo ""
-	@echo "=== Running unit tests ==="
-	@bash test/test_config.sh
-	@echo ""
-	@bash test/test_hash.sh
+# Run all tests
+test:
+	pytest --cov=paude --cov-report=term-missing
 
-# Python development targets
+# Development targets
 install:
 	pip install -e ".[dev]"
 
@@ -74,13 +68,6 @@ format:
 
 typecheck:
 	mypy src
-
-test-python:
-	@if command -v pytest >/dev/null 2>&1; then \
-		pytest --cov=paude --cov-report=term-missing; \
-	else \
-		echo "pytest not installed - skipping Python tests"; \
-	fi
 
 # Login to container registry
 login:
@@ -124,12 +111,6 @@ check-version:
 		echo "Error: VERSION is 'dev'. Tag a release first or set VERSION=x.y.z"; \
 		exit 1; \
 	fi
-	@SCRIPT_VERSION=$$(grep '^PAUDE_VERSION=' paude | cut -d'"' -f2); \
-	if [ "$$SCRIPT_VERSION" != "$(VERSION)" ]; then \
-		echo "Error: Script version ($$SCRIPT_VERSION) doesn't match VERSION ($(VERSION))"; \
-		echo "Run 'make release VERSION=$(VERSION)' first to update the script"; \
-		exit 1; \
-	fi
 
 # Full release process
 release:
@@ -140,10 +121,10 @@ release:
 	fi
 	@echo "=== Releasing v$(VERSION) ==="
 	@echo ""
-	# Update version in paude script
-	sed -i.bak 's/^PAUDE_VERSION=.*/PAUDE_VERSION="$(VERSION)"/' paude && rm -f paude.bak
+	# Update version in pyproject.toml
+	sed -i.bak 's/^version = .*/version = "$(VERSION)"/' pyproject.toml && rm -f pyproject.toml.bak
 	# Commit the version change
-	git add paude
+	git add pyproject.toml
 	git commit -m "Release v$(VERSION)"
 	# Create git tag
 	git tag -a "v$(VERSION)" -m "Release v$(VERSION)"
@@ -154,7 +135,6 @@ release:
 	@echo ""
 	@echo "Then create a GitHub release at:"
 	@echo "  https://github.com/bbrowning/paude/releases/new?tag=v$(VERSION)"
-	@echo "and attach the 'paude' script."
 
 # Remove local images
 clean:

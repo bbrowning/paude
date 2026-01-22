@@ -30,21 +30,6 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-### Bash script (legacy)
-
-Download the bash script directly:
-
-```bash
-# Download the paude script
-curl -LO https://github.com/bbrowning/paude/releases/latest/download/paude
-chmod +x paude
-
-# Move to a directory in your PATH (e.g., ~/.local/bin)
-mv paude ~/.local/bin/
-
-# Container images are pulled automatically on first run
-```
-
 ### Requirements
 
 - [Podman](https://podman.io/getting-started/installation) installed
@@ -89,18 +74,18 @@ Container images are pulled automatically on first run. For development, run fro
 
 Paude encourages separating research from execution for security:
 
-**Execution mode** (default): `./paude`
+**Execution mode** (default): `paude`
 - Network filtered via proxy - only Google/Vertex AI domains accessible
 - Claude Code API calls work, but arbitrary exfiltration blocked
 - Claude prompts for confirmation before edits and commands
 
-**Autonomous mode**: `./paude --yolo`
+**Autonomous mode**: `paude --yolo`
 - Same network filtering as execution mode
 - Claude edits files and runs commands without confirmation prompts
 - Passes `--dangerously-skip-permissions` to Claude Code inside the container
 - Your host machine's Claude environment is unaffected (container isolation)
 
-**Research mode**: `./paude --allow-network`
+**Research mode**: `paude --allow-network`
 - Full network access for web searches, documentation, package installation
 - Treat outputs more carefully (prompt injection via web content is possible)
 - A warning is displayed when network access is enabled
@@ -264,10 +249,10 @@ These exfiltration paths have been tested and confirmed blocked:
 
 ```bash
 # SAFE: Network filtered, cannot exfiltrate data
-./paude --yolo
+paude --yolo
 
 # DANGEROUS: Full network access, can send files anywhere
-./paude --yolo --allow-network
+paude --yolo --allow-network
 ```
 
 The `--yolo` flag enables autonomous execution (no confirmation prompts). This is safe when network filtering is active because Claude cannot exfiltrate files or secrets even if it reads them.
