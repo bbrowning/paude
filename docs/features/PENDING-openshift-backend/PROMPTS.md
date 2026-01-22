@@ -1,0 +1,7 @@
+
+# Prompt used for initial research/plan/tasks
+
+```
+ /ralph-loop:ralph-loop "I really need to demo a seamless experience of using paude with an OpenShift cluster. There's a lot to explore here - we'll have to add an abstraction to our backend for openshift and not just podman. We'll have to figure out where we do builds (in-cluster? locally?), how we get built images into the cluster if local builds, how we connect/disconnect from a pod, how we get the right claude code CLI interface (requires tmux?), how we sync files (mutagen?), and so on. We need research and a comprehensive plan and tasks to accomplish this. Refer to our roadmap and help me plan this out. Ask any questions of me you need to clarify assumptions and to get to a great user experience that takes into account using a repo that is cloned locally to someone's laptop that then needs to get the current state of that code in a container inside openshift with all the required dev dependencies installed, separate venv from host (if using venvs, ie not sharing binaries of deps between host and remote paude container), syncing changes back to the host including git commits (either automatically or explicitly), and disconnecting / reconnecting to a running claude code session in the remote container. We can do this iteratively, but the final task is not complete until all this is researched, planned for, and scoped out into tasks that an Opus 4.5 or Sonnet 4.5 model can implement." --max-iterations 15
+```
+
