@@ -22,6 +22,10 @@ Using `paude` in a repository feels just like using `claude`, but:
 
 ## Roadmap Themes
 
+### Theme 0: Infrastructure
+
+Keep the foundation current and aligned with upstream changes.
+
 ### Theme 1: Security Hardening
 
 Close security gaps in the current implementation.
@@ -45,6 +49,68 @@ Multi-user, audit, compliance for organizational use.
 ---
 
 ## Detailed Roadmap Items
+
+### 0. Native Installer Migration
+
+**Priority: Highest (Critical)**
+**Theme: Infrastructure**
+**Status: Designed**
+**Effort: Small (S)**
+
+#### Problem
+
+Paude currently installs Claude Code using the npm installer:
+
+```dockerfile
+RUN npm install -g @anthropic-ai/claude-code
+```
+
+The npm installer is now **deprecated**. Anthropic recommends the native installer:
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+```
+
+Continuing with npm means:
+- Missing future improvements prioritized for native
+- Larger container images (Node.js required)
+- Potential compatibility issues as npm support winds down
+
+#### Key Changes
+
+| Aspect | npm (current) | Native (target) |
+|--------|---------------|-----------------|
+| Base image | `node:22-slim` (~200MB) | `debian:bookworm-slim` (~80MB) |
+| Install method | `npm install -g` | `curl \| bash` |
+| Binary location | `/usr/local/bin/claude` | `~/.local/bin/claude` |
+| ripgrep | Separate apt install | Bundled |
+| Node.js | Required | Not required |
+
+#### Benefits
+
+1. **Smaller image**: No Node.js runtime = smaller container
+2. **Aligned with Anthropic**: Following official recommendations
+3. **Future-proof**: Won't be affected by npm deprecation
+4. **Bundled ripgrep**: One less dependency to manage
+
+#### Implementation
+
+See [docs/features/native-installer/](features/native-installer/) for full documentation:
+- RESEARCH.md - Background research, alternatives considered
+- PLAN.md - Design decisions and rationale
+- TASKS.md - Detailed implementation tasks
+- README.md - Feature overview
+
+#### Acceptance Criteria
+
+- [ ] Container builds with native installer
+- [ ] `claude --version` works inside container
+- [ ] All existing tests pass
+- [ ] Image size is equal or smaller
+- [ ] No auto-update delays (DISABLE_AUTOUPDATER=1)
+- [ ] ripgrep works (bundled)
+
+---
 
 ### 1. Claude Config Isolation
 
@@ -796,11 +862,12 @@ This keeps paude CLI-focused while enabling IDE workflows.
 
 ### Phase 1: Foundation (Current + Next)
 
+0. **Native installer migration** (critical - npm deprecated) [S]
 1. Claude config isolation (security gap)
 2. Configurable network allowlists (quick win)
 3. Config layering (devcontainer.json + paude.json)
 
-**Goal**: Close security gaps, improve configuration
+**Goal**: Migrate to supported installer, close security gaps, improve configuration
 
 ### Phase 2: Polish
 
