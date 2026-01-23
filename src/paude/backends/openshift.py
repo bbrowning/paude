@@ -293,14 +293,17 @@ class OpenShiftBackend:
         """
         for attempt in range(1, self.RSYNC_MAX_RETRIES + 1):
             try:
+                # Use capture=False to show progress to user
                 self._run_oc(
                     "rsync",
+                    "--progress",
                     source,
                     dest,
                     "-n", namespace,
                     "--no-perms",
                     *exclude_args,
                     timeout=self.RSYNC_TIMEOUT,
+                    capture=False,
                     check=False,
                 )
                 return True
@@ -1771,6 +1774,12 @@ class OpenShiftBackend:
 
         # Sync based on direction
         if direction in ("remote", "both"):
+            # Ensure destination directory exists
+            self._run_oc(
+                "exec", pod_name, "-n", ns, "--",
+                "mkdir", "-p", remote_path,
+                check=False,
+            )
             # Local to remote
             print(f"Syncing local → {pod_name}:{remote_path}...", file=sys.stderr)
             self._rsync_with_retry(
