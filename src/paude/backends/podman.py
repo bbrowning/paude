@@ -157,6 +157,8 @@ class PodmanBackend:
             env["PAUDE_CLAUDE_ARGS"] = " ".join(claude_args)
 
         # Create container (stopped)
+        # Use sleep infinity as entrypoint to keep container alive
+        # The actual session setup happens when attaching via exec
         print(f"Creating container {container_name}...", file=sys.stderr)
         try:
             self._runner.create_container(
@@ -166,7 +168,8 @@ class PodmanBackend:
                 env=env,
                 workdir=config.workdir or str(config.workspace),
                 labels=labels,
-                entrypoint="/usr/local/bin/entrypoint-tmux.sh",
+                entrypoint="sleep",
+                command=["infinity"],
             )
         except Exception:
             # Cleanup volume on failure

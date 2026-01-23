@@ -48,6 +48,7 @@ class ContainerRunner:
         network: str | None = None,
         labels: dict[str, str] | None = None,
         entrypoint: str | None = None,
+        command: list[str] | None = None,
     ) -> str:
         """Create a container without starting it.
 
@@ -60,6 +61,7 @@ class ContainerRunner:
             network: Optional network to attach to.
             labels: Labels to attach to the container.
             entrypoint: Optional entrypoint override.
+            command: Optional command to run (after image in podman create).
 
         Returns:
             Container ID.
@@ -92,6 +94,9 @@ class ContainerRunner:
             cmd.extend(["--entrypoint", entrypoint])
 
         cmd.append(image)
+
+        if command:
+            cmd.extend(command)
 
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
