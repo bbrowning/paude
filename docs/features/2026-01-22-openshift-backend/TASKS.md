@@ -309,9 +309,9 @@ def attach_session(self, session_id: str) -> int:
 
 ### Task 3.2: Create tmux-aware Entrypoint
 
-**File:** `containers/paude/entrypoint-tmux.sh`
+**File:** `containers/paude/entrypoint.sh`
 
-**Description:** Entrypoint script that manages tmux sessions and handles OpenShift-specific setup.
+**Description:** Entrypoint script that manages tmux sessions and handles OpenShift-specific setup. (Note: tmux functionality was consolidated into the main entrypoint.sh)
 
 **Acceptance Criteria:**
 - [ ] Configure git safe.directory for arbitrary UID support (fixes "dubious ownership" error)
@@ -354,7 +354,7 @@ Git 2.35.2+ will refuse to operate with "fatal: detected dubious ownership" erro
 **Description:** Use tmux attach when connecting to existing session.
 
 **Acceptance Criteria:**
-- [ ] Update `attach_session()` to run entrypoint-tmux.sh
+- [ ] Update `attach_session()` to run entrypoint.sh
 - [ ] Or directly: `oc exec -it <pod> -- tmux attach -t claude`
 - [ ] Handle case where tmux session doesn't exist yet
 - [ ] Return exit code from tmux

@@ -274,7 +274,7 @@ class PodmanBackend:
         # Attach to the container via tmux entrypoint
         return self._runner.attach_container(
             container_name,
-            entrypoint="/usr/local/bin/entrypoint-tmux.sh",
+            entrypoint="/usr/local/bin/entrypoint.sh",
         )
 
     def stop_session(self, name: str, sync: bool = False) -> None:
@@ -327,7 +327,7 @@ class PodmanBackend:
         print(f"Connecting to session '{name}'...", file=sys.stderr)
         return self._runner.attach_container(
             container_name,
-            entrypoint="/usr/local/bin/entrypoint-tmux.sh",
+            entrypoint="/usr/local/bin/entrypoint.sh",
         )
 
     def list_sessions(self) -> list[Session]:

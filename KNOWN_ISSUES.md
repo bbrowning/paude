@@ -142,7 +142,7 @@ paude attach <session-id> --backend=openshift
 ### Related Files
 
 - `src/paude/backends/openshift.py` (`_create_claude_secret` method)
-- `containers/paude/entrypoint-tmux.sh` (seed file copying)
+- `containers/paude/entrypoint.sh` (seed file copying)
 
 ## BUG-003: Multi-pod git sync conflicts when syncing .git directory
 

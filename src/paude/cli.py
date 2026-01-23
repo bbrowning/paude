@@ -75,7 +75,7 @@ def version_callback(value: bool) -> None:
     if value:
         typer.echo(f"paude {__version__}")
         dev_mode = os.environ.get("PAUDE_DEV", "0") == "1"
-        registry = os.environ.get("PAUDE_REGISTRY", "docker.io/bbrowning")
+        registry = os.environ.get("PAUDE_REGISTRY", "quay.io/bbrowning")
         if dev_mode:
             typer.echo("  mode: development (PAUDE_DEV=1, building locally)")
         else:
@@ -120,6 +120,8 @@ OPTIONS:
                         Container registry URL (e.g., quay.io/myuser)
     --no-openshift-tls-verify
                         Disable TLS certificate verification when pushing images
+    --platform          Target platform for image builds (e.g., linux/amd64)
+                        Use when building for a different architecture than your host
 
 EXAMPLES:
     paude                           Start interactive claude session (ephemeral)
@@ -214,6 +216,13 @@ def session_create(
             help="Verify TLS certificates when pushing images.",
         ),
     ] = True,
+    platform: Annotated[
+        str | None,
+        typer.Option(
+            "--platform",
+            help="Target platform for image builds (e.g., linux/amd64, linux/arm64).",
+        ),
+    ] = None,
 ) -> None:
     """Create a new persistent session (does not start it)."""
     from paude.backends import (
@@ -247,11 +256,11 @@ def session_create(
     if backend == BackendType.podman:
         # Get script directory for dev mode
         script_dir: Path | None = None
-        dev_path = Path(__file__).parent.parent
+        dev_path = Path(__file__).parent.parent.parent
         if (dev_path / "containers" / "paude" / "Dockerfile").exists():
             script_dir = dev_path
 
-        image_manager = ImageManager(script_dir=script_dir)
+        image_manager = ImageManager(script_dir=script_dir, platform=platform)
 
         # Ensure image
         try:
@@ -312,11 +321,11 @@ def session_create(
 
         # Get script directory for dev mode
         os_script_dir: Path | None = None
-        os_dev_path = Path(__file__).parent.parent
+        os_dev_path = Path(__file__).parent.parent.parent
         if (os_dev_path / "containers" / "paude" / "Dockerfile").exists():
             os_script_dir = os_dev_path
 
-        image_manager = ImageManager(script_dir=os_script_dir)
+        image_manager = ImageManager(script_dir=os_script_dir, platform=platform)
 
         # Ensure image (build and push to registry)
         try:
@@ -1165,6 +1174,13 @@ def main(
             help="Verify TLS certificates when pushing images.",
         ),
     ] = True,
+    platform: Annotated[
+        str | None,
+        typer.Option(
+            "--platform",
+            help="Target platform for image builds (e.g., linux/amd64, linux/arm64).",
+        ),
+    ] = None,
     claude_args: Annotated[
         str | None,
         typer.Option(
@@ -1201,6 +1217,7 @@ def main(
     ctx.obj["openshift_namespace"] = openshift_namespace
     ctx.obj["openshift_registry"] = openshift_registry
     ctx.obj["openshift_tls_verify"] = openshift_tls_verify
+    ctx.obj["platform"] = platform
     ctx.obj["claude_args"] = parsed_args
 
     if dry_run:
@@ -1236,6 +1253,7 @@ def _run_openshift_backend(ctx: typer.Context) -> None:
     openshift_namespace = ctx.obj["openshift_namespace"]
     openshift_registry = ctx.obj["openshift_registry"]
     openshift_tls_verify = ctx.obj["openshift_tls_verify"]
+    platform = ctx.obj.get("platform")
 
     workspace = Path.cwd()
 
@@ -1283,11 +1301,11 @@ def _run_openshift_backend(ctx: typer.Context) -> None:
 
     # Get script directory for dev mode
     script_dir: Path | None = None
-    dev_path = Path(__file__).parent.parent
+    dev_path = Path(__file__).parent.parent.parent
     if (dev_path / "containers" / "paude" / "Dockerfile").exists():
         script_dir = dev_path
 
-    image_manager = ImageManager(script_dir=script_dir)
+    image_manager = ImageManager(script_dir=script_dir, platform=platform)
 
     # Build the image locally first
     if config and (config.base_image or config.dockerfile or config.pip_install):
@@ -1373,10 +1391,11 @@ def _run_podman_backend(ctx: typer.Context) -> None:
     allow_network = ctx.obj["allow_network"]
     rebuild = ctx.obj["rebuild"]
     claude_args = ctx.obj["claude_args"]
+    platform = ctx.obj.get("platform")
 
     # Get script directory for dev mode
     script_dir: Path | None = None
-    dev_path = Path(__file__).parent.parent
+    dev_path = Path(__file__).parent.parent.parent
     if (dev_path / "containers" / "paude" / "Dockerfile").exists():
         script_dir = dev_path
 
@@ -1401,7 +1420,7 @@ def _run_podman_backend(ctx: typer.Context) -> None:
             raise typer.Exit(1) from None
 
     # Create managers and backend
-    image_manager = ImageManager(script_dir=script_dir)
+    image_manager = ImageManager(script_dir=script_dir, platform=platform)
     network_manager = NetworkManager()
     backend_instance = PodmanBackend()
 

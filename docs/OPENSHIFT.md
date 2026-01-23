@@ -110,9 +110,9 @@ paude create my-project --backend=openshift --storage-class=fast-ssd
 
 ### Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `PAUDE_REGISTRY` | Custom container registry |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PAUDE_REGISTRY` | Custom container registry | `quay.io/bbrowning` |
 
 ## Security
 

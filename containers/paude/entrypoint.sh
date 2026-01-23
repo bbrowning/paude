@@ -80,4 +80,35 @@ if [[ -n "${PAUDE_VENV_PATHS:-}" && -d /opt/venv ]]; then
     unset PYTHON_HOME
 fi
 
-exec claude "$@"
+# Get claude args from environment or command line
+CLAUDE_ARGS="${PAUDE_CLAUDE_ARGS:-$*}"
+
+# Check if we have a TTY for tmux
+if [ -t 0 ] && [ -t 1 ]; then
+    # Run Claude in tmux for session persistence
+    SESSION_NAME="claude"
+
+    # Set up terminal environment for tmux
+    export TERM="${TERM:-xterm-256color}"
+    export SHELL=/bin/bash
+
+    if tmux -u has-session -t "$SESSION_NAME" 2>/dev/null; then
+        echo "Attaching to existing Claude session..."
+        exec tmux -u attach -t "$SESSION_NAME"
+    else
+        echo "Starting new Claude session..."
+        # Start tmux with login shell for proper terminal initialization
+        tmux -u new-session -s "$SESSION_NAME" -d "bash -l"
+        # Set up environment
+        tmux send-keys -t "$SESSION_NAME" "export HOME=$HOME PATH=$HOME/.local/bin:\$PATH" Enter
+        # Set up venv if applicable
+        if [[ -n "${PAUDE_VENV_PATHS:-}" && -d /opt/venv ]]; then
+            tmux send-keys -t "$SESSION_NAME" "export VIRTUAL_ENV=/opt/venv PATH=/opt/venv/bin:\$PATH" Enter
+        fi
+        tmux send-keys -t "$SESSION_NAME" "claude $CLAUDE_ARGS" Enter
+        exec tmux -u attach -t "$SESSION_NAME"
+    fi
+else
+    # No TTY available, run claude directly
+    exec claude $CLAUDE_ARGS
+fi

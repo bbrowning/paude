@@ -129,18 +129,15 @@ paude/
 
 ## Releasing
 
-Releases are published to Docker Hub (docker.io/bbrowning).
+Releases are published to Quay.io (quay.io/bbrowning).
 
 ### One-Time Setup
 
 Authenticate with your container registry:
 
 ```bash
-# For Docker Hub (default)
-podman login docker.io
-
-# For other registries, override REGISTRY when publishing
-make publish VERSION=0.2.0 REGISTRY=ghcr.io/yourusername
+# For Quay.io (default)
+podman login quay.io
 ```
 
 ### Release Process
@@ -152,17 +149,17 @@ git pull origin main
 git status  # Should be clean
 
 # 2. Update version in pyproject.toml and create git tag
-make release VERSION=0.2.0
+make release VERSION=0.4.0
 
 # 3. Build multi-arch images and push to registry
-make publish VERSION=0.2.0
+make publish VERSION=0.4.0
 
 # 4. Push the commit and tag to GitHub
 git push origin main --tags
 
 # 5. Create GitHub release
-#    Go to: https://github.com/bbrowning/paude/releases/new?tag=v0.2.0
-#    - Title: v0.2.0
+#    Go to: https://github.com/bbrowning/paude/releases/new?tag=v0.4.0
+#    - Title: v0.4.0
 #    - Add release notes describing changes
 ```
 
@@ -175,9 +172,9 @@ git push origin main --tags
 
 2. `make publish VERSION=x.y.z`:
    - Builds multi-arch images (amd64 + arm64)
-   - Pushes to docker.io/bbrowning/paude:x.y.z
-   - Pushes to docker.io/bbrowning/paude:latest
-   - Same for paude-proxy image
+   - Pushes to quay.io/bbrowning/paude-claude-centos9:x.y.z
+   - Pushes to quay.io/bbrowning/paude-claude-centos9:latest
+   - Same for paude-proxy-centos9 image
 
 ### Verifying a Release
 

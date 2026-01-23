@@ -14,16 +14,22 @@ from paude.hash import compute_config_hash
 class ImageManager:
     """Manages container images for paude."""
 
-    def __init__(self, script_dir: Path | None = None):
+    def __init__(
+        self,
+        script_dir: Path | None = None,
+        platform: str | None = None,
+    ):
         """Initialize the image manager.
 
         Args:
             script_dir: Path to the paude script directory (for dev mode).
+            platform: Target platform (e.g., "linux/amd64"). If None, uses native arch.
         """
         self.script_dir = script_dir
         self.dev_mode = os.environ.get("PAUDE_DEV", "0") == "1"
-        self.registry = os.environ.get("PAUDE_REGISTRY", "docker.io/bbrowning")
+        self.registry = os.environ.get("PAUDE_REGISTRY", "quay.io/bbrowning")
         self.version = __version__
+        self.platform = platform
 
     def ensure_default_image(self) -> str:
         """Ensure the default paude image is available.
@@ -34,8 +40,13 @@ class ImageManager:
         import sys
 
         if self.dev_mode and self.script_dir:
-            # Build locally in dev mode (matches bash: paude:latest)
-            tag = "paude:latest"
+            # Build locally in dev mode
+            # Use platform-specific tag to avoid arch conflicts
+            if self.platform:
+                arch = self.platform.split("/")[-1]  # e.g., "linux/amd64" -> "amd64"
+                tag = f"paude-claude-centos9:latest-{arch}"
+            else:
+                tag = "paude-claude-centos9:latest"
             if not image_exists(tag):
                 print(f"Building {tag} image...", file=sys.stderr)
                 dockerfile = self.script_dir / "containers" / "paude" / "Dockerfile"
@@ -44,7 +55,7 @@ class ImageManager:
             return tag
         else:
             # Pull from registry with version tag (matches bash)
-            tag = f"{self.registry}/paude:{self.version}"
+            tag = f"{self.registry}/paude-claude-centos9:{self.version}"
             if not image_exists(tag):
                 print(f"Pulling {tag}...", file=sys.stderr)
                 try:
@@ -92,7 +103,12 @@ class ImageManager:
             workspace=workspace,
             pip_install=config.pip_install,
         )
-        tag = f"paude-workspace:{config_hash}"
+        # Use platform-specific tag to avoid arch conflicts
+        if self.platform:
+            arch = self.platform.split("/")[-1]  # e.g., "linux/amd64" -> "amd64"
+            tag = f"paude-workspace:{config_hash}-{arch}"
+        else:
+            tag = f"paude-workspace:{config_hash}"
 
         # Check if we need to build
         if not force_rebuild and image_exists(tag):
@@ -122,17 +138,29 @@ class ImageManager:
                 config.dockerfile, user_image, build_context, user_build_args
             )
             base_image = user_image
+            using_default_paude_image = False
             print("  → Adding paude requirements...", file=sys.stderr)
         elif config.base_image:
             base_image = config.base_image
+            using_default_paude_image = False
             print(f"  → Using base: {base_image}", file=sys.stderr)
         else:
-            base_image = "debian:bookworm-slim"
+            # No custom base specified - use the default paude image
+            base_image = self.ensure_default_image()
+            using_default_paude_image = True
+            print(f"  → Using default paude image: {base_image}", file=sys.stderr)
 
-        # Generate and build the workspace Dockerfile
-        from paude.config.dockerfile import generate_workspace_dockerfile
+        # Generate the workspace Dockerfile
+        if using_default_paude_image:
+            # Simpler Dockerfile - just add pip_install layer on top of complete image
+            from paude.config.dockerfile import generate_pip_install_dockerfile
 
-        dockerfile_content = generate_workspace_dockerfile(config)
+            dockerfile_content = generate_pip_install_dockerfile(config)
+        else:
+            # Full Dockerfile - install all paude requirements on top of user's base
+            from paude.config.dockerfile import generate_workspace_dockerfile
+
+            dockerfile_content = generate_workspace_dockerfile(config)
 
         # Add features if present (matches bash behavior)
         if config.features:
@@ -151,33 +179,28 @@ class ImageManager:
             dockerfile_path = Path(tmpdir) / "Dockerfile"
             dockerfile_path.write_text(dockerfile_content)
 
-            # Copy entrypoints (ensure Unix line endings for Linux containers)
-            entrypoint_dest = Path(tmpdir) / "entrypoint.sh"
-            if entrypoint.exists():
-                content = entrypoint.read_text().replace("\r\n", "\n")
-                entrypoint_dest.write_text(content, newline="\n")
-            else:
-                # Minimal fallback
-                entrypoint_dest.write_text(
-                    "#!/bin/bash\nexec claude \"$@\"\n", newline="\n"
-                )
-            entrypoint_dest.chmod(0o755)
+            # Copy entrypoints only when not using default paude image
+            # (default image already has entrypoints installed)
+            if not using_default_paude_image:
+                # Copy entrypoints (ensure Unix line endings for Linux containers)
+                entrypoint_dest = Path(tmpdir) / "entrypoint.sh"
+                if entrypoint.exists():
+                    content = entrypoint.read_text().replace("\r\n", "\n")
+                    entrypoint_dest.write_text(content, newline="\n")
+                else:
+                    # Minimal fallback
+                    entrypoint_dest.write_text(
+                        "#!/bin/bash\nexec claude \"$@\"\n", newline="\n"
+                    )
+                entrypoint_dest.chmod(0o755)
 
-            # Copy tmux entrypoint for OpenShift session persistence
-            entrypoint_tmux = entrypoint.parent / "entrypoint-tmux.sh"
-            entrypoint_tmux_dest = Path(tmpdir) / "entrypoint-tmux.sh"
-            if entrypoint_tmux.exists():
-                content = entrypoint_tmux.read_text().replace("\r\n", "\n")
-                entrypoint_tmux_dest.write_text(content, newline="\n")
-                entrypoint_tmux_dest.chmod(0o755)
-
-            # Copy session entrypoint for persistent sessions (Podman and OpenShift)
-            entrypoint_session = entrypoint.parent / "entrypoint-session.sh"
-            entrypoint_session_dest = Path(tmpdir) / "entrypoint-session.sh"
-            if entrypoint_session.exists():
-                content = entrypoint_session.read_text().replace("\r\n", "\n")
-                entrypoint_session_dest.write_text(content, newline="\n")
-                entrypoint_session_dest.chmod(0o755)
+                # Copy session entrypoint for persistent sessions (Podman and OpenShift)
+                entrypoint_session = entrypoint.parent / "entrypoint-session.sh"
+                entrypoint_session_dest = Path(tmpdir) / "entrypoint-session.sh"
+                if entrypoint_session.exists():
+                    content = entrypoint_session.read_text().replace("\r\n", "\n")
+                    entrypoint_session_dest.write_text(content, newline="\n")
+                    entrypoint_session_dest.chmod(0o755)
 
             # Copy features to build context if present
             if config.features:
@@ -218,8 +241,13 @@ class ImageManager:
         import sys
 
         if self.dev_mode and self.script_dir:
-            # Build locally in dev mode (matches bash: paude-proxy:latest)
-            tag = "paude-proxy:latest"
+            # Build locally in dev mode
+            # Use platform-specific tag to avoid arch conflicts
+            if self.platform:
+                arch = self.platform.split("/")[-1]  # e.g., "linux/amd64" -> "amd64"
+                tag = f"paude-proxy-centos9:latest-{arch}"
+            else:
+                tag = "paude-proxy-centos9:latest"
             if not image_exists(tag):
                 print(f"Building {tag} image...", file=sys.stderr)
                 dockerfile = self.script_dir / "containers" / "proxy" / "Dockerfile"
@@ -228,7 +256,7 @@ class ImageManager:
             return tag
         else:
             # Pull from registry with version tag (matches bash)
-            tag = f"{self.registry}/paude-proxy:{self.version}"
+            tag = f"{self.registry}/paude-proxy-centos9:{self.version}"
             if not image_exists(tag):
                 print(f"Pulling {tag}...", file=sys.stderr)
                 try:
@@ -248,7 +276,6 @@ class ImageManager:
         tag: str,
         context: Path,
         build_args: dict[str, str] | None = None,
-        platform: str | None = "linux/amd64",
     ) -> None:
         """Build a container image.
 
@@ -257,11 +284,12 @@ class ImageManager:
             tag: Image tag.
             context: Build context directory.
             build_args: Optional build arguments.
-            platform: Target platform (default: linux/amd64 for compatibility).
         """
         cmd = ["build", "-f", str(dockerfile), "-t", tag]
-        if platform:
-            cmd.extend(["--platform", platform])
+
+        # Use platform from ImageManager if specified
+        if self.platform:
+            cmd.extend(["--platform", self.platform])
         if build_args:
             for key, value in build_args.items():
                 cmd.extend(["--build-arg", f"{key}={value}"])

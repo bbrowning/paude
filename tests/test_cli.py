@@ -53,6 +53,7 @@ def test_version_shows_installed_mode(monkeypatch: pytest.MonkeyPatch):
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
     assert "installed" in result.stdout
+    assert "quay.io/bbrowning" in result.stdout
 
 
 def test_version_shows_custom_registry(monkeypatch: pytest.MonkeyPatch):

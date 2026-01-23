@@ -6,9 +6,9 @@
 #   make release VERSION=x.y.z - Tag, update version, build, and push
 #   make clean          - Remove local images
 
-REGISTRY ?= docker.io/bbrowning
-IMAGE_NAME = paude
-PROXY_IMAGE_NAME = paude-proxy
+REGISTRY ?= quay.io/bbrowning
+IMAGE_NAME = paude-claude-centos9
+PROXY_IMAGE_NAME = paude-proxy-centos9
 
 # Get version from git tag, or use 'dev' if not on a tag
 VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null || echo "dev")
@@ -43,10 +43,13 @@ help:
 	@echo "  REGISTRY=$(REGISTRY)"
 	@echo "  VERSION=$(VERSION)"
 
-# Build images locally (single arch, for development)
+# Detect native architecture for builds
+NATIVE_ARCH := $(shell uname -m | sed 's/x86_64/amd64/')
+
+# Build images locally (native arch, for development)
 build:
-	podman build -t $(IMAGE_NAME):latest ./containers/paude
-	podman build -t $(PROXY_IMAGE_NAME):latest ./containers/proxy
+	podman build --platform linux/$(NATIVE_ARCH) -t $(IMAGE_NAME):latest ./containers/paude
+	podman build --platform linux/$(NATIVE_ARCH) -t $(PROXY_IMAGE_NAME):latest ./containers/proxy
 
 # Run paude in dev mode (builds images locally)
 run:
@@ -72,7 +75,7 @@ typecheck:
 # Login to container registry
 login:
 	@echo "Logging in to $(REGISTRY)..."
-	podman login docker.io
+	podman login quay.io
 
 # Build and push multi-arch images
 publish: check-version

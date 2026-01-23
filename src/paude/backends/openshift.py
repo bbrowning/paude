@@ -1135,7 +1135,7 @@ class OpenShiftBackend:
                         "name": "paude",
                         "image": image,
                         "imagePullPolicy": "Always",
-                        "command": ["/usr/local/bin/entrypoint-tmux.sh"],
+                        "command": ["/usr/local/bin/entrypoint.sh"],
                         "stdin": True,
                         "tty": True,
                         "env": env_list,
@@ -2048,7 +2048,7 @@ class OpenShiftBackend:
             ]
 
         # Use tmux entrypoint for session persistence
-        exec_cmd.append("/usr/local/bin/entrypoint-tmux.sh")
+        exec_cmd.append("/usr/local/bin/entrypoint.sh")
 
         exec_result = subprocess.run(exec_cmd)
 

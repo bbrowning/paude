@@ -4,5 +4,5 @@ if [[ -n "$SQUID_DNS" ]]; then
     echo "dns_nameservers $SQUID_DNS" >> /etc/squid/squid.conf
 fi
 
-# Execute the original ubuntu/squid entrypoint
-exec /usr/local/bin/entrypoint.sh "$@"
+# Run squid directly (UBI9 + EPEL squid package)
+exec /usr/sbin/squid "$@"

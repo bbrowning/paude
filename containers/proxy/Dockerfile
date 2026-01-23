@@ -1,9 +1,9 @@
-FROM docker.io/ubuntu/squid:latest
+FROM quay.io/centos/centos:stream9
 
-# Install debugging tools
-RUN apt-get update && \
-    apt-get install -y curl wget dnsutils iputils-ping && \
-    rm -rf /var/lib/apt/lists/*
+# Enable EPEL repository and install Squid + debugging tools
+RUN dnf install -y epel-release && \
+    dnf install -y --allowerasing squid curl wget bind-utils iputils && \
+    dnf clean all
 
 # Copy allowlist configuration and custom entrypoint
 COPY squid.conf /etc/squid/squid.conf
