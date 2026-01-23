@@ -13,7 +13,7 @@ from paude import __version__
 
 app = typer.Typer(
     name="paude",
-    help="Run Claude Code in an isolated Podman container.",
+    help="Run Claude Code in an isolated container.",
     add_completion=False,
     context_settings={"allow_interspersed_args": False},
 )
@@ -89,7 +89,7 @@ def version_callback(value: bool) -> None:
 
 def show_help() -> None:
     """Show custom help message matching bash format."""
-    help_text = """paude - Run Claude Code in a secure Podman container
+    help_text = """paude - Run Claude Code in a secure container
 
 USAGE:
     paude [OPTIONS] [-- CLAUDE_ARGS...]
@@ -1177,7 +1177,7 @@ def main(
         typer.Argument(help="Arguments to pass to claude (after --)"),
     ] = None,
 ) -> None:
-    """Run Claude Code in an isolated Podman container."""
+    """Run Claude Code in an isolated container."""
     # Handle case where first positional arg is a subcommand name
     # This happens because Typer's Argument captures all positional args
     # before subcommand routing occurs
@@ -1230,7 +1230,7 @@ def main(
 
 
 def _run_openshift_backend(ctx: typer.Context) -> None:
-    """Run using OpenShift backend with persistent sessions."""
+    """Run Claude Code using the OpenShift backend with persistent sessions."""
     from paude.backends import OpenShiftBackend, OpenShiftConfig, SessionConfig
     from paude.backends.openshift import (
         NamespaceNotFoundError,
@@ -1369,7 +1369,7 @@ def _run_openshift_backend(ctx: typer.Context) -> None:
 
 
 def _run_podman_backend(ctx: typer.Context) -> None:
-    """Run using Podman backend (legacy ephemeral mode)."""
+    """Run Claude Code using the Podman backend (legacy ephemeral mode)."""
     import atexit
     import signal
     import sys
