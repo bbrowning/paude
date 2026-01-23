@@ -154,3 +154,52 @@ def test_help_shows_subcommands():
     assert "attach" in result.stdout
     assert "stop" in result.stdout
     assert "sync" in result.stdout
+
+
+def test_stop_help():
+    """'stop --help' shows subcommand help, not main help."""
+    result = runner.invoke(app, ["stop", "--help"])
+    assert result.exit_code == 0
+    # Usage line includes parent args, so check for subcommand name and description
+    assert "stop" in result.stdout
+    assert "Stop a session" in result.stdout
+    # Should NOT show main help text
+    assert "paude - Run Claude Code" not in result.stdout
+
+
+def test_sessions_help():
+    """'sessions --help' shows subcommand help."""
+    result = runner.invoke(app, ["sessions", "--help"])
+    assert result.exit_code == 0
+    assert "sessions" in result.stdout
+    assert "List active sessions" in result.stdout
+    assert "paude - Run Claude Code" not in result.stdout
+
+
+def test_attach_help():
+    """'attach --help' shows subcommand help."""
+    result = runner.invoke(app, ["attach", "--help"])
+    assert result.exit_code == 0
+    assert "attach" in result.stdout
+    assert "Attach to an existing session" in result.stdout
+    assert "paude - Run Claude Code" not in result.stdout
+
+
+def test_sync_help():
+    """'sync --help' shows subcommand help."""
+    result = runner.invoke(app, ["sync", "--help"])
+    assert result.exit_code == 0
+    assert "sync" in result.stdout
+    assert "Sync files" in result.stdout
+    assert "paude - Run Claude Code" not in result.stdout
+
+
+def test_subcommand_runs_without_main_execution():
+    """Subcommands run without triggering main execution logic."""
+    # This test verifies that subcommands don't trigger podman checks
+    # by confirming they complete without the "podman required" error
+    result = runner.invoke(app, ["stop"])
+    assert result.exit_code == 0
+    assert "ephemeral" in result.stdout
+    # Should NOT contain podman error
+    assert "podman is required" not in result.stdout

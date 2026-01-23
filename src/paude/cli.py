@@ -17,6 +17,9 @@ app = typer.Typer(
     context_settings={"allow_interspersed_args": False},
 )
 
+# Known subcommand names - must be updated when adding new subcommands
+SUBCOMMANDS = {"sessions", "attach", "stop", "sync"}
+
 
 class BackendType(str, Enum):
     """Container backend types."""
@@ -443,7 +446,28 @@ def main(
     ] = None,
 ) -> None:
     """Run Claude Code in an isolated Podman container."""
-    # If a subcommand is invoked, don't run the default
+    # Handle case where first positional arg is a subcommand name
+    # This happens because Typer's Argument captures all positional args
+    # before subcommand routing occurs
+    if claude_args and claude_args[0] in SUBCOMMANDS:
+        cmd_name = claude_args[0]
+        remaining_args = claude_args[1:]
+
+        # Get the click command and invoke it with proper context
+        click_app = ctx.command
+        if cmd_name in click_app.commands:
+            import click
+
+            cmd = click_app.commands[cmd_name]
+            try:
+                sub_ctx = cmd.make_context(cmd_name, list(remaining_args), parent=ctx)
+                with sub_ctx:
+                    cmd.invoke(sub_ctx)
+                raise typer.Exit(0)
+            except click.exceptions.Exit as e:
+                raise typer.Exit(e.exit_code)
+
+    # If a subcommand is invoked through normal routing, don't run default
     if ctx.invoked_subcommand is not None:
         return
 
