@@ -1765,6 +1765,16 @@ class OpenShiftBackend:
             ".env",
             "__pycache__",
             "*.pyc",
+            ".mypy_cache",
+            ".pytest_cache",
+            ".ruff_cache",
+            ".tox",
+            ".nox",
+            ".coverage",
+            "htmlcov",
+            "*.egg-info",
+            "dist",
+            "build",
             "node_modules",
         ]
 
@@ -1774,12 +1784,26 @@ class OpenShiftBackend:
 
         # Sync based on direction
         if direction in ("remote", "both"):
-            # Ensure destination directory exists
-            self._run_oc(
+            # Prepare workspace directory with proper permissions
+            # The PVC persists between pod restarts, but OpenShift assigns different
+            # arbitrary UIDs to each pod. If /pvc/workspace was created by a previous
+            # pod, we can't chmod it (EPERM). Solution: remove and recreate it.
+            # This is safe because we're about to overwrite with local data anyway.
+            prep_result = self._run_oc(
                 "exec", pod_name, "-n", ns, "--",
-                "mkdir", "-p", remote_path,
+                "bash", "-c",
+                # Remove old workspace if it exists (might be owned by different UID)
+                # Then create fresh with correct ownership and permissions
+                f"rm -rf {remote_path} && "
+                f"mkdir -p {remote_path} && "
+                f"chmod g+rwX {remote_path}",
                 check=False,
             )
+            if prep_result.returncode != 0:
+                print(
+                    f"Warning: workspace prep failed: {prep_result.stderr}",
+                    file=sys.stderr,
+                )
             # Local to remote
             print(f"Syncing local → {pod_name}:{remote_path}...", file=sys.stderr)
             self._rsync_with_retry(
@@ -1787,6 +1811,13 @@ class OpenShiftBackend:
                 f"{pod_name}:{remote_path}",
                 ns,
                 exclude_args,
+            )
+            # Make synced subdirectories group-writable for OpenShift arbitrary UID
+            # rsync/tar creates directories with restrictive permissions
+            self._run_oc(
+                "exec", pod_name, "-n", ns, "--",
+                "chmod", "-R", "g+rwX", remote_path,
+                check=False,
             )
 
         if direction in ("local", "both"):
@@ -2268,6 +2299,16 @@ class OpenShiftBackend:
             ".env",
             "__pycache__",
             "*.pyc",
+            ".mypy_cache",
+            ".pytest_cache",
+            ".ruff_cache",
+            ".tox",
+            ".nox",
+            ".coverage",
+            "htmlcov",
+            "*.egg-info",
+            "dist",
+            "build",
             "node_modules",
             ".paude-initialized",
         ]

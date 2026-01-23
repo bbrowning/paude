@@ -6,6 +6,7 @@ RUN dnf install -y epel-release && \
         git \
         curl \
         wget \
+        rsync \
         bind-utils \
         iputils \
         jq \

@@ -21,6 +21,12 @@ rm -f "$HOME/.test" 2>/dev/null || true
 # Ensure all home directories are group-writable for OpenShift arbitrary UID
 chmod -R g+rwX "$HOME" 2>/dev/null || true
 
+# Make PVC mount group-writable for OpenShift (PVC mounted at /pvc)
+# The paude user is in group 0, so g+rwX allows write access
+if [[ -d /pvc ]]; then
+    chmod g+rwX /pvc 2>/dev/null || true
+fi
+
 # Create .gitconfig if it doesn't exist (needed for git config --global)
 touch "$HOME/.gitconfig" 2>/dev/null || true
 
