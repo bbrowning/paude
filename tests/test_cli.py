@@ -114,9 +114,9 @@ def test_help_shows_dry_run_option():
     assert "--dry-run" in result.stdout
 
 
-def test_args_after_double_dash():
-    """Arguments after -- are captured in claude_args (verified via dry-run)."""
-    result = runner.invoke(app, ["--dry-run", "--", "-p", "hello"])
+def test_args_option():
+    """--args option is parsed and captured in claude_args (verified via dry-run)."""
+    result = runner.invoke(app, ["--dry-run", "--args", "-p hello"])
     assert result.exit_code == 0
     assert "claude_args: ['-p', 'hello']" in result.stdout
 

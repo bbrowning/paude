@@ -18,10 +18,6 @@ app = typer.Typer(
     context_settings={"allow_interspersed_args": False},
 )
 
-# Known subcommand names - must be updated when adding new subcommands
-SUBCOMMANDS = {"create", "delete", "start", "stop", "connect", "list", "sync"}
-
-
 class BackendType(str, Enum):
     """Container backend types."""
 
@@ -92,7 +88,7 @@ def show_help() -> None:
     help_text = """paude - Run Claude Code in a secure container
 
 USAGE:
-    paude [OPTIONS] [-- CLAUDE_ARGS...]
+    paude [OPTIONS]
     paude <COMMAND> [OPTIONS]
 
 COMMANDS:
@@ -107,6 +103,7 @@ COMMANDS:
 OPTIONS:
     -h, --help          Show this help message and exit
     -V, --version       Show paude version and exit
+    -a, --args          Arguments to pass to claude (e.g., -a '-p "prompt"')
     --yolo              Enable YOLO mode (skip all permission prompts)
                         Claude can edit files and run commands without confirmation
     --allow-network     Allow unrestricted network access
@@ -124,14 +121,10 @@ OPTIONS:
     --no-openshift-tls-verify
                         Disable TLS certificate verification when pushing images
 
-CLAUDE OPTIONS:
-    All arguments after -- are passed directly to claude.
-    Run 'paude -- --help' to see claude's options.
-
 EXAMPLES:
     paude                           Start interactive claude session (ephemeral)
     paude --yolo                    Start with YOLO mode (no permission prompts)
-    paude -- -p "What is 2+2?"      Run claude with a prompt
+    paude -a '-p "What is 2+2?"'    Run claude with a prompt
     paude create                    Create a persistent session
     paude start                     Start and connect to a session
     paude list                      List all sessions
@@ -1173,35 +1166,29 @@ def main(
         ),
     ] = True,
     claude_args: Annotated[
-        list[str] | None,
-        typer.Argument(help="Arguments to pass to claude (after --)"),
+        str | None,
+        typer.Option(
+            "--args",
+            "-a",
+            help="Arguments to pass to claude (e.g., -a '-p \"prompt\"').",
+        ),
     ] = None,
 ) -> None:
     """Run Claude Code in an isolated container."""
-    # Handle case where first positional arg is a subcommand name
-    # This happens because Typer's Argument captures all positional args
-    # before subcommand routing occurs
-    if claude_args and claude_args[0] in SUBCOMMANDS:
-        cmd_name = claude_args[0]
-        remaining_args = claude_args[1:]
+    import shlex
 
-        # Get the click command and invoke it with proper context
-        click_app = ctx.command
-        if hasattr(click_app, "commands") and cmd_name in click_app.commands:
-            import click
-
-            cmd = click_app.commands[cmd_name]
-            try:
-                sub_ctx = cmd.make_context(cmd_name, list(remaining_args), parent=ctx)
-                with sub_ctx:
-                    cmd.invoke(sub_ctx)
-                raise typer.Exit(0)
-            except click.exceptions.Exit as e:
-                raise typer.Exit(e.exit_code) from None
-
-    # If a subcommand is invoked through normal routing, don't run default
+    # If a subcommand is invoked, don't run the default ephemeral mode
     if ctx.invoked_subcommand is not None:
         return
+
+    # Parse claude_args string into a list
+    parsed_args: list[str] = []
+    if claude_args:
+        try:
+            parsed_args = shlex.split(claude_args)
+        except ValueError as e:
+            typer.echo(f"Error parsing --args: {e}", err=True)
+            raise typer.Exit(1) from None
 
     # Store flags for use by other modules
     ctx.ensure_object(dict)
@@ -1214,7 +1201,7 @@ def main(
     ctx.obj["openshift_namespace"] = openshift_namespace
     ctx.obj["openshift_registry"] = openshift_registry
     ctx.obj["openshift_tls_verify"] = openshift_tls_verify
-    ctx.obj["claude_args"] = claude_args or []
+    ctx.obj["claude_args"] = parsed_args
 
     if dry_run:
         from paude.dry_run import show_dry_run
