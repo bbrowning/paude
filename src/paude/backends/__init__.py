@@ -2,6 +2,7 @@
 
 from paude.backends.base import Backend, LegacyBackend, Session, SessionConfig
 from paude.backends.openshift import (
+    BuildFailedError,
     NamespaceNotFoundError,
     OcNotInstalledError,
     OcNotLoggedInError,
@@ -9,7 +10,6 @@ from paude.backends.openshift import (
     OpenShiftBackend,
     OpenShiftConfig,
     OpenShiftError,
-    RegistryNotAccessibleError,
 )
 from paude.backends.podman import (
     PodmanBackend,
@@ -19,6 +19,7 @@ from paude.backends.podman import (
 
 __all__ = [
     "Backend",
+    "BuildFailedError",
     "LegacyBackend",
     "NamespaceNotFoundError",
     "OcNotInstalledError",
@@ -28,7 +29,6 @@ __all__ = [
     "OpenShiftConfig",
     "OpenShiftError",
     "PodmanBackend",
-    "RegistryNotAccessibleError",
     "Session",
     "SessionConfig",
     "SessionExistsError",

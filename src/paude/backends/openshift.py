@@ -60,10 +60,19 @@ class NamespaceNotFoundError(OpenShiftError):
     pass
 
 
-class RegistryNotAccessibleError(OpenShiftError):
-    """Registry is not accessible from outside the cluster."""
+class BuildFailedError(OpenShiftError):
+    """OpenShift binary build failed."""
 
-    pass
+    def __init__(
+        self, build_name: str, reason: str, logs: str | None = None
+    ) -> None:
+        self.build_name = build_name
+        self.reason = reason
+        self.logs = logs
+        message = f"Build '{build_name}' failed: {reason}"
+        if logs:
+            message += f"\n\nBuild logs:\n{logs}"
+        super().__init__(message)
 
 
 class SessionExistsError(OpenShiftError):
@@ -85,17 +94,18 @@ class OpenShiftConfig:
     Attributes:
         context: Kubeconfig context to use (None for current context).
         namespace: Namespace for paude resources (None for current namespace).
-        registry: External registry URL (None for auto-detect).
-        tls_verify: Whether to verify TLS certificates when pushing images.
-        resources: Resource requests/limits for pods.
+        resources: Resource requests/limits for session pods.
+        build_resources: Resource requests/limits for build pods.
     """
 
     context: str | None = None
     namespace: str | None = None  # None means use current namespace
-    registry: str | None = None
-    tls_verify: bool = True
     resources: dict[str, dict[str, str]] = field(default_factory=lambda: {
         "requests": {"cpu": "1", "memory": "4Gi"},
+        "limits": {"cpu": "4", "memory": "8Gi"},
+    })
+    build_resources: dict[str, dict[str, str]] = field(default_factory=lambda: {
+        "requests": {"cpu": "1", "memory": "2Gi"},
         "limits": {"cpu": "4", "memory": "8Gi"},
     })
 
@@ -185,6 +195,10 @@ class OpenShiftBackend:
 
     # Default timeout for oc commands (seconds)
     OC_DEFAULT_TIMEOUT = 30
+    # Timeout for rsync operations (5 minutes - large workspaces take time)
+    RSYNC_TIMEOUT = 300
+    # Number of retries for rsync on timeout
+    RSYNC_MAX_RETRIES = 3
 
     def _run_oc(
         self,
@@ -259,6 +273,52 @@ class OpenShiftBackend:
 
         return result
 
+    def _rsync_with_retry(
+        self,
+        source: str,
+        dest: str,
+        namespace: str,
+        exclude_args: list[str],
+    ) -> bool:
+        """Run oc rsync with retry logic for timeouts.
+
+        Args:
+            source: Source path (local or pod:path format).
+            dest: Destination path (local or pod:path format).
+            namespace: Kubernetes namespace.
+            exclude_args: List of --exclude arguments.
+
+        Returns:
+            True if sync succeeded, False if all retries failed.
+        """
+        for attempt in range(1, self.RSYNC_MAX_RETRIES + 1):
+            try:
+                self._run_oc(
+                    "rsync",
+                    source,
+                    dest,
+                    "-n", namespace,
+                    "--no-perms",
+                    *exclude_args,
+                    timeout=self.RSYNC_TIMEOUT,
+                    check=False,
+                )
+                return True
+            except OcTimeoutError:
+                retries = self.RSYNC_MAX_RETRIES
+                if attempt < retries:
+                    print(
+                        f"Rsync timed out (attempt {attempt}/{retries}), retrying...",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(
+                        f"Rsync failed after {retries} attempts",
+                        file=sys.stderr,
+                    )
+                    return False
+        return False
+
     def _check_connection(self) -> bool:
         """Check if logged in to OpenShift.
 
@@ -304,400 +364,288 @@ class OpenShiftBackend:
                 f"Please create it or switch to an existing namespace."
             )
 
-    def _get_openshift_route_registry(self) -> str | None:
-        """Get the OpenShift internal registry's external route URL.
+    def _create_build_config(self, config_hash: str) -> None:
+        """Create a BuildConfig and ImageStream for binary builds.
 
-        Returns:
-            Route URL or None if not exposed.
-        """
-        result = self._run_oc(
-            "get", "route", "default-route",
-            "-n", "openshift-image-registry",
-            "-o", "jsonpath={.spec.host}",
-            check=False,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-        return None
-
-    def _get_registry_url(self) -> str | None:
-        """Detect the registry URL.
-
-        Priority:
-        1. Explicitly configured registry (--openshift-registry or config)
-        2. OpenShift default-route (externally accessible)
-        3. None (registry not accessible from outside cluster)
-
-        Returns:
-            Registry URL or None if not available.
-        """
-        if self._config.registry:
-            return self._config.registry
-
-        # Try to get default-route from openshift-image-registry
-        route = self._get_openshift_route_registry()
-        if route:
-            return route
-
-        # No external route available
-        return None
-
-    def _push_via_port_forward(
-        self,
-        local_image: str,
-        ns: str,
-        tag: str,
-    ) -> str:
-        """Push image to internal registry via port-forward.
+        If the BuildConfig already exists, this is a no-op.
 
         Args:
-            local_image: Local image tag.
-            ns: Namespace for the image.
-            tag: Image tag (e.g., "latest").
+            config_hash: Hash of the configuration for naming.
+        """
+        ns = self.namespace
+        bc_name = f"paude-{config_hash}"
+
+        result = self._run_oc(
+            "get", "buildconfig", bc_name,
+            "-n", ns,
+            check=False,
+        )
+        if result.returncode == 0:
+            print(
+                f"BuildConfig/{bc_name} already exists, reusing...",
+                file=sys.stderr,
+            )
+            return
+
+        print(f"Creating BuildConfig/{bc_name}...", file=sys.stderr)
+
+        is_spec: dict[str, Any] = {
+            "apiVersion": "image.openshift.io/v1",
+            "kind": "ImageStream",
+            "metadata": {
+                "name": bc_name,
+                "namespace": ns,
+                "labels": {
+                    "app": "paude",
+                    "paude.io/config-hash": config_hash,
+                },
+            },
+        }
+
+        bc_spec: dict[str, Any] = {
+            "apiVersion": "build.openshift.io/v1",
+            "kind": "BuildConfig",
+            "metadata": {
+                "name": bc_name,
+                "namespace": ns,
+                "labels": {
+                    "app": "paude",
+                    "paude.io/config-hash": config_hash,
+                },
+            },
+            "spec": {
+                "output": {
+                    "to": {
+                        "kind": "ImageStreamTag",
+                        "name": f"{bc_name}:latest",
+                    },
+                },
+                "source": {
+                    "type": "Binary",
+                },
+                "strategy": {
+                    "type": "Docker",
+                    "dockerStrategy": {},
+                },
+                "resources": self._config.build_resources,
+            },
+        }
+
+        self._run_oc("apply", "-f", "-", input_data=json.dumps(is_spec))
+        self._run_oc("apply", "-f", "-", input_data=json.dumps(bc_spec))
+
+    def _start_binary_build(
+        self,
+        config_hash: str,
+        context_dir: Path,
+    ) -> str:
+        """Start a binary build and return the build name.
+
+        Args:
+            config_hash: Hash of the configuration for naming.
+            context_dir: Path to the build context directory.
 
         Returns:
-            The internal registry reference for pod image pulls.
-
-        Raises:
-            OpenShiftError: If push fails.
+            Name of the started build (e.g., "paude-abc123-1").
         """
-        import signal
-
-        # Find an available local port
-        local_port = 5000
+        ns = self.namespace
+        bc_name = f"paude-{config_hash}"
 
         print(
-            f"Starting port-forward to internal registry on port {local_port}...",
+            f"Starting build from {context_dir}...",
             file=sys.stderr,
         )
 
-        # Start port-forward in background
-        pf_cmd = [
-            "oc", "port-forward", "svc/image-registry",
-            "-n", "openshift-image-registry",
-            f"{local_port}:5000",
-        ]
-        if self._config.context:
-            pf_cmd = ["oc", "--context", self._config.context] + pf_cmd[1:]
-
-        port_forward_proc = subprocess.Popen(
-            pf_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+        result = self._run_oc(
+            "start-build", bc_name,
+            f"--from-dir={context_dir}",
+            "-n", ns,
+            timeout=120,
         )
 
-        # Give port-forward time to establish
-        time.sleep(2)
+        build_name = result.stdout.strip()
+        if build_name.startswith("build.build.openshift.io/"):
+            build_name = build_name.split("/")[1]
+        elif build_name.startswith("build/"):
+            build_name = build_name.split("/")[1]
 
-        # Check if port-forward is still running
-        if port_forward_proc.poll() is not None:
-            stderr = ""
-            if port_forward_proc.stderr:
-                stderr = port_forward_proc.stderr.read().decode()
-            raise OpenShiftError(
-                f"Failed to start port-forward to registry: {stderr}\n"
-                "You may not have permission to port-forward to the "
-                "openshift-image-registry namespace."
-            )
+        build_name = build_name.strip('"').replace(" started", "")
+        print(f"Build {build_name} started", file=sys.stderr)
+        return build_name
 
-        try:
-            localhost_registry = f"localhost:{local_port}"
-            localhost_tag = f"{localhost_registry}/{ns}/paude:{tag}"
-
-            # Get token for registry login
-            token_result = self._run_oc("whoami", "-t")
-            token = token_result.stdout.strip()
-
-            # Build login command
-            login_cmd = [
-                "podman", "login",
-                "--username=unused",
-                f"--password={token}",
-            ]
-            if not self._config.tls_verify:
-                login_cmd.append("--tls-verify=false")
-            login_cmd.append(localhost_registry)
-
-            login_result = subprocess.run(login_cmd, capture_output=True, text=True)
-            if login_result.returncode != 0:
-                stderr = login_result.stderr
-                if "certificate" in stderr.lower() or "tls" in stderr.lower():
-                    raise OpenShiftError(
-                        f"TLS certificate verification failed for registry.\n\n"
-                        f"The internal registry uses a self-signed certificate.\n"
-                        f"To proceed, re-run with TLS verification disabled:\n\n"
-                        f"  paude --backend=openshift --no-openshift-tls-verify\n\n"
-                        f"Original error: {stderr}"
-                    )
-                raise OpenShiftError(f"Failed to login to registry: {stderr}")
-
-            # Tag local image for localhost registry
-            tag_cmd = ["podman", "tag", local_image, localhost_tag]
-            tag_result = subprocess.run(tag_cmd, capture_output=True, text=True)
-            if tag_result.returncode != 0:
-                raise OpenShiftError(f"Failed to tag image: {tag_result.stderr}")
-
-            # Push to registry via port-forward
-            push_cmd = ["podman", "push"]
-            if not self._config.tls_verify:
-                push_cmd.append("--tls-verify=false")
-            push_cmd.append(localhost_tag)
-
-            print(f"Pushing {local_image} to {localhost_tag}...", file=sys.stderr)
-            push_result = subprocess.run(push_cmd, capture_output=True, text=True)
-            if push_result.returncode != 0:
-                stderr = push_result.stderr
-                if "certificate" in stderr.lower() or "tls" in stderr.lower():
-                    raise OpenShiftError(
-                        f"TLS certificate verification failed during push.\n\n"
-                        f"The internal registry uses a self-signed certificate.\n"
-                        f"To proceed, re-run with TLS verification disabled:\n\n"
-                        f"  paude --backend=openshift --no-openshift-tls-verify\n\n"
-                        f"Original error: {stderr}"
-                    )
-                if "connection refused" in stderr.lower() or \
-                        "connection reset" in stderr.lower():
-                    raise OpenShiftError(
-                        "Port-forward connection failed during image push.\n\n"
-                        "The port-forward approach is unstable for large images.\n"
-                        "Use an external registry instead:\n\n"
-                        "  # Login to your registry first\n"
-                        "  podman login quay.io\n\n"
-                        "  # Then run paude with the registry option\n"
-                        "  paude --backend=openshift "
-                        "--openshift-registry=quay.io/YOUR_USERNAME\n"
-                    )
-                raise OpenShiftError(f"Failed to push image: {stderr}")
-
-            print("Image pushed successfully via port-forward.", file=sys.stderr)
-
-            # Return internal registry reference for pod image pulls
-            internal_ref = (
-                f"image-registry.openshift-image-registry.svc:5000/{ns}/paude:{tag}"
-            )
-            return internal_ref
-
-        finally:
-            # Clean up port-forward process
-            port_forward_proc.send_signal(signal.SIGTERM)
-            try:
-                port_forward_proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                port_forward_proc.kill()
-
-    def push_image(
+    def _wait_for_build(
         self,
-        local_image: str,
-        remote_tag: str | None = None,
-    ) -> str:
-        """Push a local image to the OpenShift registry.
-
-        This method tries the following in order:
-        1. If --openshift-registry is specified, push to that registry
-        2. If OpenShift default-route is exposed, push via that route
-        3. Fall back to port-forward to internal registry
+        build_name: str,
+        timeout: int = 600,
+    ) -> None:
+        """Wait for a build to complete, streaming logs.
 
         Args:
-            local_image: Local image tag (e.g., "paude:latest")
-            remote_tag: Optional remote tag. If not specified, uses
-                        <registry>/<namespace>/paude:latest
-
-        Returns:
-            The full remote image reference that was pushed.
+            build_name: Name of the build to wait for.
+            timeout: Timeout in seconds.
 
         Raises:
-            OpenShiftError: If push fails.
+            BuildFailedError: If the build fails.
+            OcTimeoutError: If the build times out.
         """
         ns = self.namespace
 
-        # Extract tag from local image
-        if ":" in local_image:
-            tag = local_image.split(":")[-1]
-        else:
-            tag = "latest"
+        print(f"Waiting for build {build_name} to complete...", file=sys.stderr)
+        print("--- Build Logs ---", file=sys.stderr)
 
-        registry = self._get_registry_url()
-
-        # If no external registry is available, try port-forward
-        if not registry:
-            print(
-                "No external registry route available. "
-                "Using port-forward to internal registry...",
-                file=sys.stderr,
-            )
-            return self._push_via_port_forward(local_image, ns, tag)
-
-        # Determine if this is a user-specified external registry or OpenShift registry
-        # User-specified: full image path, just append tag
-        # OpenShift route: append namespace/paude/tag
-        is_user_specified_registry = self._config.registry is not None
-        is_openshift_registry = (
-            not is_user_specified_registry and (
-                "openshift" in registry.lower() or
-                registry == self._get_openshift_route_registry()
-            )
+        log_proc = subprocess.Popen(
+            ["oc", "logs", "-f", f"build/{build_name}", "-n", ns]
+            + (["--context", self._config.context] if self._config.context else []),
+            stdout=sys.stderr,
+            stderr=sys.stderr,
         )
 
-        # Generate remote tag if not provided
-        if not remote_tag:
-            if is_user_specified_registry:
-                # User specified full image path, just append tag
-                remote_tag = f"{registry}:{tag}"
-            else:
-                # OpenShift registry, use namespace/paude structure
-                remote_tag = f"{registry}/{ns}/paude:{tag}"
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            result = self._run_oc(
+                "get", "build", build_name,
+                "-n", ns,
+                "-o", "jsonpath={.status.phase}",
+                check=False,
+            )
+            if result.returncode != 0:
+                time.sleep(2)
+                continue
 
-        print(f"Pushing {local_image} to {remote_tag}...", file=sys.stderr)
+            phase = result.stdout.strip()
 
-        if is_openshift_registry:
-            # Get token for OpenShift registry login
-            token_result = self._run_oc("whoami", "-t")
-            token = token_result.stdout.strip()
+            if phase == "Complete":
+                log_proc.terminate()
+                print("--- End Build Logs ---", file=sys.stderr)
+                print(f"Build {build_name} completed successfully.", file=sys.stderr)
+                return
 
-            # Login to registry using podman
-            login_cmd = [
-                "podman", "login",
-                "--username=unused",
-                f"--password={token}",
-            ]
-            if not self._config.tls_verify:
-                login_cmd.append("--tls-verify=false")
-            login_cmd.append(registry)
+            if phase in ("Failed", "Error", "Cancelled"):
+                log_proc.terminate()
+                print("--- End Build Logs ---", file=sys.stderr)
 
-            login_result = subprocess.run(login_cmd, capture_output=True, text=True)
-            if login_result.returncode != 0:
-                raise OpenShiftError(
-                    f"Failed to login to registry: {login_result.stderr}"
+                reason_result = self._run_oc(
+                    "get", "build", build_name,
+                    "-n", ns,
+                    "-o", "jsonpath={.status.message}",
+                    check=False,
                 )
-        else:
-            # External registry - user should already be logged in
-            # Extract registry hostname from full image path for login check
-            # e.g., "docker.io/user/image" -> "docker.io"
-            registry_host = registry.split("/")[0]
+                if reason_result.returncode == 0:
+                    reason = reason_result.stdout.strip()
+                else:
+                    reason = phase
 
-            # Verify by checking podman login status
-            check_cmd = ["podman", "login", "--get-login", registry_host]
-            check_result = subprocess.run(
-                check_cmd, capture_output=True, text=True
-            )
-            if check_result.returncode != 0:
-                raise OpenShiftError(
-                    f"Not logged in to registry '{registry_host}'. "
-                    f"Please run: podman login {registry_host}"
+                logs_result = self._run_oc(
+                    "logs", f"build/{build_name}",
+                    "-n", ns,
+                    "--tail=50",
+                    check=False,
                 )
+                logs = logs_result.stdout if logs_result.returncode == 0 else None
 
-        # Tag local image for registry
-        tag_cmd = ["podman", "tag", local_image, remote_tag]
-        tag_result = subprocess.run(tag_cmd, capture_output=True, text=True)
-        if tag_result.returncode != 0:
-            raise OpenShiftError(
-                f"Failed to tag image: {tag_result.stderr}"
-            )
+                raise BuildFailedError(build_name, reason, logs)
 
-        # Push to registry
-        push_cmd = ["podman", "push"]
-        if not self._config.tls_verify:
-            push_cmd.append("--tls-verify=false")
-        push_cmd.append(remote_tag)
+            time.sleep(5)
 
-        push_result = subprocess.run(push_cmd, capture_output=True, text=True)
-        if push_result.returncode != 0:
-            raise OpenShiftError(
-                f"Failed to push image: {push_result.stderr}"
-            )
+        log_proc.terminate()
+        raise OcTimeoutError(
+            f"Build {build_name} did not complete within {timeout} seconds"
+        )
 
-        print("Image pushed successfully.", file=sys.stderr)
-        return remote_tag
-
-    def ensure_image(
-        self,
-        local_image: str,
-        force_push: bool = False,
-    ) -> str:
-        """Ensure an image is available in the OpenShift registry.
-
-        If the image doesn't exist in the registry or force_push is True,
-        push the local image. If no external registry route is available,
-        uses port-forward to push to the internal registry.
+    def _get_imagestream_reference(self, config_hash: str) -> str:
+        """Get the internal image reference from an ImageStream.
 
         Args:
-            local_image: Local image tag.
-            force_push: Force push even if image exists.
+            config_hash: Hash of the configuration for naming.
 
         Returns:
-            The registry image reference to use (internal service URL).
+            Internal image reference for pod image pulls.
         """
         ns = self.namespace
+        is_name = f"paude-{config_hash}"
 
-        # Extract tag from local image
-        if ":" in local_image:
-            tag = local_image.split(":")[-1]
-        else:
-            tag = "latest"
+        result = self._run_oc(
+            "get", "imagestream", is_name,
+            "-n", ns,
+            "-o", "jsonpath={.status.dockerImageRepository}",
+        )
+        repo = result.stdout.strip()
+        if not repo:
+            repo = f"image-registry.openshift-image-registry.svc:5000/{ns}/{is_name}"
 
-        registry = self._get_registry_url()
+        return f"{repo}:latest"
 
-        # Determine if using user-specified external registry
-        is_user_specified_registry = self._config.registry is not None
+    def ensure_image_via_build(
+        self,
+        config: Any,
+        workspace: Path,
+        script_dir: Path | None = None,
+        force_rebuild: bool = False,
+    ) -> str:
+        """Ensure an image is available via OpenShift binary build.
 
-        # If no external registry, we must push via port-forward
-        # (push_image handles this automatically)
-        if not registry:
-            # Internal reference for pod image pulls
-            internal_ref = (
-                f"image-registry.openshift-image-registry.svc:5000/{ns}/paude:{tag}"
-            )
+        This method:
+        1. Prepares a build context with Dockerfile and source
+        2. Creates a BuildConfig/ImageStream if needed
+        3. Runs a binary build in the cluster
+        4. Returns the internal image reference
 
-            if force_push:
-                self.push_image(local_image)
-                return internal_ref
+        Args:
+            config: PaudeConfig (or None for default image).
+            workspace: Workspace directory.
+            script_dir: Path to paude script directory (for dev mode).
+            force_rebuild: Force rebuild even if image exists.
 
-            # Check if image stream already exists
-            result = self._run_oc(
-                "get", "imagestreamtag",
-                f"paude:{tag}",
-                "-n", ns,
-                check=False,
-            )
+        Returns:
+            Internal image reference for pod image pulls.
+        """
+        import shutil
 
-            if result.returncode != 0:
-                # Image doesn't exist, push it
-                self.push_image(local_image)
+        from paude.container.image import prepare_build_context
 
-            return internal_ref
+        ns = self.namespace
 
-        # Determine image reference based on registry type
-        if is_user_specified_registry:
-            # User specified full image path, just append tag
-            # Pod will pull from external registry
-            image_ref = f"{registry}:{tag}"
-        else:
-            # OpenShift registry route - use internal service URL for pod pulls
-            image_ref = (
-                f"image-registry.openshift-image-registry.svc:5000/{ns}/paude:{tag}"
-            )
+        if config is None:
+            from paude.config.models import PaudeConfig
 
-        if force_push:
-            self.push_image(local_image)
-            return image_ref
+            config = PaudeConfig(config_file=None)
 
-        # Check if image stream exists (only applies to OpenShift internal registry)
-        if not is_user_specified_registry:
-            result = self._run_oc(
-                "get", "imagestreamtag",
-                f"paude:{tag}",
-                "-n", ns,
-                check=False,
-            )
+        build_ctx = prepare_build_context(
+            config,
+            workspace=workspace,
+            script_dir=script_dir,
+            platform="linux/amd64",
+            for_remote_build=True,
+        )
 
-            if result.returncode != 0:
-                # Image doesn't exist, push it
-                self.push_image(local_image)
-        else:
-            # For external registries, always push (we can't easily check if it exists)
-            self.push_image(local_image)
+        try:
+            config_hash = build_ctx.config_hash
+            is_name = f"paude-{config_hash}"
 
-        return image_ref
+            if not force_rebuild:
+                result = self._run_oc(
+                    "get", "imagestreamtag",
+                    f"{is_name}:latest",
+                    "-n", ns,
+                    check=False,
+                )
+                if result.returncode == 0:
+                    print(
+                        f"Image {is_name}:latest already exists, reusing...",
+                        file=sys.stderr,
+                    )
+                    return self._get_imagestream_reference(config_hash)
+
+            self._create_build_config(config_hash)
+
+            build_name = self._start_binary_build(config_hash, build_ctx.context_dir)
+
+            self._wait_for_build(build_name)
+
+            return self._get_imagestream_reference(config_hash)
+
+        finally:
+            shutil.rmtree(build_ctx.context_dir, ignore_errors=True)
 
     def _ensure_network_policy(self, session_id: str) -> None:
         """Ensure a NetworkPolicy exists that restricts egress traffic for this session.
@@ -1825,27 +1773,21 @@ class OpenShiftBackend:
         if direction in ("remote", "both"):
             # Local to remote
             print(f"Syncing local → {pod_name}:{remote_path}...", file=sys.stderr)
-            self._run_oc(
-                "rsync",
+            self._rsync_with_retry(
                 f"{workspace}/",
                 f"{pod_name}:{remote_path}",
-                "-n", ns,
-                "--no-perms",
-                *exclude_args,
-                check=False,
+                ns,
+                exclude_args,
             )
 
         if direction in ("local", "both"):
             # Remote to local
             print(f"Syncing {pod_name}:{remote_path} → local...", file=sys.stderr)
-            self._run_oc(
-                "rsync",
+            self._rsync_with_retry(
                 f"{pod_name}:{remote_path}/",
                 str(workspace),
-                "-n", ns,
-                "--no-perms",
-                *exclude_args,
-                check=False,
+                ns,
+                exclude_args,
             )
 
     def find_session_for_workspace(self, workspace: Path) -> Session | None:
@@ -2374,9 +2316,29 @@ class OpenShiftBackend:
 
         cmd.extend([local_src, remote_dest])
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            print(f"Warning: rsync to pod failed: {result.stderr}", file=sys.stderr)
+        for attempt in range(1, self.RSYNC_MAX_RETRIES + 1):
+            try:
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=self.RSYNC_TIMEOUT
+                )
+                if result.returncode != 0:
+                    print(
+                        f"Warning: rsync to pod failed: {result.stderr}",
+                        file=sys.stderr,
+                    )
+                return
+            except subprocess.TimeoutExpired:
+                retries = self.RSYNC_MAX_RETRIES
+                if attempt < retries:
+                    print(
+                        f"Rsync timed out (attempt {attempt}/{retries}), retrying...",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(
+                        f"Rsync to pod failed after {retries} attempts",
+                        file=sys.stderr,
+                    )
 
     def _rsync_from_pod(
         self,
@@ -2409,6 +2371,26 @@ class OpenShiftBackend:
 
         cmd.extend([remote_src, local_dest])
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            print(f"Warning: rsync from pod failed: {result.stderr}", file=sys.stderr)
+        for attempt in range(1, self.RSYNC_MAX_RETRIES + 1):
+            try:
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=self.RSYNC_TIMEOUT
+                )
+                if result.returncode != 0:
+                    print(
+                        f"Warning: rsync from pod failed: {result.stderr}",
+                        file=sys.stderr,
+                    )
+                return
+            except subprocess.TimeoutExpired:
+                retries = self.RSYNC_MAX_RETRIES
+                if attempt < retries:
+                    print(
+                        f"Rsync timed out (attempt {attempt}/{retries}), retrying...",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(
+                        f"Rsync from pod failed after {retries} attempts",
+                        file=sys.stderr,
+                    )

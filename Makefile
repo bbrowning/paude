@@ -81,27 +81,31 @@ login:
 publish: check-version
 	@echo "Building and pushing $(FULL_IMAGE) and $(FULL_PROXY_IMAGE)..."
 	@echo ""
-	# Build and push paude image
+	# Build and push paude image (remove any existing image/manifest first)
+	-podman rmi -f $(FULL_IMAGE) 2>/dev/null
 	-podman manifest rm $(FULL_IMAGE) 2>/dev/null
 	podman manifest create $(FULL_IMAGE)
 	podman build --platform $(PLATFORMS) --manifest $(FULL_IMAGE) ./containers/paude
-	podman manifest push $(FULL_IMAGE) $(FULL_IMAGE)
+	podman manifest push --all $(FULL_IMAGE) $(FULL_IMAGE)
 	# Tag as latest
+	-podman rmi -f $(LATEST_IMAGE) 2>/dev/null
 	-podman manifest rm $(LATEST_IMAGE) 2>/dev/null
 	podman manifest create $(LATEST_IMAGE)
 	podman build --platform $(PLATFORMS) --manifest $(LATEST_IMAGE) ./containers/paude
-	podman manifest push $(LATEST_IMAGE) $(LATEST_IMAGE)
+	podman manifest push --all $(LATEST_IMAGE) $(LATEST_IMAGE)
 	@echo ""
 	# Build and push proxy image
+	-podman rmi -f $(FULL_PROXY_IMAGE) 2>/dev/null
 	-podman manifest rm $(FULL_PROXY_IMAGE) 2>/dev/null
 	podman manifest create $(FULL_PROXY_IMAGE)
 	podman build --platform $(PLATFORMS) --manifest $(FULL_PROXY_IMAGE) ./containers/proxy
-	podman manifest push $(FULL_PROXY_IMAGE) $(FULL_PROXY_IMAGE)
+	podman manifest push --all $(FULL_PROXY_IMAGE) $(FULL_PROXY_IMAGE)
 	# Tag as latest
+	-podman rmi -f $(LATEST_PROXY_IMAGE) 2>/dev/null
 	-podman manifest rm $(LATEST_PROXY_IMAGE) 2>/dev/null
 	podman manifest create $(LATEST_PROXY_IMAGE)
 	podman build --platform $(PLATFORMS) --manifest $(LATEST_PROXY_IMAGE) ./containers/proxy
-	podman manifest push $(LATEST_PROXY_IMAGE) $(LATEST_PROXY_IMAGE)
+	podman manifest push --all $(LATEST_PROXY_IMAGE) $(LATEST_PROXY_IMAGE)
 	@echo ""
 	@echo "Published:"
 	@echo "  $(FULL_IMAGE)"

@@ -116,10 +116,6 @@ OPTIONS:
     --openshift-context Kubeconfig context for OpenShift
     --openshift-namespace
                         OpenShift namespace (default: current context)
-    --openshift-registry
-                        Container registry URL (e.g., quay.io/myuser)
-    --no-openshift-tls-verify
-                        Disable TLS certificate verification when pushing images
     --platform          Target platform for image builds (e.g., linux/amd64)
                         Use when building for a different architecture than your host
 
@@ -202,20 +198,6 @@ def session_create(
             help="OpenShift namespace (default: current context namespace).",
         ),
     ] = None,
-    openshift_registry: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-registry",
-            help="Container registry URL (e.g., quay.io/myuser).",
-        ),
-    ] = None,
-    openshift_tls_verify: Annotated[
-        bool,
-        typer.Option(
-            "--openshift-tls-verify/--no-openshift-tls-verify",
-            help="Verify TLS certificates when pushing images.",
-        ),
-    ] = True,
     platform: Annotated[
         str | None,
         typer.Option(
@@ -311,13 +293,13 @@ def session_create(
     else:
         # OpenShift backend
         from paude.backends.openshift import (
+            BuildFailedError,
             OpenShiftBackend,
             OpenShiftConfig,
         )
         from paude.backends.openshift import (
             SessionExistsError as OpenshiftSessionExistsError,
         )
-        from paude.container import ImageManager
 
         # Get script directory for dev mode
         os_script_dir: Path | None = None
@@ -325,43 +307,28 @@ def session_create(
         if (os_dev_path / "containers" / "paude" / "Dockerfile").exists():
             os_script_dir = os_dev_path
 
-        image_manager = ImageManager(script_dir=os_script_dir, platform=platform)
-
-        # Ensure image (build and push to registry)
-        try:
-            has_custom = (
-                config
-                and (config.base_image or config.dockerfile or config.pip_install)
-            )
-            if has_custom and config is not None:
-                image = image_manager.ensure_custom_image(
-                    config, force_rebuild=False, workspace=workspace
-                )
-            else:
-                image = image_manager.ensure_default_image()
-        except Exception as e:
-            typer.echo(f"Error ensuring image: {e}", err=True)
-            raise typer.Exit(1) from None
-
         openshift_config = OpenShiftConfig(
             context=openshift_context,
             namespace=openshift_namespace,
-            registry=openshift_registry,
-            tls_verify=openshift_tls_verify,
         )
 
         try:
             os_backend = OpenShiftBackend(config=openshift_config)
 
-            # Push image to OpenShift registry
-            typer.echo("Pushing image to OpenShift registry...")
-            remote_image = os_backend.push_image(image)
+            # Build image via OpenShift binary build
+            typer.echo("Building image in OpenShift cluster...")
+            image = os_backend.ensure_image_via_build(
+                config=config,
+                workspace=workspace,
+                script_dir=os_script_dir,
+                force_rebuild=False,
+            )
 
             # Create session config
             session_config = SessionConfig(
                 name=name,
                 workspace=workspace,
-                image=remote_image,
+                image=image,
                 env=env,
                 mounts=[],  # OpenShift uses oc rsync, not mounts
                 args=[],
@@ -378,6 +345,9 @@ def session_create(
                 f"Run 'paude start {session.name} --backend=openshift' "
                 "to start it."
             )
+        except BuildFailedError as e:
+            typer.echo(f"Build failed: {e}", err=True)
+            raise typer.Exit(1) from None
         except OpenshiftSessionExistsError as e:
             typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1) from None
@@ -1160,20 +1130,6 @@ def main(
             help="OpenShift namespace (default: current context namespace).",
         ),
     ] = None,
-    openshift_registry: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-registry",
-            help="Container registry URL (e.g., quay.io/myuser).",
-        ),
-    ] = None,
-    openshift_tls_verify: Annotated[
-        bool,
-        typer.Option(
-            "--openshift-tls-verify/--no-openshift-tls-verify",
-            help="Verify TLS certificates when pushing images.",
-        ),
-    ] = True,
     platform: Annotated[
         str | None,
         typer.Option(
@@ -1215,8 +1171,6 @@ def main(
     ctx.obj["backend"] = backend.value
     ctx.obj["openshift_context"] = openshift_context
     ctx.obj["openshift_namespace"] = openshift_namespace
-    ctx.obj["openshift_registry"] = openshift_registry
-    ctx.obj["openshift_tls_verify"] = openshift_tls_verify
     ctx.obj["platform"] = platform
     ctx.obj["claude_args"] = parsed_args
 
@@ -1237,11 +1191,11 @@ def _run_openshift_backend(ctx: typer.Context) -> None:
     """Run Claude Code using the OpenShift backend with persistent sessions."""
     from paude.backends import OpenShiftBackend, OpenShiftConfig, SessionConfig
     from paude.backends.openshift import (
+        BuildFailedError,
         NamespaceNotFoundError,
         OcNotInstalledError,
         OcNotLoggedInError,
         OpenShiftError,
-        RegistryNotAccessibleError,
     )
     from paude.config import detect_config, parse_config
     from paude.environment import build_environment
@@ -1251,9 +1205,6 @@ def _run_openshift_backend(ctx: typer.Context) -> None:
     claude_args = ctx.obj["claude_args"]
     openshift_context = ctx.obj["openshift_context"]
     openshift_namespace = ctx.obj["openshift_namespace"]
-    openshift_registry = ctx.obj["openshift_registry"]
-    openshift_tls_verify = ctx.obj["openshift_tls_verify"]
-    platform = ctx.obj.get("platform")
 
     workspace = Path.cwd()
 
@@ -1280,8 +1231,6 @@ def _run_openshift_backend(ctx: typer.Context) -> None:
     os_config = OpenShiftConfig(
         context=openshift_context,
         namespace=openshift_namespace,
-        registry=openshift_registry,
-        tls_verify=openshift_tls_verify,
     )
 
     try:
@@ -1295,31 +1244,23 @@ def _run_openshift_backend(ctx: typer.Context) -> None:
 
     rebuild = ctx.obj["rebuild"]
 
-    # Determine image to use
-    # For OpenShift, we build locally and push to internal registry
-    from paude.container import ImageManager
-
     # Get script directory for dev mode
     script_dir: Path | None = None
     dev_path = Path(__file__).parent.parent.parent
     if (dev_path / "containers" / "paude" / "Dockerfile").exists():
         script_dir = dev_path
 
-    image_manager = ImageManager(script_dir=script_dir, platform=platform)
-
-    # Build the image locally first
-    if config and (config.base_image or config.dockerfile or config.pip_install):
-        local_image = image_manager.ensure_custom_image(
-            config, force_rebuild=rebuild, workspace=workspace
-        )
-    else:
-        local_image = image_manager.ensure_default_image()
-
-    # Push to OpenShift registry
+    # Build image via OpenShift binary build
     try:
-        image = backend_instance.ensure_image(local_image, force_push=rebuild)
-    except RegistryNotAccessibleError as e:
-        typer.echo(f"Error: {e}", err=True)
+        typer.echo("Building image in OpenShift cluster...")
+        image = backend_instance.ensure_image_via_build(
+            config=config,
+            workspace=workspace,
+            script_dir=script_dir,
+            force_rebuild=rebuild,
+        )
+    except BuildFailedError as e:
+        typer.echo(f"Build failed: {e}", err=True)
         raise typer.Exit(1) from None
 
     # Use persistent session workflow:

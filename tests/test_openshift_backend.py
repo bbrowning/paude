@@ -27,23 +27,24 @@ class TestOpenShiftConfig:
 
         assert config.context is None
         assert config.namespace is None  # None means use current context namespace
-        assert config.registry is None
         assert "requests" in config.resources
         assert "limits" in config.resources
+        assert "requests" in config.build_resources
+        assert "limits" in config.build_resources
 
     def test_custom_values(self) -> None:
         """OpenShiftConfig accepts custom values."""
         config = OpenShiftConfig(
             context="my-context",
             namespace="my-namespace",
-            registry="my-registry:5000",
             resources={"requests": {"cpu": "2", "memory": "8Gi"}},
+            build_resources={"requests": {"cpu": "1", "memory": "4Gi"}},
         )
 
         assert config.context == "my-context"
         assert config.namespace == "my-namespace"
-        assert config.registry == "my-registry:5000"
         assert config.resources["requests"]["cpu"] == "2"
+        assert config.build_resources["requests"]["memory"] == "4Gi"
 
 
 class TestOpenShiftBackend:
@@ -1047,3 +1048,132 @@ class TestOpenShiftStatefulSetSpec:
 
         vct = spec["spec"]["volumeClaimTemplates"][0]
         assert vct["spec"]["storageClassName"] == "fast-ssd"
+
+
+class TestBuildFailedError:
+    """Tests for BuildFailedError exception."""
+
+    def test_message_format(self) -> None:
+        """BuildFailedError has expected message format."""
+        from paude.backends.openshift import BuildFailedError
+
+        error = BuildFailedError("paude-abc123-1", "OutOfMemory")
+        assert "paude-abc123-1" in str(error)
+        assert "OutOfMemory" in str(error)
+
+    def test_includes_logs_when_provided(self) -> None:
+        """BuildFailedError includes logs when provided."""
+        from paude.backends.openshift import BuildFailedError
+
+        logs = "Step 5/10: npm install\nOOM killed"
+        error = BuildFailedError("paude-abc123-1", "OutOfMemory", logs=logs)
+        assert "OOM killed" in str(error)
+
+
+class TestCreateBuildConfig:
+    """Tests for _create_build_config method."""
+
+    @patch("subprocess.run")
+    def test_creates_buildconfig_and_imagestream(
+        self, mock_run: MagicMock
+    ) -> None:
+        """_create_build_config creates BuildConfig and ImageStream."""
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "get" in cmd and "buildconfig" in cmd:
+                # BuildConfig doesn't exist yet
+                return MagicMock(returncode=1, stdout="", stderr="not found")
+            # Apply commands succeed
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._create_build_config("abc123")
+
+        # Should have called oc apply twice (ImageStream and BuildConfig)
+        calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        assert len(calls) >= 2
+
+    @patch("subprocess.run")
+    def test_skips_if_buildconfig_exists(
+        self, mock_run: MagicMock
+    ) -> None:
+        """_create_build_config skips if BuildConfig already exists."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="{}", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._create_build_config("abc123")
+
+        # Should only have called get, not apply
+        calls = mock_run.call_args_list
+        get_calls = [c for c in calls if "get" in str(c) and "buildconfig" in str(c)]
+        apply_calls = [c for c in calls if "apply" in str(c)]
+        assert len(get_calls) == 1
+        assert len(apply_calls) == 0
+
+
+class TestStartBinaryBuild:
+    """Tests for _start_binary_build method."""
+
+    @patch("subprocess.run")
+    def test_starts_build_with_from_dir(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """_start_binary_build uses --from-dir option."""
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="build/paude-abc123-1 started", stderr=""
+        )
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        build_name = backend._start_binary_build("abc123", tmp_path)
+
+        assert "paude-abc123-1" in build_name
+
+        # Verify start-build was called with --from-dir
+        calls = mock_run.call_args_list
+        start_calls = [c for c in calls if "start-build" in str(c)]
+        assert len(start_calls) >= 1
+        cmd = start_calls[0][0][0]
+        assert any("--from-dir" in str(arg) for arg in cmd)
+
+
+class TestGetImagestreamReference:
+    """Tests for _get_imagestream_reference method."""
+
+    @patch("subprocess.run")
+    def test_returns_internal_reference(
+        self, mock_run: MagicMock
+    ) -> None:
+        """_get_imagestream_reference returns internal image URL."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="image-registry.openshift-image-registry.svc:5000/test-ns/paude-abc123",
+            stderr="",
+        )
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        ref = backend._get_imagestream_reference("abc123")
+
+        assert "image-registry.openshift-image-registry.svc:5000" in ref
+        assert "paude-abc123" in ref
+        assert ":latest" in ref
+
+    @patch("subprocess.run")
+    def test_falls_back_to_default_registry(
+        self, mock_run: MagicMock
+    ) -> None:
+        """_get_imagestream_reference uses default when no dockerImageRepository."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        ref = backend._get_imagestream_reference("abc123")
+
+        assert "image-registry.openshift-image-registry.svc:5000" in ref
+        assert "test-ns" in ref
+        assert "paude-abc123" in ref
