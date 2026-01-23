@@ -33,18 +33,59 @@ paude --backend=openshift --openshift-namespace=my-namespace
 
 ## Session Management
 
+Paude now uses a unified session model across all backends. Sessions are persistent by default, surviving pod restarts via StatefulSets and PersistentVolumeClaims.
+
+### Quick Start (Ephemeral)
+
 ```bash
-# List active sessions
-paude sessions --backend=openshift
+# Start immediately (creates ephemeral session)
+paude --backend=openshift
+```
 
-# Attach to an existing session
-paude attach SESSION_ID --backend=openshift
+### Persistent Sessions
 
-# Stop a session
-paude stop SESSION_ID --backend=openshift
+```bash
+# Create a named session (without starting)
+paude session create my-project --backend=openshift
 
-# Sync files manually
-paude sync SESSION_ID --backend=openshift
+# Start the session (scales StatefulSet, syncs files, connects)
+paude session start my-project --backend=openshift
+
+# Work in Claude... then detach with Ctrl+b d
+
+# Reconnect later
+paude session connect my-project --backend=openshift
+
+# Stop to save cluster resources (scales to 0, preserves PVC)
+paude session stop my-project --backend=openshift
+
+# Restart - instant resume, everything still there
+paude session start my-project --backend=openshift
+
+# List all sessions
+paude session list --backend=openshift
+
+# Delete session completely (removes StatefulSet + PVC)
+paude session delete my-project --confirm --backend=openshift
+```
+
+### Session Lifecycle
+
+| State | StatefulSet Replicas | Pod | PVC | Files |
+|-------|---------------------|-----|-----|-------|
+| Created | 0 | None | Created | Empty |
+| Started | 1 | Running | Bound | Synced from local |
+| Stopped | 0 | None | Retained | Preserved |
+| Deleted | Deleted | Deleted | Deleted | Gone |
+
+### OpenShift-Specific Options
+
+```bash
+# Custom PVC size
+paude session create my-project --backend=openshift --pvc-size=50Gi
+
+# Custom storage class
+paude session create my-project --backend=openshift --storage-class=fast-ssd
 ```
 
 ## Configuration

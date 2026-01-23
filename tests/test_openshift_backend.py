@@ -287,8 +287,8 @@ class TestListSessions:
         assert sessions == []
 
     @patch("subprocess.run")
-    def test_parses_pods_response(self, mock_run: MagicMock) -> None:
-        """list_sessions parses pods response correctly."""
+    def test_parses_pods_response_legacy(self, mock_run: MagicMock) -> None:
+        """list_sessions_legacy parses pods response correctly."""
         pods_response = {
             "items": [
                 {
@@ -316,25 +316,25 @@ class TestListSessions:
         )
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        sessions = backend.list_sessions()
+        sessions = backend.list_sessions_legacy()
 
         assert len(sessions) == 2
-        assert sessions[0].id == "abc123"
+        assert sessions[0].name == "abc123"
         assert sessions[0].status == "running"
-        assert sessions[1].id == "def456"
+        assert sessions[1].name == "def456"
         assert sessions[1].status == "pending"
 
 
 class TestStopSession:
-    """Tests for stop_session method."""
+    """Tests for stop_session_legacy method."""
 
     @patch("subprocess.run")
     def test_deletes_pod(self, mock_run: MagicMock) -> None:
-        """stop_session deletes the pod."""
+        """stop_session_legacy deletes the pod."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        backend.stop_session("abc123")
+        backend.stop_session_legacy("abc123")
 
         # Should have called oc delete pod and oc delete secrets
         assert mock_run.call_count >= 2
@@ -346,26 +346,26 @@ class TestStopSession:
 
 
 class TestAttachSession:
-    """Tests for attach_session method."""
+    """Tests for attach_session_legacy method."""
 
     @patch("subprocess.run")
     def test_returns_error_when_pod_not_found(self, mock_run: MagicMock) -> None:
-        """attach_session returns 1 when pod not found."""
+        """attach_session_legacy returns 1 when pod not found."""
         mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        result = backend.attach_session("nonexistent")
+        result = backend.attach_session_legacy("nonexistent")
 
         assert result == 1
 
     @patch("subprocess.run")
     def test_returns_error_when_pod_not_running(self, mock_run: MagicMock) -> None:
-        """attach_session returns 1 when pod not running."""
+        """attach_session_legacy returns 1 when pod not running."""
         # First call is get pod status, second would be exec
         mock_run.return_value = MagicMock(returncode=0, stdout="Pending", stderr="")
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        result = backend.attach_session("pending-session")
+        result = backend.attach_session_legacy("pending-session")
 
         assert result == 1
 
@@ -569,3 +569,481 @@ class TestCreateGitconfigConfigmap:
 
             assert result == "paude-gitconfig-test-123"
             mock_run.assert_called()
+
+
+# =============================================================================
+# Session Management Tests (New Backend Protocol)
+# =============================================================================
+
+
+class TestOpenShiftSessionHelpers:
+    """Tests for OpenShift session helper functions."""
+
+    def test_generate_session_name_includes_project(self) -> None:
+        """Session name includes project name from workspace."""
+        from paude.backends.openshift import _generate_session_name
+
+        name = _generate_session_name(Path("/home/user/my-project"))
+        assert name.startswith("my-project-")
+
+    def test_encode_decode_path_roundtrip(self) -> None:
+        """Path encoding and decoding is reversible."""
+        from paude.backends.openshift import _decode_path, _encode_path
+
+        original = Path("/home/user/my project/src")
+        encoded = _encode_path(original)
+        decoded = _decode_path(encoded)
+        assert decoded == original
+
+
+class TestOpenShiftCreateSession:
+    """Tests for OpenShiftBackend.create_session."""
+
+    @patch("subprocess.run")
+    def test_create_session_creates_statefulset(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Create session creates a StatefulSet."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        from paude.backends.base import SessionConfig
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        config = SessionConfig(
+            name="test-session",
+            workspace=Path("/home/user/project"),
+            image="paude:latest",
+        )
+
+        session = backend.create_session(config)
+
+        assert session.name == "test-session"
+        assert session.status == "stopped"
+        assert session.backend_type == "openshift"
+        assert session.container_id == "paude-test-session-0"
+        assert session.volume_name == "workspace-paude-test-session-0"
+
+        # Verify oc apply was called for StatefulSet
+        calls = mock_run.call_args_list
+        apply_calls = [c for c in calls if "apply" in str(c)]
+        assert len(apply_calls) > 0
+
+    @patch("subprocess.run")
+    def test_create_session_raises_if_exists(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Create session raises SessionExistsError if session exists."""
+        # First call to get statefulset returns existing
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "get" in cmd and "statefulset" in cmd:
+                return MagicMock(
+                    returncode=0,
+                    stdout=json.dumps({
+                        "apiVersion": "apps/v1",
+                        "kind": "StatefulSet",
+                        "metadata": {"name": "paude-existing"},
+                    }),
+                    stderr="",
+                )
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        from paude.backends.base import SessionConfig
+        from paude.backends.openshift import SessionExistsError
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        config = SessionConfig(
+            name="existing",
+            workspace=Path("/home/user/project"),
+            image="paude:latest",
+        )
+
+        with pytest.raises(SessionExistsError):
+            backend.create_session(config)
+
+
+class TestOpenShiftDeleteSession:
+    """Tests for OpenShiftBackend.delete_session."""
+
+    @patch("subprocess.run")
+    def test_delete_session_requires_confirmation(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Delete session requires confirm=True."""
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with pytest.raises(ValueError, match="(?i)confirm"):
+            backend.delete_session("my-session", confirm=False)
+
+    @patch("subprocess.run")
+    def test_delete_session_raises_if_not_found(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Delete session raises SessionNotFoundError if not found."""
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "get" in cmd and "statefulset" in cmd:
+                # Not found - return non-zero exit code with empty stdout
+                return MagicMock(returncode=1, stdout="", stderr="not found")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        from paude.backends.openshift import SessionNotFoundError
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with pytest.raises(SessionNotFoundError):
+            backend.delete_session("nonexistent", confirm=True)
+
+    @patch("subprocess.run")
+    def test_delete_session_deletes_resources(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Delete session deletes StatefulSet, PVC, and credentials."""
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "get" in cmd and "statefulset" in cmd:
+                return MagicMock(
+                    returncode=0,
+                    stdout=json.dumps({
+                        "apiVersion": "apps/v1",
+                        "kind": "StatefulSet",
+                        "metadata": {"name": "paude-test"},
+                    }),
+                    stderr="",
+                )
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend.delete_session("test", confirm=True)
+
+        # Verify delete commands were called
+        calls = mock_run.call_args_list
+        delete_calls = [c for c in calls if "delete" in str(c)]
+        assert len(delete_calls) >= 2  # StatefulSet, PVC, and credentials
+
+
+class TestOpenShiftStartSession:
+    """Tests for OpenShiftBackend.start_session."""
+
+    @patch("subprocess.run")
+    def test_start_session_raises_if_not_found(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Start session raises SessionNotFoundError if not found."""
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "get" in cmd and "statefulset" in cmd:
+                # Not found - return non-zero exit code
+                return MagicMock(returncode=1, stdout="", stderr="not found")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        from paude.backends.openshift import SessionNotFoundError
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with pytest.raises(SessionNotFoundError):
+            backend.start_session("nonexistent")
+
+    @patch("subprocess.run")
+    def test_start_session_scales_statefulset(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Start session scales StatefulSet to 1."""
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "get" in cmd and "statefulset" in cmd:
+                return MagicMock(
+                    returncode=0,
+                    stdout=json.dumps({
+                        "apiVersion": "apps/v1",
+                        "kind": "StatefulSet",
+                        "metadata": {
+                            "name": "paude-test",
+                            "annotations": {
+                                "paude.io/workspace": "",
+                            },
+                        },
+                        "spec": {"replicas": 0},
+                    }),
+                    stderr="",
+                )
+            # For scale and other commands
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        # Mock wait_for_pod_ready and connect_session to avoid actual waits
+        with patch.object(backend, "_wait_for_pod_ready"):
+            with patch.object(backend, "connect_session", return_value=0):
+                exit_code = backend.start_session("test", sync=False)
+
+        assert exit_code == 0
+
+        # Verify scale command was called
+        calls = mock_run.call_args_list
+        scale_calls = [c for c in calls if "scale" in str(c)]
+        assert len(scale_calls) >= 1
+
+
+class TestOpenShiftStopSession:
+    """Tests for OpenShiftBackend.stop_session."""
+
+    @patch("subprocess.run")
+    def test_stop_session_scales_to_zero(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Stop session scales StatefulSet to 0."""
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "get" in cmd and "statefulset" in cmd:
+                return MagicMock(
+                    returncode=0,
+                    stdout=json.dumps({
+                        "apiVersion": "apps/v1",
+                        "kind": "StatefulSet",
+                        "metadata": {"name": "paude-test"},
+                        "spec": {"replicas": 1},
+                    }),
+                    stderr="",
+                )
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend.stop_session("test")
+
+        # Verify scale to 0 was called
+        calls = mock_run.call_args_list
+        scale_calls = [c for c in calls if "scale" in str(c) and "replicas=0" in str(c)]
+        assert len(scale_calls) >= 1
+
+    @patch("subprocess.run")
+    def test_stop_session_raises_if_not_found(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Stop session raises SessionNotFoundError if not found."""
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "get" in cmd and "statefulset" in cmd:
+                # Not found - return non-zero exit code
+                return MagicMock(returncode=1, stdout="", stderr="not found")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        from paude.backends.openshift import SessionNotFoundError
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with pytest.raises(SessionNotFoundError):
+            backend.stop_session("nonexistent")
+
+
+class TestOpenShiftListSessions:
+    """Tests for OpenShiftBackend.list_sessions (new protocol)."""
+
+    @patch("subprocess.run")
+    def test_list_sessions_returns_statefulsets(
+        self, mock_run: MagicMock
+    ) -> None:
+        """List sessions returns StatefulSets as sessions."""
+        from paude.backends.openshift import _encode_path
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "get" in cmd and "statefulsets" in cmd and "-l" in cmd:
+                return MagicMock(
+                    returncode=0,
+                    stdout=json.dumps({
+                        "items": [
+                            {
+                                "metadata": {
+                                    "name": "paude-test-session",
+                                    "labels": {
+                                        "app": "paude",
+                                        "paude.io/session-name": "test-session",
+                                    },
+                                    "annotations": {
+                                        "paude.io/workspace": _encode_path(
+                                            Path("/home/user/project")
+                                        ),
+                                        "paude.io/created-at": "2024-01-15T10:00:00Z",
+                                    },
+                                },
+                                "spec": {"replicas": 1},
+                                "status": {"readyReplicas": 1},
+                            }
+                        ]
+                    }),
+                    stderr="",
+                )
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        sessions = backend.list_sessions()
+
+        assert len(sessions) == 1
+        assert sessions[0].name == "test-session"
+        assert sessions[0].status == "running"
+        assert sessions[0].backend_type == "openshift"
+
+    @patch("subprocess.run")
+    def test_list_sessions_returns_empty_on_error(
+        self, mock_run: MagicMock
+    ) -> None:
+        """List sessions returns empty list on error."""
+
+        def run_side_effect(*args, **kwargs):
+            return MagicMock(returncode=1, stdout="", stderr="error")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        sessions = backend.list_sessions()
+
+        assert sessions == []
+
+
+class TestOpenShiftGetSession:
+    """Tests for OpenShiftBackend.get_session."""
+
+    @patch("subprocess.run")
+    def test_get_session_returns_session_if_found(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Get session returns session if StatefulSet found."""
+        from paude.backends.openshift import _encode_path
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "get" in cmd and "statefulset" in cmd:
+                return MagicMock(
+                    returncode=0,
+                    stdout=json.dumps({
+                        "metadata": {
+                            "name": "paude-my-session",
+                            "annotations": {
+                                "paude.io/workspace": _encode_path(
+                                    Path("/home/user/project")
+                                ),
+                                "paude.io/created-at": "2024-01-15T10:00:00Z",
+                            },
+                        },
+                        "spec": {"replicas": 0},
+                        "status": {},
+                    }),
+                    stderr="",
+                )
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        session = backend.get_session("my-session")
+
+        assert session is not None
+        assert session.name == "my-session"
+        assert session.status == "stopped"
+
+    @patch("subprocess.run")
+    def test_get_session_returns_none_if_not_found(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Get session returns None if StatefulSet not found."""
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "get" in cmd and "statefulset" in cmd:
+                # Not found - return non-zero exit code
+                return MagicMock(returncode=1, stdout="", stderr="not found")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        session = backend.get_session("nonexistent")
+
+        assert session is None
+
+
+class TestOpenShiftStatefulSetSpec:
+    """Tests for _generate_statefulset_spec."""
+
+    def test_generates_statefulset_with_volume_claim_templates(self) -> None:
+        """StatefulSet spec includes volumeClaimTemplates."""
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        spec = backend._generate_statefulset_spec(
+            session_name="test-session",
+            image="paude:latest",
+            env={},
+            workspace=Path("/home/user/project"),
+        )
+
+        assert spec["kind"] == "StatefulSet"
+        assert spec["metadata"]["name"] == "paude-test-session"
+        assert spec["spec"]["replicas"] == 0  # Created stopped
+        assert "volumeClaimTemplates" in spec["spec"]
+        assert len(spec["spec"]["volumeClaimTemplates"]) > 0
+
+    def test_statefulset_includes_workspace_annotation(self) -> None:
+        """StatefulSet includes workspace path in annotations."""
+        from paude.backends.openshift import _encode_path
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        workspace = Path("/home/user/my-project")
+        spec = backend._generate_statefulset_spec(
+            session_name="test",
+            image="paude:latest",
+            env={},
+            workspace=workspace,
+        )
+
+        annotations = spec["metadata"]["annotations"]
+        assert annotations["paude.io/workspace"] == _encode_path(workspace)
+
+    def test_statefulset_uses_custom_pvc_size(self) -> None:
+        """StatefulSet uses custom PVC size when specified."""
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        spec = backend._generate_statefulset_spec(
+            session_name="test",
+            image="paude:latest",
+            env={},
+            workspace=Path("/project"),
+            pvc_size="50Gi",
+        )
+
+        vct = spec["spec"]["volumeClaimTemplates"][0]
+        assert vct["spec"]["resources"]["requests"]["storage"] == "50Gi"
+
+    def test_statefulset_uses_custom_storage_class(self) -> None:
+        """StatefulSet uses custom storage class when specified."""
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        spec = backend._generate_statefulset_spec(
+            session_name="test",
+            image="paude:latest",
+            env={},
+            workspace=Path("/project"),
+            storage_class="fast-ssd",
+        )
+
+        vct = spec["spec"]["volumeClaimTemplates"][0]
+        assert vct["spec"]["storageClassName"] == "fast-ssd"

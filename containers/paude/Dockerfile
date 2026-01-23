@@ -1,6 +1,6 @@
 FROM debian:bookworm-slim
 
-# System dependencies
+# System dependencies including Python for venv creation
 RUN apt-get update && \
     apt-get install -y \
         git \
@@ -15,6 +15,9 @@ RUN apt-get update && \
         bash \
         tmux \
         locales \
+        python3 \
+        python3-venv \
+        python3-pip \
     && rm -rf /var/lib/apt/lists/* \
     && localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
 
@@ -34,6 +37,9 @@ USER paude
 WORKDIR /home/paude
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
+# Install uv for fast Python package management at runtime
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+
 # Disable auto-updates (version controlled by image rebuild)
 ENV DISABLE_AUTOUPDATER=1
 
@@ -44,6 +50,7 @@ ENV PATH="/home/paude/.local/bin:$PATH"
 USER root
 COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY --chmod=755 entrypoint-tmux.sh /usr/local/bin/entrypoint-tmux.sh
+COPY --chmod=755 entrypoint-session.sh /usr/local/bin/entrypoint-session.sh
 
 # Fix permissions on directories created by Claude install
 # Must be done as root after Claude install, for OpenShift arbitrary UID

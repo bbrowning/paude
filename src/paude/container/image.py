@@ -171,6 +171,14 @@ class ImageManager:
                 entrypoint_tmux_dest.write_text(content, newline="\n")
                 entrypoint_tmux_dest.chmod(0o755)
 
+            # Copy session entrypoint for persistent sessions (Podman and OpenShift)
+            entrypoint_session = entrypoint.parent / "entrypoint-session.sh"
+            entrypoint_session_dest = Path(tmpdir) / "entrypoint-session.sh"
+            if entrypoint_session.exists():
+                content = entrypoint_session.read_text().replace("\r\n", "\n")
+                entrypoint_session_dest.write_text(content, newline="\n")
+                entrypoint_session_dest.chmod(0o755)
+
             # Copy features to build context if present
             if config.features:
                 from paude.features.downloader import FEATURE_CACHE_DIR

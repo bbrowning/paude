@@ -8,7 +8,8 @@ A container runtime for [Claude Code](https://claude.ai/code) that provides isol
 - Authenticates via Google Vertex AI (gcloud Application Default Credentials)
 - Read-write access to current working directory only
 - Git read operations work (clone, pull, local commits) - push blocked by design
-- Persists Claude Code settings between sessions
+- **Persistent sessions**: Survive restarts with named volumes/PVCs
+- **Unified session management**: Same commands for both backends
 - **Multiple backends**: Local (Podman) or remote (OpenShift/Kubernetes)
 
 **Status**: Paude is a work-in-progress. See the [roadmap](docs/ROADMAP.md) for planned features and priorities.
@@ -71,26 +72,81 @@ Arguments before `--` are interpreted by paude. Arguments after `--` are passed 
 
 Container images are pulled automatically on first run. For development, run from the cloned repo to build images locally.
 
-## OpenShift Backend
+## Session Management
 
-For remote execution on OpenShift/Kubernetes clusters with persistent sessions:
+Paude provides persistent sessions that survive container/pod restarts with consistent commands across both Podman and OpenShift backends.
+
+### Quick Start (Ephemeral)
 
 ```bash
-# Start a session on OpenShift
+# Start immediately (creates ephemeral session)
+paude                         # Local Podman
+paude --backend=openshift     # Remote OpenShift
+```
+
+### Persistent Sessions
+
+```bash
+# Create a named session (without starting)
+paude session create my-project
+
+# Start the session (launches container, connects)
+paude session start my-project
+
+# Work in Claude... then detach with Ctrl+b d
+
+# Reconnect later
+paude session connect my-project
+
+# Stop to save resources (preserves state)
+paude session stop my-project
+
+# Restart - instant resume, no reinstall
+paude session start my-project
+
+# List all sessions
+paude session list
+
+# Delete session completely
+paude session delete my-project --confirm
+```
+
+### Backend Selection
+
+All session commands work with both backends:
+
+```bash
+# Explicit backend selection
+paude session create my-project --backend=openshift
+paude session list --backend=podman
+
+# Backend-specific options
+paude session create my-project --backend=openshift \
+  --pvc-size=50Gi \
+  --storage-class=fast-ssd
+```
+
+### Session Lifecycle
+
+| Command | What It Does |
+|---------|--------------|
+| `create` | Creates session resources (container/StatefulSet, volume/PVC) |
+| `start` | Starts container/pod, syncs files, connects |
+| `stop` | Stops container/pod, preserves volume |
+| `connect` | Attaches to running session |
+| `delete` | Removes all resources including volume |
+
+## OpenShift Backend
+
+For remote execution on OpenShift/Kubernetes clusters:
+
+```bash
 paude --backend=openshift
-
-# List active sessions
-paude sessions --backend=openshift
-
-# Attach to an existing session (survives network disconnects)
-paude attach SESSION_ID --backend=openshift
-
-# Stop a session
-paude stop SESSION_ID --backend=openshift
 ```
 
 The OpenShift backend provides:
-- **Persistent sessions** via tmux (survive network disconnects)
+- **Persistent sessions** using StatefulSets with PVC storage
+- **Survive network disconnects** via tmux attachment
 - **File synchronization** between local and remote workspace
 - **Automatic image push** to OpenShift internal registry
 - **Credential injection** via Kubernetes Secrets

@@ -102,7 +102,8 @@ RUN if command -v apt-get >/dev/null 2>&1; then \\
     lines.append("USER root")
     lines.append("COPY entrypoint.sh /usr/local/bin/entrypoint.sh")
     lines.append("COPY entrypoint-tmux.sh /usr/local/bin/entrypoint-tmux.sh")
-    lines.append("RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/entrypoint-tmux.sh")
+    lines.append("COPY entrypoint-session.sh /usr/local/bin/entrypoint-session.sh")
+    lines.append("RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/entrypoint-tmux.sh /usr/local/bin/entrypoint-session.sh")
 
     lines.append("")
     lines.append("# Fix permissions on directories created by Claude install")

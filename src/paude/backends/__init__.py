@@ -1,6 +1,6 @@
 """Backend abstraction for paude container execution."""
 
-from paude.backends.base import Backend, Session
+from paude.backends.base import Backend, LegacyBackend, Session, SessionConfig
 from paude.backends.openshift import (
     NamespaceNotFoundError,
     OcNotInstalledError,
@@ -11,10 +11,15 @@ from paude.backends.openshift import (
     OpenShiftError,
     RegistryNotAccessibleError,
 )
-from paude.backends.podman import PodmanBackend
+from paude.backends.podman import (
+    PodmanBackend,
+    SessionExistsError,
+    SessionNotFoundError,
+)
 
 __all__ = [
     "Backend",
+    "LegacyBackend",
     "NamespaceNotFoundError",
     "OcNotInstalledError",
     "OcNotLoggedInError",
@@ -25,4 +30,7 @@ __all__ = [
     "PodmanBackend",
     "RegistryNotAccessibleError",
     "Session",
+    "SessionConfig",
+    "SessionExistsError",
+    "SessionNotFoundError",
 ]
