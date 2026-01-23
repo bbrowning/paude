@@ -77,9 +77,22 @@ def show_dry_run(flags: dict[str, Any]) -> None:
 
     typer.echo("")
     typer.echo("Flags:")
+    typer.echo(f"  --backend: {flags.get('backend', 'podman')}")
     typer.echo(f"  --yolo: {flags.get('yolo', False)}")
     typer.echo(f"  --allow-network: {flags.get('allow_network', False)}")
     typer.echo(f"  --rebuild: {flags.get('rebuild', False)}")
+
+    # OpenShift-specific options
+    backend = flags.get("backend", "podman")
+    if backend == "openshift":
+        ctx = flags.get("openshift_context") or "(current context)"
+        ns = flags.get("openshift_namespace") or "(current namespace)"
+        reg = flags.get("openshift_registry") or "(auto-detect)"
+        tls = flags.get("openshift_tls_verify", True)
+        typer.echo(f"  --openshift-context: {ctx}")
+        typer.echo(f"  --openshift-namespace: {ns}")
+        typer.echo(f"  --openshift-registry: {reg}")
+        typer.echo(f"  --openshift-tls-verify: {tls}")
 
     if flags.get("claude_args"):
         typer.echo(f"  claude_args: {flags['claude_args']}")

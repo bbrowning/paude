@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 # Ensure HOME is set correctly for OpenShift arbitrary UID
 # OpenShift runs containers with random UIDs that don't exist in /etc/passwd
@@ -60,12 +61,10 @@ if [[ -f /tmp/claude.json.seed ]] || [[ -L /tmp/claude.json.seed ]]; then
 fi
 
 # Create symlinks from shadowed venv directories to /opt/venv
-# PAUDE_VENV_PATHS is a colon-separated list of venv paths
 if [[ -n "${PAUDE_VENV_PATHS:-}" && -d /opt/venv ]]; then
     IFS=':' read -ra VENV_PATHS <<< "$PAUDE_VENV_PATHS"
     for venv_path in "${VENV_PATHS[@]}"; do
         if [[ -d "$venv_path" ]]; then
-            # Create symlinks for common venv subdirectories
             for subdir in bin lib include lib64 pyvenv.cfg; do
                 if [[ -e "/opt/venv/$subdir" ]]; then
                     ln -sf "/opt/venv/$subdir" "$venv_path/$subdir"
@@ -74,10 +73,37 @@ if [[ -n "${PAUDE_VENV_PATHS:-}" && -d /opt/venv ]]; then
         fi
     done
 
-    # Activate the venv for Claude Code's shell commands
     export VIRTUAL_ENV=/opt/venv
     export PATH="/opt/venv/bin:$PATH"
     unset PYTHON_HOME
 fi
 
-exec claude "$@"
+# Get claude args from environment or command line
+CLAUDE_ARGS="${PAUDE_CLAUDE_ARGS:-$*}"
+
+SESSION_NAME="claude"
+
+# Set up terminal environment for tmux
+export TERM="${TERM:-xterm-256color}"
+
+# Set UTF-8 locale for proper character rendering
+export LANG="${LANG:-C.UTF-8}"
+export LC_ALL="${LC_ALL:-C.UTF-8}"
+
+# Explicitly set SHELL for tmux - OpenShift arbitrary UIDs don't exist in /etc/passwd
+# so tmux can't determine the shell and may default to /sbin/nologin
+export SHELL=/bin/bash
+
+if tmux -u has-session -t "$SESSION_NAME" 2>/dev/null; then
+    echo "Attaching to existing Claude session..."
+    exec tmux -u attach -t "$SESSION_NAME"
+else
+    echo "Starting new Claude session..."
+    # Start tmux with login shell (bash -l) for proper terminal initialization
+    # This handles TTY and escape sequences correctly
+    tmux -u new-session -s "$SESSION_NAME" -d "bash -l"
+    # Set HOME and PATH explicitly, then start claude
+    tmux send-keys -t "$SESSION_NAME" "export HOME=$HOME PATH=$HOME/.local/bin:\$PATH" Enter
+    tmux send-keys -t "$SESSION_NAME" "claude $CLAUDE_ARGS" Enter
+    exec tmux -u attach -t "$SESSION_NAME"
+fi

@@ -296,7 +296,7 @@ class TestGenerateWorkspaceDockerfile:
         assert "COPY . /opt/workspace-src" in dockerfile
         assert "RUN python3 -m venv /opt/venv" in dockerfile
         assert "/opt/venv/bin/pip install -e /opt/workspace-src" in dockerfile
-        assert "RUN chown -R paude:paude /opt/venv" in dockerfile
+        assert "RUN chown -R paude:0 /opt/venv" in dockerfile
 
     def test_pip_install_custom_command(self):
         """generate_workspace_dockerfile with pip_install string uses custom command."""

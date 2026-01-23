@@ -1,6 +1,6 @@
 # Paude
 
-A Podman wrapper that runs [Claude Code](https://claude.ai/code) inside a container for isolated, secure usage with Google Vertex AI authentication.
+A container runtime for [Claude Code](https://claude.ai/code) that provides isolated, secure execution with Google Vertex AI authentication. Supports local execution via Podman or remote execution via OpenShift/Kubernetes.
 
 ## Features
 
@@ -9,6 +9,7 @@ A Podman wrapper that runs [Claude Code](https://claude.ai/code) inside a contai
 - Read-write access to current working directory only
 - Git read operations work (clone, pull, local commits) - push blocked by design
 - Persists Claude Code settings between sessions
+- **Multiple backends**: Local (Podman) or remote (OpenShift/Kubernetes)
 
 **Status**: Paude is a work-in-progress. See the [roadmap](docs/ROADMAP.md) for planned features and priorities.
 
@@ -69,6 +70,32 @@ paude --yolo -- -p "refactor this function"
 Arguments before `--` are interpreted by paude. Arguments after `--` are passed directly to Claude Code.
 
 Container images are pulled automatically on first run. For development, run from the cloned repo to build images locally.
+
+## OpenShift Backend
+
+For remote execution on OpenShift/Kubernetes clusters with persistent sessions:
+
+```bash
+# Start a session on OpenShift
+paude --backend=openshift
+
+# List active sessions
+paude sessions --backend=openshift
+
+# Attach to an existing session (survives network disconnects)
+paude attach SESSION_ID --backend=openshift
+
+# Stop a session
+paude stop SESSION_ID --backend=openshift
+```
+
+The OpenShift backend provides:
+- **Persistent sessions** via tmux (survive network disconnects)
+- **File synchronization** between local and remote workspace
+- **Automatic image push** to OpenShift internal registry
+- **Credential injection** via Kubernetes Secrets
+
+See [docs/OPENSHIFT.md](docs/OPENSHIFT.md) for detailed setup and usage.
 
 ## Workflow: Research vs Execution
 

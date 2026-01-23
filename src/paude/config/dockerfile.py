@@ -36,26 +36,36 @@ def generate_workspace_dockerfile(config: PaudeConfig) -> str:
         yum install -y {pkg_list} && yum clean all; \\
     fi""")
 
-    # Standard paude requirements
+    # Standard paude requirements (including tmux for OpenShift session persistence)
     lines.append("")
     lines.append("""# Install required system packages
 RUN if command -v apt-get >/dev/null 2>&1; then \\
         apt-get update && \\
-        apt-get install -y --no-install-recommends git curl ca-certificates bash && \\
-        rm -rf /var/lib/apt/lists/*; \\
+        apt-get install -y --no-install-recommends git curl ca-certificates bash tmux locales && \\
+        rm -rf /var/lib/apt/lists/* && \\
+        localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8; \\
     elif command -v apk >/dev/null 2>&1; then \\
-        apk add --no-cache git curl ca-certificates bash; \\
+        apk add --no-cache git curl ca-certificates bash tmux; \\
     elif command -v yum >/dev/null 2>&1; then \\
-        yum install -y git curl ca-certificates bash && \\
+        yum install -y git curl ca-certificates bash tmux glibc-langpack-en && \\
         yum clean all; \\
     else \\
         echo "Warning: Unknown package manager, git may not be available" >&2; \\
     fi""")
 
     lines.append("")
-    lines.append("# Create paude user if it doesn't exist")
+    lines.append("# Set UTF-8 locale for proper terminal rendering")
+    lines.append("ENV LANG=en_US.UTF-8")
+    lines.append("ENV LC_ALL=en_US.UTF-8")
+
+    lines.append("")
+    lines.append("# Create paude user with root group (GID 0) for OpenShift compatibility")
+    lines.append("# OpenShift runs containers with arbitrary UIDs but GID 0, so home must be group-writable")
     lines.append(
-        "RUN id paude >/dev/null 2>&1 || useradd -m -s /bin/bash paude 2>/dev/null || adduser -D -s /bin/bash paude"
+        "RUN (id paude >/dev/null 2>&1 || useradd -m -s /bin/bash -g 0 paude 2>/dev/null || adduser -D -s /bin/bash -G root paude) && "
+        "chmod -R g+rwX /home/paude && "
+        "mkdir -p /home/paude/.claude /home/paude/.config && "
+        "chmod -R g+rwX /home/paude/.claude /home/paude/.config"
     )
 
     lines.append("")
@@ -85,13 +95,19 @@ RUN if command -v apt-get >/dev/null 2>&1; then \\
             pip_cmd = "pip install -e /opt/workspace-src"
 
         lines.append(f"RUN /opt/venv/bin/{pip_cmd}")
-        lines.append("RUN chown -R paude:paude /opt/venv")
+        lines.append("RUN chown -R paude:0 /opt/venv && chmod -R g+rwX /opt/venv")
 
     lines.append("")
-    lines.append("# Copy entrypoint (requires root)")
+    lines.append("# Copy entrypoints (requires root)")
     lines.append("USER root")
     lines.append("COPY entrypoint.sh /usr/local/bin/entrypoint.sh")
-    lines.append("RUN chmod +x /usr/local/bin/entrypoint.sh")
+    lines.append("COPY entrypoint-tmux.sh /usr/local/bin/entrypoint-tmux.sh")
+    lines.append("RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/entrypoint-tmux.sh")
+
+    lines.append("")
+    lines.append("# Fix permissions on directories created by Claude install")
+    lines.append("# Must be done as root after Claude install, for OpenShift arbitrary UID")
+    lines.append("RUN chmod -R g+rwX /home/paude")
 
     lines.append("")
     lines.append("USER paude")

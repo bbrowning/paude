@@ -128,3 +128,29 @@ def test_multiple_flags_work_together():
     assert "--yolo: True" in result.stdout
     assert "--allow-network: True" in result.stdout
     assert "--rebuild: True" in result.stdout
+
+
+def test_backend_flag_recognized():
+    """--backend flag is recognized (verified via dry-run)."""
+    result = runner.invoke(app, ["--backend=podman", "--dry-run"])
+    assert result.exit_code == 0
+    assert "--backend: podman" in result.stdout
+
+
+def test_backend_openshift_shows_openshift_options():
+    """--backend=openshift shows OpenShift-specific options."""
+    result = runner.invoke(app, ["--backend=openshift", "--dry-run"])
+    assert result.exit_code == 0
+    assert "--backend: openshift" in result.stdout
+    assert "--openshift-namespace:" in result.stdout
+
+
+def test_help_shows_subcommands():
+    """Help shows subcommands section."""
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "COMMANDS:" in result.stdout
+    assert "sessions" in result.stdout
+    assert "attach" in result.stdout
+    assert "stop" in result.stdout
+    assert "sync" in result.stdout

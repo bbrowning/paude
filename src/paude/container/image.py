@@ -151,14 +151,25 @@ class ImageManager:
             dockerfile_path = Path(tmpdir) / "Dockerfile"
             dockerfile_path.write_text(dockerfile_content)
 
-            # Copy entrypoint
+            # Copy entrypoints (ensure Unix line endings for Linux containers)
             entrypoint_dest = Path(tmpdir) / "entrypoint.sh"
             if entrypoint.exists():
-                entrypoint_dest.write_text(entrypoint.read_text())
+                content = entrypoint.read_text().replace("\r\n", "\n")
+                entrypoint_dest.write_text(content, newline="\n")
             else:
                 # Minimal fallback
-                entrypoint_dest.write_text("#!/bin/bash\nexec claude \"$@\"\n")
+                entrypoint_dest.write_text(
+                    "#!/bin/bash\nexec claude \"$@\"\n", newline="\n"
+                )
             entrypoint_dest.chmod(0o755)
+
+            # Copy tmux entrypoint for OpenShift session persistence
+            entrypoint_tmux = entrypoint.parent / "entrypoint-tmux.sh"
+            entrypoint_tmux_dest = Path(tmpdir) / "entrypoint-tmux.sh"
+            if entrypoint_tmux.exists():
+                content = entrypoint_tmux.read_text().replace("\r\n", "\n")
+                entrypoint_tmux_dest.write_text(content, newline="\n")
+                entrypoint_tmux_dest.chmod(0o755)
 
             # Copy features to build context if present
             if config.features:
@@ -229,6 +240,7 @@ class ImageManager:
         tag: str,
         context: Path,
         build_args: dict[str, str] | None = None,
+        platform: str | None = "linux/amd64",
     ) -> None:
         """Build a container image.
 
@@ -237,8 +249,11 @@ class ImageManager:
             tag: Image tag.
             context: Build context directory.
             build_args: Optional build arguments.
+            platform: Target platform (default: linux/amd64 for compatibility).
         """
         cmd = ["build", "-f", str(dockerfile), "-t", tag]
+        if platform:
+            cmd.extend(["--platform", platform])
         if build_args:
             for key, value in build_args.items():
                 cmd.extend(["--build-arg", f"{key}={value}"])
