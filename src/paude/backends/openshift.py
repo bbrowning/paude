@@ -1701,7 +1701,7 @@ class OpenShiftBackend:
         exec_result = subprocess.run(exec_cmd)
 
         # Reset terminal state after tmux disconnection
-        os.system("stty sane 2>/dev/null")
+        os.system("stty sane 2>/dev/null")  # noqa: S605
 
         return exec_result.returncode
 
@@ -2053,7 +2053,7 @@ class OpenShiftBackend:
 
         # Reset terminal state after tmux disconnection
         # tmux can leave terminal in bad state when connection drops
-        os.system("stty sane 2>/dev/null")
+        os.system("stty sane 2>/dev/null")  # noqa: S605
 
         return exec_result.returncode
 

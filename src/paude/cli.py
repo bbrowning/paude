@@ -37,6 +37,51 @@ class BackendType(str, Enum):
     openshift = "openshift"
 
 
+def find_session_backend(
+    session_name: str,
+    openshift_context: str | None = None,
+    openshift_namespace: str | None = None,
+) -> tuple[BackendType, object] | None:
+    """Find which backend contains the given session.
+
+    Args:
+        session_name: Name of the session to find.
+        openshift_context: Optional OpenShift context.
+        openshift_namespace: Optional OpenShift namespace.
+
+    Returns:
+        Tuple of (backend_type, backend_instance) if found, None otherwise.
+        The backend_instance is either PodmanBackend or OpenShiftBackend.
+    """
+    from paude.backends import PodmanBackend
+
+    # Try Podman first
+    try:
+        podman = PodmanBackend()
+        for session in podman.list_sessions():
+            if session.name == session_name:
+                return (BackendType.podman, podman)
+    except Exception:  # noqa: S110 - Podman may not be available
+        pass
+
+    # Try OpenShift
+    try:
+        from paude.backends.openshift import OpenShiftBackend, OpenShiftConfig
+
+        os_config = OpenShiftConfig(
+            context=openshift_context,
+            namespace=openshift_namespace,
+        )
+        os_backend = OpenShiftBackend(config=os_config)
+        for session in os_backend.list_sessions():
+            if session.name == session_name:
+                return (BackendType.openshift, os_backend)
+    except Exception:  # noqa: S110 - OpenShift may not be available
+        pass
+
+    return None
+
+
 def version_callback(value: bool) -> None:
     """Print version information and exit."""
     if value:
@@ -370,12 +415,12 @@ def session_delete(
         ),
     ] = False,
     backend: Annotated[
-        BackendType,
+        BackendType | None,
         typer.Option(
             "--backend",
-            help="Container backend to use.",
+            help="Container backend (auto-detected from session if not specified).",
         ),
-    ] = BackendType.podman,
+    ] = None,
     openshift_context: Annotated[
         str | None,
         typer.Option(
@@ -401,6 +446,22 @@ def session_delete(
         )
         typer.echo("Use --confirm to proceed.", err=True)
         raise typer.Exit(1)
+
+    # Auto-detect backend if not specified
+    if backend is None:
+        result = find_session_backend(name, openshift_context, openshift_namespace)
+        if result:
+            backend, backend_obj = result
+            try:
+                backend_obj.delete_session(name, confirm=True)  # type: ignore[attr-defined]
+                typer.echo(f"Session '{name}' deleted.")
+                return
+            except Exception as e:
+                typer.echo(f"Error deleting session: {e}", err=True)
+                raise typer.Exit(1) from None
+        else:
+            typer.echo(f"Session '{name}' not found.", err=True)
+            raise typer.Exit(1)
 
     if backend == BackendType.podman:
         try:
@@ -453,12 +514,12 @@ def session_start(
         ),
     ] = False,
     backend: Annotated[
-        BackendType,
+        BackendType | None,
         typer.Option(
             "--backend",
-            help="Container backend to use.",
+            help="Container backend (auto-detected from session if not specified).",
         ),
-    ] = BackendType.podman,
+    ] = None,
     openshift_context: Annotated[
         str | None,
         typer.Option(
@@ -476,6 +537,25 @@ def session_start(
 ) -> None:
     """Start a session and connect to it."""
     from paude.backends import PodmanBackend, SessionNotFoundError
+
+    # Auto-detect backend if name is provided but backend is not
+    if name and backend is None:
+        result = find_session_backend(name, openshift_context, openshift_namespace)
+        if result:
+            backend, backend_obj = result
+            try:
+                exit_code = backend_obj.start_session(name, sync=not no_sync)  # type: ignore[attr-defined]
+                raise typer.Exit(exit_code)
+            except Exception as e:
+                typer.echo(f"Error starting session: {e}", err=True)
+                raise typer.Exit(1) from None
+        else:
+            typer.echo(f"Session '{name}' not found.", err=True)
+            raise typer.Exit(1)
+
+    # Default to podman if no backend specified and no name
+    if backend is None:
+        backend = BackendType.podman
 
     if backend == BackendType.podman:
         backend_instance = PodmanBackend()
@@ -575,12 +655,12 @@ def session_stop(
         ),
     ] = False,
     backend: Annotated[
-        BackendType,
+        BackendType | None,
         typer.Option(
             "--backend",
-            help="Container backend to use.",
+            help="Container backend (auto-detected from session if not specified).",
         ),
-    ] = BackendType.podman,
+    ] = None,
     openshift_context: Annotated[
         str | None,
         typer.Option(
@@ -598,6 +678,26 @@ def session_stop(
 ) -> None:
     """Stop a session (preserves data)."""
     from paude.backends import PodmanBackend
+
+    # Auto-detect backend if name is provided but backend is not
+    if name and backend is None:
+        result = find_session_backend(name, openshift_context, openshift_namespace)
+        if result:
+            backend, backend_obj = result
+            try:
+                backend_obj.stop_session(name, sync=do_sync)  # type: ignore[attr-defined]
+                typer.echo(f"Session '{name}' stopped.")
+                return
+            except Exception as e:
+                typer.echo(f"Error stopping session: {e}", err=True)
+                raise typer.Exit(1) from None
+        else:
+            typer.echo(f"Session '{name}' not found.", err=True)
+            raise typer.Exit(1)
+
+    # Default to podman if no backend specified and no name
+    if backend is None:
+        backend = BackendType.podman
 
     if backend == BackendType.podman:
         backend_instance = PodmanBackend()
@@ -692,12 +792,12 @@ def session_connect(
         typer.Argument(help="Session name (auto-select if not specified)"),
     ] = None,
     backend: Annotated[
-        BackendType,
+        BackendType | None,
         typer.Option(
             "--backend",
-            help="Container backend to use.",
+            help="Container backend (auto-detected from session if not specified).",
         ),
-    ] = BackendType.podman,
+    ] = None,
     openshift_context: Annotated[
         str | None,
         typer.Option(
@@ -715,6 +815,21 @@ def session_connect(
 ) -> None:
     """Attach to a running session."""
     from paude.backends import PodmanBackend
+
+    # Auto-detect backend if name is provided but backend is not
+    if name and backend is None:
+        result = find_session_backend(name, openshift_context, openshift_namespace)
+        if result:
+            backend, backend_obj = result
+            exit_code = backend_obj.connect_session(name)  # type: ignore[attr-defined]
+            raise typer.Exit(exit_code)
+        else:
+            typer.echo(f"Session '{name}' not found.", err=True)
+            raise typer.Exit(1)
+
+    # Default to podman if no backend specified and no name
+    if backend is None:
+        backend = BackendType.podman
 
     if backend == BackendType.podman:
         backend_instance = PodmanBackend()
@@ -822,8 +937,8 @@ def session_list(
         try:
             podman_backend = PodmanBackend()
             all_sessions.extend(podman_backend.list_sessions())
-        except Exception:
-            pass  # Podman may not be available
+        except Exception:  # noqa: S110 - Podman may not be available
+            pass
 
     # Get OpenShift sessions
     if backend is None or backend == BackendType.openshift:
@@ -839,8 +954,8 @@ def session_list(
             for session in os_backend.list_sessions():
                 # Convert old Session format to new
                 all_sessions.append(session)
-        except Exception:
-            pass  # OpenShift may not be available
+        except Exception:  # noqa: S110 - OpenShift may not be available
+            pass
 
     if not all_sessions:
         typer.echo("No sessions found.")
@@ -877,12 +992,12 @@ def session_sync(
         ),
     ] = "both",
     backend: Annotated[
-        BackendType,
+        BackendType | None,
         typer.Option(
             "--backend",
-            help="Container backend to use.",
+            help="Container backend (auto-detected from session if not specified).",
         ),
-    ] = BackendType.podman,
+    ] = None,
     openshift_context: Annotated[
         str | None,
         typer.Option(
@@ -907,6 +1022,26 @@ def session_sync(
             err=True,
         )
         raise typer.Exit(1)
+
+    # Auto-detect backend if name is provided but backend is not
+    if name and backend is None:
+        result = find_session_backend(name, openshift_context, openshift_namespace)
+        if result:
+            backend, backend_obj = result
+            try:
+                backend_obj.sync_session(name, direction=direction)  # type: ignore[attr-defined]
+                typer.echo(f"Synced session '{name}'.")
+                return
+            except Exception as e:
+                typer.echo(f"Error syncing session: {e}", err=True)
+                raise typer.Exit(1) from None
+        else:
+            typer.echo(f"Session '{name}' not found.", err=True)
+            raise typer.Exit(1)
+
+    # Default to podman if no backend specified and no name
+    if backend is None:
+        backend = BackendType.podman
 
     if backend == BackendType.podman:
         backend_instance = PodmanBackend()
