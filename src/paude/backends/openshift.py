@@ -279,6 +279,7 @@ class OpenShiftBackend:
         dest: str,
         namespace: str,
         exclude_args: list[str],
+        verbose: bool = False,
     ) -> bool:
         """Run oc rsync with retry logic for timeouts.
 
@@ -287,13 +288,14 @@ class OpenShiftBackend:
             dest: Destination path (local or pod:path format).
             namespace: Kubernetes namespace.
             exclude_args: List of --exclude arguments.
+            verbose: Whether to show rsync output (default False).
 
         Returns:
             True if sync succeeded, False if all retries failed.
         """
         for attempt in range(1, self.RSYNC_MAX_RETRIES + 1):
             try:
-                # Use capture=False to show progress to user
+                # Show output only when verbose is enabled
                 self._run_oc(
                     "rsync",
                     "--progress",
@@ -303,7 +305,7 @@ class OpenShiftBackend:
                     "--no-perms",
                     *exclude_args,
                     timeout=self.RSYNC_TIMEOUT,
-                    capture=False,
+                    capture=not verbose,
                     check=False,
                 )
                 return True
@@ -1543,6 +1545,7 @@ class OpenShiftBackend:
         self,
         name: str,
         sync: bool = True,
+        verbose: bool = False,
     ) -> int:
         """Start a session and connect to it.
 
@@ -1551,6 +1554,7 @@ class OpenShiftBackend:
         Args:
             name: Session name.
             sync: Whether to sync workspace files before connecting.
+            verbose: Whether to show rsync output (default False).
 
         Returns:
             Exit code from the connected session.
@@ -1577,12 +1581,17 @@ class OpenShiftBackend:
         # Sync workspace if requested
         if sync:
             print("Syncing workspace to pod...", file=sys.stderr)
-            self.sync_session(name, direction="remote")
+            self.sync_session(name, direction="remote", verbose=verbose)
 
         # Connect to session
         return self.connect_session(name)
 
-    def stop_session(self, name: str, sync: bool = False) -> None:
+    def stop_session(
+        self,
+        name: str,
+        sync: bool = False,
+        verbose: bool = False,
+    ) -> None:
         """Stop a session (preserves volume).
 
         Scales StatefulSet to 0 but keeps PVC intact.
@@ -1590,6 +1599,7 @@ class OpenShiftBackend:
         Args:
             name: Session name.
             sync: Whether to sync files back to local before stopping.
+            verbose: Whether to show rsync output (default False).
         """
         # Check if session exists
         sts = self._get_statefulset(name)
@@ -1600,7 +1610,7 @@ class OpenShiftBackend:
         if sync:
             print("Syncing workspace from pod...", file=sys.stderr)
             try:
-                self.sync_session(name, direction="local")
+                self.sync_session(name, direction="local", verbose=verbose)
             except Exception as e:
                 print(f"Warning: Sync failed: {e}", file=sys.stderr)
 
@@ -1710,12 +1720,14 @@ class OpenShiftBackend:
         self,
         name: str,
         direction: str = "both",
+        verbose: bool = False,
     ) -> None:
         """Sync files between local and remote workspace.
 
         Args:
             name: Session name.
             direction: Sync direction ("local", "remote", "both").
+            verbose: Whether to show rsync output (default False).
         """
         # Get session to find workspace
         sts = self._get_statefulset(name)
@@ -1811,6 +1823,7 @@ class OpenShiftBackend:
                 f"{pod_name}:{remote_path}",
                 ns,
                 exclude_args,
+                verbose=verbose,
             )
             # Make synced subdirectories group-writable for OpenShift arbitrary UID
             # rsync/tar creates directories with restrictive permissions
@@ -1828,6 +1841,7 @@ class OpenShiftBackend:
                 str(workspace),
                 ns,
                 exclude_args,
+                verbose=verbose,
             )
 
     def find_session_for_workspace(self, workspace: Path) -> Session | None:
@@ -2252,6 +2266,7 @@ class OpenShiftBackend:
         local_path: Path | None = None,
         remote_path: str = "/workspace",
         exclude: list[str] | None = None,
+        verbose: bool = False,
     ) -> None:
         """Sync files between local and remote workspace using oc rsync.
 
@@ -2264,6 +2279,7 @@ class OpenShiftBackend:
             local_path: Local directory to sync. Defaults to current directory.
             remote_path: Remote directory in the pod. Defaults to /workspace.
             exclude: List of patterns to exclude from sync.
+            verbose: Whether to show rsync output (default False).
         """
         pod_name = f"paude-session-{session_id}"
         ns = self.namespace
@@ -2324,14 +2340,18 @@ class OpenShiftBackend:
                 f"Syncing local -> remote ({local} -> {pod_name}:{remote_path})...",
                 file=sys.stderr,
             )
-            self._rsync_to_pod(local, pod_name, remote_path, ns, exclude_args)
+            self._rsync_to_pod(
+                local, pod_name, remote_path, ns, exclude_args, verbose=verbose
+            )
 
         if direction in ("local", "both"):
             print(
                 f"Syncing remote -> local ({pod_name}:{remote_path} -> {local})...",
                 file=sys.stderr,
             )
-            self._rsync_from_pod(local, pod_name, remote_path, ns, exclude_args)
+            self._rsync_from_pod(
+                local, pod_name, remote_path, ns, exclude_args, verbose=verbose
+            )
 
         print("Sync complete.", file=sys.stderr)
 
@@ -2342,6 +2362,7 @@ class OpenShiftBackend:
         remote_path: str,
         namespace: str,
         exclude_args: list[str],
+        verbose: bool = False,
     ) -> None:
         """Sync files from local to pod using oc rsync.
 
@@ -2351,6 +2372,7 @@ class OpenShiftBackend:
             remote_path: Remote path in pod.
             namespace: Kubernetes namespace.
             exclude_args: Exclude pattern arguments.
+            verbose: Whether to show rsync output (default False).
         """
         cmd = ["oc", "rsync", "--progress"]
 
@@ -2368,10 +2390,14 @@ class OpenShiftBackend:
 
         for attempt in range(1, self.RSYNC_MAX_RETRIES + 1):
             try:
+                # Show output only when verbose is enabled
                 result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=self.RSYNC_TIMEOUT
+                    cmd,
+                    capture_output=not verbose,
+                    text=True,
+                    timeout=self.RSYNC_TIMEOUT,
                 )
-                if result.returncode != 0:
+                if result.returncode != 0 and not verbose:
                     print(
                         f"Warning: rsync to pod failed: {result.stderr}",
                         file=sys.stderr,
@@ -2397,6 +2423,7 @@ class OpenShiftBackend:
         remote_path: str,
         namespace: str,
         exclude_args: list[str],
+        verbose: bool = False,
     ) -> None:
         """Sync files from pod to local using oc rsync.
 
@@ -2406,6 +2433,7 @@ class OpenShiftBackend:
             remote_path: Remote path in pod.
             namespace: Kubernetes namespace.
             exclude_args: Exclude pattern arguments.
+            verbose: Whether to show rsync output (default False).
         """
         cmd = ["oc", "rsync", "--progress"]
 
@@ -2423,10 +2451,14 @@ class OpenShiftBackend:
 
         for attempt in range(1, self.RSYNC_MAX_RETRIES + 1):
             try:
+                # Show output only when verbose is enabled
                 result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=self.RSYNC_TIMEOUT
+                    cmd,
+                    capture_output=not verbose,
+                    text=True,
+                    timeout=self.RSYNC_TIMEOUT,
                 )
-                if result.returncode != 0:
+                if result.returncode != 0 and not verbose:
                     print(
                         f"Warning: rsync from pod failed: {result.stderr}",
                         file=sys.stderr,

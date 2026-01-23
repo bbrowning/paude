@@ -78,6 +78,7 @@ def show_dry_run(flags: dict[str, Any]) -> None:
     typer.echo("")
     typer.echo("Flags:")
     typer.echo(f"  --backend: {flags.get('backend', 'podman')}")
+    typer.echo(f"  --verbose: {flags.get('verbose', False)}")
     typer.echo(f"  --yolo: {flags.get('yolo', False)}")
     typer.echo(f"  --allow-network: {flags.get('allow_network', False)}")
     typer.echo(f"  --rebuild: {flags.get('rebuild', False)}")

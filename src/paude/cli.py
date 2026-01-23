@@ -103,6 +103,7 @@ COMMANDS:
 OPTIONS:
     -h, --help          Show this help message and exit
     -V, --version       Show paude version and exit
+    -v, --verbose       Enable verbose output (show rsync progress, etc.)
     -a, --args          Arguments to pass to claude (e.g., -a '-p "prompt"')
     --yolo              Enable YOLO mode (skip all permission prompts)
                         Claude can edit files and run commands without confirmation
@@ -489,6 +490,14 @@ def session_start(
             help="OpenShift namespace (default: current context namespace).",
         ),
     ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Enable verbose output (show rsync progress).",
+        ),
+    ] = False,
 ) -> None:
     """Start a session and connect to it."""
     from paude.backends import PodmanBackend, SessionNotFoundError
@@ -499,7 +508,9 @@ def session_start(
         if result:
             backend, backend_obj = result
             try:
-                exit_code = backend_obj.start_session(name, sync=not no_sync)  # type: ignore[attr-defined]
+                exit_code = backend_obj.start_session(  # type: ignore[attr-defined]
+                    name, sync=not no_sync, verbose=verbose
+                )
                 raise typer.Exit(exit_code)
             except Exception as e:
                 typer.echo(f"Error starting session: {e}", err=True)
@@ -586,7 +597,9 @@ def session_start(
                     raise typer.Exit(1)
 
         try:
-            exit_code = os_backend.start_session(name, sync=not no_sync)
+            exit_code = os_backend.start_session(
+                name, sync=not no_sync, verbose=verbose
+            )
             raise typer.Exit(exit_code)
         except OpenshiftSessionNotFoundError as e:
             typer.echo(f"Error: {e}", err=True)
@@ -630,6 +643,14 @@ def session_stop(
             help="OpenShift namespace (default: current context namespace).",
         ),
     ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Enable verbose output (show rsync progress).",
+        ),
+    ] = False,
 ) -> None:
     """Stop a session (preserves data)."""
     from paude.backends import PodmanBackend
@@ -640,7 +661,7 @@ def session_stop(
         if result:
             backend, backend_obj = result
             try:
-                backend_obj.stop_session(name, sync=do_sync)  # type: ignore[attr-defined]
+                backend_obj.stop_session(name, sync=do_sync, verbose=verbose)  # type: ignore[attr-defined]
                 typer.echo(f"Session '{name}' stopped.")
                 return
             except Exception as e:
@@ -730,7 +751,7 @@ def session_stop(
                     raise typer.Exit(1)
 
         try:
-            os_backend.stop_session(name, sync=do_sync)
+            os_backend.stop_session(name, sync=do_sync, verbose=verbose)
             typer.echo(f"Session '{name}' stopped.")
         except OpenshiftSessionNotFoundError as e:
             typer.echo(f"Error: {e}", err=True)
@@ -967,6 +988,14 @@ def session_sync(
             help="OpenShift namespace (default: current context namespace).",
         ),
     ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Enable verbose output (show rsync progress).",
+        ),
+    ] = False,
 ) -> None:
     """Sync files between local workspace and remote session."""
     from paude.backends import PodmanBackend
@@ -984,7 +1013,7 @@ def session_sync(
         if result:
             backend, backend_obj = result
             try:
-                backend_obj.sync_session(name, direction=direction)  # type: ignore[attr-defined]
+                backend_obj.sync_session(name, direction=direction, verbose=verbose)  # type: ignore[attr-defined]
                 typer.echo(f"Synced session '{name}'.")
                 return
             except Exception as e:
@@ -1048,7 +1077,7 @@ def session_sync(
                 raise typer.Exit(1)
 
         try:
-            os_backend.sync_session(name, direction=direction)
+            os_backend.sync_session(name, direction=direction, verbose=verbose)
             typer.echo(f"Synced session '{name}'.")
         except OpenshiftSessionNotFoundError as e:
             typer.echo(f"Error: {e}", err=True)
@@ -1145,6 +1174,14 @@ def main(
             help="Arguments to pass to claude (e.g., -a '-p \"prompt\"').",
         ),
     ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Enable verbose output.",
+        ),
+    ] = False,
 ) -> None:
     """Run Claude Code in an isolated container."""
     import shlex
@@ -1173,6 +1210,7 @@ def main(
     ctx.obj["openshift_namespace"] = openshift_namespace
     ctx.obj["platform"] = platform
     ctx.obj["claude_args"] = parsed_args
+    ctx.obj["verbose"] = verbose
 
     if dry_run:
         from paude.dry_run import show_dry_run
@@ -1205,6 +1243,7 @@ def _run_openshift_backend(ctx: typer.Context) -> None:
     claude_args = ctx.obj["claude_args"]
     openshift_context = ctx.obj["openshift_context"]
     openshift_namespace = ctx.obj["openshift_namespace"]
+    verbose = ctx.obj["verbose"]
 
     workspace = Path.cwd()
 
@@ -1278,7 +1317,9 @@ def _run_openshift_backend(ctx: typer.Context) -> None:
                 exit_code = backend_instance.connect_session(session_name)
             else:
                 typer.echo(f"Starting existing session '{session_name}'...")
-                exit_code = backend_instance.start_session(session_name, sync=True)
+                exit_code = backend_instance.start_session(
+                    session_name, sync=True, verbose=verbose
+                )
         else:
             # Create a new session
             session_config = SessionConfig(
@@ -1295,7 +1336,9 @@ def _run_openshift_backend(ctx: typer.Context) -> None:
 
             session = backend_instance.create_session(session_config)
             typer.echo(f"Created session '{session.name}'")
-            exit_code = backend_instance.start_session(session.name, sync=True)
+            exit_code = backend_instance.start_session(
+                session.name, sync=True, verbose=verbose
+            )
 
     except NamespaceNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
