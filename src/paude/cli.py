@@ -18,16 +18,8 @@ app = typer.Typer(
     context_settings={"allow_interspersed_args": False},
 )
 
-# Session subcommand group
-session_app = typer.Typer(
-    name="session",
-    help="Manage persistent paude sessions.",
-    add_completion=False,
-)
-app.add_typer(session_app, name="session")
-
 # Known subcommand names - must be updated when adding new subcommands
-SUBCOMMANDS = {"session"}
+SUBCOMMANDS = {"create", "delete", "start", "stop", "connect", "list", "sync"}
 
 
 class BackendType(str, Enum):
@@ -101,16 +93,16 @@ def show_help() -> None:
 
 USAGE:
     paude [OPTIONS] [-- CLAUDE_ARGS...]
-    paude session <COMMAND> [OPTIONS]
+    paude <COMMAND> [OPTIONS]
 
-SESSION COMMANDS:
-    session create [NAME]   Create a new persistent session
-    session delete NAME     Delete a session and all its resources
-    session start [NAME]    Start a session and connect to it
-    session stop [NAME]     Stop a session (preserves data)
-    session connect [NAME]  Attach to a running session
-    session list            List all sessions
-    session sync [NAME]     Sync files between local and remote workspace
+COMMANDS:
+    create [NAME]       Create a new persistent session
+    delete NAME         Delete a session and all its resources
+    start [NAME]        Start a session and connect to it
+    stop [NAME]         Stop a session (preserves data)
+    connect [NAME]      Attach to a running session
+    list                List all sessions
+    sync [NAME]         Sync files between local and remote workspace
 
 OPTIONS:
     -h, --help          Show this help message and exit
@@ -140,10 +132,10 @@ EXAMPLES:
     paude                           Start interactive claude session (ephemeral)
     paude --yolo                    Start with YOLO mode (no permission prompts)
     paude -- -p "What is 2+2?"      Run claude with a prompt
-    paude session create            Create a persistent session
-    paude session start             Start and connect to a session
-    paude session list              List all sessions
-    paude session delete my-project --confirm
+    paude create                    Create a persistent session
+    paude start                     Start and connect to a session
+    paude list                      List all sessions
+    paude delete my-project --confirm
                                     Delete a session permanently
 
 SECURITY:
@@ -160,10 +152,7 @@ def help_callback(value: bool) -> None:
         raise typer.Exit()
 
 
-# Session subcommands
-
-
-@session_app.command("create")
+@app.command("create")
 def session_create(
     name: Annotated[
         str | None,
@@ -310,7 +299,7 @@ def session_create(
             backend_instance = PodmanBackend()
             session = backend_instance.create_session(session_config)
             typer.echo(f"Session '{session.name}' created.")
-            typer.echo(f"Run 'paude session start {session.name}' to start it.")
+            typer.echo(f"Run 'paude start {session.name}' to start it.")
         except SessionExistsError as e:
             typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1) from None
@@ -384,7 +373,7 @@ def session_create(
             session = os_backend.create_session(session_config)
             typer.echo(f"Session '{session.name}' created.")
             typer.echo(
-                f"Run 'paude session start {session.name} --backend=openshift' "
+                f"Run 'paude start {session.name} --backend=openshift' "
                 "to start it."
             )
         except OpenshiftSessionExistsError as e:
@@ -395,7 +384,7 @@ def session_create(
             raise typer.Exit(1) from None
 
 
-@session_app.command("delete")
+@app.command("delete")
 def session_delete(
     name: Annotated[
         str,
@@ -494,7 +483,7 @@ def session_delete(
             raise typer.Exit(1) from None
 
 
-@session_app.command("start")
+@app.command("start")
 def session_start(
     name: Annotated[
         str | None,
@@ -564,7 +553,7 @@ def session_start(
                 sessions = backend_instance.list_sessions()
                 if not sessions:
                     typer.echo(
-                        "No sessions found. Create one with 'paude session create'.",
+                        "No sessions found. Create one with 'paude create'.",
                         err=True,
                     )
                     raise typer.Exit(1)
@@ -612,7 +601,7 @@ def session_start(
                 if not sessions:
                     typer.echo(
                         "No sessions found. Create one with "
-                        "'paude session create --backend=openshift'.",
+                        "'paude create --backend=openshift'.",
                         err=True,
                     )
                     raise typer.Exit(1)
@@ -635,7 +624,7 @@ def session_start(
             raise typer.Exit(1) from None
 
 
-@session_app.command("stop")
+@app.command("stop")
 def session_stop(
     name: Annotated[
         str | None,
@@ -779,7 +768,7 @@ def session_stop(
             raise typer.Exit(1) from None
 
 
-@session_app.command("connect")
+@app.command("connect")
 def session_connect(
     name: Annotated[
         str | None,
@@ -897,7 +886,7 @@ def session_connect(
         raise typer.Exit(exit_code)
 
 
-@session_app.command("list")
+@app.command("list")
 def session_list(
     backend: Annotated[
         BackendType | None,
@@ -972,7 +961,7 @@ def session_list(
         typer.echo(line)
 
 
-@session_app.command("sync")
+@app.command("sync")
 def session_sync(
     name: Annotated[
         str | None,

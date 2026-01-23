@@ -46,27 +46,27 @@ paude --backend=openshift
 
 ```bash
 # Create a named session (without starting)
-paude session create my-project --backend=openshift
+paude create my-project --backend=openshift
 
 # Start the session (scales StatefulSet, syncs files, connects)
-paude session start my-project --backend=openshift
+paude start my-project --backend=openshift
 
 # Work in Claude... then detach with Ctrl+b d
 
 # Reconnect later
-paude session connect my-project --backend=openshift
+paude connect my-project --backend=openshift
 
 # Stop to save cluster resources (scales to 0, preserves PVC)
-paude session stop my-project --backend=openshift
+paude stop my-project --backend=openshift
 
 # Restart - instant resume, everything still there
-paude session start my-project --backend=openshift
+paude start my-project --backend=openshift
 
 # List all sessions
-paude session list --backend=openshift
+paude list --backend=openshift
 
 # Delete session completely (removes StatefulSet + PVC)
-paude session delete my-project --confirm --backend=openshift
+paude delete my-project --confirm --backend=openshift
 ```
 
 ### Session Lifecycle
@@ -82,10 +82,10 @@ paude session delete my-project --confirm --backend=openshift
 
 ```bash
 # Custom PVC size
-paude session create my-project --backend=openshift --pvc-size=50Gi
+paude create my-project --backend=openshift --pvc-size=50Gi
 
 # Custom storage class
-paude session create my-project --backend=openshift --storage-class=fast-ssd
+paude create my-project --backend=openshift --storage-class=fast-ssd
 ```
 
 ## Configuration

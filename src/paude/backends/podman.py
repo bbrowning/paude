@@ -319,7 +319,7 @@ class PodmanBackend:
         if not self._runner.container_running(container_name):
             print(
                 f"Session '{name}' is not running. "
-                f"Use 'paude session start {name}' to start it.",
+                f"Use 'paude start {name}' to start it.",
                 file=sys.stderr,
             )
             return 1
@@ -549,7 +549,7 @@ class PodmanBackend:
         """
         print(
             "Legacy Podman sessions are ephemeral and cannot be reattached. "
-            "Use 'paude session' commands for persistent sessions.",
+            "Use 'paude create' and 'paude start' for persistent sessions.",
             file=sys.stderr,
         )
         return 1

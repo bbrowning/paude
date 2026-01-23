@@ -88,27 +88,27 @@ paude --backend=openshift     # Remote OpenShift
 
 ```bash
 # Create a named session (without starting)
-paude session create my-project
+paude create my-project
 
 # Start the session (launches container, connects)
-paude session start my-project
+paude start my-project
 
 # Work in Claude... then detach with Ctrl+b d
 
 # Reconnect later
-paude session connect my-project
+paude connect my-project
 
 # Stop to save resources (preserves state)
-paude session stop my-project
+paude stop my-project
 
 # Restart - instant resume, no reinstall
-paude session start my-project
+paude start my-project
 
 # List all sessions
-paude session list
+paude list
 
 # Delete session completely
-paude session delete my-project --confirm
+paude delete my-project --confirm
 ```
 
 ### Backend Selection
@@ -117,11 +117,11 @@ All session commands work with both backends:
 
 ```bash
 # Explicit backend selection
-paude session create my-project --backend=openshift
-paude session list --backend=podman
+paude create my-project --backend=openshift
+paude list --backend=podman
 
 # Backend-specific options
-paude session create my-project --backend=openshift \
+paude create my-project --backend=openshift \
   --pvc-size=50Gi \
   --storage-class=fast-ssd
 ```

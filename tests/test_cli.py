@@ -145,48 +145,48 @@ def test_backend_openshift_shows_openshift_options():
     assert "--openshift-namespace:" in result.stdout
 
 
-def test_help_shows_session_commands():
-    """Help shows session commands section."""
+def test_help_shows_commands():
+    """Help shows commands section."""
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "SESSION COMMANDS:" in result.stdout
-    assert "session create" in result.stdout
-    assert "session start" in result.stdout
-    assert "session stop" in result.stdout
-    assert "session list" in result.stdout
-    assert "session sync" in result.stdout
+    assert "COMMANDS:" in result.stdout
+    assert "create" in result.stdout
+    assert "start" in result.stdout
+    assert "stop" in result.stdout
+    assert "list" in result.stdout
+    assert "sync" in result.stdout
 
 
-def test_session_stop_help():
-    """'session stop --help' shows subcommand help, not main help."""
-    result = runner.invoke(app, ["session", "stop", "--help"])
+def test_stop_help():
+    """'stop --help' shows subcommand help, not main help."""
+    result = runner.invoke(app, ["stop", "--help"])
     assert result.exit_code == 0
     assert "stop" in result.stdout.lower()
     assert "Stop a session" in result.stdout
     assert "paude - Run Claude Code" not in result.stdout
 
 
-def test_session_list_help():
-    """'session list --help' shows subcommand help."""
-    result = runner.invoke(app, ["session", "list", "--help"])
+def test_list_help():
+    """'list --help' shows subcommand help."""
+    result = runner.invoke(app, ["list", "--help"])
     assert result.exit_code == 0
     assert "list" in result.stdout.lower()
     assert "List all sessions" in result.stdout
     assert "paude - Run Claude Code" not in result.stdout
 
 
-def test_session_connect_help():
-    """'session connect --help' shows subcommand help."""
-    result = runner.invoke(app, ["session", "connect", "--help"])
+def test_connect_help():
+    """'connect --help' shows subcommand help."""
+    result = runner.invoke(app, ["connect", "--help"])
     assert result.exit_code == 0
     assert "connect" in result.stdout.lower()
     assert "Attach to a running session" in result.stdout
     assert "paude - Run Claude Code" not in result.stdout
 
 
-def test_session_sync_help():
-    """'session sync --help' shows subcommand help."""
-    result = runner.invoke(app, ["session", "sync", "--help"])
+def test_sync_help():
+    """'sync --help' shows subcommand help."""
+    result = runner.invoke(app, ["sync", "--help"])
     assert result.exit_code == 0
     assert "sync" in result.stdout.lower()
     assert "Sync files" in result.stdout
@@ -197,7 +197,7 @@ def test_subcommand_runs_without_main_execution():
     """Subcommands run without triggering main execution logic."""
     # This test verifies that subcommands don't trigger podman checks
     # by confirming they complete without the "podman required" error
-    result = runner.invoke(app, ["session", "stop", "--help"])
+    result = runner.invoke(app, ["stop", "--help"])
     assert result.exit_code == 0
     assert "Stop a session" in result.stdout
     assert "podman is required" not in result.stdout

@@ -166,13 +166,13 @@ Pod B:  X → B1 → B2  (Claude fixed a bug)
 
 If user syncs from Pod A first:
 ```bash
-paude session sync pod-a --direction local
+paude sync pod-a --direction local
 # Local now has: X → A1 → A2
 ```
 
 Then syncs from Pod B:
 ```bash
-paude session sync pod-b --direction local
+paude sync pod-b --direction local
 # Local now has: X → B1 → B2
 # Commits A1 and A2 are LOST (overwritten)
 ```
@@ -196,8 +196,8 @@ The `oc rsync` mechanism does a file-level sync of the entire workspace, includi
 # In pod B: git checkout -b claude/bugfix-pod-b
 
 # Sync both back - no conflict since different branches
-paude session sync pod-a --direction local
-paude session sync pod-b --direction local
+paude sync pod-a --direction local
+paude sync pod-b --direction local
 
 # Locally merge as desired
 git merge claude/feature-pod-a
@@ -223,21 +223,21 @@ git am /tmp/patches/*.patch
 **Option 4: Sequential sync with push/pull coordination**
 ```bash
 # Sync pod A, push to remote
-paude session sync pod-a --direction local
+paude sync pod-a --direction local
 git push origin main
 
 # Connect to pod B, pull updated main, rebase its work
 oc exec -it pod-b -- git pull --rebase origin main
 
 # Then sync pod B
-paude session sync pod-b --direction local
+paude sync pod-b --direction local
 ```
 
 ### Proposed Fix Options
 
 1. **Branch-per-session feature**: Add `--branch` flag to session creation that auto-creates a unique branch:
    ```bash
-   paude session create my-feature --branch claude/my-feature-$(date +%s)
+   paude create my-feature --branch claude/my-feature-$(date +%s)
    ```
    This makes multi-pod workflows safer by default.
 
