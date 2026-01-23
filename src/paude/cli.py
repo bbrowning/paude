@@ -1198,7 +1198,7 @@ def main(
 
         # Get the click command and invoke it with proper context
         click_app = ctx.command
-        if cmd_name in click_app.commands:
+        if hasattr(click_app, "commands") and cmd_name in click_app.commands:
             import click
 
             cmd = click_app.commands[cmd_name]

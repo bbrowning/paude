@@ -1387,7 +1387,8 @@ class OpenShiftBackend:
             return None
 
         try:
-            return json.loads(result.stdout)
+            data: dict[str, Any] = json.loads(result.stdout)
+            return data
         except json.JSONDecodeError:
             return None
 

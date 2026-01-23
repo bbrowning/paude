@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import time
+from typing import Any
 
 
 class ProxyStartError(Exception):
@@ -272,7 +273,7 @@ class ContainerRunner:
         self,
         label_filter: str | None = None,
         all_containers: bool = True,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """List containers with optional label filter.
 
         Args:
@@ -376,7 +377,7 @@ class ContainerRunner:
     def list_volumes(
         self,
         label_filter: str | None = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """List volumes with optional label filter.
 
         Args:
