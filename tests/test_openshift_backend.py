@@ -438,6 +438,68 @@ class TestOpenShiftStartSession:
         scale_calls = [c for c in calls if "scale" in str(c)]
         assert len(scale_calls) >= 1
 
+        # Verify NO proxy scale command was issued (proxy doesn't exist)
+        proxy_scale_calls = [
+            c for c in calls
+            if "scale" in str(c)
+            and "deployment" in str(c)
+            and "paude-proxy" in str(c)
+        ]
+        assert len(proxy_scale_calls) == 0
+
+    @patch("subprocess.run")
+    def test_start_session_scales_proxy_to_one(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Start session scales proxy Deployment to 1 when it exists."""
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
+            if "get" in cmd and "statefulset" in cmd:
+                return MagicMock(
+                    returncode=0,
+                    stdout=json.dumps({
+                        "apiVersion": "apps/v1",
+                        "kind": "StatefulSet",
+                        "metadata": {
+                            "name": "paude-test",
+                            "annotations": {
+                                "paude.io/workspace": "",
+                            },
+                        },
+                        "spec": {"replicas": 0},
+                    }),
+                    stderr="",
+                )
+            # Proxy deployment exists
+            if "get" in cmd and "deployment" in cmd and "paude-proxy" in cmd_str:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            # For scale and other commands
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with patch.object(backend, "_wait_for_pod_ready"):
+            with patch.object(backend, "_wait_for_proxy_ready"):
+                with patch.object(backend, "connect_session", return_value=0):
+                    exit_code = backend.start_session("test", sync=False)
+
+        assert exit_code == 0
+
+        # Verify proxy scale command was called with replicas=1
+        calls = mock_run.call_args_list
+        proxy_scale_calls = [
+            c for c in calls
+            if "scale" in str(c)
+            and "deployment" in str(c)
+            and "paude-proxy" in str(c)
+            and "replicas=1" in str(c)
+        ]
+        assert len(proxy_scale_calls) == 1
+
 
 class TestOpenShiftStopSession:
     """Tests for OpenShiftBackend.stop_session."""
@@ -494,6 +556,102 @@ class TestOpenShiftStopSession:
 
         with pytest.raises(SessionNotFoundError):
             backend.stop_session("nonexistent")
+
+    @patch("subprocess.run")
+    def test_stop_session_scales_proxy_to_zero(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Stop session scales proxy Deployment to 0 when it exists."""
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
+            if "get" in cmd and "statefulset" in cmd:
+                return MagicMock(
+                    returncode=0,
+                    stdout=json.dumps({
+                        "apiVersion": "apps/v1",
+                        "kind": "StatefulSet",
+                        "metadata": {"name": "paude-test"},
+                        "spec": {"replicas": 1},
+                    }),
+                    stderr="",
+                )
+            # Proxy deployment exists
+            if "get" in cmd and "deployment" in cmd and "paude-proxy" in cmd_str:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend.stop_session("test")
+
+        # Verify proxy scale to 0 was called
+        calls = mock_run.call_args_list
+        proxy_scale_calls = [
+            c for c in calls
+            if "scale" in str(c)
+            and "deployment" in str(c)
+            and "paude-proxy" in str(c)
+            and "replicas=0" in str(c)
+        ]
+        assert len(proxy_scale_calls) == 1
+
+    @patch("subprocess.run")
+    def test_stop_session_succeeds_when_proxy_does_not_exist(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Stop session succeeds and skips proxy when it doesn't exist."""
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
+            if "get" in cmd and "statefulset" in cmd:
+                return MagicMock(
+                    returncode=0,
+                    stdout=json.dumps({
+                        "apiVersion": "apps/v1",
+                        "kind": "StatefulSet",
+                        "metadata": {"name": "paude-test"},
+                        "spec": {"replicas": 1},
+                    }),
+                    stderr="",
+                )
+            # Proxy deployment doesn't exist
+            if "get" in cmd and "deployment" in cmd and "paude-proxy" in cmd_str:
+                return MagicMock(
+                    returncode=1,
+                    stdout="",
+                    stderr="Error: deployments.apps \"paude-proxy-test\" not found",
+                )
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        # Should not raise - proxy doesn't exist so we skip scaling it
+        backend.stop_session("test")
+
+        # Verify StatefulSet was still scaled to 0
+        calls = mock_run.call_args_list
+        sts_scale_calls = [
+            c for c in calls
+            if "scale" in str(c)
+            and "statefulset" in str(c)
+            and "replicas=0" in str(c)
+        ]
+        assert len(sts_scale_calls) == 1
+
+        # Verify NO proxy scale was attempted (proxy doesn't exist)
+        proxy_scale_calls = [
+            c for c in calls
+            if "scale" in str(c)
+            and "deployment" in str(c)
+            and "paude-proxy" in str(c)
+        ]
+        assert len(proxy_scale_calls) == 0
 
 
 class TestOpenShiftListSessions:

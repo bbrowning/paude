@@ -1296,6 +1296,21 @@ class OpenShiftBackend:
             f"--replicas={replicas}",
         )
 
+    def _scale_deployment(self, deployment_name: str, replicas: int) -> None:
+        """Scale a Deployment to the specified number of replicas.
+
+        Args:
+            deployment_name: Deployment name.
+            replicas: Number of replicas (0 or 1).
+        """
+        ns = self.namespace
+        self._run_oc(
+            "scale", "deployment", deployment_name,
+            "-n", ns,
+            f"--replicas={replicas}",
+            check=False,  # Don't fail if deployment doesn't exist
+        )
+
     # -------------------------------------------------------------------------
     # New Backend Protocol Methods (persistent sessions)
     # -------------------------------------------------------------------------
@@ -1614,7 +1629,8 @@ class OpenShiftBackend:
             check=False,
         )
         if result.returncode == 0:
-            # Proxy exists, wait for it to be ready
+            # Proxy exists, scale it up and wait for ready
+            self._scale_deployment(proxy_deployment, 1)
             self._wait_for_proxy_ready(name)
 
         # Wait for pod to be ready
@@ -1667,6 +1683,17 @@ class OpenShiftBackend:
         # Scale to 0
         print(f"Stopping session '{name}'...", file=sys.stderr)
         self._scale_statefulset(name, 0)
+
+        # Scale proxy to 0 if it exists
+        proxy_deployment = f"paude-proxy-{name}"
+        result = self._run_oc(
+            "get", "deployment", proxy_deployment,
+            "-n", self.namespace,
+            check=False,
+        )
+        if result.returncode == 0:
+            print(f"Stopping proxy '{proxy_deployment}'...", file=sys.stderr)
+            self._scale_deployment(proxy_deployment, 0)
 
         print(f"Session '{name}' stopped.", file=sys.stderr)
 
