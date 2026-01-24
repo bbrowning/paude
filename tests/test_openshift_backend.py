@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1789,9 +1790,10 @@ class TestSyncConfigToPod:
         ]
         assert len(exec_calls) >= 1
 
-        # Verify the command includes rm -rf, mkdir, and chmod
+        # Verify the command includes mkdir (idempotent) and chmod, but NOT rm -rf
+        # Using mkdir -p instead of rm -rf preserves working directories
         exec_cmd = str(exec_calls[0])
-        assert "rm -rf /pvc/config" in exec_cmd
+        assert "rm -rf /pvc/config" not in exec_cmd
         assert "mkdir -p /pvc/config/gcloud /pvc/config/claude" in exec_cmd
         assert "chmod -R g+rwX /pvc/config" in exec_cmd
 
@@ -1913,3 +1915,227 @@ class TestSyncConfigToPod:
         calls_str = str(mock_run.call_args_list)
         assert "mkdir -p /pvc/config/gcloud /pvc/config/claude" in calls_str
         assert ".ready" in calls_str
+
+    @patch("subprocess.run")
+    def test_raises_on_mkdir_failure(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """_sync_config_to_pod raises OpenShiftError when mkdir fails."""
+        from paude.backends.openshift import OpenShiftError
+
+        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
+            cmd = args[0] if args else []
+            # Fail the mkdir command (first exec call)
+            if "exec" in cmd and "mkdir" in str(cmd):
+                return MagicMock(
+                    returncode=1,
+                    stdout="",
+                    stderr="mkdir: cannot create directory: No space left",
+                )
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = mock_run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with patch.object(Path, "home", return_value=tmp_path):
+            with pytest.raises(OpenShiftError) as exc_info:
+                backend._sync_config_to_pod("test-pod-0")
+
+        assert "Failed to prepare config directory" in str(exc_info.value)
+
+
+class TestRsyncWithRetry:
+    """Tests for _rsync_with_retry method."""
+
+    @patch("subprocess.run")
+    def test_rsync_with_delete_flag(self, mock_run: MagicMock) -> None:
+        """_rsync_with_retry includes --delete when delete=True."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        result = backend._rsync_with_retry(
+            "/local/path/",
+            "test-pod-0:/remote/path",
+            "test-ns",
+            exclude_args=["--exclude", ".git"],
+            delete=True,
+        )
+
+        assert result is True
+        # Find the rsync call
+        rsync_calls = [
+            c for c in mock_run.call_args_list if "rsync" in str(c)
+        ]
+        assert len(rsync_calls) == 1
+        rsync_cmd = str(rsync_calls[0])
+        assert "--delete" in rsync_cmd
+
+    @patch("subprocess.run")
+    def test_rsync_without_delete_flag(self, mock_run: MagicMock) -> None:
+        """_rsync_with_retry does not include --delete when delete=False."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        result = backend._rsync_with_retry(
+            "/local/path/",
+            "test-pod-0:/remote/path",
+            "test-ns",
+            exclude_args=[],
+            delete=False,
+        )
+
+        assert result is True
+        rsync_calls = [
+            c for c in mock_run.call_args_list if "rsync" in str(c)
+        ]
+        assert len(rsync_calls) == 1
+        rsync_cmd = str(rsync_calls[0])
+        assert "--delete" not in rsync_cmd
+
+    @patch("subprocess.run")
+    def test_rsync_default_delete_is_false(self, mock_run: MagicMock) -> None:
+        """_rsync_with_retry defaults to delete=False when not specified."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        # Call without specifying delete parameter - should default to False
+        result = backend._rsync_with_retry(
+            "/local/path/",
+            "test-pod-0:/remote/path",
+            "test-ns",
+            exclude_args=[],
+        )
+
+        assert result is True
+        rsync_calls = [
+            c for c in mock_run.call_args_list if "rsync" in str(c)
+        ]
+        assert len(rsync_calls) == 1
+        rsync_cmd = str(rsync_calls[0])
+        assert "--delete" not in rsync_cmd
+
+
+class TestSyncSession:
+    """Tests for sync_session method."""
+
+    @patch("subprocess.run")
+    def test_sync_session_does_not_delete_directory(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """sync_session uses mkdir -p instead of rm -rf to preserve CWD."""
+        import base64
+
+        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
+            # Check for pod status request and return "Running"
+            cmd = args[0] if args else []
+            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(returncode=0, stdout="Running", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = mock_run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        # Mock _get_statefulset to return a session with base64-encoded workspace
+        workspace_encoded = base64.b64encode(str(tmp_path).encode()).decode()
+        mock_sts = {
+            "metadata": {
+                "annotations": {
+                    "paude.io/workspace": workspace_encoded,
+                },
+            },
+        }
+        with patch.object(backend, "_get_statefulset", return_value=mock_sts):
+            backend.sync_session("test-session", direction="remote")
+
+        # Check all exec calls
+        exec_calls = [
+            c for c in mock_run.call_args_list
+            if "exec" in str(c) and "bash" in str(c)
+        ]
+
+        # Verify no rm -rf /pvc/workspace
+        for call in exec_calls:
+            call_str = str(call)
+            assert "rm -rf /pvc/workspace" not in call_str
+
+        # Verify mkdir -p is used instead
+        mkdir_calls = [c for c in exec_calls if "mkdir -p" in str(c)]
+        assert len(mkdir_calls) >= 1
+
+    @patch("subprocess.run")
+    def test_sync_session_uses_rsync_delete(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """sync_session uses rsync --delete for incremental cleanup."""
+        import base64
+
+        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
+            cmd = args[0] if args else []
+            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(returncode=0, stdout="Running", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = mock_run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        workspace_encoded = base64.b64encode(str(tmp_path).encode()).decode()
+        mock_sts = {
+            "metadata": {
+                "annotations": {
+                    "paude.io/workspace": workspace_encoded,
+                },
+            },
+        }
+        with patch.object(backend, "_get_statefulset", return_value=mock_sts):
+            backend.sync_session("test-session", direction="remote")
+
+        # Find rsync calls
+        rsync_calls = [
+            c for c in mock_run.call_args_list if "rsync" in str(c)
+        ]
+        assert len(rsync_calls) >= 1
+
+        # Verify --delete flag is present for remote sync
+        rsync_cmd = str(rsync_calls[0])
+        assert "--delete" in rsync_cmd
+
+    @patch("subprocess.run")
+    def test_sync_session_local_does_not_use_delete(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """sync_session with direction='local' does NOT use --delete.
+
+        Local files should not be deleted when syncing from remote.
+        """
+        import base64
+
+        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
+            cmd = args[0] if args else []
+            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(returncode=0, stdout="Running", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = mock_run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        workspace_encoded = base64.b64encode(str(tmp_path).encode()).decode()
+        mock_sts = {
+            "metadata": {
+                "annotations": {
+                    "paude.io/workspace": workspace_encoded,
+                },
+            },
+        }
+        with patch.object(backend, "_get_statefulset", return_value=mock_sts):
+            backend.sync_session("test-session", direction="local")
+
+        # Find rsync calls
+        rsync_calls = [
+            c for c in mock_run.call_args_list if "rsync" in str(c)
+        ]
+        assert len(rsync_calls) >= 1
+
+        # Verify --delete flag is NOT present for local sync
+        rsync_cmd = str(rsync_calls[0])
+        assert "--delete" not in rsync_cmd

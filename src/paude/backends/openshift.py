@@ -279,6 +279,7 @@ class OpenShiftBackend:
         namespace: str,
         exclude_args: list[str],
         verbose: bool = False,
+        delete: bool = False,
     ) -> bool:
         """Run oc rsync with retry logic for timeouts.
 
@@ -288,21 +289,29 @@ class OpenShiftBackend:
             namespace: Kubernetes namespace.
             exclude_args: List of --exclude arguments.
             verbose: Whether to show rsync output (default False).
+            delete: Whether to delete files not in source (default False).
 
         Returns:
             True if sync succeeded, False if all retries failed.
         """
         for attempt in range(1, self.RSYNC_MAX_RETRIES + 1):
             try:
-                # Show output only when verbose is enabled
-                self._run_oc(
+                # Build rsync args
+                rsync_args = [
                     "rsync",
                     "--progress",
                     source,
                     dest,
                     "-n", namespace,
                     "--no-perms",
-                    *exclude_args,
+                ]
+                if delete:
+                    rsync_args.append("--delete")
+                rsync_args.extend(exclude_args)
+
+                # Show output only when verbose is enabled
+                self._run_oc(
+                    *rsync_args,
                     timeout=self.RSYNC_TIMEOUT,
                     capture=not verbose,
                     check=False,
@@ -1505,15 +1514,19 @@ class OpenShiftBackend:
         print("Syncing credentials to pod...", file=sys.stderr)
 
         # Prepare config directory with OpenShift UID pattern
-        # Previous pod may have created it with different UID, so rm -rf first
-        self._run_oc(
+        # Using mkdir -p (idempotent) instead of rm -rf to preserve working directories
+        # Chmod may fail if different UID owns it, but g+rwX permissions are already set
+        prep_result = self._run_oc(
             "exec", pod_name, "-n", ns, "--",
             "bash", "-c",
-            f"rm -rf {config_path} && "
             f"mkdir -p {config_path}/gcloud {config_path}/claude && "
-            f"chmod -R g+rwX {config_path}",
-            check=True,
+            f"chmod -R g+rwX {config_path} 2>/dev/null || true",
+            check=False,
         )
+        if prep_result.returncode != 0:
+            raise OpenShiftError(
+                f"Failed to prepare config directory: {prep_result.stderr}"
+            )
 
         # Sync gcloud credentials
         gcloud_dir = home / ".config" / "gcloud"
@@ -1874,18 +1887,14 @@ class OpenShiftBackend:
         # Sync based on direction
         if direction in ("remote", "both"):
             # Prepare workspace directory with proper permissions
-            # The PVC persists between pod restarts, but OpenShift assigns different
-            # arbitrary UIDs to each pod. If /pvc/workspace was created by a previous
-            # pod, we can't chmod it (EPERM). Solution: remove and recreate it.
-            # This is safe because we're about to overwrite with local data anyway.
+            # Use mkdir -p (idempotent) instead of rm -rf to preserve CWD
+            # g+rwX allows any pod (all run as GID 0) to access the directory
+            # Chmod may fail if different UID owns it, but perms already set
             prep_result = self._run_oc(
                 "exec", pod_name, "-n", ns, "--",
                 "bash", "-c",
-                # Remove old workspace if it exists (might be owned by different UID)
-                # Then create fresh with correct ownership and permissions
-                f"rm -rf {remote_path} && "
                 f"mkdir -p {remote_path} && "
-                f"chmod g+rwX {remote_path}",
+                f"chmod g+rwX {remote_path} 2>/dev/null || true",
                 check=False,
             )
             if prep_result.returncode != 0:
@@ -1893,7 +1902,7 @@ class OpenShiftBackend:
                     f"Warning: workspace prep failed: {prep_result.stderr}",
                     file=sys.stderr,
                 )
-            # Local to remote
+            # Local to remote with --delete for incremental cleanup
             print(f"Syncing local → {pod_name}:{remote_path}...", file=sys.stderr)
             self._rsync_with_retry(
                 f"{workspace}/",
@@ -1901,6 +1910,7 @@ class OpenShiftBackend:
                 ns,
                 exclude_args,
                 verbose=verbose,
+                delete=True,
             )
             # Make synced subdirectories group-writable for OpenShift arbitrary UID
             # rsync/tar creates directories with restrictive permissions
