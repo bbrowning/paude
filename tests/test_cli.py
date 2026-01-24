@@ -26,16 +26,20 @@ def test_short_help_shows_help():
 
 def test_version_shows_version():
     """--version shows version and exits 0."""
+    from paude import __version__
+
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert "paude 0.4.0" in result.stdout
+    assert f"paude {__version__}" in result.stdout
 
 
 def test_short_version_shows_version():
     """-V shows version and exits 0."""
+    from paude import __version__
+
     result = runner.invoke(app, ["-V"])
     assert result.exit_code == 0
-    assert "paude 0.4.0" in result.stdout
+    assert f"paude {__version__}" in result.stdout
 
 
 def test_version_shows_development_mode(monkeypatch: pytest.MonkeyPatch):

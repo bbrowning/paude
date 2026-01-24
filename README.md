@@ -62,13 +62,20 @@ paude --yolo
 # Combine flags for full autonomous mode with network access
 paude --yolo --allow-network
 
-# Pass arguments to Claude Code (use -- separator)
-paude -- --help
-paude -- -p "explain this code"
-paude --yolo -- -p "refactor this function"
-```
+# Pass arguments to Claude Code
+paude -a '--help'
+paude -a '-p "explain this code"'
+paude --yolo -a '-p "refactor this function"'
 
-Arguments before `--` are interpreted by paude. Arguments after `--` are passed directly to Claude Code.
+# Verbose output (shows rsync progress, etc.)
+paude -v
+
+# Force rebuild after changing config
+paude --rebuild
+
+# Verify configuration without running
+paude --dry-run
+```
 
 On first run, paude pulls the base container image and installs Claude Code locally. This one-time setup takes a few minutes. Subsequent runs use the cached image and start immediately.
 
@@ -134,6 +141,7 @@ paude create my-project --backend=openshift \
 | `start` | Starts container/pod, syncs files, connects |
 | `stop` | Stops container/pod, preserves volume |
 | `connect` | Attaches to running session |
+| `sync` | Syncs files between local and remote workspace |
 | `delete` | Removes all resources including volume |
 
 ## OpenShift Backend
@@ -306,7 +314,7 @@ The container intentionally restricts certain operations:
 
 | Resource | Access | Purpose |
 |----------|--------|---------|
-| Network | proxy-filtered (Google/Vertex only) | Prevents data exfiltration |
+| Network | proxy-filtered (Vertex AI only) | Prevents data exfiltration |
 | Current directory | read-write | Working files |
 | `~/.config/gcloud` | read-only | Vertex AI auth |
 | `~/.claude` | copied in, not mounted | Prevents host config poisoning |
@@ -391,6 +399,8 @@ Create `paude.json` at project root:
 
 ### Supported Properties
 
+**devcontainer.json properties:**
+
 | Property | Description |
 |----------|-------------|
 | `image` | Base container image |
@@ -400,8 +410,19 @@ Create `paude.json` at project root:
 | `features` | Dev container features (ghcr.io OCI artifacts) |
 | `postCreateCommand` | Run after first start |
 | `containerEnv` | Environment variables |
-| `venv` | Venv isolation: `"auto"`, `"none"`, or list of directories (paude.json only) |
-| `pip_install` | Build-time pip install: `true`, `false`, or custom command (paude.json only) |
+
+**paude.json properties:**
+
+| Property | Description |
+|----------|-------------|
+| `base` | Base container image |
+| `build.dockerfile` | Path to custom Dockerfile |
+| `build.context` | Build context directory |
+| `build.args` | Build arguments for Dockerfile |
+| `packages` | Additional system packages to install |
+| `setup` | Run after first start |
+| `venv` | Venv isolation: `"auto"`, `"none"`, or list of directories |
+| `pip_install` | Build-time pip install: `true`, `false`, or custom command |
 
 ### Unsupported Properties (Security)
 

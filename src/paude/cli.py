@@ -131,7 +131,7 @@ EXAMPLES:
                                     Delete a session permanently
 
 SECURITY:
-    By default, paude runs with network restricted to Google/Anthropic APIs only.
+    By default, paude runs with network restricted to Vertex AI endpoints only.
     Use --allow-network to permit all network access (enables data exfiltration).
     Combining --yolo with --allow-network is maximum risk mode."""
     typer.echo(help_text)
