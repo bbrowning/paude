@@ -123,6 +123,17 @@ class TestRunOc:
         mock_run.assert_called_once()
         assert mock_run.call_args[1]["input"] == '{"kind":"Pod"}'
 
+    def test_timeout_constants_have_expected_values(self) -> None:
+        """Timeout constants are set to expected values."""
+        # OC_DEFAULT_TIMEOUT: standard commands should complete quickly
+        assert OpenShiftBackend.OC_DEFAULT_TIMEOUT == 30
+
+        # OC_EXEC_TIMEOUT: exec operations may be slow after pod restart
+        assert OpenShiftBackend.OC_EXEC_TIMEOUT == 120
+
+        # RSYNC_TIMEOUT: large workspaces take time to sync
+        assert OpenShiftBackend.RSYNC_TIMEOUT == 300
+
     @patch("subprocess.run")
     def test_run_oc_uses_default_timeout(self, mock_run: MagicMock) -> None:
         """_run_oc uses default timeout when none specified."""
@@ -1969,6 +1980,37 @@ class TestSyncConfigToPod:
 
         assert "Failed to prepare config directory" in str(exc_info.value)
 
+    @patch("subprocess.run")
+    def test_exec_calls_use_extended_timeout(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """_sync_config_to_pod exec calls use OC_EXEC_TIMEOUT (not default)."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with patch.object(Path, "home", return_value=tmp_path):
+            backend._sync_config_to_pod("test-pod-0")
+
+        # Find all exec calls (mkdir/chmod operations)
+        exec_calls = [
+            c for c in mock_run.call_args_list
+            if len(c[0]) > 0 and "exec" in c[0][0]
+        ]
+
+        # There should be at least 2 exec calls:
+        # 1. mkdir + chmod for config directory prep
+        # 2. chmod + touch for .ready marker
+        assert len(exec_calls) >= 2, f"Expected at least 2 exec calls, got {len(exec_calls)}"
+
+        # All exec calls should use the extended timeout
+        for call in exec_calls:
+            timeout = call[1].get("timeout")
+            assert timeout == OpenShiftBackend.OC_EXEC_TIMEOUT, (
+                f"exec call should use OC_EXEC_TIMEOUT ({OpenShiftBackend.OC_EXEC_TIMEOUT}), "
+                f"got {timeout}. Call: {call}"
+            )
+
 
 class TestRsyncWithRetry:
     """Tests for _rsync_with_retry method."""
@@ -2251,6 +2293,53 @@ class TestSyncSession:
         captured = capsys.readouterr()
         assert "FAILED" in captured.err
         assert "Permission denied" in captured.err
+
+    @patch("subprocess.run")
+    def test_sync_session_exec_uses_extended_timeout(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """sync_session exec calls use OC_EXEC_TIMEOUT (not default)."""
+        import base64
+
+        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
+            # Check for pod status request and return "Running"
+            cmd = args[0] if args else []
+            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(returncode=0, stdout="Running", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = mock_run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        workspace_encoded = base64.b64encode(str(tmp_path).encode()).decode()
+        mock_sts = {
+            "metadata": {
+                "annotations": {
+                    "paude.io/workspace": workspace_encoded,
+                },
+            },
+        }
+        with patch.object(backend, "_get_statefulset", return_value=mock_sts):
+            backend.sync_session("test-session", direction="remote")
+
+        # Find all exec calls (mkdir/chmod operations)
+        exec_calls = [
+            c for c in mock_run.call_args_list
+            if len(c[0]) > 0 and "exec" in c[0][0]
+        ]
+
+        # There should be at least 2 exec calls:
+        # 1. mkdir + chmod for workspace prep
+        # 2. chmod after rsync
+        assert len(exec_calls) >= 2, f"Expected at least 2 exec calls, got {len(exec_calls)}"
+
+        # All exec calls should use the extended timeout
+        for call in exec_calls:
+            timeout = call[1].get("timeout")
+            assert timeout == OpenShiftBackend.OC_EXEC_TIMEOUT, (
+                f"exec call should use OC_EXEC_TIMEOUT ({OpenShiftBackend.OC_EXEC_TIMEOUT}), "
+                f"got {timeout}. Call: {call}"
+            )
 
 
 class TestSyncConfigWithPlugins:

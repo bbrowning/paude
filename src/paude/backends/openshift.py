@@ -211,6 +211,8 @@ class OpenShiftBackend:
 
     # Default timeout for oc commands (seconds)
     OC_DEFAULT_TIMEOUT = 30
+    # Timeout for oc exec operations (may be slow after pod restart)
+    OC_EXEC_TIMEOUT = 120
     # Timeout for rsync operations (5 minutes - large workspaces take time)
     RSYNC_TIMEOUT = 300
     # Number of retries for rsync on timeout
@@ -1554,6 +1556,7 @@ class OpenShiftBackend:
             f"mkdir -p {config_path}/gcloud {config_path}/claude && "
             f"(chmod -R g+rwX {config_path} 2>/dev/null || true)",
             check=False,
+            timeout=self.OC_EXEC_TIMEOUT,
         )
         if prep_result.returncode != 0:
             raise OpenShiftError(
@@ -1639,6 +1642,7 @@ class OpenShiftBackend:
             f"touch {config_path}/.ready && "
             f"chmod g+r {config_path}/.ready",
             check=False,
+            timeout=self.OC_EXEC_TIMEOUT,
         )
 
         print("Configuration synced.", file=sys.stderr)
@@ -1674,6 +1678,7 @@ class OpenShiftBackend:
             f'"{installed_plugins}" > "{installed_plugins}.tmp" && '
             f'mv "{installed_plugins}.tmp" "{installed_plugins}"; fi',
             check=False,
+            timeout=self.OC_EXEC_TIMEOUT,
         )
 
         # Rewrite known_marketplaces.json - installLocation field
@@ -1693,6 +1698,7 @@ class OpenShiftBackend:
             f'"{known_marketplaces}" > "{known_marketplaces}.tmp" && '
             f'mv "{known_marketplaces}.tmp" "{known_marketplaces}"; fi',
             check=False,
+            timeout=self.OC_EXEC_TIMEOUT,
         )
 
     def start_session(
@@ -1987,6 +1993,7 @@ class OpenShiftBackend:
                 f"mkdir -p {remote_path} && "
                 f"(chmod g+rwX {remote_path} 2>/dev/null || true)",
                 check=False,
+                timeout=self.OC_EXEC_TIMEOUT,
             )
             if prep_result.returncode != 0:
                 print(
@@ -2010,6 +2017,7 @@ class OpenShiftBackend:
                     "exec", pod_name, "-n", ns, "--",
                     "chmod", "-R", "g+rwX", remote_path,
                     check=False,
+                    timeout=self.OC_EXEC_TIMEOUT,
                 )
                 print("Sync to remote completed.", file=sys.stderr)
             else:
