@@ -668,7 +668,7 @@ def session_start(
                 pass
 
         if not all_sessions:
-            typer.echo("No sessions found for this workspace.", err=True)
+            typer.echo("No sessions found.", err=True)
             typer.echo("", err=True)
             typer.echo("To create and start a session:", err=True)
             typer.echo("  paude create && paude start", err=True)
@@ -970,7 +970,7 @@ def session_stop(
         # If no name provided, find running session for current workspace
         if not name:
             session = backend_instance.find_session_for_workspace(Path.cwd())
-            if session:
+            if session and session.status == "running":
                 name = session.name
             else:
                 # Find running sessions
@@ -1017,7 +1017,7 @@ def session_stop(
         # If no name provided, find running session for current workspace
         if not name:
             session = os_backend.find_session_for_workspace(Path.cwd())
-            if session:
+            if session and session.status == "running":
                 name = session.name
             else:
                 # Find running sessions

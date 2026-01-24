@@ -655,6 +655,38 @@ class TestStartMultiBackend:
         assert "Starting 'workspace-session' (openshift)..." in result.output
         mock_os_backend.start_session.assert_called_once()
 
+    @patch("paude.backends.PodmanBackend")
+    @patch("paude.backends.openshift.OpenShiftBackend")
+    @patch("paude.backends.openshift.OpenShiftConfig")
+    def test_start_includes_stopped_sessions(
+        self,
+        mock_os_config_class: MagicMock,
+        mock_os_backend_class: MagicMock,
+        mock_podman_class: MagicMock,
+    ):
+        """Start includes stopped sessions (unlike stop which only considers running)."""
+        # Create a stopped session - start should still find and start it
+        stopped_session = _make_session(
+            "stopped-session", status="stopped", backend_type="podman"
+        )
+        mock_podman = MagicMock()
+        mock_podman.find_session_for_workspace.return_value = None
+        mock_podman.list_sessions.return_value = [stopped_session]
+        mock_podman.start_session.return_value = 0
+        mock_podman_class.return_value = mock_podman
+
+        mock_os_backend = MagicMock()
+        mock_os_backend.find_session_for_workspace.return_value = None
+        mock_os_backend.list_sessions.return_value = []
+        mock_os_backend_class.return_value = mock_os_backend
+
+        result = runner.invoke(app, ["start"])
+
+        # Start should find the stopped session and start it
+        assert result.exit_code == 0
+        assert "Starting 'stopped-session' (podman)..." in result.output
+        mock_podman.start_session.assert_called_once()
+
 
 class TestStopMultiBackend:
     """Tests for stop command searching multiple backends."""
