@@ -309,13 +309,27 @@ class OpenShiftBackend:
                     rsync_args.append("--delete")
                 rsync_args.extend(exclude_args)
 
-                # Show output only when verbose is enabled
-                self._run_oc(
+                # Always capture output so we can report errors
+                # When verbose, we'll print stdout/stderr after
+                result = self._run_oc(
                     *rsync_args,
                     timeout=self.RSYNC_TIMEOUT,
-                    capture=not verbose,
+                    capture=True,
                     check=False,
                 )
+
+                # Show output when verbose is enabled
+                if verbose and result.stdout:
+                    print(result.stdout, file=sys.stderr)
+
+                # Check for rsync failure
+                if result.returncode != 0:
+                    print(
+                        f"Rsync failed: {result.stderr.strip() or 'unknown error'}",
+                        file=sys.stderr,
+                    )
+                    return False
+
                 return True
             except OcTimeoutError:
                 retries = self.RSYNC_MAX_RETRIES
@@ -1213,7 +1227,8 @@ class OpenShiftBackend:
                                     "name": "PAUDE_WORKSPACE",
                                     "value": "/pvc/workspace",
                                 }],
-                                "workingDir": "/pvc/workspace",
+                                # Don't set workingDir - kubelet creates it as root
+                                # Entrypoint creates dir with correct UID and cd's to it
                                 "resources": self._config.resources,
                                 "volumeMounts": volume_mounts,
                             },
@@ -1501,7 +1516,7 @@ class OpenShiftBackend:
         - Claude config files (settings.json, credentials.json, etc.)
         - gitconfig
 
-        Uses the OpenShift UID permission pattern: rm -rf && mkdir && chmod g+rwX.
+        Uses mkdir -p (idempotent) with chmod g+rwX for OpenShift arbitrary UID.
 
         Args:
             pod_name: Name of the pod to sync to.
@@ -1520,7 +1535,7 @@ class OpenShiftBackend:
             "exec", pod_name, "-n", ns, "--",
             "bash", "-c",
             f"mkdir -p {config_path}/gcloud {config_path}/claude && "
-            f"chmod -R g+rwX {config_path} 2>/dev/null || true",
+            f"(chmod -R g+rwX {config_path} 2>/dev/null || true)",
             check=False,
         )
         if prep_result.returncode != 0:
@@ -1894,7 +1909,7 @@ class OpenShiftBackend:
                 "exec", pod_name, "-n", ns, "--",
                 "bash", "-c",
                 f"mkdir -p {remote_path} && "
-                f"chmod g+rwX {remote_path} 2>/dev/null || true",
+                f"(chmod g+rwX {remote_path} 2>/dev/null || true)",
                 check=False,
             )
             if prep_result.returncode != 0:
@@ -1904,7 +1919,7 @@ class OpenShiftBackend:
                 )
             # Local to remote with --delete for incremental cleanup
             print(f"Syncing local → {pod_name}:{remote_path}...", file=sys.stderr)
-            self._rsync_with_retry(
+            success = self._rsync_with_retry(
                 f"{workspace}/",
                 f"{pod_name}:{remote_path}",
                 ns,
@@ -1912,24 +1927,32 @@ class OpenShiftBackend:
                 verbose=verbose,
                 delete=True,
             )
-            # Make synced subdirectories group-writable for OpenShift arbitrary UID
-            # rsync/tar creates directories with restrictive permissions
-            self._run_oc(
-                "exec", pod_name, "-n", ns, "--",
-                "chmod", "-R", "g+rwX", remote_path,
-                check=False,
-            )
+            if success:
+                # Make synced subdirectories group-writable for OpenShift arbitrary UID
+                # rsync/tar creates directories with restrictive permissions
+                self._run_oc(
+                    "exec", pod_name, "-n", ns, "--",
+                    "chmod", "-R", "g+rwX", remote_path,
+                    check=False,
+                )
+                print("Sync to remote completed.", file=sys.stderr)
+            else:
+                print("Sync to remote FAILED.", file=sys.stderr)
 
         if direction in ("local", "both"):
             # Remote to local
             print(f"Syncing {pod_name}:{remote_path} → local...", file=sys.stderr)
-            self._rsync_with_retry(
+            success = self._rsync_with_retry(
                 f"{pod_name}:{remote_path}/",
                 str(workspace),
                 ns,
                 exclude_args,
                 verbose=verbose,
             )
+            if success:
+                print("Sync to local completed.", file=sys.stderr)
+            else:
+                print("Sync to local FAILED.", file=sys.stderr)
 
     def find_session_for_workspace(self, workspace: Path) -> Session | None:
         """Find an existing session for the given workspace.

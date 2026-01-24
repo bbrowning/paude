@@ -847,6 +847,27 @@ class TestOpenShiftStatefulSetSpec:
         vct = spec["spec"]["volumeClaimTemplates"][0]
         assert vct["spec"]["storageClassName"] == "fast-ssd"
 
+    def test_statefulset_does_not_include_working_dir(self) -> None:
+        """StatefulSet container spec must NOT include workingDir.
+
+        If workingDir is set, kubelet creates the directory as root before
+        the container starts, which causes permission errors for the random
+        UID that OpenShift assigns. The entrypoint script creates the
+        workspace directory with correct ownership instead.
+        """
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        spec = backend._generate_statefulset_spec(
+            session_name="test",
+            image="paude:latest",
+            env={},
+            workspace=Path("/project"),
+        )
+
+        container = spec["spec"]["template"]["spec"]["containers"][0]
+        assert "workingDir" not in container, (
+            "workingDir must not be set - kubelet creates it as root"
+        )
+
 
 class TestBuildFailedError:
     """Tests for BuildFailedError exception."""
@@ -2015,6 +2036,55 @@ class TestRsyncWithRetry:
         rsync_cmd = str(rsync_calls[0])
         assert "--delete" not in rsync_cmd
 
+    @patch("subprocess.run")
+    def test_rsync_returns_false_on_failure(
+        self, mock_run: MagicMock, capsys: Any
+    ) -> None:
+        """_rsync_with_retry returns False and prints error when rsync fails."""
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stdout="",
+            stderr="error: Permission denied",
+        )
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        result = backend._rsync_with_retry(
+            "/local/path/",
+            "test-pod-0:/remote/path",
+            "test-ns",
+            exclude_args=[],
+        )
+
+        assert result is False
+        captured = capsys.readouterr()
+        assert "Rsync failed" in captured.err
+        assert "Permission denied" in captured.err
+
+    @patch("subprocess.run")
+    def test_rsync_prints_error_even_without_verbose(
+        self, mock_run: MagicMock, capsys: Any
+    ) -> None:
+        """_rsync_with_retry prints error message even when verbose=False."""
+        mock_run.return_value = MagicMock(
+            returncode=23,
+            stdout="",
+            stderr="rsync error: some files could not be transferred",
+        )
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        result = backend._rsync_with_retry(
+            "/local/path/",
+            "test-pod-0:/remote/path",
+            "test-ns",
+            exclude_args=[],
+            verbose=False,
+        )
+
+        assert result is False
+        captured = capsys.readouterr()
+        assert "Rsync failed" in captured.err
+        assert "some files could not be transferred" in captured.err
+
 
 class TestSyncSession:
     """Tests for sync_session method."""
@@ -2139,3 +2209,41 @@ class TestSyncSession:
         # Verify --delete flag is NOT present for local sync
         rsync_cmd = str(rsync_calls[0])
         assert "--delete" not in rsync_cmd
+
+    @patch("subprocess.run")
+    def test_sync_session_reports_failure(
+        self, mock_run: MagicMock, tmp_path: Path, capsys: Any
+    ) -> None:
+        """sync_session prints FAILED message when rsync fails."""
+        import base64
+
+        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
+            cmd = args[0] if args else []
+            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Fail rsync calls
+            if "rsync" in cmd:
+                return MagicMock(
+                    returncode=1,
+                    stdout="",
+                    stderr="error: Permission denied",
+                )
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = mock_run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        workspace_encoded = base64.b64encode(str(tmp_path).encode()).decode()
+        mock_sts = {
+            "metadata": {
+                "annotations": {
+                    "paude.io/workspace": workspace_encoded,
+                },
+            },
+        }
+        with patch.object(backend, "_get_statefulset", return_value=mock_sts):
+            backend.sync_session("test-session", direction="remote")
+
+        captured = capsys.readouterr()
+        assert "FAILED" in captured.err
+        assert "Permission denied" in captured.err
