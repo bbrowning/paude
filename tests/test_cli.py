@@ -654,3 +654,148 @@ class TestStartMultiBackend:
         assert result.exit_code == 0
         assert "Starting 'workspace-session' (openshift)..." in result.output
         mock_os_backend.start_session.assert_called_once()
+
+
+class TestStopMultiBackend:
+    """Tests for stop command searching multiple backends."""
+
+    @patch("paude.backends.PodmanBackend")
+    @patch("paude.backends.openshift.OpenShiftBackend")
+    @patch("paude.backends.openshift.OpenShiftConfig")
+    def test_stop_finds_openshift_session_when_podman_empty(
+        self,
+        mock_os_config_class: MagicMock,
+        mock_os_backend_class: MagicMock,
+        mock_podman_class: MagicMock,
+    ):
+        """Stop finds OpenShift running session when podman has none."""
+        mock_podman = MagicMock()
+        mock_podman.find_session_for_workspace.return_value = None
+        mock_podman.list_sessions.return_value = []
+        mock_podman_class.return_value = mock_podman
+
+        os_session = _make_session("os-session", backend_type="openshift")
+        mock_os_backend = MagicMock()
+        mock_os_backend.find_session_for_workspace.return_value = None
+        mock_os_backend.list_sessions.return_value = [os_session]
+        mock_os_backend_class.return_value = mock_os_backend
+
+        result = runner.invoke(app, ["stop"])
+
+        assert result.exit_code == 0
+        assert "Stopping 'os-session' (openshift)..." in result.output
+        assert "Session 'os-session' stopped." in result.output
+        mock_os_backend.stop_session.assert_called_once()
+
+    @patch("paude.backends.PodmanBackend")
+    @patch("paude.backends.openshift.OpenShiftBackend")
+    @patch("paude.backends.openshift.OpenShiftConfig")
+    def test_stop_finds_podman_session_when_openshift_empty(
+        self,
+        mock_os_config_class: MagicMock,
+        mock_os_backend_class: MagicMock,
+        mock_podman_class: MagicMock,
+    ):
+        """Stop finds podman running session when OpenShift has none."""
+        podman_session = _make_session("podman-session", backend_type="podman")
+        mock_podman = MagicMock()
+        mock_podman.find_session_for_workspace.return_value = None
+        mock_podman.list_sessions.return_value = [podman_session]
+        mock_podman_class.return_value = mock_podman
+
+        mock_os_backend = MagicMock()
+        mock_os_backend.find_session_for_workspace.return_value = None
+        mock_os_backend.list_sessions.return_value = []
+        mock_os_backend_class.return_value = mock_os_backend
+
+        result = runner.invoke(app, ["stop"])
+
+        assert result.exit_code == 0
+        assert "Stopping 'podman-session' (podman)..." in result.output
+        assert "Session 'podman-session' stopped." in result.output
+        mock_podman.stop_session.assert_called_once()
+
+    @patch("paude.backends.PodmanBackend")
+    @patch("paude.backends.openshift.OpenShiftBackend")
+    @patch("paude.backends.openshift.OpenShiftConfig")
+    def test_stop_shows_multiple_running_sessions_across_backends(
+        self,
+        mock_os_config_class: MagicMock,
+        mock_os_backend_class: MagicMock,
+        mock_podman_class: MagicMock,
+    ):
+        """Stop shows all running sessions when multiple exist across backends."""
+        podman_session = _make_session("podman-session", backend_type="podman")
+        mock_podman = MagicMock()
+        mock_podman.find_session_for_workspace.return_value = None
+        mock_podman.list_sessions.return_value = [podman_session]
+        mock_podman_class.return_value = mock_podman
+
+        os_session = _make_session("os-session", backend_type="openshift")
+        mock_os_backend = MagicMock()
+        mock_os_backend.find_session_for_workspace.return_value = None
+        mock_os_backend.list_sessions.return_value = [os_session]
+        mock_os_backend_class.return_value = mock_os_backend
+
+        result = runner.invoke(app, ["stop"])
+
+        assert result.exit_code == 1
+        assert "Multiple running sessions found" in result.output
+        assert "paude stop podman-session" in result.output
+        assert "paude stop os-session" in result.output
+
+    @patch("paude.backends.PodmanBackend")
+    @patch("paude.backends.openshift.OpenShiftBackend")
+    @patch("paude.backends.openshift.OpenShiftConfig")
+    def test_stop_prefers_workspace_match(
+        self,
+        mock_os_config_class: MagicMock,
+        mock_os_backend_class: MagicMock,
+        mock_podman_class: MagicMock,
+    ):
+        """Stop prefers workspace-matching running session."""
+        workspace_session = _make_session(
+            "workspace-session", backend_type="openshift"
+        )
+        mock_podman = MagicMock()
+        mock_podman.find_session_for_workspace.return_value = None
+        mock_podman_class.return_value = mock_podman
+
+        mock_os_backend = MagicMock()
+        mock_os_backend.find_session_for_workspace.return_value = workspace_session
+        mock_os_backend_class.return_value = mock_os_backend
+
+        result = runner.invoke(app, ["stop"])
+
+        assert result.exit_code == 0
+        assert "Stopping 'workspace-session' (openshift)..." in result.output
+        assert "Session 'workspace-session' stopped." in result.output
+        mock_os_backend.stop_session.assert_called_once()
+
+    @patch("paude.backends.PodmanBackend")
+    @patch("paude.backends.openshift.OpenShiftBackend")
+    @patch("paude.backends.openshift.OpenShiftConfig")
+    def test_stop_ignores_stopped_sessions(
+        self,
+        mock_os_config_class: MagicMock,
+        mock_os_backend_class: MagicMock,
+        mock_podman_class: MagicMock,
+    ):
+        """Stop only considers running sessions, not stopped ones."""
+        stopped_session = _make_session(
+            "stopped-session", status="stopped", backend_type="podman"
+        )
+        mock_podman = MagicMock()
+        mock_podman.find_session_for_workspace.return_value = None
+        mock_podman.list_sessions.return_value = [stopped_session]
+        mock_podman_class.return_value = mock_podman
+
+        mock_os_backend = MagicMock()
+        mock_os_backend.find_session_for_workspace.return_value = None
+        mock_os_backend.list_sessions.return_value = []
+        mock_os_backend_class.return_value = mock_os_backend
+
+        result = runner.invoke(app, ["stop"])
+
+        assert result.exit_code == 1
+        assert "No running sessions to stop." in result.output
