@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
 import pytest
 from typer.testing import CliRunner
 
+from paude.backends import Session
 from paude.cli import app
 
 runner = CliRunner()
@@ -233,3 +237,285 @@ def test_subcommand_runs_without_main_execution():
     assert result.exit_code == 0
     assert "Stop a session" in result.stdout
     assert "podman is required" not in result.stdout
+
+
+# Tests for connect command multi-backend search behavior
+
+
+def _make_session(
+    name: str,
+    status: str = "running",
+    workspace: Path | None = None,
+    backend_type: str = "podman",
+) -> Session:
+    """Helper to create a Session object for tests."""
+    return Session(
+        name=name,
+        status=status,
+        workspace=workspace or Path("/some/path"),
+        created_at="2024-01-15T10:00:00Z",
+        backend_type=backend_type,
+    )
+
+
+class TestConnectMultiBackend:
+    """Tests for connect command searching multiple backends."""
+
+    @patch("paude.backends.PodmanBackend")
+    @patch("paude.backends.openshift.OpenShiftBackend")
+    @patch("paude.backends.openshift.OpenShiftConfig")
+    def test_connect_finds_openshift_session_when_podman_empty(
+        self,
+        mock_os_config_class: MagicMock,
+        mock_os_backend_class: MagicMock,
+        mock_podman_class: MagicMock,
+    ):
+        """Connect finds OpenShift running session when podman has none."""
+        mock_podman = MagicMock()
+        mock_podman.find_session_for_workspace.return_value = None
+        mock_podman.list_sessions.return_value = []
+        mock_podman_class.return_value = mock_podman
+
+        os_session = _make_session("os-session", backend_type="openshift")
+        mock_os_backend = MagicMock()
+        mock_os_backend.find_session_for_workspace.return_value = None
+        mock_os_backend.list_sessions.return_value = [os_session]
+        mock_os_backend.connect_session.return_value = 0
+        mock_os_backend_class.return_value = mock_os_backend
+
+        result = runner.invoke(app, ["connect"])
+
+        assert result.exit_code == 0
+        assert "Connecting to 'os-session' (openshift)..." in result.output
+        mock_os_backend.connect_session.assert_called_once_with("os-session")
+
+    @patch("paude.backends.PodmanBackend")
+    @patch("paude.backends.openshift.OpenShiftBackend")
+    @patch("paude.backends.openshift.OpenShiftConfig")
+    def test_connect_finds_podman_session_when_openshift_empty(
+        self,
+        mock_os_config_class: MagicMock,
+        mock_os_backend_class: MagicMock,
+        mock_podman_class: MagicMock,
+    ):
+        """Connect finds podman running session when OpenShift has none."""
+        podman_session = _make_session("podman-session", backend_type="podman")
+        mock_podman = MagicMock()
+        mock_podman.find_session_for_workspace.return_value = None
+        mock_podman.list_sessions.return_value = [podman_session]
+        mock_podman.connect_session.return_value = 0
+        mock_podman_class.return_value = mock_podman
+
+        mock_os_backend = MagicMock()
+        mock_os_backend.find_session_for_workspace.return_value = None
+        mock_os_backend.list_sessions.return_value = []
+        mock_os_backend_class.return_value = mock_os_backend
+
+        result = runner.invoke(app, ["connect"])
+
+        assert result.exit_code == 0
+        assert "Connecting to 'podman-session' (podman)..." in result.output
+        mock_podman.connect_session.assert_called_once_with("podman-session")
+
+    @patch("paude.backends.PodmanBackend")
+    @patch("paude.backends.openshift.OpenShiftBackend")
+    @patch("paude.backends.openshift.OpenShiftConfig")
+    def test_connect_shows_multiple_sessions_across_backends(
+        self,
+        mock_os_config_class: MagicMock,
+        mock_os_backend_class: MagicMock,
+        mock_podman_class: MagicMock,
+    ):
+        """Connect shows all sessions when multiple exist across backends."""
+        podman_session = _make_session("podman-session", backend_type="podman")
+        mock_podman = MagicMock()
+        mock_podman.find_session_for_workspace.return_value = None
+        mock_podman.list_sessions.return_value = [podman_session]
+        mock_podman_class.return_value = mock_podman
+
+        os_session = _make_session("os-session", backend_type="openshift")
+        mock_os_backend = MagicMock()
+        mock_os_backend.find_session_for_workspace.return_value = None
+        mock_os_backend.list_sessions.return_value = [os_session]
+        mock_os_backend_class.return_value = mock_os_backend
+
+        result = runner.invoke(app, ["connect"])
+
+        assert result.exit_code == 1
+        assert "Multiple running sessions found" in result.output
+        # Verify actionable command syntax is shown
+        assert "paude connect podman-session" in result.output
+        assert "paude connect os-session" in result.output
+        # Verify backend info is shown
+        assert "podman" in result.output
+        assert "openshift" in result.output
+
+    @patch("paude.backends.PodmanBackend")
+    @patch("paude.backends.openshift.OpenShiftBackend")
+    @patch("paude.backends.openshift.OpenShiftConfig")
+    def test_connect_no_sessions_shows_error(
+        self,
+        mock_os_config_class: MagicMock,
+        mock_os_backend_class: MagicMock,
+        mock_podman_class: MagicMock,
+    ):
+        """Connect shows error when no running sessions exist."""
+        mock_podman = MagicMock()
+        mock_podman.find_session_for_workspace.return_value = None
+        mock_podman.list_sessions.return_value = []
+        mock_podman_class.return_value = mock_podman
+
+        mock_os_backend = MagicMock()
+        mock_os_backend.find_session_for_workspace.return_value = None
+        mock_os_backend.list_sessions.return_value = []
+        mock_os_backend_class.return_value = mock_os_backend
+
+        result = runner.invoke(app, ["connect"])
+
+        assert result.exit_code == 1
+        assert "No running sessions to connect to" in result.output
+        # Verify helpful guidance is shown
+        assert "paude list" in result.output
+        assert "paude start" in result.output
+
+    @patch("paude.backends.PodmanBackend")
+    @patch("paude.backends.openshift.OpenShiftBackend")
+    @patch("paude.backends.openshift.OpenShiftConfig")
+    def test_connect_prefers_workspace_match_in_podman(
+        self,
+        mock_os_config_class: MagicMock,
+        mock_os_backend_class: MagicMock,
+        mock_podman_class: MagicMock,
+    ):
+        """Connect prefers workspace-matching session in podman."""
+        cwd = Path("/my/workspace")
+
+        workspace_session = _make_session(
+            "workspace-session", workspace=cwd, backend_type="podman"
+        )
+        workspace_session.status = "running"
+        mock_podman = MagicMock()
+        mock_podman.find_session_for_workspace.return_value = workspace_session
+        mock_podman.connect_session.return_value = 0
+        mock_podman_class.return_value = mock_podman
+
+        mock_os_backend = MagicMock()
+        mock_os_backend_class.return_value = mock_os_backend
+
+        result = runner.invoke(app, ["connect"])
+
+        assert result.exit_code == 0
+        assert "Connecting to 'workspace-session' (podman)..." in result.output
+        mock_podman.connect_session.assert_called_once_with("workspace-session")
+        # OpenShift should not be checked since podman had workspace match
+        mock_os_backend.find_session_for_workspace.assert_not_called()
+
+    @patch("paude.backends.PodmanBackend")
+    @patch("paude.backends.openshift.OpenShiftBackend")
+    @patch("paude.backends.openshift.OpenShiftConfig")
+    def test_connect_finds_workspace_match_in_openshift(
+        self,
+        mock_os_config_class: MagicMock,
+        mock_os_backend_class: MagicMock,
+        mock_podman_class: MagicMock,
+    ):
+        """Connect finds workspace-matching session in OpenShift when podman has none."""
+        cwd = Path("/my/workspace")
+
+        mock_podman = MagicMock()
+        mock_podman.find_session_for_workspace.return_value = None
+        mock_podman_class.return_value = mock_podman
+
+        workspace_session = _make_session(
+            "os-workspace-session", workspace=cwd, backend_type="openshift"
+        )
+        workspace_session.status = "running"
+        mock_os_backend = MagicMock()
+        mock_os_backend.find_session_for_workspace.return_value = workspace_session
+        mock_os_backend.connect_session.return_value = 0
+        mock_os_backend_class.return_value = mock_os_backend
+
+        result = runner.invoke(app, ["connect"])
+
+        assert result.exit_code == 0
+        assert "Connecting to 'os-workspace-session' (openshift)..." in result.output
+        mock_os_backend.connect_session.assert_called_once_with("os-workspace-session")
+
+    @patch("paude.backends.PodmanBackend")
+    @patch("paude.backends.openshift.OpenShiftBackend")
+    @patch("paude.backends.openshift.OpenShiftConfig")
+    def test_connect_handles_podman_unavailable(
+        self,
+        mock_os_config_class: MagicMock,
+        mock_os_backend_class: MagicMock,
+        mock_podman_class: MagicMock,
+    ):
+        """Connect works when podman is unavailable."""
+        mock_podman_class.side_effect = Exception("podman not found")
+
+        os_session = _make_session("os-session", backend_type="openshift")
+        mock_os_backend = MagicMock()
+        mock_os_backend.find_session_for_workspace.return_value = None
+        mock_os_backend.list_sessions.return_value = [os_session]
+        mock_os_backend.connect_session.return_value = 0
+        mock_os_backend_class.return_value = mock_os_backend
+
+        result = runner.invoke(app, ["connect"])
+
+        assert result.exit_code == 0
+        mock_os_backend.connect_session.assert_called_once_with("os-session")
+
+    @patch("paude.backends.PodmanBackend")
+    @patch("paude.backends.openshift.OpenShiftBackend")
+    @patch("paude.backends.openshift.OpenShiftConfig")
+    def test_connect_handles_openshift_unavailable(
+        self,
+        mock_os_config_class: MagicMock,
+        mock_os_backend_class: MagicMock,
+        mock_podman_class: MagicMock,
+    ):
+        """Connect works when OpenShift is unavailable."""
+        podman_session = _make_session("podman-session", backend_type="podman")
+        mock_podman = MagicMock()
+        mock_podman.find_session_for_workspace.return_value = None
+        mock_podman.list_sessions.return_value = [podman_session]
+        mock_podman.connect_session.return_value = 0
+        mock_podman_class.return_value = mock_podman
+
+        mock_os_backend_class.side_effect = Exception("oc not found")
+
+        result = runner.invoke(app, ["connect"])
+
+        assert result.exit_code == 0
+        mock_podman.connect_session.assert_called_once_with("podman-session")
+
+    @patch("paude.backends.PodmanBackend")
+    @patch("paude.backends.openshift.OpenShiftBackend")
+    @patch("paude.backends.openshift.OpenShiftConfig")
+    def test_connect_ignores_stopped_sessions(
+        self,
+        mock_os_config_class: MagicMock,
+        mock_os_backend_class: MagicMock,
+        mock_podman_class: MagicMock,
+    ):
+        """Connect ignores stopped sessions when searching."""
+        stopped_session = _make_session(
+            "stopped-session", status="stopped", backend_type="podman"
+        )
+        running_session = _make_session("running-session", backend_type="openshift")
+
+        mock_podman = MagicMock()
+        mock_podman.find_session_for_workspace.return_value = None
+        mock_podman.list_sessions.return_value = [stopped_session]
+        mock_podman_class.return_value = mock_podman
+
+        mock_os_backend = MagicMock()
+        mock_os_backend.find_session_for_workspace.return_value = None
+        mock_os_backend.list_sessions.return_value = [running_session]
+        mock_os_backend.connect_session.return_value = 0
+        mock_os_backend_class.return_value = mock_os_backend
+
+        result = runner.invoke(app, ["connect"])
+
+        assert result.exit_code == 0
+        mock_os_backend.connect_session.assert_called_once_with("running-session")
