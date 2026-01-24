@@ -159,10 +159,10 @@ git status  # Should be clean
 make test
 
 # 3. Update version and create git tag
-make release VERSION=0.5.0
+make release VERSION=0.6.0
 
 # 4. Build and publish container images
-make publish VERSION=0.5.0
+make publish VERSION=0.6.0
 
 # 5. Build and publish Python package to PyPI
 make pypi-build
@@ -173,8 +173,8 @@ make pypi-publish
 git push origin main --tags
 
 # 7. Create GitHub release
-#    Go to: https://github.com/bbrowning/paude/releases/new?tag=v0.5.0
-#    - Title: v0.5.0
+#    Go to: https://github.com/bbrowning/paude/releases/new?tag=v0.6.0
+#    - Title: v0.6.0
 #    - Add release notes describing changes
 ```
 
