@@ -130,16 +130,17 @@ class ContainerRunner:
             )
 
     def stop_container(self, name: str) -> None:
-        """Stop a container immediately using SIGKILL.
+        """Stop a container gracefully with SIGTERM.
 
-        Uses 'podman kill' instead of 'podman stop' for immediate exit.
-        This matches the bash implementation which uses kill for cleanup.
+        Uses 'podman stop' with a 1-second timeout. The proxy container
+        is configured with shutdown_lifetime=0 so squid exits immediately
+        on SIGTERM. The timeout is a fallback in case of issues.
 
         Args:
             name: Container name.
         """
         subprocess.run(
-            ["podman", "kill", name],
+            ["podman", "stop", "-t", "1", name],
             capture_output=True,
         )
 

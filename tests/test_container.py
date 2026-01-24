@@ -181,8 +181,8 @@ class TestContainerRunner:
             runner.run_proxy("test:proxy", "test-network")
 
     @patch("paude.container.runner.subprocess.run")
-    def test_stop_container_uses_kill_for_immediate_exit(self, mock_run):
-        """stop_container uses podman kill (not stop) for immediate exit."""
+    def test_stop_container_uses_stop_with_short_timeout(self, mock_run):
+        """stop_container uses podman stop with short timeout for graceful exit."""
         mock_run.return_value = MagicMock(returncode=0)
         from paude.container.runner import ContainerRunner
 
@@ -190,11 +190,12 @@ class TestContainerRunner:
         runner.stop_container("test-container")
 
         call_args = mock_run.call_args[0][0]
-        # Should use 'kill' not 'stop' to avoid 10-second timeout
+        # Should use 'stop' with 1-second timeout (squid has shutdown_lifetime=0)
         assert call_args[0] == "podman"
-        assert call_args[1] == "kill"
-        assert "stop" not in call_args
-        assert call_args[2] == "test-container"
+        assert call_args[1] == "stop"
+        assert "-t" in call_args
+        assert "1" in call_args
+        assert "test-container" in call_args
 
 
 class TestNetworkManager:
