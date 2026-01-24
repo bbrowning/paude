@@ -88,47 +88,51 @@ def show_help() -> None:
     help_text = """paude - Run Claude Code in a secure container
 
 USAGE:
-    paude [OPTIONS]
+    paude                           List all sessions
     paude <COMMAND> [OPTIONS]
 
 COMMANDS:
     create [NAME]       Create a new persistent session
-    delete NAME         Delete a session and all its resources
     start [NAME]        Start a session and connect to it
     stop [NAME]         Stop a session (preserves data)
     connect [NAME]      Attach to a running session
     list                List all sessions
     sync [NAME]         Sync files between local and remote workspace
+    delete NAME         Delete a session and all its resources
 
-OPTIONS:
-    -h, --help          Show this help message and exit
-    -V, --version       Show paude version and exit
-    -v, --verbose       Enable verbose output (show rsync progress, etc.)
-    -a, --args          Arguments to pass to claude (e.g., -a '-p "prompt"')
+OPTIONS (for 'create' command):
     --yolo              Enable YOLO mode (skip all permission prompts)
-                        Claude can edit files and run commands without confirmation
     --allow-network     Allow unrestricted network access
-                        By default, network is restricted to Vertex AI endpoints only
     --rebuild           Force rebuild of workspace container image
-                        Use when devcontainer.json has changed
-    --dry-run           Show configuration and what would be done, then exit
-                        Useful for verifying paude.json or devcontainer.json
-    --backend           Container backend to use: podman (default), openshift
+    --dry-run           Show configuration without creating session
+    -a, --args          Arguments to pass to claude (e.g., -a '-p "prompt"')
+    -v, --verbose       Enable verbose output (rsync progress on start/stop)
+    --backend           Container backend: podman (default), openshift
+    --platform          Target platform for image builds (e.g., linux/amd64)
     --openshift-context Kubeconfig context for OpenShift
     --openshift-namespace
                         OpenShift namespace (default: current context)
-    --platform          Target platform for image builds (e.g., linux/amd64)
-                        Use when building for a different architecture than your host
+
+OPTIONS (global):
+    -h, --help          Show this help message and exit
+    -V, --version       Show paude version and exit
+
+WORKFLOW:
+    paude                           # List sessions
+    paude create                    # Create session for current workspace
+    paude create --yolo             # Create with YOLO mode enabled
+    paude start                     # Start and connect to session
+    paude connect                   # Reconnect to running session
+    paude stop                      # Stop session (preserves data)
+    paude delete NAME --confirm     # Delete session permanently
 
 EXAMPLES:
-    paude                           Start interactive claude session (ephemeral)
-    paude --yolo                    Start with YOLO mode (no permission prompts)
-    paude -a '-p "What is 2+2?"'    Run claude with a prompt
-    paude create                    Create a persistent session
-    paude start                     Start and connect to a session
-    paude list                      List all sessions
-    paude delete my-project --confirm
-                                    Delete a session permanently
+    paude create --yolo --allow-network
+                                    Create session with full autonomy
+    paude create -a '-p "prompt"'   Create session with initial prompt
+    paude create --dry-run          Verify configuration without creating
+    paude create --backend=openshift
+                                    Create session on OpenShift cluster
 
 SECURITY:
     By default, paude runs with network restricted to Vertex AI endpoints only.
@@ -171,6 +175,36 @@ def session_create(
             help="Allow unrestricted network access.",
         ),
     ] = False,
+    rebuild: Annotated[
+        bool,
+        typer.Option(
+            "--rebuild",
+            help="Force rebuild of workspace container image.",
+        ),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Show configuration and what would be done, then exit.",
+        ),
+    ] = False,
+    claude_args: Annotated[
+        str | None,
+        typer.Option(
+            "--args",
+            "-a",
+            help="Arguments to pass to claude (e.g., -a '-p \"prompt\"').",
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Enable verbose output (affects --dry-run display).",
+        ),
+    ] = False,
     pvc_size: Annotated[
         str,
         typer.Option(
@@ -208,6 +242,33 @@ def session_create(
     ] = None,
 ) -> None:
     """Create a new persistent session (does not start it)."""
+    import shlex
+
+    from paude.dry_run import show_dry_run
+
+    # Parse claude_args string into a list
+    parsed_args: list[str] = []
+    if claude_args:
+        try:
+            parsed_args = shlex.split(claude_args)
+        except ValueError as e:
+            typer.echo(f"Error parsing --args: {e}", err=True)
+            raise typer.Exit(1) from None
+
+    # Handle dry-run mode
+    if dry_run:
+        flags = {
+            "yolo": yolo,
+            "allow_network": allow_network,
+            "rebuild": rebuild,
+            "backend": backend.value,
+            "openshift_context": openshift_context,
+            "openshift_namespace": openshift_namespace,
+            "verbose": verbose,
+            "claude_args": parsed_args,
+        }
+        show_dry_run(flags)
+        raise typer.Exit()
     from paude.backends import (
         PodmanBackend,
         SessionConfig,
@@ -253,7 +314,7 @@ def session_create(
             )
             if has_custom and config is not None:
                 image = image_manager.ensure_custom_image(
-                    config, force_rebuild=False, workspace=workspace
+                    config, force_rebuild=rebuild, workspace=workspace
                 )
             else:
                 image = image_manager.ensure_default_image()
@@ -274,7 +335,7 @@ def session_create(
             image=image,
             env=env,
             mounts=mounts,
-            args=[],
+            args=parsed_args,
             workdir=str(workspace),
             network_restricted=not allow_network,
             yolo=yolo,
@@ -284,7 +345,9 @@ def session_create(
             backend_instance = PodmanBackend()
             session = backend_instance.create_session(session_config)
             typer.echo(f"Session '{session.name}' created.")
-            typer.echo(f"Run 'paude start {session.name}' to start it.")
+            typer.echo("")
+            typer.echo("To start working:")
+            typer.echo("  paude start")
         except SessionExistsError as e:
             typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1) from None
@@ -326,7 +389,7 @@ def session_create(
                 config=config,
                 workspace=workspace,
                 script_dir=os_script_dir,
-                force_rebuild=False,
+                force_rebuild=rebuild,
                 session_name=session_name,
             )
 
@@ -337,7 +400,7 @@ def session_create(
                 image=image,
                 env=env,
                 mounts=[],  # OpenShift uses oc rsync, not mounts
-                args=[],
+                args=parsed_args,
                 workdir=str(workspace),
                 network_restricted=not allow_network,
                 yolo=yolo,
@@ -347,10 +410,9 @@ def session_create(
 
             session = os_backend.create_session(session_config)
             typer.echo(f"Session '{session.name}' created.")
-            typer.echo(
-                f"Run 'paude start {session.name} --backend=openshift' "
-                "to start it."
-            )
+            typer.echo("")
+            typer.echo("To start working:")
+            typer.echo("  paude start --backend=openshift")
         except BuildFailedError as e:
             typer.echo(f"Build failed: {e}", err=True)
             raise typer.Exit(1) from None
@@ -540,10 +602,10 @@ def session_start(
                 # List all sessions and pick the first one
                 sessions = backend_instance.list_sessions()
                 if not sessions:
-                    typer.echo(
-                        "No sessions found. Create one with 'paude create'.",
-                        err=True,
-                    )
+                    typer.echo("No sessions found for this workspace.", err=True)
+                    typer.echo("", err=True)
+                    typer.echo("To create and start a session:", err=True)
+                    typer.echo("  paude create && paude start", err=True)
                     raise typer.Exit(1)
                 if len(sessions) == 1:
                     name = sessions[0].name
@@ -587,9 +649,12 @@ def session_start(
                 # List all sessions and pick the first one
                 sessions = os_backend.list_sessions()
                 if not sessions:
+                    typer.echo("No sessions found for this workspace.", err=True)
+                    typer.echo("", err=True)
+                    typer.echo("To create and start a session:", err=True)
                     typer.echo(
-                        "No sessions found. Create one with "
-                        "'paude create --backend=openshift'.",
+                        "  paude create --backend=openshift && "
+                        "paude start --backend=openshift",
                         err=True,
                     )
                     raise typer.Exit(1)
@@ -940,6 +1005,13 @@ def session_list(
 
     if not all_sessions:
         typer.echo("No sessions found.")
+        typer.echo("")
+        typer.echo("Quick start:")
+        typer.echo("  paude create && paude start")
+        typer.echo("")
+        typer.echo("Or step by step:")
+        typer.echo("  paude create       # Create session for this workspace")
+        typer.echo("  paude start        # Start and connect to session")
         return
 
     # Print header
@@ -1115,450 +1187,11 @@ def main(
             help="Show this help message and exit.",
         ),
     ] = False,
-    yolo: Annotated[
-        bool,
-        typer.Option(
-            "--yolo",
-            help="Enable YOLO mode (skip all permission prompts).",
-        ),
-    ] = False,
-    allow_network: Annotated[
-        bool,
-        typer.Option(
-            "--allow-network",
-            help="Allow unrestricted network access.",
-        ),
-    ] = False,
-    rebuild: Annotated[
-        bool,
-        typer.Option(
-            "--rebuild",
-            help="Force rebuild of workspace container image.",
-        ),
-    ] = False,
-    dry_run: Annotated[
-        bool,
-        typer.Option(
-            "--dry-run",
-            help="Show configuration and what would be done, then exit.",
-        ),
-    ] = False,
-    backend: Annotated[
-        BackendType,
-        typer.Option(
-            "--backend",
-            help="Container backend to use.",
-        ),
-    ] = BackendType.podman,
-    openshift_context: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-context",
-            help="Kubeconfig context for OpenShift.",
-        ),
-    ] = None,
-    openshift_namespace: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-namespace",
-            help="OpenShift namespace (default: current context namespace).",
-        ),
-    ] = None,
-    platform: Annotated[
-        str | None,
-        typer.Option(
-            "--platform",
-            help="Target platform for image builds (e.g., linux/amd64, linux/arm64).",
-        ),
-    ] = None,
-    claude_args: Annotated[
-        str | None,
-        typer.Option(
-            "--args",
-            "-a",
-            help="Arguments to pass to claude (e.g., -a '-p \"prompt\"').",
-        ),
-    ] = None,
-    verbose: Annotated[
-        bool,
-        typer.Option(
-            "--verbose",
-            "-v",
-            help="Enable verbose output.",
-        ),
-    ] = False,
 ) -> None:
     """Run Claude Code in an isolated container."""
-    import shlex
-
-    # If a subcommand is invoked, don't run the default ephemeral mode
+    # If a subcommand is invoked, let it handle things
     if ctx.invoked_subcommand is not None:
         return
 
-    # Parse claude_args string into a list
-    parsed_args: list[str] = []
-    if claude_args:
-        try:
-            parsed_args = shlex.split(claude_args)
-        except ValueError as e:
-            typer.echo(f"Error parsing --args: {e}", err=True)
-            raise typer.Exit(1) from None
-
-    # Store flags for use by other modules
-    ctx.ensure_object(dict)
-    ctx.obj["yolo"] = yolo
-    ctx.obj["allow_network"] = allow_network
-    ctx.obj["rebuild"] = rebuild
-    ctx.obj["dry_run"] = dry_run
-    ctx.obj["backend"] = backend.value
-    ctx.obj["openshift_context"] = openshift_context
-    ctx.obj["openshift_namespace"] = openshift_namespace
-    ctx.obj["platform"] = platform
-    ctx.obj["claude_args"] = parsed_args
-    ctx.obj["verbose"] = verbose
-
-    if dry_run:
-        from paude.dry_run import show_dry_run
-
-        show_dry_run(ctx.obj)
-        raise typer.Exit()
-
-    # Route to appropriate backend
-    if backend == BackendType.openshift:
-        _run_openshift_backend(ctx)
-    else:
-        _run_podman_backend(ctx)
-
-
-def _run_openshift_backend(ctx: typer.Context) -> None:
-    """Run Claude Code using the OpenShift backend with persistent sessions."""
-    from paude.backends import OpenShiftBackend, OpenShiftConfig, SessionConfig
-    from paude.backends.openshift import (
-        BuildFailedError,
-        NamespaceNotFoundError,
-        OcNotInstalledError,
-        OcNotLoggedInError,
-        OpenShiftError,
-        _generate_session_name,
-    )
-    from paude.config import detect_config, parse_config
-    from paude.environment import build_environment
-
-    yolo = ctx.obj["yolo"]
-    allow_network = ctx.obj["allow_network"]
-    claude_args = ctx.obj["claude_args"]
-    openshift_context = ctx.obj["openshift_context"]
-    openshift_namespace = ctx.obj["openshift_namespace"]
-    verbose = ctx.obj["verbose"]
-
-    workspace = Path.cwd()
-
-    # Detect and parse config
-    config_file = detect_config(workspace)
-    config = None
-    if config_file:
-        try:
-            config = parse_config(config_file)
-        except Exception as e:
-            typer.echo(f"Error parsing config: {e}", err=True)
-            raise typer.Exit(1) from None
-
-    # Build environment
-    env = build_environment()
-    if config and config.container_env:
-        env.update(config.container_env)
-
-    # Add claude args to environment
-    if claude_args:
-        env["PAUDE_CLAUDE_ARGS"] = " ".join(claude_args)
-
-    # Create OpenShift backend configuration
-    os_config = OpenShiftConfig(
-        context=openshift_context,
-        namespace=openshift_namespace,
-    )
-
-    try:
-        backend_instance = OpenShiftBackend(config=os_config)
-    except OcNotInstalledError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from None
-    except OcNotLoggedInError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from None
-
-    rebuild = ctx.obj["rebuild"]
-
-    # Get script directory for dev mode
-    script_dir: Path | None = None
-    dev_path = Path(__file__).parent.parent.parent
-    if (dev_path / "containers" / "paude" / "Dockerfile").exists():
-        script_dir = dev_path
-
-    # Use persistent session workflow:
-    # 1. Check for existing session for this workspace
-    # 2. If found and running → connect
-    # 3. If found and stopped → start
-    # 4. If not found → create and start
-    try:
-        # Check for existing session BEFORE building the image
-        # This lets us label the build with the session name for cleanup
-        existing_session = backend_instance.find_session_for_workspace(workspace)
-
-        # Pre-compute session name for new sessions
-        # Don't label builds for existing sessions (they already have their builds)
-        if existing_session:
-            pre_session_name = None
-        else:
-            pre_session_name = _generate_session_name(workspace)
-
-        # Build image via OpenShift binary build
-        typer.echo("Building image in OpenShift cluster...")
-        image = backend_instance.ensure_image_via_build(
-            config=config,
-            workspace=workspace,
-            script_dir=script_dir,
-            force_rebuild=rebuild,
-            session_name=pre_session_name,
-        )
-
-        if existing_session:
-            session_name = existing_session.name
-            if existing_session.status == "running":
-                typer.echo(f"Connecting to running session '{session_name}'...")
-                exit_code = backend_instance.connect_session(session_name)
-            else:
-                typer.echo(f"Starting existing session '{session_name}'...")
-                exit_code = backend_instance.start_session(
-                    session_name, sync=True, verbose=verbose
-                )
-        else:
-            # Create a new session with pre-computed name
-            session_config = SessionConfig(
-                name=pre_session_name,
-                workspace=workspace,
-                image=image,
-                env=env,
-                mounts=[],  # OpenShift uses oc rsync, not mounts
-                args=claude_args or [],
-                workdir=str(workspace),
-                network_restricted=not allow_network,
-                yolo=yolo,
-            )
-
-            session = backend_instance.create_session(session_config)
-            typer.echo(f"Created session '{session.name}'")
-            exit_code = backend_instance.start_session(
-                session.name, sync=True, verbose=verbose
-            )
-
-    except BuildFailedError as e:
-        typer.echo(f"Build failed: {e}", err=True)
-        raise typer.Exit(1) from None
-    except NamespaceNotFoundError as e:
-        typer.echo(f"Error: {e}", err=True)
-        typer.echo(
-            "Hint: Use --openshift-namespace to specify an existing namespace.",
-            err=True,
-        )
-        raise typer.Exit(1) from None
-    except OpenShiftError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from None
-    except Exception as e:
-        typer.echo(f"Error running Claude on OpenShift: {e}", err=True)
-        raise typer.Exit(1) from None
-
-    raise typer.Exit(exit_code)
-
-
-def _run_podman_backend(ctx: typer.Context) -> None:
-    """Run Claude Code using the Podman backend with persistent sessions."""
-    import atexit
-    import signal
-    import sys
-
-    from paude.backends import PodmanBackend, SessionConfig
-    from paude.config import detect_config, parse_config
-    from paude.container import ImageManager, NetworkManager
-    from paude.environment import build_environment, build_proxy_environment
-    from paude.mounts import build_mounts, build_venv_mounts, get_venv_paths
-    from paude.platform import check_macos_volumes, get_podman_machine_dns
-    from paude.utils import check_git_safety, check_requirements
-
-    yolo = ctx.obj["yolo"]
-    allow_network = ctx.obj["allow_network"]
-    rebuild = ctx.obj["rebuild"]
-    claude_args = ctx.obj["claude_args"]
-    platform = ctx.obj.get("platform")
-
-    # Get script directory for dev mode
-    script_dir: Path | None = None
-    dev_path = Path(__file__).parent.parent.parent
-    if (dev_path / "containers" / "paude" / "Dockerfile").exists():
-        script_dir = dev_path
-
-    workspace = Path.cwd()
-    home = Path.home()
-
-    # Check requirements
-    try:
-        check_requirements()
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from None
-
-    # Detect and parse config
-    config_file = detect_config(workspace)
-    config = None
-    if config_file:
-        try:
-            config = parse_config(config_file)
-        except Exception as e:
-            typer.echo(f"Error parsing config: {e}", err=True)
-            raise typer.Exit(1) from None
-
-    # Create managers and backend
-    image_manager = ImageManager(script_dir=script_dir, platform=platform)
-    network_manager = NetworkManager()
-    backend_instance = PodmanBackend()
-
-    # Track resources for cleanup
-    proxy_container: str | None = None
-    network_name: str | None = None
-
-    def cleanup() -> None:
-        """Clean up resources on exit."""
-        if proxy_container:
-            backend_instance.stop_container(proxy_container)
-
-    atexit.register(cleanup)
-    signal.signal(signal.SIGINT, lambda s, f: sys.exit(130))
-    signal.signal(signal.SIGTERM, lambda s, f: sys.exit(143))
-
-    # Ensure images
-    try:
-        if config and (config.base_image or config.dockerfile or config.pip_install):
-            image = image_manager.ensure_custom_image(
-                config, force_rebuild=rebuild, workspace=workspace
-            )
-        else:
-            image = image_manager.ensure_default_image()
-    except Exception as e:
-        typer.echo(f"Error ensuring image: {e}", err=True)
-        raise typer.Exit(1) from None
-
-    # Build mounts and environment
-    mounts = build_mounts(workspace, home)
-
-    # Add venv shadow mounts (must come after workspace mount)
-    venv_mode = config.venv if config else "auto"
-    venv_mounts = build_venv_mounts(workspace, venv_mode)
-    mounts.extend(venv_mounts)
-
-    env = build_environment()
-
-    # Add container env from config
-    if config and config.container_env:
-        env.update(config.container_env)
-
-    # Add PAUDE_VENV_PATHS when pip_install is enabled
-    if config and config.pip_install:
-        venv_paths = get_venv_paths(workspace, config.venv)
-        if venv_paths:
-            env["PAUDE_VENV_PATHS"] = ":".join(str(p) for p in venv_paths)
-
-    # Check macOS volumes
-    if not check_macos_volumes(workspace, image):
-        raise typer.Exit(1)
-
-    # Check git safety
-    check_git_safety(workspace)
-
-    # Check for existing session FIRST to avoid starting unnecessary proxy
-    existing_session = backend_instance.find_session_for_workspace(workspace)
-
-    # If we have a running session, just connect (no proxy needed)
-    if existing_session and existing_session.status == "running":
-        try:
-            typer.echo(f"Connecting to running session '{existing_session.name}'...")
-            exit_code = backend_instance.connect_session(existing_session.name)
-        except Exception as e:
-            typer.echo(f"Error connecting to session: {e}", err=True)
-            raise typer.Exit(1) from None
-        raise typer.Exit(exit_code)
-
-    # For new or stopped sessions, we need to set up the proxy
-    if not allow_network:
-        try:
-            # Create internal network (reused across invocations)
-            network_name = "paude-internal"
-            network_manager.create_internal_network(network_name)
-
-            # Start proxy
-            proxy_image = image_manager.ensure_proxy_image()
-            dns = get_podman_machine_dns()
-            proxy_container = backend_instance.run_proxy(proxy_image, network_name, dns)
-
-            # Add proxy env vars
-            env.update(build_proxy_environment(proxy_container))
-        except Exception as e:
-            typer.echo(f"Error setting up proxy: {e}", err=True)
-            cleanup()
-            raise typer.Exit(1) from None
-
-    # Run postCreateCommand if present and this is first run
-    workspace_marker = workspace / ".paude-initialized"
-    if config and config.post_create_command and not workspace_marker.exists():
-        typer.echo(f"Running postCreateCommand: {config.post_create_command}")
-        success = backend_instance.run_post_create(
-            image=image,
-            mounts=mounts,
-            env=env,
-            command=config.post_create_command,
-            workdir=str(workspace),
-            network=network_name,
-        )
-        if not success:
-            typer.echo("Warning: postCreateCommand failed", err=True)
-        else:
-            try:
-                workspace_marker.touch()
-            except OSError:
-                pass
-
-    # Use persistent session workflow:
-    # 1. If existing stopped session → start it
-    # 2. If no session → create and start
-    try:
-        if existing_session:
-            # Session exists but is stopped (running case handled above)
-            session_name = existing_session.name
-            typer.echo(f"Starting existing session '{session_name}'...")
-            exit_code = backend_instance.start_session(session_name)
-        else:
-            # Create a new session
-            session_config = SessionConfig(
-                name=None,  # Auto-generate name
-                workspace=workspace,
-                image=image,
-                env=env,
-                mounts=mounts,
-                args=claude_args or [],
-                workdir=str(workspace),
-                network_restricted=not allow_network,
-                yolo=yolo,
-                network=network_name,
-            )
-
-            session = backend_instance.create_session(session_config)
-            typer.echo(f"Created session '{session.name}'")
-            exit_code = backend_instance.start_session(session.name)
-
-    except Exception as e:
-        typer.echo(f"Error running Claude: {e}", err=True)
-        cleanup()
-        raise typer.Exit(1) from None
-
-    cleanup()
-    raise typer.Exit(exit_code)
+    # Bare 'paude' command shows session list
+    session_list()

@@ -71,7 +71,7 @@ def test_version_shows_custom_registry(monkeypatch: pytest.MonkeyPatch):
 
 def test_dry_run_works():
     """--dry-run works and shows config info."""
-    result = runner.invoke(app, ["--dry-run"])
+    result = runner.invoke(app, ["create", "--dry-run"])
     assert result.exit_code == 0
     assert "Dry-run mode" in result.stdout
 
@@ -79,14 +79,14 @@ def test_dry_run_works():
 def test_dry_run_shows_no_config(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch):
     """--dry-run shows 'none' when no config file exists."""
     monkeypatch.chdir(tmp_path)
-    result = runner.invoke(app, ["--dry-run"])
+    result = runner.invoke(app, ["create", "--dry-run"])
     assert result.exit_code == 0
     assert "Configuration: none" in result.stdout
 
 
 def test_dry_run_shows_flag_states():
     """--dry-run shows flag states."""
-    result = runner.invoke(app, ["--yolo", "--allow-network", "--dry-run"])
+    result = runner.invoke(app, ["create", "--yolo", "--allow-network", "--dry-run"])
     assert result.exit_code == 0
     assert "--yolo: True" in result.stdout
     assert "--allow-network: True" in result.stdout
@@ -94,23 +94,30 @@ def test_dry_run_shows_flag_states():
 
 def test_yolo_flag_recognized():
     """--yolo flag is recognized (verified via dry-run)."""
-    result = runner.invoke(app, ["--yolo", "--dry-run"])
+    result = runner.invoke(app, ["create", "--yolo", "--dry-run"])
     assert result.exit_code == 0
     assert "--yolo: True" in result.stdout
 
 
 def test_allow_network_flag_recognized():
     """--allow-network flag is recognized (verified via dry-run)."""
-    result = runner.invoke(app, ["--allow-network", "--dry-run"])
+    result = runner.invoke(app, ["create", "--allow-network", "--dry-run"])
     assert result.exit_code == 0
     assert "--allow-network: True" in result.stdout
 
 
 def test_rebuild_flag_recognized():
     """--rebuild flag is recognized (verified via dry-run)."""
-    result = runner.invoke(app, ["--rebuild", "--dry-run"])
+    result = runner.invoke(app, ["create", "--rebuild", "--dry-run"])
     assert result.exit_code == 0
     assert "--rebuild: True" in result.stdout
+
+
+def test_verbose_flag_recognized():
+    """--verbose flag is recognized (verified via dry-run)."""
+    result = runner.invoke(app, ["create", "--verbose", "--dry-run"])
+    assert result.exit_code == 0
+    assert "--verbose: True" in result.stdout
 
 
 def test_help_shows_dry_run_option():
@@ -121,14 +128,14 @@ def test_help_shows_dry_run_option():
 
 def test_args_option():
     """--args option is parsed and captured in claude_args (verified via dry-run)."""
-    result = runner.invoke(app, ["--dry-run", "--args", "-p hello"])
+    result = runner.invoke(app, ["create", "--dry-run", "--args", "-p hello"])
     assert result.exit_code == 0
     assert "claude_args: ['-p', 'hello']" in result.stdout
 
 
 def test_multiple_flags_work_together():
     """Multiple flags work together (verified via dry-run)."""
-    result = runner.invoke(app, ["--yolo", "--allow-network", "--rebuild", "--dry-run"])
+    result = runner.invoke(app, ["create", "--yolo", "--allow-network", "--rebuild", "--dry-run"])
     assert result.exit_code == 0
     assert "--yolo: True" in result.stdout
     assert "--allow-network: True" in result.stdout
@@ -137,17 +144,37 @@ def test_multiple_flags_work_together():
 
 def test_backend_flag_recognized():
     """--backend flag is recognized (verified via dry-run)."""
-    result = runner.invoke(app, ["--backend=podman", "--dry-run"])
+    result = runner.invoke(app, ["create", "--backend=podman", "--dry-run"])
     assert result.exit_code == 0
     assert "--backend: podman" in result.stdout
 
 
 def test_backend_openshift_shows_openshift_options():
     """--backend=openshift shows OpenShift-specific options."""
-    result = runner.invoke(app, ["--backend=openshift", "--dry-run"])
+    result = runner.invoke(app, ["create", "--backend=openshift", "--dry-run"])
     assert result.exit_code == 0
     assert "--backend: openshift" in result.stdout
     assert "--openshift-namespace:" in result.stdout
+
+
+def test_bare_paude_shows_list():
+    """Bare 'paude' command shows session list with helpful hints."""
+    result = runner.invoke(app, [])
+    assert result.exit_code == 0
+    # Should show either "No sessions found." or the session list header
+    assert "No sessions found." in result.stdout or "NAME" in result.stdout
+    # When no sessions, should show helpful next steps
+    if "No sessions found." in result.stdout:
+        assert "paude create" in result.stdout
+
+
+def test_start_without_session_shows_helpful_error():
+    """'paude start' without a session shows helpful error with create hint."""
+    result = runner.invoke(app, ["start"])
+    assert result.exit_code == 1
+    # Should show helpful message with create command (error goes to stderr)
+    output = result.stdout + (result.stderr or "")
+    assert "No sessions found" in output or "paude create" in output
 
 
 def test_help_shows_commands():

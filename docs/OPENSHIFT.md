@@ -16,11 +16,14 @@ Run Claude Code in OpenShift/Kubernetes pods with persistent sessions, credentia
 oc whoami
 oc project
 
-# Start a session
-paude --backend=openshift
+# Create a session
+paude create --backend=openshift
 
 # Or with explicit namespace
-paude --backend=openshift --openshift-namespace=my-namespace
+paude create --backend=openshift --openshift-namespace=my-namespace
+
+# Start the session
+paude start
 ```
 
 ## How It Works
@@ -33,14 +36,7 @@ paude --backend=openshift --openshift-namespace=my-namespace
 
 ## Session Management
 
-Paude now uses a unified session model across all backends. Sessions are persistent by default, surviving pod restarts via StatefulSets and PersistentVolumeClaims.
-
-### Quick Start (Ephemeral)
-
-```bash
-# Start immediately (creates ephemeral session)
-paude --backend=openshift
-```
+Paude uses a unified session model across all backends. Sessions are persistent by default, surviving pod restarts via StatefulSets and PersistentVolumeClaims.
 
 ### Persistent Sessions
 
@@ -183,7 +179,7 @@ oc project my-existing-namespace
 
 2. Or specify an existing namespace explicitly:
 ```bash
-paude --backend=openshift --openshift-namespace=my-namespace
+paude create --backend=openshift --openshift-namespace=my-namespace
 ```
 
 3. Or ask an administrator to create the namespace for you.
@@ -209,8 +205,8 @@ The most reliable approach is to use an external registry like Quay.io or Docker
 # Login to your registry first
 podman login quay.io
 
-# Run paude with your registry
-paude --backend=openshift --openshift-registry=quay.io/myuser
+# Create session with your registry
+paude create --backend=openshift --openshift-registry=quay.io/myuser
 ```
 
 **Port-forward fallback (experimental):**
@@ -219,7 +215,7 @@ If no external route or registry is specified, paude attempts to use `oc port-fo
 
 If you see TLS certificate errors with port-forward:
 ```bash
-paude --backend=openshift --no-openshift-tls-verify
+paude create --backend=openshift --no-openshift-tls-verify
 ```
 
 If port-forward fails with connection errors, use an external registry instead.

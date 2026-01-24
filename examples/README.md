@@ -119,7 +119,7 @@ Example with additional packages:
 Custom images are cached based on a hash of the configuration. If you change your devcontainer.json or paude.json, paude automatically detects this and rebuilds. To force a rebuild:
 
 ```bash
-paude --rebuild
+paude create --rebuild
 ```
 
 ## Supported Configuration Options

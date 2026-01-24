@@ -50,31 +50,36 @@ pip install -e .
 # Show paude help (options, examples, security notes)
 paude --help
 
-# Run Claude Code interactively (network filtered to Vertex AI only)
+# List all sessions
 paude
 
-# Enable full network access for web searches and package installation
-paude --allow-network
+# Create a session for the current workspace
+paude create
 
-# Enable autonomous mode (no confirmation prompts for edits/commands)
-paude --yolo
+# Create with YOLO mode (no permission prompts)
+paude create --yolo
+
+# Create with full network access
+paude create --allow-network
 
 # Combine flags for full autonomous mode with network access
-paude --yolo --allow-network
+paude create --yolo --allow-network
 
 # Pass arguments to Claude Code
-paude -a '--help'
-paude -a '-p "explain this code"'
-paude --yolo -a '-p "refactor this function"'
-
-# Verbose output (shows rsync progress, etc.)
-paude -v
+paude create -a '-p "explain this code"'
+paude create --yolo -a '-p "refactor this function"'
 
 # Force rebuild after changing config
-paude --rebuild
+paude create --rebuild
 
-# Verify configuration without running
-paude --dry-run
+# Verify configuration without creating session
+paude create --dry-run
+
+# Start and connect to a session
+paude start
+
+# Verbose output (shows rsync progress, etc.)
+paude start -v
 ```
 
 On first run, paude pulls the base container image and installs Claude Code locally. This one-time setup takes a few minutes. Subsequent runs use the cached image and start immediately.
@@ -82,14 +87,6 @@ On first run, paude pulls the base container image and installs Claude Code loca
 ## Session Management
 
 Paude provides persistent sessions that survive container/pod restarts with consistent commands across both Podman and OpenShift backends.
-
-### Quick Start (Ephemeral)
-
-```bash
-# Start immediately (creates ephemeral session)
-paude                         # Local Podman
-paude --backend=openshift     # Remote OpenShift
-```
 
 ### Persistent Sessions
 
@@ -149,7 +146,8 @@ paude create my-project --backend=openshift \
 For remote execution on OpenShift/Kubernetes clusters:
 
 ```bash
-paude --backend=openshift
+paude create --backend=openshift
+paude start
 ```
 
 The OpenShift backend provides:
@@ -165,18 +163,18 @@ See [docs/OPENSHIFT.md](docs/OPENSHIFT.md) for detailed setup and usage.
 
 Paude encourages separating research from execution for security:
 
-**Execution mode** (default): `paude`
+**Execution mode** (default): `paude create`
 - Network filtered via proxy - only Google/Vertex AI domains accessible
 - Claude Code API calls work, but arbitrary exfiltration blocked
 - Claude prompts for confirmation before edits and commands
 
-**Autonomous mode**: `paude --yolo`
+**Autonomous mode**: `paude create --yolo`
 - Same network filtering as execution mode
 - Claude edits files and runs commands without confirmation prompts
 - Passes `--dangerously-skip-permissions` to Claude Code inside the container
 - Your host machine's Claude environment is unaffected (container isolation)
 
-**Research mode**: `paude --allow-network`
+**Research mode**: `paude create --allow-network`
 - Full network access for web searches, documentation, package installation
 - Treat outputs more carefully (prompt injection via web content is possible)
 - A warning is displayed when network access is enabled
@@ -341,10 +339,10 @@ These exfiltration paths have been tested and confirmed blocked:
 
 ```bash
 # SAFE: Network filtered, cannot exfiltrate data
-paude --yolo
+paude create --yolo
 
 # DANGEROUS: Full network access, can send files anywhere
-paude --yolo --allow-network
+paude create --yolo --allow-network
 ```
 
 The `--yolo` flag enables autonomous execution (no confirmation prompts). This is safe when network filtering is active because Claude cannot exfiltrate files or secrets even if it reads them.
@@ -439,7 +437,7 @@ These properties are ignored for security reasons:
 Custom images are cached based on a hash of the configuration. To force a rebuild after changing your config:
 
 ```bash
-paude --rebuild
+paude create --rebuild
 ```
 
 ### Verifying Configuration
@@ -447,7 +445,7 @@ paude --rebuild
 Use `--dry-run` to verify your configuration without building or running anything:
 
 ```bash
-paude --dry-run
+paude create --dry-run
 ```
 
 This shows the detected configuration, base image, packages, and the Dockerfile that would be generated. Useful for debugging paude.json or devcontainer.json issues.

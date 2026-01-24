@@ -21,7 +21,7 @@ class TestFullFlow:
     ):
         """Full flow with default config in dry-run mode."""
         monkeypatch.chdir(tmp_path)
-        result = runner.invoke(app, ["--dry-run"])
+        result = runner.invoke(app, ["create", "--dry-run"])
         assert result.exit_code == 0
         assert "Configuration: none" in result.stdout
 
@@ -33,7 +33,7 @@ class TestFullFlow:
         devcontainer = tmp_path / ".devcontainer.json"
         devcontainer.write_text(json.dumps({"image": "python:3.11-slim"}))
 
-        result = runner.invoke(app, ["--dry-run"])
+        result = runner.invoke(app, ["create", "--dry-run"])
         assert result.exit_code == 0
         assert "devcontainer" in result.stdout
         assert "python:3.11-slim" in result.stdout
@@ -48,7 +48,7 @@ class TestFullFlow:
             json.dumps({"base": "node:22-slim", "packages": ["git", "make"]})
         )
 
-        result = runner.invoke(app, ["--dry-run"])
+        result = runner.invoke(app, ["create", "--dry-run"])
         assert result.exit_code == 0
         assert "paude" in result.stdout
         assert "node:22-slim" in result.stdout
@@ -59,7 +59,7 @@ class TestFullFlow:
     ):
         """Dry-run mode shows correct output."""
         monkeypatch.chdir(tmp_path)
-        result = runner.invoke(app, ["--dry-run"])
+        result = runner.invoke(app, ["create", "--dry-run"])
         assert result.exit_code == 0
         assert "Dry-run mode" in result.stdout
         assert "Workspace" in result.stdout
@@ -69,7 +69,7 @@ class TestFullFlow:
     ):
         """Allow-network flag is recognized in dry-run."""
         monkeypatch.chdir(tmp_path)
-        result = runner.invoke(app, ["--allow-network", "--dry-run"])
+        result = runner.invoke(app, ["create", "--allow-network", "--dry-run"])
         assert result.exit_code == 0
         assert "--allow-network: True" in result.stdout
 
@@ -78,7 +78,7 @@ class TestFullFlow:
     ):
         """YOLO flag is recognized in dry-run."""
         monkeypatch.chdir(tmp_path)
-        result = runner.invoke(app, ["--yolo", "--dry-run"])
+        result = runner.invoke(app, ["create", "--yolo", "--dry-run"])
         assert result.exit_code == 0
         assert "--yolo: True" in result.stdout
 
@@ -87,6 +87,6 @@ class TestFullFlow:
     ):
         """Rebuild flag is recognized in dry-run."""
         monkeypatch.chdir(tmp_path)
-        result = runner.invoke(app, ["--rebuild", "--dry-run"])
+        result = runner.invoke(app, ["create", "--rebuild", "--dry-run"])
         assert result.exit_code == 0
         assert "--rebuild: True" in result.stdout
