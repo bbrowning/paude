@@ -372,6 +372,47 @@ class TestContainerRunner:
         assert call_args[env_idx + 1] == "SQUID_DNS=192.168.127.1"
 
     @patch("paude.container.runner.subprocess.run")
+    def test_run_proxy_passes_allowed_domains_as_env_var(self, mock_run):
+        """run_proxy passes allowed_domains as ALLOWED_DOMAINS env var."""
+        mock_run.return_value = MagicMock(returncode=0)
+        from paude.container.runner import ContainerRunner
+
+        runner = ContainerRunner()
+        allowed_domains = [".googleapis.com", ".pypi.org", "api.example.com"]
+        runner.run_proxy("test:proxy", "test-network", allowed_domains=allowed_domains)
+
+        call_args = mock_run.call_args[0][0]
+        # Should use -e ALLOWED_DOMAINS=...
+        assert "-e" in call_args
+        # Find the ALLOWED_DOMAINS env var
+        env_indices = [i for i, x in enumerate(call_args) if x == "-e"]
+        found_domains = False
+        for idx in env_indices:
+            if call_args[idx + 1].startswith("ALLOWED_DOMAINS="):
+                found_domains = True
+                expected = "ALLOWED_DOMAINS=.googleapis.com,.pypi.org,api.example.com"
+                assert call_args[idx + 1] == expected
+                break
+        assert found_domains, "ALLOWED_DOMAINS env var not found in command"
+
+    @patch("paude.container.runner.subprocess.run")
+    def test_run_proxy_omits_allowed_domains_when_none(self, mock_run):
+        """run_proxy omits ALLOWED_DOMAINS env var when not provided."""
+        mock_run.return_value = MagicMock(returncode=0)
+        from paude.container.runner import ContainerRunner
+
+        runner = ContainerRunner()
+        runner.run_proxy("test:proxy", "test-network")
+
+        call_args = mock_run.call_args[0][0]
+        # Should not have ALLOWED_DOMAINS
+        env_indices = [i for i, x in enumerate(call_args) if x == "-e"]
+        for idx in env_indices:
+            assert not call_args[idx + 1].startswith("ALLOWED_DOMAINS="), (
+                "ALLOWED_DOMAINS should not be set when not provided"
+            )
+
+    @patch("paude.container.runner.subprocess.run")
     def test_yolo_mode_adds_skip_permissions(self, mock_run):
         """YOLO mode adds --dangerously-skip-permissions."""
         mock_run.return_value = MagicMock(returncode=0)

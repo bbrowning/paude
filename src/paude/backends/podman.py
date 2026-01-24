@@ -473,6 +473,7 @@ class PodmanBackend:
         image: str,
         network: str,
         dns: str | None = None,
+        allowed_domains: list[str] | None = None,
     ) -> str:
         """Start the proxy container.
 
@@ -480,11 +481,12 @@ class PodmanBackend:
             image: Proxy image to run.
             network: Network to attach to.
             dns: Optional DNS IP for squid to use.
+            allowed_domains: List of domains to allow through the proxy.
 
         Returns:
             Container name.
         """
-        return self._runner.run_proxy(image, network, dns)
+        return self._runner.run_proxy(image, network, dns, allowed_domains)
 
     def stop_container(self, name: str) -> None:
         """Stop a container by name.

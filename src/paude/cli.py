@@ -102,7 +102,10 @@ COMMANDS:
 
 OPTIONS (for 'create' command):
     --yolo              Enable YOLO mode (skip all permission prompts)
-    --allow-network     Allow unrestricted network access
+    --allowed-domains   Domains to allow network access (repeatable).
+                        Special: 'all' (unrestricted), 'default' (vertexai+pypi)
+                        Aliases: 'vertexai', 'pypi'
+                        Custom domains REPLACE defaults; use with 'default' to add.
     --rebuild           Force rebuild of workspace container image
     --dry-run           Show configuration without creating session
     -a, --args          Arguments to pass to claude (e.g., -a '-p "prompt"')
@@ -127,17 +130,21 @@ WORKFLOW:
     paude delete NAME --confirm     # Delete session permanently
 
 EXAMPLES:
-    paude create --yolo --allow-network
-                                    Create session with full autonomy
+    paude create --yolo --allowed-domains all
+                                    Create session with full autonomy (DANGEROUS)
+    paude create --allowed-domains default --allowed-domains .example.com
+                                    Add custom domain to defaults
+    paude create --allowed-domains .example.com
+                                    Allow ONLY custom domain (replaces defaults)
     paude create -a '-p "prompt"'   Create session with initial prompt
     paude create --dry-run          Verify configuration without creating
     paude create --backend=openshift
                                     Create session on OpenShift cluster
 
 SECURITY:
-    By default, paude runs with network restricted to Vertex AI endpoints only.
-    Use --allow-network to permit all network access (enables data exfiltration).
-    Combining --yolo with --allow-network is maximum risk mode."""
+    By default, paude runs with network restricted to Vertex AI and PyPI only.
+    Use --allowed-domains all to permit all network access (enables data exfil).
+    Combining --yolo with --allowed-domains all is maximum risk mode."""
     typer.echo(help_text)
 
 
@@ -168,13 +175,17 @@ def session_create(
             help="Enable YOLO mode (skip all permission prompts).",
         ),
     ] = False,
-    allow_network: Annotated[
-        bool,
+    allowed_domains: Annotated[
+        list[str] | None,
         typer.Option(
-            "--allow-network",
-            help="Allow unrestricted network access.",
+            "--allowed-domains",
+            help=(
+                "Domains to allow network access. Can be repeated. "
+                "Special values: 'all' (unrestricted), 'default' (vertexai+pypi), "
+                "'vertexai', 'pypi'. Default: 'default'."
+            ),
         ),
-    ] = False,
+    ] = None,
     rebuild: Annotated[
         bool,
         typer.Option(
@@ -257,9 +268,14 @@ def session_create(
 
     # Handle dry-run mode
     if dry_run:
+        from paude.domains import expand_domains
+
+        # Default to ["default"] if not specified
+        domains_input = allowed_domains if allowed_domains else ["default"]
+        expanded = expand_domains(domains_input)
         flags = {
             "yolo": yolo,
-            "allow_network": allow_network,
+            "allowed_domains": expanded,
             "rebuild": rebuild,
             "backend": backend.value,
             "openshift_context": openshift_context,
@@ -328,6 +344,28 @@ def session_create(
         venv_mounts = build_venv_mounts(workspace, venv_mode)
         mounts.extend(venv_mounts)
 
+        # Expand allowed domains (default to ["default"] if not specified)
+        from paude.domains import (
+            expand_domains,
+            format_domains_for_display,
+            is_unrestricted,
+        )
+
+        domains_input = allowed_domains if allowed_domains else ["default"]
+        expanded_domains = expand_domains(domains_input)
+
+        # Show warnings for dangerous configurations
+        if yolo and is_unrestricted(expanded_domains):
+            typer.echo(
+                "WARNING: Creating session with --yolo and unrestricted network.",
+                err=True,
+            )
+            typer.echo(
+                "         Claude can exfiltrate files without confirmation.",
+                err=True,
+            )
+            typer.echo("", err=True)
+
         # Create session config
         session_config = SessionConfig(
             name=name,
@@ -337,7 +375,7 @@ def session_create(
             mounts=mounts,
             args=parsed_args,
             workdir=str(workspace),
-            network_restricted=not allow_network,
+            allowed_domains=expanded_domains,
             yolo=yolo,
         )
 
@@ -345,6 +383,10 @@ def session_create(
             backend_instance = PodmanBackend()
             session = backend_instance.create_session(session_config)
             typer.echo(f"Session '{session.name}' created.")
+            domains_display = format_domains_for_display(expanded_domains)
+            typer.echo(f"  Network: {domains_display}")
+            if yolo:
+                typer.echo("  Mode: YOLO (no permission prompts)")
             typer.echo("")
             typer.echo("To start working:")
             typer.echo("  paude start")
@@ -393,6 +435,29 @@ def session_create(
                 session_name=session_name,
             )
 
+            # Expand allowed domains (default to ["default"] if not specified)
+            from paude.domains import (
+                expand_domains,
+                format_domains_for_display,
+                is_unrestricted,
+            )
+
+            domains_input = allowed_domains if allowed_domains else ["default"]
+            expanded_domains = expand_domains(domains_input)
+
+            # Show warnings for dangerous configurations
+            if yolo and is_unrestricted(expanded_domains):
+                typer.echo(
+                    "WARNING: Creating session with --yolo and unrestricted network.",
+                    err=True,
+                )
+                typer.echo(
+                    "         Claude can exfiltrate files to the internet "
+                    "without confirmation.",
+                    err=True,
+                )
+                typer.echo("", err=True)
+
             # Create session config
             session_config = SessionConfig(
                 name=session_name,
@@ -402,7 +467,7 @@ def session_create(
                 mounts=[],  # OpenShift uses oc rsync, not mounts
                 args=parsed_args,
                 workdir=str(workspace),
-                network_restricted=not allow_network,
+                allowed_domains=expanded_domains,
                 yolo=yolo,
                 pvc_size=pvc_size,
                 storage_class=storage_class,
@@ -410,6 +475,10 @@ def session_create(
 
             session = os_backend.create_session(session_config)
             typer.echo(f"Session '{session.name}' created.")
+            domains_display = format_domains_for_display(expanded_domains)
+            typer.echo(f"  Network: {domains_display}")
+            if yolo:
+                typer.echo("  Mode: YOLO (no permission prompts)")
             typer.echo("")
             typer.echo("To start working:")
             typer.echo("  paude start --backend=openshift")

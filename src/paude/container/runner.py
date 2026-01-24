@@ -409,7 +409,7 @@ class ContainerRunner:
         workdir: str | None = None,
         network: str | None = None,
         yolo: bool = False,
-        allow_network: bool = False,
+        unrestricted_network: bool = False,
     ) -> int:
         """Run the Claude container (ephemeral, legacy mode).
 
@@ -421,13 +421,13 @@ class ContainerRunner:
             workdir: Working directory inside the container.
             network: Optional network to attach to.
             yolo: Enable YOLO mode (skip permission prompts).
-            allow_network: Allow unrestricted network access.
+            unrestricted_network: Allow unrestricted network access (no proxy).
 
         Returns:
             Exit code from the container.
         """
         # Show warnings for dangerous modes (matches bash behavior)
-        if yolo and allow_network:
+        if yolo and unrestricted_network:
             warning = """
 \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557
 \u2551  WARNING: MAXIMUM RISK MODE                          \u2551
@@ -444,8 +444,8 @@ class ContainerRunner:
                 "Claude can edit files and run commands without confirmation."
             )
             print(msg, file=sys.stderr)
-        elif allow_network:
-            msg = "Warning: Network access enabled. Data exfiltration is possible."
+        elif unrestricted_network:
+            msg = "Warning: Network access unrestricted. Data exfiltration is possible."
             print(msg, file=sys.stderr)
 
         cmd = [
@@ -490,6 +490,7 @@ class ContainerRunner:
         image: str,
         network: str,
         dns: str | None = None,
+        allowed_domains: list[str] | None = None,
     ) -> str:
         """Start the proxy container.
 
@@ -497,6 +498,8 @@ class ContainerRunner:
             image: Proxy image to run.
             network: Network to attach to.
             dns: Optional DNS IP for squid to use (passed as SQUID_DNS env var).
+            allowed_domains: List of domains to allow. If provided, passed as
+                ALLOWED_DOMAINS env var (comma-separated).
 
         Returns:
             Container name.
@@ -524,6 +527,11 @@ class ContainerRunner:
         # Pass DNS IP as environment variable for squid to use
         if dns:
             cmd.extend(["-e", f"SQUID_DNS={dns}"])
+
+        # Pass allowed domains as comma-separated list
+        if allowed_domains:
+            domains_str = ",".join(allowed_domains)
+            cmd.extend(["-e", f"ALLOWED_DOMAINS={domains_str}"])
 
         cmd.append(image)
 

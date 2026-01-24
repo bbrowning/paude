@@ -90,10 +90,10 @@ def test_dry_run_shows_no_config(tmp_path: pytest.TempPathFactory, monkeypatch: 
 
 def test_dry_run_shows_flag_states():
     """--dry-run shows flag states."""
-    result = runner.invoke(app, ["create", "--yolo", "--allow-network", "--dry-run"])
+    result = runner.invoke(app, ["create", "--yolo", "--allowed-domains", "all", "--dry-run"])
     assert result.exit_code == 0
     assert "--yolo: True" in result.stdout
-    assert "--allow-network: True" in result.stdout
+    assert "--allowed-domains: unrestricted" in result.stdout
 
 
 def test_yolo_flag_recognized():
@@ -103,11 +103,40 @@ def test_yolo_flag_recognized():
     assert "--yolo: True" in result.stdout
 
 
-def test_allow_network_flag_recognized():
-    """--allow-network flag is recognized (verified via dry-run)."""
-    result = runner.invoke(app, ["create", "--allow-network", "--dry-run"])
+def test_allowed_domains_default_value():
+    """Default --allowed-domains value shows vertexai + pypi."""
+    result = runner.invoke(app, ["create", "--dry-run"])
     assert result.exit_code == 0
-    assert "--allow-network: True" in result.stdout
+    assert "--allowed-domains:" in result.stdout
+    # Default should expand to vertexai + pypi
+    assert "vertexai" in result.stdout or "pypi" in result.stdout
+
+
+def test_allowed_domains_all_value():
+    """--allowed-domains all shows unrestricted."""
+    result = runner.invoke(app, ["create", "--allowed-domains", "all", "--dry-run"])
+    assert result.exit_code == 0
+    assert "--allowed-domains: unrestricted" in result.stdout
+
+
+def test_allowed_domains_custom_domain():
+    """--allowed-domains with custom domain."""
+    result = runner.invoke(app, ["create", "--allowed-domains", ".example.com", "--dry-run"])
+    assert result.exit_code == 0
+    assert ".example.com" in result.stdout
+
+
+def test_allowed_domains_multiple_values():
+    """--allowed-domains can be repeated."""
+    result = runner.invoke(app, [
+        "create",
+        "--allowed-domains", "vertexai",
+        "--allowed-domains", ".example.com",
+        "--dry-run",
+    ])
+    assert result.exit_code == 0
+    # Should show both
+    assert "vertexai" in result.stdout or ".example.com" in result.stdout
 
 
 def test_rebuild_flag_recognized():
@@ -139,10 +168,10 @@ def test_args_option():
 
 def test_multiple_flags_work_together():
     """Multiple flags work together (verified via dry-run)."""
-    result = runner.invoke(app, ["create", "--yolo", "--allow-network", "--rebuild", "--dry-run"])
+    result = runner.invoke(app, ["create", "--yolo", "--allowed-domains", "all", "--rebuild", "--dry-run"])
     assert result.exit_code == 0
     assert "--yolo: True" in result.stdout
-    assert "--allow-network: True" in result.stdout
+    assert "--allowed-domains: unrestricted" in result.stdout
     assert "--rebuild: True" in result.stdout
 
 

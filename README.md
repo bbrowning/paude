@@ -59,11 +59,14 @@ paude create
 # Create with YOLO mode (no permission prompts)
 paude create --yolo
 
-# Create with full network access
-paude create --allow-network
+# Create with full network access (unrestricted)
+paude create --allowed-domains all
+
+# Create with specific domains allowed
+paude create --allowed-domains pypi --allowed-domains .example.com
 
 # Combine flags for full autonomous mode with network access
-paude create --yolo --allow-network
+paude create --yolo --allowed-domains all
 
 # Pass arguments to Claude Code
 paude create -a '-p "explain this code"'
@@ -164,7 +167,7 @@ See [docs/OPENSHIFT.md](docs/OPENSHIFT.md) for detailed setup and usage.
 Paude encourages separating research from execution for security:
 
 **Execution mode** (default): `paude create`
-- Network filtered via proxy - only Google/Vertex AI domains accessible
+- Network filtered via proxy - only Vertex AI and PyPI domains accessible
 - Claude Code API calls work, but arbitrary exfiltration blocked
 - Claude prompts for confirmation before edits and commands
 
@@ -174,10 +177,15 @@ Paude encourages separating research from execution for security:
 - Passes `--dangerously-skip-permissions` to Claude Code inside the container
 - Your host machine's Claude environment is unaffected (container isolation)
 
-**Research mode**: `paude create --allow-network`
+**Research mode**: `paude create --allowed-domains all`
 - Full network access for web searches, documentation, package installation
 - Treat outputs more carefully (prompt injection via web content is possible)
-- A warning is displayed when network access is enabled
+- A warning is displayed when network access is unrestricted
+
+**Custom domains**: `paude create --allowed-domains default --allowed-domains .example.com`
+- Add specific domains by combining with `default`
+- Specifying domains without `default` replaces the allowlist entirely
+- Special values: `all` (unrestricted), `default`, `vertexai`, `pypi`
 
 This separation makes trust boundaries explicit. Do your research in one session, then execute changes in an isolated session.
 
@@ -190,12 +198,26 @@ By default, paude runs a proxy sidecar that filters network access:
 │  paude-internal network (no direct internet)        │
 │  ┌───────────┐      ┌─────────────────────────────┐ │
 │  │  Claude   │─────▶│  Proxy (squid allowlist)    │─┼──▶ *.googleapis.com
-│  │ Container │      │                             │ │    *.google.com
+│  │ Container │      │                             │ │    *.pypi.org
 │  └───────────┘      └─────────────────────────────┘ │
 └─────────────────────────────────────────────────────┘
 ```
 
-The allowlist (`containers/proxy/squid.conf`) permits only domains required for Vertex AI authentication and API calls. Edit this file to add additional allowed domains if needed.
+The default allowlist includes:
+- **vertexai**: Vertex AI and Google OAuth domains (`.googleapis.com`, `.google.com`)
+- **pypi**: Python package repositories (`.pypi.org`, `.pythonhosted.org`)
+
+Use `--allowed-domains` to customize:
+```bash
+# Add custom domain to defaults (must include 'default')
+paude create --allowed-domains default --allowed-domains .example.com
+
+# Use only vertexai (replaces default)
+paude create --allowed-domains vertexai
+
+# Disable proxy entirely (unrestricted)
+paude create --allowed-domains all
+```
 
 ## macOS Setup
 
@@ -342,19 +364,19 @@ These exfiltration paths have been tested and confirmed blocked:
 paude create --yolo
 
 # DANGEROUS: Full network access, can send files anywhere
-paude create --yolo --allow-network
+paude create --yolo --allowed-domains all
 ```
 
 The `--yolo` flag enables autonomous execution (no confirmation prompts). This is safe when network filtering is active because Claude cannot exfiltrate files or secrets even if it reads them.
 
-**Do not combine `--yolo` with `--allow-network`** unless you fully trust the task. The combination allows Claude to read any file in your workspace and send it to arbitrary URLs.
+**Do not combine `--yolo` with `--allowed-domains all`** unless you fully trust the task. The combination allows Claude to read any file in your workspace and send it to arbitrary URLs.
 
 ### Residual Risks
 
 These risks are accepted by design:
 
 1. **Workspace destruction**: Claude can delete files including `.git`. Mitigation: push to remote before autonomous sessions.
-2. **Secrets readable**: `.env` files in workspace are readable. Mitigation: network filtering prevents exfiltration; don't use `--allow-network` with sensitive workspaces.
+2. **Secrets readable**: `.env` files in workspace are readable. Mitigation: network filtering prevents exfiltration; don't use `--allowed-domains all` with sensitive workspaces.
 3. **No audit logging**: Commands executed aren't logged. This is a forensics gap, not a security breach vector.
 
 ## Custom Container Environments (BYOC)

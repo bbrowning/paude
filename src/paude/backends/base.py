@@ -42,7 +42,7 @@ class SessionConfig:
         mounts: Volume mount arguments (Podman-style).
         args: Arguments to pass to Claude.
         workdir: Working directory inside container.
-        network_restricted: Whether to restrict network.
+        allowed_domains: List of domains to allow, or None for unrestricted.
         yolo: Enable YOLO mode.
         pvc_size: PVC size for OpenShift (e.g., "10Gi").
         storage_class: Storage class for OpenShift.
@@ -56,7 +56,7 @@ class SessionConfig:
     mounts: list[str] = field(default_factory=list)
     args: list[str] = field(default_factory=list)
     workdir: str | None = None
-    network_restricted: bool = True
+    allowed_domains: list[str] | None = None
     yolo: bool = False
     pvc_size: str = "10Gi"
     storage_class: str | None = None

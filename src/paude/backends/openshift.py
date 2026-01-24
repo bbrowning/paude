@@ -847,6 +847,7 @@ class OpenShiftBackend:
         self,
         session_name: str,
         proxy_image: str,
+        allowed_domains: list[str] | None = None,
     ) -> None:
         """Create a Deployment for the squid proxy pod.
 
@@ -856,6 +857,7 @@ class OpenShiftBackend:
         Args:
             session_name: Session name for labeling.
             proxy_image: Container image for the proxy.
+            allowed_domains: List of domains to allow through the proxy.
         """
         ns = self.namespace
         deployment_name = f"paude-proxy-{session_name}"
@@ -864,6 +866,12 @@ class OpenShiftBackend:
             f"Creating Deployment/{deployment_name} in namespace {ns}...",
             file=sys.stderr,
         )
+
+        # Build environment variables for the proxy container
+        env_list: list[dict[str, str]] = []
+        if allowed_domains:
+            domains_str = ",".join(allowed_domains)
+            env_list.append({"name": "ALLOWED_DOMAINS", "value": domains_str})
 
         deployment_spec: dict[str, Any] = {
             "apiVersion": "apps/v1",
@@ -898,6 +906,7 @@ class OpenShiftBackend:
                                 "image": proxy_image,
                                 "imagePullPolicy": "Always",
                                 "ports": [{"containerPort": 3128}],
+                                "env": env_list,
                                 "resources": {
                                     "requests": {"cpu": "100m", "memory": "128Mi"},
                                     "limits": {"cpu": "500m", "memory": "256Mi"},
@@ -1388,7 +1397,9 @@ class OpenShiftBackend:
         print(f"Creating session '{session_name}'...", file=sys.stderr)
 
         # Apply network policy based on config
-        if config.network_restricted:
+        # allowed_domains is None → no proxy (permissive NetworkPolicy)
+        # allowed_domains is list → create proxy with those domains
+        if config.allowed_domains is not None:
             # Create proxy pod and service first (before NetworkPolicy)
             # Derive proxy image from the main image
             proxy_image = config.image.replace(
@@ -1398,7 +1409,9 @@ class OpenShiftBackend:
             if proxy_image == config.image:
                 proxy_image = "quay.io/bbrowning/paude-proxy-centos9:latest"
 
-            self._create_proxy_deployment(session_name, proxy_image)
+            self._create_proxy_deployment(
+                session_name, proxy_image, config.allowed_domains
+            )
             self._create_proxy_service(session_name)
 
             # Create NetworkPolicy for proxy (allows all egress for squid)
@@ -1417,8 +1430,8 @@ class OpenShiftBackend:
         if claude_args:
             session_env["PAUDE_CLAUDE_ARGS"] = " ".join(claude_args)
 
-        # Add proxy environment variables when network is restricted
-        if config.network_restricted:
+        # Add proxy environment variables when using proxy (allowed_domains is set)
+        if config.allowed_domains is not None:
             proxy_url = f"http://paude-proxy-{session_name}:3128"
             session_env["HTTP_PROXY"] = proxy_url
             session_env["HTTPS_PROXY"] = proxy_url

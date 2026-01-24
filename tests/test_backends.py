@@ -66,10 +66,13 @@ class TestPodmanBackend:
         backend = PodmanBackend()
         backend._runner = mock_runner
 
-        result = backend.run_proxy("proxy:latest", "network-name", "1.2.3.4")
+        allowed_domains = [".googleapis.com", ".example.com"]
+        result = backend.run_proxy(
+            "proxy:latest", "network-name", "1.2.3.4", allowed_domains
+        )
 
         mock_runner.run_proxy.assert_called_once_with(
-            "proxy:latest", "network-name", "1.2.3.4"
+            "proxy:latest", "network-name", "1.2.3.4", allowed_domains
         )
         assert result == "proxy-container-123"
 

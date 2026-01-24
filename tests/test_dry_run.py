@@ -85,12 +85,27 @@ class TestShowDryRun:
                 show_dry_run(
                     {
                         "yolo": True,
-                        "allow_network": True,
+                        "allowed_domains": None,  # None = unrestricted
                         "rebuild": False,
                     }
                 )
 
         captured = capsys.readouterr()
         assert "--yolo: True" in captured.out
-        assert "--allow-network: True" in captured.out
+        assert "--allowed-domains: unrestricted" in captured.out
         assert "--rebuild: False" in captured.out
+
+    def test_shows_allowed_domains_list(self, capsys: pytest.CaptureFixture[str]):
+        """Shows allowed domains when set."""
+        with patch("paude.dry_run.Path.cwd") as mock_cwd:
+            mock_cwd.return_value = Path("/test")
+            with patch("paude.dry_run.detect_config") as mock_detect:
+                mock_detect.return_value = None
+                show_dry_run(
+                    {
+                        "allowed_domains": [".googleapis.com", ".google.com"],
+                    }
+                )
+
+        captured = capsys.readouterr()
+        assert "--allowed-domains:" in captured.out

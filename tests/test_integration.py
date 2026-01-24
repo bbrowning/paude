@@ -64,14 +64,14 @@ class TestFullFlow:
         assert "Dry-run mode" in result.stdout
         assert "Workspace" in result.stdout
 
-    def test_allow_network_flag_recognized(
+    def test_allowed_domains_flag_recognized(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
-        """Allow-network flag is recognized in dry-run."""
+        """Allowed-domains flag is recognized in dry-run."""
         monkeypatch.chdir(tmp_path)
-        result = runner.invoke(app, ["create", "--allow-network", "--dry-run"])
+        result = runner.invoke(app, ["create", "--allowed-domains", "all", "--dry-run"])
         assert result.exit_code == 0
-        assert "--allow-network: True" in result.stdout
+        assert "--allowed-domains: unrestricted" in result.stdout
 
     def test_yolo_flag_recognized(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

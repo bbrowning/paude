@@ -1393,10 +1393,10 @@ class TestCreateSessionWithProxy:
     """Tests for create_session with proxy deployment."""
 
     @patch("subprocess.run")
-    def test_creates_proxy_when_network_restricted(
+    def test_creates_proxy_when_allowed_domains_set(
         self, mock_run: MagicMock
     ) -> None:
-        """create_session creates proxy when network_restricted=True."""
+        """create_session creates proxy when allowed_domains is set."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         from paude.backends.base import SessionConfig
@@ -1406,7 +1406,7 @@ class TestCreateSessionWithProxy:
             name="test-session",
             workspace=Path("/home/user/project"),
             image="quay.io/test/paude-base-centos9:v1",
-            network_restricted=True,
+            allowed_domains=[".googleapis.com", ".google.com"],
         )
 
         backend.create_session(config)
@@ -1424,10 +1424,45 @@ class TestCreateSessionWithProxy:
         assert len(deployment_calls) >= 1
 
     @patch("subprocess.run")
-    def test_sets_proxy_env_vars_when_network_restricted(
+    def test_proxy_gets_allowed_domains_env_var(
         self, mock_run: MagicMock
     ) -> None:
-        """create_session sets HTTP_PROXY env vars when network_restricted."""
+        """create_session passes ALLOWED_DOMAINS to proxy deployment."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        from paude.backends.base import SessionConfig
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        config = SessionConfig(
+            name="test-session",
+            workspace=Path("/home/user/project"),
+            image="quay.io/test/paude-base-centos9:v1",
+            allowed_domains=[".googleapis.com", ".example.com"],
+        )
+
+        backend.create_session(config)
+
+        # Find the proxy Deployment creation
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        deployment_calls = [
+            c for c in apply_calls
+            if '"kind": "Deployment"' in str(c[1].get("input", ""))
+        ]
+        assert len(deployment_calls) >= 1
+
+        # Check ALLOWED_DOMAINS env var
+        deployment_spec = json.loads(deployment_calls[0][1]["input"])
+        container = deployment_spec["spec"]["template"]["spec"]["containers"][0]
+        env_dict = {e["name"]: e["value"] for e in container.get("env", [])}
+        assert "ALLOWED_DOMAINS" in env_dict
+        assert ".googleapis.com" in env_dict["ALLOWED_DOMAINS"]
+        assert ".example.com" in env_dict["ALLOWED_DOMAINS"]
+
+    @patch("subprocess.run")
+    def test_sets_proxy_env_vars_when_allowed_domains_set(
+        self, mock_run: MagicMock
+    ) -> None:
+        """create_session sets HTTP_PROXY env vars when allowed_domains is set."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         from paude.backends.base import SessionConfig
@@ -1437,7 +1472,7 @@ class TestCreateSessionWithProxy:
             name="test-session",
             workspace=Path("/home/user/project"),
             image="quay.io/test/paude:v1",
-            network_restricted=True,
+            allowed_domains=[".googleapis.com"],
         )
 
         backend.create_session(config)
@@ -1461,10 +1496,10 @@ class TestCreateSessionWithProxy:
         assert env_dict.get("https_proxy") == expected_proxy
 
     @patch("subprocess.run")
-    def test_no_proxy_when_allow_network(
+    def test_no_proxy_when_allowed_domains_none(
         self, mock_run: MagicMock
     ) -> None:
-        """create_session does not create proxy when network_restricted=False."""
+        """create_session does not create proxy when allowed_domains=None."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         from paude.backends.base import SessionConfig
@@ -1474,7 +1509,7 @@ class TestCreateSessionWithProxy:
             name="test-session",
             workspace=Path("/home/user/project"),
             image="quay.io/test/paude:v1",
-            network_restricted=False,
+            allowed_domains=None,
         )
 
         backend.create_session(config)
@@ -1619,7 +1654,7 @@ class TestProxyImageDerivation:
             name="test",
             workspace=Path("/project"),
             image="quay.io/bbrowning/paude-base-centos9:v1.2.3",
-            network_restricted=True,
+            allowed_domains=[".googleapis.com"],
         )
 
         backend.create_session(config)
@@ -1652,7 +1687,7 @@ class TestProxyImageDerivation:
             name="test",
             workspace=Path("/project"),
             image="custom-registry.io/some-other-image:latest",  # No pattern match
-            network_restricted=True,
+            allowed_domains=[".googleapis.com"],
         )
 
         backend.create_session(config)
@@ -1786,7 +1821,7 @@ class TestCreateSessionWithProxyNetworkPolicy:
             name="test-session",
             workspace=Path("/project"),
             image="quay.io/test/paude:v1",
-            network_restricted=True,
+            allowed_domains=[".googleapis.com"],
         )
 
         backend.create_session(config)

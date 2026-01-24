@@ -9,6 +9,7 @@ import typer
 
 from paude.config import detect_config, parse_config
 from paude.config.dockerfile import generate_workspace_dockerfile
+from paude.domains import format_domains_for_display
 
 
 def show_dry_run(flags: dict[str, Any]) -> None:
@@ -25,7 +26,7 @@ def show_dry_run(flags: dict[str, Any]) -> None:
     8. Flags summary
 
     Args:
-        flags: Dictionary containing CLI flags (yolo, allow_network, rebuild, etc.)
+        flags: Dictionary containing CLI flags (yolo, allowed_domains, rebuild, etc.)
     """
     workspace = Path.cwd()
 
@@ -80,7 +81,12 @@ def show_dry_run(flags: dict[str, Any]) -> None:
     typer.echo(f"  --backend: {flags.get('backend', 'podman')}")
     typer.echo(f"  --verbose: {flags.get('verbose', False)}")
     typer.echo(f"  --yolo: {flags.get('yolo', False)}")
-    typer.echo(f"  --allow-network: {flags.get('allow_network', False)}")
+
+    # Show allowed domains with expansion
+    allowed_domains = flags.get("allowed_domains")
+    domains_display = format_domains_for_display(allowed_domains)
+    typer.echo(f"  --allowed-domains: {domains_display}")
+
     typer.echo(f"  --rebuild: {flags.get('rebuild', False)}")
 
     # OpenShift-specific options
