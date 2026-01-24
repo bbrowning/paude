@@ -2,7 +2,7 @@
 set -e
 
 # Entrypoint for persistent sessions (Podman and OpenShift)
-# Handles: HOME setup, credentials, venv creation, dependency installation, Claude startup
+# Handles: HOME setup, credentials from PVC, venv creation, dependency installation, Claude startup
 
 # Ensure HOME is set correctly for OpenShift arbitrary UID
 # OpenShift runs containers with random UIDs that don't exist in /etc/passwd
@@ -33,9 +33,82 @@ touch "$HOME/.gitconfig" 2>/dev/null || true
 # Fix git "dubious ownership" error when running as arbitrary UID (OpenShift restricted SCC)
 git config --global --add safe.directory '*' 2>/dev/null || true
 
-# Copy seed files if provided (mounted read-only from host)
-# Kubernetes mounts secrets as symlinks, so we copy each file individually
-if [[ -d /tmp/claude.seed ]]; then
+# Wait for credentials to be synced by the host (via oc cp)
+# The host creates /pvc/config/.ready when sync is complete
+wait_for_credentials() {
+    local ready_file="/pvc/config/.ready"
+    local timeout=300
+    local elapsed=0
+
+    # Only wait if /pvc exists (OpenShift with PVC-based credentials)
+    if [[ ! -d /pvc ]]; then
+        return 0
+    fi
+
+    while [[ ! -f "$ready_file" ]]; do
+        if [[ $elapsed -ge $timeout ]]; then
+            echo "ERROR: Timed out waiting for credentials sync" >&2
+            exit 1
+        fi
+        if [[ $((elapsed % 10)) -eq 0 ]]; then
+            echo "Waiting for credentials... ($elapsed/${timeout}s)" >&2
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+    echo "Credentials ready." >&2
+}
+
+# Set up credentials from PVC-based storage
+setup_credentials_from_pvc() {
+    local config_path="/pvc/config"
+
+    # Only set up if /pvc/config exists
+    if [[ ! -d "$config_path" ]]; then
+        return 0
+    fi
+
+    # Set up gcloud credentials via symlink
+    if [[ -d "$config_path/gcloud" ]]; then
+        mkdir -p "$HOME/.config"
+        rm -rf "$HOME/.config/gcloud" 2>/dev/null || true
+        ln -sf "$config_path/gcloud" "$HOME/.config/gcloud"
+    fi
+
+    # Copy claude config files (need to be writable, so copy instead of symlink)
+    if [[ -d "$config_path/claude" ]]; then
+        mkdir -p "$HOME/.claude"
+        chmod g+rwX "$HOME/.claude" 2>/dev/null || true
+
+        # Copy each file from /pvc/config/claude/
+        for f in "$config_path/claude"/*; do
+            if [[ -f "$f" ]]; then
+                filename=$(basename "$f")
+                # claude.json goes to ~/.claude.json (root of home)
+                if [[ "$filename" == "claude.json" ]]; then
+                    cp -f "$f" "$HOME/.claude.json" 2>/dev/null || true
+                    chmod g+rw "$HOME/.claude.json" 2>/dev/null || true
+                else
+                    cp -f "$f" "$HOME/.claude/" 2>/dev/null || true
+                fi
+            fi
+        done
+        chmod -R g+rw "$HOME/.claude" 2>/dev/null || true
+    fi
+
+    # Set up gitconfig via symlink
+    if [[ -f "$config_path/gitconfig" ]]; then
+        rm -f "$HOME/.gitconfig" 2>/dev/null || true
+        ln -sf "$config_path/gitconfig" "$HOME/.gitconfig"
+    fi
+}
+
+# Wait for and set up PVC-based credentials
+wait_for_credentials
+setup_credentials_from_pvc
+
+# Legacy: Copy seed files if provided via Secret mount (Podman backend fallback)
+if [[ -d /tmp/claude.seed ]] && [[ ! -d /pvc/config ]]; then
     mkdir -p "$HOME/.claude"
     chmod g+rwX "$HOME/.claude" 2>/dev/null || true
     for f in /tmp/claude.seed/*; do

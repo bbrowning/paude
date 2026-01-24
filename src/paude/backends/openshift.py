@@ -6,7 +6,6 @@ import base64
 import hashlib
 import json
 import os
-import secrets
 import subprocess
 import sys
 import time
@@ -1060,327 +1059,6 @@ class OpenShiftBackend:
             input_data=json.dumps(policy_spec),
         )
 
-    def _create_credentials_secret(
-        self,
-        session_id: str,
-    ) -> str | None:
-        """Create a secret containing gcloud credentials.
-
-        Args:
-            session_id: Session ID for labeling.
-
-        Returns:
-            Secret name if created, None if no credentials found.
-        """
-        home = Path.home()
-        gcloud_dir = home / ".config" / "gcloud"
-
-        if not gcloud_dir.exists():
-            print("No gcloud credentials found, skipping.", file=sys.stderr)
-            return None
-
-        ns = self.namespace
-        secret_name = f"paude-gcloud-{session_id}"
-
-        # Create secret from directory contents
-        # Only include essential credential files
-        files_to_include = [
-            "application_default_credentials.json",
-            "credentials.db",
-            "access_tokens.db",
-        ]
-
-        # Build secret data from files
-        secret_data: dict[str, str] = {}
-        import base64
-        for filename in files_to_include:
-            filepath = gcloud_dir / filename
-            if filepath.exists():
-                try:
-                    content = filepath.read_bytes()
-                    secret_data[filename] = base64.b64encode(content).decode()
-                except OSError:
-                    continue  # Skip unreadable files
-
-        if not secret_data:
-            print("No gcloud credential files found.", file=sys.stderr)
-            return None
-
-        secret_spec: dict[str, Any] = {
-            "apiVersion": "v1",
-            "kind": "Secret",
-            "metadata": {
-                "name": secret_name,
-                "namespace": ns,
-                "labels": {
-                    "app": "paude",
-                    "session-id": session_id,
-                    "paude.io/session-name": session_id,
-                },
-            },
-            "type": "Opaque",
-            "data": secret_data,
-        }
-
-        print(f"Creating Secret/{secret_name} in namespace {ns}...", file=sys.stderr)
-        self._run_oc("apply", "-f", "-", input_data=json.dumps(secret_spec))
-
-        return secret_name
-
-    def _create_gitconfig_configmap(
-        self,
-        session_id: str,
-    ) -> str | None:
-        """Create a ConfigMap containing .gitconfig.
-
-        Args:
-            session_id: Session ID for labeling.
-
-        Returns:
-            ConfigMap name if created, None if no config found.
-        """
-        home = Path.home()
-        gitconfig = home / ".gitconfig"
-
-        if not gitconfig.exists():
-            return None
-
-        ns = self.namespace
-        cm_name = f"paude-gitconfig-{session_id}"
-
-        try:
-            content = gitconfig.read_text()
-        except Exception:
-            return None
-
-        cm_spec: dict[str, Any] = {
-            "apiVersion": "v1",
-            "kind": "ConfigMap",
-            "metadata": {
-                "name": cm_name,
-                "namespace": ns,
-                "labels": {
-                    "app": "paude",
-                    "session-id": session_id,
-                    "paude.io/session-name": session_id,
-                },
-            },
-            "data": {
-                ".gitconfig": content,
-            },
-        }
-
-        print(f"Creating ConfigMap/{cm_name} in namespace {ns}...", file=sys.stderr)
-        self._run_oc("apply", "-f", "-", input_data=json.dumps(cm_spec))
-
-        return cm_name
-
-    def _create_claude_secret(
-        self,
-        session_id: str,
-    ) -> str | None:
-        """Create a secret containing Claude configuration.
-
-        Only includes essential config files, not logs/cache/history.
-
-        Args:
-            session_id: Session ID for labeling.
-
-        Returns:
-            Secret name if created, None if no config found.
-        """
-        home = Path.home()
-        claude_dir = home / ".claude"
-        claude_json = home / ".claude.json"
-
-        if not claude_dir.exists() and not claude_json.exists():
-            return None
-
-        ns = self.namespace
-        secret_name = f"paude-claude-{session_id}"
-
-        import base64
-        secret_data: dict[str, str] = {}
-
-        # Only include specific essential files from .claude directory
-        # Exclude: logs, databases, projects, todos, cache
-        essential_files = [
-            "settings.json",
-            "credentials.json",
-            "statsig.json",
-        ]
-
-        # Include .claude.json if it exists (main config file)
-        if claude_json.exists():
-            try:
-                content = claude_json.read_bytes()
-                secret_data["claude.json"] = base64.b64encode(content).decode()
-            except OSError:
-                pass  # File unreadable, skip it
-
-        # Include only essential files from .claude directory
-        if claude_dir.exists():
-            for filename in essential_files:
-                filepath = claude_dir / filename
-                if filepath.exists() and filepath.is_file():
-                    try:
-                        content = filepath.read_bytes()
-                        secret_data[filename] = base64.b64encode(content).decode()
-                    except OSError:
-                        continue  # Skip unreadable files
-
-        if not secret_data:
-            return None
-
-        secret_spec: dict[str, Any] = {
-            "apiVersion": "v1",
-            "kind": "Secret",
-            "metadata": {
-                "name": secret_name,
-                "namespace": ns,
-                "labels": {
-                    "app": "paude",
-                    "session-id": session_id,
-                    "paude.io/session-name": session_id,
-                },
-            },
-            "type": "Opaque",
-            "data": secret_data,
-        }
-
-        print(f"Creating Secret/{secret_name} in namespace {ns}...", file=sys.stderr)
-        self._run_oc("apply", "-f", "-", input_data=json.dumps(secret_spec))
-
-        return secret_name
-
-    def _generate_session_id(self) -> str:
-        """Generate a unique session ID.
-
-        Returns:
-            Session ID string.
-        """
-        return f"{int(time.time())}-{secrets.token_hex(4)}"
-
-    def _generate_pod_spec(
-        self,
-        session_id: str,
-        image: str,
-        env: dict[str, str],
-        gcloud_secret: str | None = None,
-        gitconfig_cm: str | None = None,
-        claude_secret: str | None = None,
-    ) -> dict[str, Any]:
-        """Generate a Kubernetes Pod specification.
-
-        Args:
-            session_id: Unique session identifier.
-            image: Container image to use.
-            env: Environment variables to set.
-            gcloud_secret: Name of gcloud credentials secret.
-            gitconfig_cm: Name of gitconfig ConfigMap.
-            claude_secret: Name of Claude config secret.
-
-        Returns:
-            Pod spec as a dictionary.
-        """
-        pod_name = f"paude-session-{session_id}"
-
-        # Convert env dict to list of name/value dicts
-        env_list = [{"name": k, "value": v} for k, v in env.items()]
-
-        # Build volume mounts
-        volume_mounts: list[dict[str, Any]] = [
-            {
-                "name": "workspace",
-                "mountPath": "/workspace",
-            },
-        ]
-
-        # Build volumes
-        volumes: list[dict[str, Any]] = [
-            {
-                "name": "workspace",
-                "emptyDir": {},
-            },
-        ]
-
-        # Add gcloud credentials if available
-        if gcloud_secret:
-            volume_mounts.append({
-                "name": "gcloud-creds",
-                "mountPath": "/home/paude/.config/gcloud",
-                "readOnly": True,
-            })
-            volumes.append({
-                "name": "gcloud-creds",
-                "secret": {
-                    "secretName": gcloud_secret,
-                },
-            })
-
-        # Add gitconfig if available
-        if gitconfig_cm:
-            volume_mounts.append({
-                "name": "gitconfig",
-                "mountPath": "/home/paude/.gitconfig",
-                "subPath": ".gitconfig",
-                "readOnly": True,
-            })
-            volumes.append({
-                "name": "gitconfig",
-                "configMap": {
-                    "name": gitconfig_cm,
-                },
-            })
-
-        # Add claude config if available
-        if claude_secret:
-            volume_mounts.append({
-                "name": "claude-config",
-                "mountPath": "/tmp/claude.seed",  # noqa: S108
-                "readOnly": True,
-            })
-            volumes.append({
-                "name": "claude-config",
-                "secret": {
-                    "secretName": claude_secret,
-                },
-            })
-
-        pod_spec: dict[str, Any] = {
-            "apiVersion": "v1",
-            "kind": "Pod",
-            "metadata": {
-                "name": pod_name,
-                "namespace": self.namespace,
-                "labels": {
-                    "app": "paude",
-                    "role": "workload",
-                    "session-id": session_id,
-                },
-            },
-            "spec": {
-                "containers": [
-                    {
-                        "name": "paude",
-                        "image": image,
-                        "imagePullPolicy": "Always",
-                        "command": ["/usr/local/bin/entrypoint.sh"],
-                        "stdin": True,
-                        "tty": True,
-                        "env": env_list,
-                        "workingDir": "/workspace",
-                        "resources": self._config.resources,
-                        "volumeMounts": volume_mounts,
-                    },
-                ],
-                "volumes": volumes,
-                "restartPolicy": "Never",
-            },
-        }
-
-        return pod_spec
-
     def _wait_for_pod_ready(
         self,
         pod_name: str,
@@ -1434,22 +1112,19 @@ class OpenShiftBackend:
         image: str,
         env: dict[str, str],
         workspace: Path,
-        gcloud_secret: str | None = None,
-        gitconfig_cm: str | None = None,
-        claude_secret: str | None = None,
         pvc_size: str = "10Gi",
         storage_class: str | None = None,
     ) -> dict[str, Any]:
         """Generate a Kubernetes StatefulSet specification for persistent sessions.
+
+        Credentials (gcloud, claude, gitconfig) are synced to /pvc/config via
+        _sync_config_to_pod() after the pod starts, not mounted as Secrets.
 
         Args:
             session_name: Session name.
             image: Container image to use.
             env: Environment variables to set.
             workspace: Local workspace path (for annotation).
-            gcloud_secret: Name of gcloud credentials secret.
-            gitconfig_cm: Name of gitconfig ConfigMap.
-            claude_secret: Name of Claude config secret.
             pvc_size: Size of the PVC (e.g., "10Gi").
             storage_class: Storage class name (None for default).
 
@@ -1462,7 +1137,7 @@ class OpenShiftBackend:
         # Convert env dict to list of name/value dicts
         env_list = [{"name": k, "value": v} for k, v in env.items()]
 
-        # Build volume mounts - PVC mounted at /pvc
+        # PVC mounted at /pvc - credentials and workspace synced there
         volume_mounts: list[dict[str, Any]] = [
             {
                 "name": "workspace",
@@ -1470,51 +1145,8 @@ class OpenShiftBackend:
             },
         ]
 
-        # Build non-PVC volumes
+        # No additional volumes - credentials are synced via oc cp to /pvc/config
         volumes: list[dict[str, Any]] = []
-
-        # Add gcloud credentials if available
-        if gcloud_secret:
-            volume_mounts.append({
-                "name": "gcloud-creds",
-                "mountPath": "/home/paude/.config/gcloud",
-                "readOnly": True,
-            })
-            volumes.append({
-                "name": "gcloud-creds",
-                "secret": {
-                    "secretName": gcloud_secret,
-                },
-            })
-
-        # Add gitconfig if available
-        if gitconfig_cm:
-            volume_mounts.append({
-                "name": "gitconfig",
-                "mountPath": "/home/paude/.gitconfig",
-                "subPath": ".gitconfig",
-                "readOnly": True,
-            })
-            volumes.append({
-                "name": "gitconfig",
-                "configMap": {
-                    "name": gitconfig_cm,
-                },
-            })
-
-        # Add claude config if available
-        if claude_secret:
-            volume_mounts.append({
-                "name": "claude-config",
-                "mountPath": "/tmp/claude.seed",  # noqa: S108
-                "readOnly": True,
-            })
-            volumes.append({
-                "name": "claude-config",
-                "secret": {
-                    "secretName": claude_secret,
-                },
-            })
 
         # Build PVC spec for volumeClaimTemplates
         pvc_spec: dict[str, Any] = {
@@ -1697,11 +1329,6 @@ class OpenShiftBackend:
 
         print(f"Creating session '{session_name}'...", file=sys.stderr)
 
-        # Create credential secrets and configmaps
-        gcloud_secret = self._create_credentials_secret(session_name)
-        gitconfig_cm = self._create_gitconfig_configmap(session_name)
-        claude_secret = self._create_claude_secret(session_name)
-
         # Apply network policy based on config
         if config.network_restricted:
             # Create proxy pod and service first (before NetworkPolicy)
@@ -1741,14 +1368,12 @@ class OpenShiftBackend:
             session_env["https_proxy"] = proxy_url
 
         # Generate and apply StatefulSet spec
+        # Credentials are synced to /pvc/config when session starts, not via Secrets
         sts_spec = self._generate_statefulset_spec(
             session_name=session_name,
             image=config.image,
             env=session_env,
             workspace=config.workspace,
-            gcloud_secret=gcloud_secret,
-            gitconfig_cm=gitconfig_cm,
-            claude_secret=claude_secret,
             pvc_size=config.pvc_size,
             storage_class=config.storage_class,
         )
@@ -1823,18 +1448,10 @@ class OpenShiftBackend:
             check=False,
         )
 
-        # Delete session-specific secrets/configmaps/networkpolicies
-        print("Deleting Secret,ConfigMap,NetworkPolicy for session...",
-              file=sys.stderr)
+        # Delete session-specific NetworkPolicies
+        print("Deleting NetworkPolicy for session...", file=sys.stderr)
         self._run_oc(
-            "delete", "secret,configmap,networkpolicy",
-            "-n", ns,
-            "-l", f"session-id={name}",
-            check=False,
-        )
-        # Also try with session-name label (new naming)
-        self._run_oc(
-            "delete", "secret,configmap,networkpolicy",
+            "delete", "networkpolicy",
             "-n", ns,
             "-l", f"paude.io/session-name={name}",
             check=False,
@@ -1847,6 +1464,117 @@ class OpenShiftBackend:
         self._delete_session_builds(name)
 
         print(f"Session '{name}' deleted.", file=sys.stderr)
+
+    def _sync_config_to_pod(
+        self,
+        pod_name: str,
+        verbose: bool = False,
+    ) -> None:
+        """Sync credentials to pod /pvc/config/ directory.
+
+        Creates the config directory structure and syncs:
+        - gcloud credentials (ADC, credentials.db, access_tokens.db)
+        - Claude config files (settings.json, credentials.json, etc.)
+        - gitconfig
+
+        Uses the OpenShift UID permission pattern: rm -rf && mkdir && chmod g+rwX.
+
+        Args:
+            pod_name: Name of the pod to sync to.
+            verbose: Whether to show sync progress.
+        """
+        ns = self.namespace
+        home = Path.home()
+        config_path = "/pvc/config"
+
+        print("Syncing credentials to pod...", file=sys.stderr)
+
+        # Prepare config directory with OpenShift UID pattern
+        # Previous pod may have created it with different UID, so rm -rf first
+        self._run_oc(
+            "exec", pod_name, "-n", ns, "--",
+            "bash", "-c",
+            f"rm -rf {config_path} && "
+            f"mkdir -p {config_path}/gcloud {config_path}/claude && "
+            f"chmod -R g+rwX {config_path}",
+            check=True,
+        )
+
+        # Sync gcloud credentials
+        gcloud_dir = home / ".config" / "gcloud"
+        gcloud_files = [
+            "application_default_credentials.json",
+            "credentials.db",
+            "access_tokens.db",
+        ]
+        gcloud_dest = f"{pod_name}:{config_path}/gcloud"
+        for filename in gcloud_files:
+            filepath = gcloud_dir / filename
+            if filepath.exists():
+                try:
+                    self._run_oc(
+                        "cp", str(filepath), f"{gcloud_dest}/{filename}",
+                        "-n", ns, check=False,
+                    )
+                except Exception:  # noqa: S110
+                    pass  # Skip unreadable files
+
+        # Sync claude config files
+        claude_dir = home / ".claude"
+        claude_json = home / ".claude.json"
+        claude_dest = f"{pod_name}:{config_path}/claude"
+        claude_files = [
+            "settings.json",
+            "credentials.json",
+            "statsig.json",
+        ]
+
+        # .claude.json (main config) goes to claude/claude.json
+        if claude_json.exists():
+            try:
+                self._run_oc(
+                    "cp", str(claude_json), f"{claude_dest}/claude.json",
+                    "-n", ns, check=False,
+                )
+            except Exception:  # noqa: S110
+                pass
+
+        # Files from ~/.claude/
+        for filename in claude_files:
+            filepath = claude_dir / filename
+            if filepath.exists():
+                try:
+                    self._run_oc(
+                        "cp", str(filepath), f"{claude_dest}/{filename}",
+                        "-n", ns, check=False,
+                    )
+                except Exception:  # noqa: S110
+                    pass
+
+        # Sync gitconfig
+        gitconfig = home / ".gitconfig"
+        if gitconfig.exists():
+            try:
+                self._run_oc(
+                    "cp", str(gitconfig), f"{pod_name}:{config_path}/gitconfig",
+                    "-n", ns, check=False,
+                )
+            except Exception:  # noqa: S110
+                pass
+
+        # Make synced files read-only (but group-readable for OpenShift)
+        # and create .ready marker
+        self._run_oc(
+            "exec", pod_name, "-n", ns, "--",
+            "bash", "-c",
+            f"chmod -R g+rX {config_path} && "
+            f"touch {config_path}/.ready && "
+            f"chmod g+r {config_path}/.ready",
+            check=False,
+        )
+
+        if verbose:
+            print("Credentials synced successfully.", file=sys.stderr)
 
     def start_session(
         self,
@@ -1896,6 +1624,9 @@ class OpenShiftBackend:
         except PodNotReadyError as e:
             print(f"Pod failed to start: {e}", file=sys.stderr)
             return 1
+
+        # Sync credentials to pod (gcloud, claude config, gitconfig)
+        self._sync_config_to_pod(pod_name, verbose=verbose)
 
         # Sync workspace if requested
         if sync:
@@ -2181,311 +1912,8 @@ class OpenShiftBackend:
 
         return None
 
-    # -------------------------------------------------------------------------
-    # Legacy Methods (ephemeral sessions for backward compatibility)
-    # -------------------------------------------------------------------------
-
-    def start_session_legacy(
-        self,
-        image: str,
-        workspace: Path,
-        env: dict[str, str],
-        mounts: list[str],
-        args: list[str],
-        workdir: str | None = None,
-        network_restricted: bool = True,
-        yolo: bool = False,
-        network: str | None = None,
-    ) -> Session:
-        """Start a new Claude session on OpenShift.
-
-        Args:
-            image: Container image to use.
-            workspace: Local workspace path.
-            env: Environment variables to set.
-            mounts: Volume mount arguments (unused for OpenShift - uses sync).
-            args: Arguments to pass to Claude.
-            workdir: Working directory inside container.
-            network_restricted: Whether to restrict network (default True).
-            yolo: Enable YOLO mode (skip permission prompts).
-            network: Network name (unused for OpenShift).
-
-        Returns:
-            Session object representing the started session.
-        """
-        # Check connection
-        self._check_connection()
-
-        # Verify namespace exists (never create)
-        self._verify_namespace()
-
-        # Generate session ID
-        session_id = self._generate_session_id()
-        created_at = datetime.now(UTC).isoformat()
-        pod_name = f"paude-session-{session_id}"
-
-        # Apply network policy for this session based on network_restricted flag
-        if network_restricted:
-            # Create proxy pod and service first
-            proxy_image = image.replace(
-                "paude-claude-centos9", "paude-proxy-centos9"
-            )
-            if proxy_image == image:
-                proxy_image = "quay.io/bbrowning/paude-proxy-centos9:latest"
-
-            self._create_proxy_deployment(session_id, proxy_image)
-            self._create_proxy_service(session_id)
-            self._ensure_proxy_network_policy(session_id)
-            self._ensure_network_policy(session_id)
-        else:
-            self._ensure_network_policy_permissive(session_id)
-
-        # Add YOLO flag to claude args if enabled
-        claude_args = list(args)
-        if yolo:
-            claude_args = ["--dangerously-skip-permissions"] + claude_args
-
-        # Store args in environment for entrypoint
-        session_env = dict(env)
-        if claude_args:
-            session_env["PAUDE_CLAUDE_ARGS"] = " ".join(claude_args)
-
-        # Add proxy environment variables when network is restricted
-        if network_restricted:
-            proxy_url = f"http://paude-proxy-{session_id}:3128"
-            session_env["HTTP_PROXY"] = proxy_url
-            session_env["HTTPS_PROXY"] = proxy_url
-            session_env["http_proxy"] = proxy_url
-            session_env["https_proxy"] = proxy_url
-
-        print(f"Creating session {session_id}...", file=sys.stderr)
-
-        # Create credential secrets and configmaps
-        gcloud_secret = self._create_credentials_secret(session_id)
-        gitconfig_cm = self._create_gitconfig_configmap(session_id)
-        claude_secret = self._create_claude_secret(session_id)
-
-        # Generate and apply pod spec with credentials
-        pod_spec = self._generate_pod_spec(
-            session_id=session_id,
-            image=image,
-            env=session_env,
-            gcloud_secret=gcloud_secret,
-            gitconfig_cm=gitconfig_cm,
-            claude_secret=claude_secret,
-        )
-
-        ns = self.namespace
-        print(f"Creating Pod/{pod_name} in namespace {ns}...", file=sys.stderr)
-        self._run_oc(
-            "apply", "-f", "-",
-            input_data=json.dumps(pod_spec),
-        )
-
-        # Wait for proxy to be ready first (if network restricted)
-        if network_restricted:
-            self._wait_for_proxy_ready(session_id)
-
-        # Wait for pod to be ready
-        print(f"Waiting for Pod/{pod_name} to be ready...", file=sys.stderr)
-        try:
-            self._wait_for_pod_ready(pod_name)
-        except PodNotReadyError:
-            # Get container logs before cleanup for debugging
-            print("\n--- Pod failed, gathering debug info ---", file=sys.stderr)
-            logs_result = self._run_oc(
-                "logs", pod_name, "-n", self.namespace, check=False
-            )
-            if logs_result.returncode == 0 and logs_result.stdout.strip():
-                print("Container logs:", file=sys.stderr)
-                print(logs_result.stdout, file=sys.stderr)
-            else:
-                print("No container logs available.", file=sys.stderr)
-
-            # Get recent events
-            events_result = self._run_oc(
-                "get", "events", "-n", self.namespace,
-                "--field-selector", f"involvedObject.name={pod_name}",
-                "--sort-by=.lastTimestamp",
-                check=False,
-            )
-            if events_result.returncode == 0 and events_result.stdout.strip():
-                print("\nPod events:", file=sys.stderr)
-                print(events_result.stdout, file=sys.stderr)
-
-            print("--- End debug info ---\n", file=sys.stderr)
-
-            # Cleanup failed pod
-            self._run_oc(
-                "delete", "pod", pod_name, "-n", self.namespace, check=False
-            )
-            raise
-
-        print(f"Session {session_id} is running.", file=sys.stderr)
-
-        # Initial sync of workspace files to pod
-        print("Syncing workspace to pod...", file=sys.stderr)
-        self.sync_workspace(session_id, direction="remote", local_path=workspace)
-
-        # Attach to the session
-        exit_code = self.attach_session_legacy(session_id)
-
-        # Determine status based on exit code
-        status = "stopped" if exit_code == 0 else "error"
-
-        return Session(
-            name=session_id,
-            status=status,
-            workspace=workspace,
-            created_at=created_at,
-            backend_type="openshift",
-        )
-
-    def attach_session_legacy(self, session_id: str) -> int:
-        """Attach to a running session.
-
-        Args:
-            session_id: ID of the session to attach to.
-
-        Returns:
-            Exit code from the attached session.
-        """
-        pod_name = f"paude-session-{session_id}"
-        ns = self.namespace
-
-        # Verify pod exists and is running
-        result = self._run_oc(
-            "get", "pod", pod_name,
-            "-n", ns,
-            "-o", "jsonpath={.status.phase}",
-            check=False,
-        )
-
-        if result.returncode != 0:
-            print(f"Session {session_id} not found.", file=sys.stderr)
-            return 1
-
-        phase = result.stdout.strip()
-        if phase != "Running":
-            print(
-                f"Session {session_id} is not running (status: {phase}).",
-                file=sys.stderr,
-            )
-            return 1
-
-        # Attach using oc exec with interactive TTY
-        # Uses tmux entrypoint which creates or attaches to tmux session
-        exec_cmd = ["oc", "exec", "-it", "-n", ns, pod_name, "--"]
-
-        # Add context if specified
-        if self._config.context:
-            exec_cmd = [
-                "oc", "--context", self._config.context,
-                "exec", "-it", "-n", ns, pod_name, "--",
-            ]
-
-        # Use tmux entrypoint for session persistence
-        exec_cmd.append("/usr/local/bin/entrypoint.sh")
-
-        exec_result = subprocess.run(exec_cmd)
-
-        # Reset terminal state after tmux disconnection
-        # tmux can leave terminal in bad state when connection drops
-        os.system("stty sane 2>/dev/null")  # noqa: S605
-
-        return exec_result.returncode
-
-    def stop_session_legacy(self, session_id: str) -> None:
-        """Stop and cleanup a legacy ephemeral session.
-
-        Args:
-            session_id: ID of the session to stop.
-        """
-        pod_name = f"paude-session-{session_id}"
-        ns = self.namespace
-
-        print(f"Deleting Pod/{pod_name} in namespace {ns}...", file=sys.stderr)
-
-        # Delete pod
-        self._run_oc(
-            "delete", "pod", pod_name,
-            "-n", ns,
-            "--grace-period=0",
-            check=False,
-        )
-
-        # Delete session-specific secrets/configmaps/networkpolicies
-        print(
-            f"Deleting Secret,ConfigMap,NetworkPolicy with label "
-            f"session-id={session_id} in namespace {ns}...",
-            file=sys.stderr,
-        )
-        self._run_oc(
-            "delete", "secret,configmap,networkpolicy",
-            "-n", ns,
-            "-l", f"session-id={session_id}",
-            check=False,
-        )
-
-        # Delete proxy resources (if they exist)
-        self._delete_proxy_resources(session_id)
-
-        print(f"Session {session_id} stopped.", file=sys.stderr)
-
-    def list_sessions_legacy(self) -> list[Session]:
-        """List all sessions for current user.
-
-        Returns:
-            List of Session objects.
-        """
-        ns = self.namespace
-
-        result = self._run_oc(
-            "get", "pods",
-            "-n", ns,
-            "-l", "app=paude",
-            "-o", "json",
-            check=False,
-        )
-
-        if result.returncode != 0:
-            return []
-
-        try:
-            data = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            return []
-
-        sessions = []
-        for item in data.get("items", []):
-            metadata = item.get("metadata", {})
-            labels = metadata.get("labels", {})
-            status = item.get("status", {})
-
-            session_id = labels.get("session-id", "unknown")
-            phase = status.get("phase", "Unknown")
-
-            # Map Kubernetes phase to session status
-            status_map = {
-                "Running": "running",
-                "Pending": "pending",
-                "Succeeded": "stopped",
-                "Failed": "error",
-                "Unknown": "error",
-            }
-
-            sessions.append(Session(
-                name=session_id,
-                status=status_map.get(phase, "error"),
-                workspace=Path("/workspace"),
-                created_at=metadata.get("creationTimestamp", ""),
-                backend_type="openshift",
-            ))
-
-        return sessions
-
     def list_sessions(self) -> list[Session]:
-        """List all sessions (StatefulSets and legacy pods).
+        """List all sessions (StatefulSets).
 
         Returns:
             List of Session objects.
@@ -2493,7 +1921,6 @@ class OpenShiftBackend:
         ns = self.namespace
         sessions = []
 
-        # First, get StatefulSet-based sessions (new session model)
         result = self._run_oc(
             "get", "statefulsets",
             "-n", ns,
@@ -2551,272 +1978,4 @@ class OpenShiftBackend:
             except json.JSONDecodeError:
                 pass
 
-        # Also get legacy pods (not owned by StatefulSets)
-        result = self._run_oc(
-            "get", "pods",
-            "-n", ns,
-            "-l", "app=paude",
-            "-o", "json",
-            check=False,
-        )
-
-        if result.returncode == 0:
-            try:
-                data = json.loads(result.stdout)
-                for item in data.get("items", []):
-                    metadata = item.get("metadata", {})
-                    labels = metadata.get("labels", {})
-                    pod_status = item.get("status", {})
-                    owner_refs = metadata.get("ownerReferences", [])
-
-                    # Skip pods owned by StatefulSets (already counted above)
-                    is_sts_pod = any(
-                        ref.get("kind") == "StatefulSet"
-                        for ref in owner_refs
-                    )
-                    if is_sts_pod:
-                        continue
-
-                    # This is a legacy pod
-                    session_id = labels.get("session-id", "unknown")
-                    phase = pod_status.get("phase", "Unknown")
-
-                    # Map Kubernetes phase to session status
-                    status_map = {
-                        "Running": "running",
-                        "Pending": "pending",
-                        "Succeeded": "stopped",
-                        "Failed": "error",
-                        "Unknown": "error",
-                    }
-
-                    sessions.append(Session(
-                        name=session_id,
-                        status=status_map.get(phase, "error"),
-                        workspace=Path("/workspace"),
-                        created_at=metadata.get("creationTimestamp", ""),
-                        backend_type="openshift",
-                        container_id=metadata.get("name", ""),
-                    ))
-            except json.JSONDecodeError:
-                pass
-
         return sessions
-
-    def sync_workspace(
-        self,
-        session_id: str,
-        direction: str = "both",
-        local_path: Path | None = None,
-        remote_path: str = "/workspace",
-        exclude: list[str] | None = None,
-        verbose: bool = False,
-    ) -> None:
-        """Sync files between local and remote workspace using oc rsync.
-
-        Args:
-            session_id: ID of the session.
-            direction: Sync direction ("local", "remote", "both").
-                - "local": Sync from remote to local
-                - "remote": Sync from local to remote
-                - "both": Sync both directions (remote first, then local)
-            local_path: Local directory to sync. Defaults to current directory.
-            remote_path: Remote directory in the pod. Defaults to /workspace.
-            exclude: List of patterns to exclude from sync.
-            verbose: Whether to show rsync output (default False).
-        """
-        pod_name = f"paude-session-{session_id}"
-        ns = self.namespace
-
-        # Verify pod exists and is running
-        result = self._run_oc(
-            "get", "pod", pod_name,
-            "-n", ns,
-            "-o", "jsonpath={.status.phase}",
-            check=False,
-        )
-
-        if result.returncode != 0:
-            print(f"Session {session_id} not found.", file=sys.stderr)
-            return
-
-        phase = result.stdout.strip()
-        if phase != "Running":
-            print(
-                f"Session {session_id} is not running (status: {phase}).",
-                file=sys.stderr,
-            )
-            return
-
-        local = local_path or Path.cwd()
-
-        # Default excludes - exclude venvs and build artifacts, but NOT .git
-        default_excludes = [
-            ".venv",
-            "venv",
-            ".virtualenv",
-            "env",
-            ".env",
-            "__pycache__",
-            "*.pyc",
-            ".mypy_cache",
-            ".pytest_cache",
-            ".ruff_cache",
-            ".tox",
-            ".nox",
-            ".coverage",
-            "htmlcov",
-            "*.egg-info",
-            "dist",
-            "build",
-            "node_modules",
-            ".paude-initialized",
-        ]
-        excludes = (exclude or []) + default_excludes
-
-        # Build exclude args
-        exclude_args: list[str] = []
-        for pattern in excludes:
-            exclude_args.extend(["--exclude", pattern])
-
-        if direction in ("remote", "both"):
-            print(
-                f"Syncing local -> remote ({local} -> {pod_name}:{remote_path})...",
-                file=sys.stderr,
-            )
-            self._rsync_to_pod(
-                local, pod_name, remote_path, ns, exclude_args, verbose=verbose
-            )
-
-        if direction in ("local", "both"):
-            print(
-                f"Syncing remote -> local ({pod_name}:{remote_path} -> {local})...",
-                file=sys.stderr,
-            )
-            self._rsync_from_pod(
-                local, pod_name, remote_path, ns, exclude_args, verbose=verbose
-            )
-
-        print("Sync complete.", file=sys.stderr)
-
-    def _rsync_to_pod(
-        self,
-        local_path: Path,
-        pod_name: str,
-        remote_path: str,
-        namespace: str,
-        exclude_args: list[str],
-        verbose: bool = False,
-    ) -> None:
-        """Sync files from local to pod using oc rsync.
-
-        Args:
-            local_path: Local directory.
-            pod_name: Pod name.
-            remote_path: Remote path in pod.
-            namespace: Kubernetes namespace.
-            exclude_args: Exclude pattern arguments.
-            verbose: Whether to show rsync output (default False).
-        """
-        cmd = ["oc", "rsync", "--progress"]
-
-        if self._config.context:
-            cmd.extend(["--context", self._config.context])
-
-        cmd.extend(["-n", namespace])
-        cmd.extend(exclude_args)
-
-        # Add trailing slash to copy contents, not directory
-        local_src = f"{local_path}/"
-        remote_dest = f"{pod_name}:{remote_path}"
-
-        cmd.extend([local_src, remote_dest])
-
-        for attempt in range(1, self.RSYNC_MAX_RETRIES + 1):
-            try:
-                # Show output only when verbose is enabled
-                result = subprocess.run(
-                    cmd,
-                    capture_output=not verbose,
-                    text=True,
-                    timeout=self.RSYNC_TIMEOUT,
-                )
-                if result.returncode != 0 and not verbose:
-                    print(
-                        f"Warning: rsync to pod failed: {result.stderr}",
-                        file=sys.stderr,
-                    )
-                return
-            except subprocess.TimeoutExpired:
-                retries = self.RSYNC_MAX_RETRIES
-                if attempt < retries:
-                    print(
-                        f"Rsync timed out (attempt {attempt}/{retries}), retrying...",
-                        file=sys.stderr,
-                    )
-                else:
-                    print(
-                        f"Rsync to pod failed after {retries} attempts",
-                        file=sys.stderr,
-                    )
-
-    def _rsync_from_pod(
-        self,
-        local_path: Path,
-        pod_name: str,
-        remote_path: str,
-        namespace: str,
-        exclude_args: list[str],
-        verbose: bool = False,
-    ) -> None:
-        """Sync files from pod to local using oc rsync.
-
-        Args:
-            local_path: Local directory.
-            pod_name: Pod name.
-            remote_path: Remote path in pod.
-            namespace: Kubernetes namespace.
-            exclude_args: Exclude pattern arguments.
-            verbose: Whether to show rsync output (default False).
-        """
-        cmd = ["oc", "rsync", "--progress"]
-
-        if self._config.context:
-            cmd.extend(["--context", self._config.context])
-
-        cmd.extend(["-n", namespace])
-        cmd.extend(exclude_args)
-
-        # Add trailing slash to copy contents, not directory
-        remote_src = f"{pod_name}:{remote_path}/"
-        local_dest = str(local_path)
-
-        cmd.extend([remote_src, local_dest])
-
-        for attempt in range(1, self.RSYNC_MAX_RETRIES + 1):
-            try:
-                # Show output only when verbose is enabled
-                result = subprocess.run(
-                    cmd,
-                    capture_output=not verbose,
-                    text=True,
-                    timeout=self.RSYNC_TIMEOUT,
-                )
-                if result.returncode != 0 and not verbose:
-                    print(
-                        f"Warning: rsync from pod failed: {result.stderr}",
-                        file=sys.stderr,
-                    )
-                return
-            except subprocess.TimeoutExpired:
-                retries = self.RSYNC_MAX_RETRIES
-                if attempt < retries:
-                    print(
-                        f"Rsync timed out (attempt {attempt}/{retries}), retrying...",
-                        file=sys.stderr,
-                    )
-                else:
-                    print(
-                        f"Rsync from pod failed after {retries} attempts",
-                        file=sys.stderr,
-                    )

@@ -48,130 +48,11 @@ class TestPodmanBackend:
         backend = PodmanBackend()
         assert backend is not None
 
-    @patch("paude.backends.podman.ContainerRunner")
-    def test_start_session_legacy_returns_session(self, mock_runner_class: MagicMock) -> None:
-        """start_session_legacy returns a Session object."""
-        mock_runner = MagicMock()
-        mock_runner.run_claude.return_value = 0
-        mock_runner_class.return_value = mock_runner
-
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-
-        session = backend.start_session_legacy(
-            image="test-image:latest",
-            workspace=Path("/test/workspace"),
-            env={"TEST": "value"},
-            mounts=["-v", "/host:/container"],
-            args=["--help"],
-            workdir="/test/workspace",
-            network_restricted=True,
-            yolo=False,
-            network=None,
-        )
-
-        assert isinstance(session, Session)
-        assert session.backend_type == "podman"
-        assert session.workspace == Path("/test/workspace")
-
-    @patch("paude.backends.podman.ContainerRunner")
-    def test_start_session_legacy_status_stopped_on_success(
-        self, mock_runner_class: MagicMock
-    ) -> None:
-        """start_session_legacy returns stopped status when exit code is 0."""
-        mock_runner = MagicMock()
-        mock_runner.run_claude.return_value = 0
-        mock_runner_class.return_value = mock_runner
-
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-
-        session = backend.start_session_legacy(
-            image="test-image:latest",
-            workspace=Path("/test/workspace"),
-            env={},
-            mounts=[],
-            args=[],
-        )
-
-        assert session.status == "stopped"
-
-    @patch("paude.backends.podman.ContainerRunner")
-    def test_start_session_legacy_status_error_on_failure(
-        self, mock_runner_class: MagicMock
-    ) -> None:
-        """start_session_legacy returns error status when exit code is non-zero."""
-        mock_runner = MagicMock()
-        mock_runner.run_claude.return_value = 1
-        mock_runner_class.return_value = mock_runner
-
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-
-        session = backend.start_session_legacy(
-            image="test-image:latest",
-            workspace=Path("/test/workspace"),
-            env={},
-            mounts=[],
-            args=[],
-        )
-
-        assert session.status == "error"
-
-    @patch("paude.backends.podman.ContainerRunner")
-    def test_start_session_legacy_calls_run_claude(self, mock_runner_class: MagicMock) -> None:
-        """start_session_legacy calls runner.run_claude with correct args."""
-        mock_runner = MagicMock()
-        mock_runner.run_claude.return_value = 0
-        mock_runner_class.return_value = mock_runner
-
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-
-        backend.start_session_legacy(
-            image="test-image:latest",
-            workspace=Path("/test/workspace"),
-            env={"KEY": "value"},
-            mounts=["-v", "/a:/b"],
-            args=["--help"],
-            workdir="/work",
-            network_restricted=False,
-            yolo=True,
-            network="test-network",
-        )
-
-        mock_runner.run_claude.assert_called_once_with(
-            image="test-image:latest",
-            mounts=["-v", "/a:/b"],
-            env={"KEY": "value"},
-            args=["--help"],
-            workdir="/work",
-            network="test-network",
-            yolo=True,
-            allow_network=True,
-        )
-
-    def test_attach_session_legacy_returns_error(self) -> None:
-        """attach_session_legacy returns 1 for Podman (legacy sessions are ephemeral)."""
-        backend = PodmanBackend()
-        result = backend.attach_session_legacy("any-id")
-        assert result == 1
-
-    def test_stop_session_legacy_is_noop(self) -> None:
-        """stop_session_legacy does nothing for Podman legacy sessions."""
-        backend = PodmanBackend()
-        backend.stop_session_legacy("any-id")
-
     def test_list_sessions_returns_empty(self) -> None:
-        """list_sessions returns empty list for Podman."""
+        """list_sessions returns empty list for Podman when no sessions exist."""
         backend = PodmanBackend()
         sessions = backend.list_sessions()
         assert sessions == []
-
-    def test_sync_workspace_legacy_is_noop(self) -> None:
-        """sync_workspace_legacy does nothing for Podman."""
-        backend = PodmanBackend()
-        backend.sync_workspace_legacy("any-id", "both")
 
     @patch("paude.backends.podman.ContainerRunner")
     def test_run_proxy_delegates_to_runner(
@@ -246,7 +127,7 @@ class TestBackendProtocol:
         """PodmanBackend implements all required Backend methods."""
         backend = PodmanBackend()
 
-        # New Backend protocol methods
+        # Backend protocol methods
         assert hasattr(backend, "create_session")
         assert hasattr(backend, "delete_session")
         assert hasattr(backend, "start_session")
@@ -264,20 +145,3 @@ class TestBackendProtocol:
         assert callable(backend.list_sessions)
         assert callable(backend.sync_session)
         assert callable(backend.get_session)
-
-    def test_podman_backend_implements_legacy_protocol(self) -> None:
-        """PodmanBackend implements all required LegacyBackend methods."""
-        backend = PodmanBackend()
-
-        # Legacy protocol methods
-        assert hasattr(backend, "start_session_legacy")
-        assert hasattr(backend, "attach_session_legacy")
-        assert hasattr(backend, "stop_session_legacy")
-        assert hasattr(backend, "list_sessions")
-        assert hasattr(backend, "sync_workspace_legacy")
-
-        assert callable(backend.start_session_legacy)
-        assert callable(backend.attach_session_legacy)
-        assert callable(backend.stop_session_legacy)
-        assert callable(backend.list_sessions)
-        assert callable(backend.sync_workspace_legacy)

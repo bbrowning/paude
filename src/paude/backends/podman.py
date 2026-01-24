@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import secrets
 import sys
-import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -468,127 +467,6 @@ class PodmanBackend:
                 return session
 
         return None
-
-    # Legacy methods for backward compatibility with ephemeral sessions
-
-    def start_session_legacy(
-        self,
-        image: str,
-        workspace: Path,
-        env: dict[str, str],
-        mounts: list[str],
-        args: list[str],
-        workdir: str | None = None,
-        network_restricted: bool = True,
-        yolo: bool = False,
-        network: str | None = None,
-    ) -> Session:
-        """Start a new Claude session (legacy ephemeral mode).
-
-        For backward compatibility with the old ephemeral session workflow.
-        This runs synchronously and exits when Claude exits.
-
-        Args:
-            image: Container image to use.
-            workspace: Local workspace path.
-            env: Environment variables to set.
-            mounts: Volume mount arguments.
-            args: Arguments to pass to Claude.
-            workdir: Working directory inside container.
-            network_restricted: Whether to restrict network (default True).
-            yolo: Enable YOLO mode (skip permission prompts).
-            network: Network name to use (for proxy setup).
-
-        Returns:
-            Session object with exit code in status.
-        """
-        session_id = f"{int(time.time())}-{secrets.token_hex(4)}"
-        created_at = datetime.now(UTC).isoformat()
-
-        self._current_session = Session(
-            name=session_id,
-            status="running",
-            workspace=workspace,
-            created_at=created_at,
-            backend_type="podman",
-        )
-
-        # Run Claude (blocks until exit)
-        exit_code = self._runner.run_claude(
-            image=image,
-            mounts=mounts,
-            env=env,
-            args=args,
-            workdir=workdir or str(workspace),
-            network=network,
-            yolo=yolo,
-            allow_network=not network_restricted,
-        )
-
-        # Update session status
-        self._current_session = Session(
-            name=session_id,
-            status="stopped" if exit_code == 0 else "error",
-            workspace=workspace,
-            created_at=created_at,
-            backend_type="podman",
-        )
-
-        return self._current_session
-
-    def attach_session_legacy(self, session_id: str) -> int:
-        """Attach to a running session (legacy).
-
-        For Podman legacy mode, sessions are ephemeral and cannot be reattached.
-
-        Args:
-            session_id: ID of the session to attach to.
-
-        Returns:
-            Exit code (always 1 for legacy Podman - sessions are ephemeral).
-        """
-        print(
-            "Legacy Podman sessions are ephemeral and cannot be reattached. "
-            "Use 'paude create' and 'paude start' for persistent sessions.",
-            file=sys.stderr,
-        )
-        return 1
-
-    def stop_session_legacy(self, session_id: str) -> None:
-        """Stop and cleanup a session (legacy).
-
-        For Podman legacy mode, sessions are managed by the container runtime.
-        The container is removed automatically when it exits (--rm flag).
-
-        Args:
-            session_id: ID of the session to stop.
-        """
-        pass
-
-    def list_sessions_legacy(self) -> list[Session]:
-        """List all sessions for current user (legacy).
-
-        For Podman legacy mode, sessions are ephemeral. Returns empty list.
-
-        Returns:
-            Empty list (legacy Podman sessions are not persistent).
-        """
-        return []
-
-    def sync_workspace_legacy(
-        self,
-        session_id: str,
-        direction: str = "both",
-    ) -> None:
-        """Sync files between local and remote workspace (legacy).
-
-        For Podman, this is a no-op since volumes are mounted directly.
-
-        Args:
-            session_id: ID of the session.
-            direction: Sync direction (ignored for Podman).
-        """
-        pass
 
     def run_proxy(
         self,

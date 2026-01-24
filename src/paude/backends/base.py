@@ -46,6 +46,7 @@ class SessionConfig:
         yolo: Enable YOLO mode.
         pvc_size: PVC size for OpenShift (e.g., "10Gi").
         storage_class: Storage class for OpenShift.
+        network: Podman network name for proxy setup.
     """
 
     name: str | None
@@ -59,6 +60,7 @@ class SessionConfig:
     yolo: bool = False
     pvc_size: str = "10Gi"
     storage_class: str | None = None
+    network: str | None = None
 
 
 class Backend(Protocol):
@@ -177,86 +179,5 @@ class Backend(Protocol):
 
         Returns:
             Session object or None if not found.
-        """
-        ...
-
-
-# Legacy compatibility - the old protocol methods for ephemeral sessions
-class LegacyBackend(Protocol):
-    """Legacy container backend interface for ephemeral sessions.
-
-    This protocol is kept for backward compatibility with the existing
-    ephemeral session workflow. New code should use the Backend protocol.
-    """
-
-    def start_session(
-        self,
-        image: str,
-        workspace: Path,
-        env: dict[str, str],
-        mounts: list[str],
-        args: list[str],
-        workdir: str | None = None,
-        network_restricted: bool = True,
-        yolo: bool = False,
-    ) -> Session:
-        """Start a new Claude session (legacy ephemeral mode).
-
-        Args:
-            image: Container image to use.
-            workspace: Local workspace path.
-            env: Environment variables to set.
-            mounts: Volume mount arguments (Podman-style).
-            args: Arguments to pass to Claude.
-            workdir: Working directory inside container.
-            network_restricted: Whether to restrict network (default True).
-            yolo: Enable YOLO mode (skip permission prompts).
-
-        Returns:
-            Session object representing the started session.
-        """
-        ...
-
-    def attach_session(self, session_id: str) -> int:
-        """Attach to a running session.
-
-        Args:
-            session_id: ID of the session to attach to.
-
-        Returns:
-            Exit code from the attached session.
-        """
-        ...
-
-    def stop_session(self, session_id: str) -> None:
-        """Stop and cleanup a session.
-
-        Args:
-            session_id: ID of the session to stop.
-        """
-        ...
-
-    def list_sessions(self) -> list[Session]:
-        """List all sessions for current user.
-
-        Returns:
-            List of Session objects.
-        """
-        ...
-
-    def sync_workspace(
-        self,
-        session_id: str,
-        direction: str = "both",
-    ) -> None:
-        """Sync files between local and remote workspace.
-
-        Args:
-            session_id: ID of the session.
-            direction: Sync direction ("local", "remote", "both").
-
-        Note:
-            For Podman backend, this is a no-op since volumes are mounted directly.
-            For OpenShift backend, this triggers file synchronization.
         """
         ...

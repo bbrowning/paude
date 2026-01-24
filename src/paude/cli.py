@@ -1373,12 +1373,12 @@ def _run_openshift_backend(ctx: typer.Context) -> None:
 
 
 def _run_podman_backend(ctx: typer.Context) -> None:
-    """Run Claude Code using the Podman backend (legacy ephemeral mode)."""
+    """Run Claude Code using the Podman backend with persistent sessions."""
     import atexit
     import signal
     import sys
 
-    from paude.backends import PodmanBackend
+    from paude.backends import PodmanBackend, SessionConfig
     from paude.config import detect_config, parse_config
     from paude.container import ImageManager, NetworkManager
     from paude.environment import build_environment, build_proxy_environment
@@ -1475,7 +1475,20 @@ def _run_podman_backend(ctx: typer.Context) -> None:
     # Check git safety
     check_git_safety(workspace)
 
-    # Setup proxy if not allow-network
+    # Check for existing session FIRST to avoid starting unnecessary proxy
+    existing_session = backend_instance.find_session_for_workspace(workspace)
+
+    # If we have a running session, just connect (no proxy needed)
+    if existing_session and existing_session.status == "running":
+        try:
+            typer.echo(f"Connecting to running session '{existing_session.name}'...")
+            exit_code = backend_instance.connect_session(existing_session.name)
+        except Exception as e:
+            typer.echo(f"Error connecting to session: {e}", err=True)
+            raise typer.Exit(1) from None
+        raise typer.Exit(exit_code)
+
+    # For new or stopped sessions, we need to set up the proxy
     if not allow_network:
         try:
             # Create internal network (reused across invocations)
@@ -1514,20 +1527,34 @@ def _run_podman_backend(ctx: typer.Context) -> None:
             except OSError:
                 pass
 
-    # Run Claude via backend (legacy ephemeral mode)
+    # Use persistent session workflow:
+    # 1. If existing stopped session → start it
+    # 2. If no session → create and start
     try:
-        session = backend_instance.start_session_legacy(
-            image=image,
-            workspace=workspace,
-            env=env,
-            mounts=mounts,
-            args=claude_args,
-            workdir=str(workspace),
-            network_restricted=not allow_network,
-            yolo=yolo,
-            network=network_name,
-        )
-        exit_code = 0 if session.status == "stopped" else 1
+        if existing_session:
+            # Session exists but is stopped (running case handled above)
+            session_name = existing_session.name
+            typer.echo(f"Starting existing session '{session_name}'...")
+            exit_code = backend_instance.start_session(session_name)
+        else:
+            # Create a new session
+            session_config = SessionConfig(
+                name=None,  # Auto-generate name
+                workspace=workspace,
+                image=image,
+                env=env,
+                mounts=mounts,
+                args=claude_args or [],
+                workdir=str(workspace),
+                network_restricted=not allow_network,
+                yolo=yolo,
+                network=network_name,
+            )
+
+            session = backend_instance.create_session(session_config)
+            typer.echo(f"Created session '{session.name}'")
+            exit_code = backend_instance.start_session(session.name)
+
     except Exception as e:
         typer.echo(f"Error running Claude: {e}", err=True)
         cleanup()

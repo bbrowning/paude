@@ -139,9 +139,40 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
     Raises:
         ConfigError: If venv config is invalid.
     """
+    config_dir = config_file.parent
+
     base_image = data.get("base")
     packages = data.get("packages", [])
     setup_command = data.get("setup")
+
+    # Extract dockerfile path (same as devcontainer.json)
+    dockerfile: Path | None = None
+    build_context: Path | None = None
+
+    build_config = data.get("build", {})
+    if "dockerfile" in build_config:
+        dockerfile_path = build_config["dockerfile"]
+        if not Path(dockerfile_path).is_absolute():
+            dockerfile = config_dir / dockerfile_path
+        else:
+            dockerfile = Path(dockerfile_path)
+
+    # Extract build context
+    if "context" in build_config:
+        context_path = build_config["context"]
+        if not Path(context_path).is_absolute():
+            build_context = config_dir / context_path
+        else:
+            build_context = Path(context_path)
+        # Normalize the path
+        if build_context.exists():
+            build_context = build_context.resolve()
+    elif dockerfile:
+        # Default context is config directory
+        build_context = config_dir
+
+    # Extract build args
+    build_args = build_config.get("args", {})
 
     venv_config = data.get("venv", "auto")
     if venv_config not in ("auto", "none") and not isinstance(venv_config, list):
@@ -165,6 +196,9 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
         config_file=config_file,
         config_type="paude",
         base_image=base_image,
+        dockerfile=dockerfile,
+        build_context=build_context,
+        build_args=build_args,
         packages=packages,
         post_create_command=setup_command,
         venv=venv_config,

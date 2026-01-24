@@ -194,86 +194,6 @@ class TestCheckConnection:
             backend._check_connection()
 
 
-class TestGeneratePodSpec:
-    """Tests for _generate_pod_spec method."""
-
-    def test_generates_valid_spec(self) -> None:
-        """_generate_pod_spec generates valid pod spec."""
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        spec = backend._generate_pod_spec(
-            session_id="test-123",
-            image="paude:latest",
-            env={"KEY": "value"},
-        )
-
-        assert spec["apiVersion"] == "v1"
-        assert spec["kind"] == "Pod"
-        assert spec["metadata"]["name"] == "paude-session-test-123"
-        assert spec["metadata"]["labels"]["app"] == "paude"
-        assert spec["metadata"]["labels"]["session-id"] == "test-123"
-
-    def test_includes_environment_variables(self) -> None:
-        """_generate_pod_spec includes environment variables."""
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        spec = backend._generate_pod_spec(
-            session_id="test-123",
-            image="paude:latest",
-            env={"KEY1": "value1", "KEY2": "value2"},
-        )
-
-        container = spec["spec"]["containers"][0]
-        env_list = container["env"]
-        env_dict = {e["name"]: e["value"] for e in env_list}
-
-        assert env_dict["KEY1"] == "value1"
-        assert env_dict["KEY2"] == "value2"
-
-    def test_uses_config_namespace(self) -> None:
-        """_generate_pod_spec uses namespace from config."""
-        config = OpenShiftConfig(namespace="custom-ns")
-        backend = OpenShiftBackend(config=config)
-        spec = backend._generate_pod_spec(
-            session_id="test-123",
-            image="paude:latest",
-            env={},
-        )
-
-        assert spec["metadata"]["namespace"] == "custom-ns"
-
-    def test_includes_resources(self) -> None:
-        """_generate_pod_spec includes resource requests and limits."""
-        config = OpenShiftConfig(
-            namespace="test-ns",
-            resources={
-                "requests": {"cpu": "2", "memory": "8Gi"},
-                "limits": {"cpu": "8", "memory": "16Gi"},
-            },
-        )
-        backend = OpenShiftBackend(config=config)
-        spec = backend._generate_pod_spec(
-            session_id="test-123",
-            image="paude:latest",
-            env={},
-        )
-
-        container = spec["spec"]["containers"][0]
-        assert container["resources"]["requests"]["cpu"] == "2"
-        assert container["resources"]["limits"]["memory"] == "16Gi"
-
-    def test_includes_workload_labels(self) -> None:
-        """_generate_pod_spec includes labels for network policy."""
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        spec = backend._generate_pod_spec(
-            session_id="test-123",
-            image="paude:latest",
-            env={},
-        )
-
-        labels = spec["metadata"]["labels"]
-        assert labels["role"] == "workload"
-        assert labels["app"] == "paude"
-
-
 class TestListSessions:
     """Tests for list_sessions method."""
 
@@ -286,291 +206,6 @@ class TestListSessions:
         sessions = backend.list_sessions()
 
         assert sessions == []
-
-    @patch("subprocess.run")
-    def test_parses_pods_response_legacy(self, mock_run: MagicMock) -> None:
-        """list_sessions_legacy parses pods response correctly."""
-        pods_response = {
-            "items": [
-                {
-                    "metadata": {
-                        "name": "paude-session-abc123",
-                        "labels": {"session-id": "abc123"},
-                        "creationTimestamp": "2024-01-15T10:00:00Z",
-                    },
-                    "status": {"phase": "Running"},
-                },
-                {
-                    "metadata": {
-                        "name": "paude-session-def456",
-                        "labels": {"session-id": "def456"},
-                        "creationTimestamp": "2024-01-15T11:00:00Z",
-                    },
-                    "status": {"phase": "Pending"},
-                },
-            ]
-        }
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout=json.dumps(pods_response),
-            stderr="",
-        )
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        sessions = backend.list_sessions_legacy()
-
-        assert len(sessions) == 2
-        assert sessions[0].name == "abc123"
-        assert sessions[0].status == "running"
-        assert sessions[1].name == "def456"
-        assert sessions[1].status == "pending"
-
-
-class TestStopSession:
-    """Tests for stop_session_legacy method."""
-
-    @patch("subprocess.run")
-    def test_deletes_pod(self, mock_run: MagicMock) -> None:
-        """stop_session_legacy deletes the pod."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        backend.stop_session_legacy("abc123")
-
-        # Should have called oc delete pod and oc delete secrets
-        assert mock_run.call_count >= 2
-        calls = [call[0][0] for call in mock_run.call_args_list]
-
-        # First call should be delete pod
-        assert "delete" in calls[0]
-        assert "pod" in calls[0]
-
-
-class TestAttachSession:
-    """Tests for attach_session_legacy method."""
-
-    @patch("subprocess.run")
-    def test_returns_error_when_pod_not_found(self, mock_run: MagicMock) -> None:
-        """attach_session_legacy returns 1 when pod not found."""
-        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        result = backend.attach_session_legacy("nonexistent")
-
-        assert result == 1
-
-    @patch("subprocess.run")
-    def test_returns_error_when_pod_not_running(self, mock_run: MagicMock) -> None:
-        """attach_session_legacy returns 1 when pod not running."""
-        # First call is get pod status, second would be exec
-        mock_run.return_value = MagicMock(returncode=0, stdout="Pending", stderr="")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        result = backend.attach_session_legacy("pending-session")
-
-        assert result == 1
-
-
-class TestSyncWorkspace:
-    """Tests for sync_workspace method."""
-
-    @patch("subprocess.run")
-    def test_sync_verifies_pod_running(
-        self, mock_run: MagicMock, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """sync_workspace verifies pod is running before syncing."""
-        # Return "Pending" for pod phase check
-        mock_run.return_value = MagicMock(returncode=0, stdout="Pending", stderr="")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        backend.sync_workspace("abc123", "both")
-
-        captured = capsys.readouterr()
-        assert "not running" in captured.err
-
-    @patch("subprocess.run")
-    def test_sync_handles_missing_pod(
-        self, mock_run: MagicMock, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """sync_workspace handles missing pod gracefully."""
-        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        backend.sync_workspace("abc123", "both")
-
-        captured = capsys.readouterr()
-        assert "not found" in captured.err
-
-
-class TestGenerateSessionId:
-    """Tests for _generate_session_id method."""
-
-    def test_format(self) -> None:
-        """Session ID has expected format."""
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        session_id = backend._generate_session_id()
-
-        # Should be timestamp-hex format
-        parts = session_id.split("-")
-        assert len(parts) == 2
-        assert parts[0].isdigit()
-        assert len(parts[1]) == 8  # 4 bytes = 8 hex chars
-
-    def test_unique(self) -> None:
-        """Session IDs are unique."""
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        ids = [backend._generate_session_id() for _ in range(10)]
-        assert len(set(ids)) == 10
-
-
-class TestPodSpecWithCredentials:
-    """Tests for _generate_pod_spec with credential mounts."""
-
-    def test_includes_gcloud_secret_mount(self) -> None:
-        """Pod spec includes gcloud secret mount when provided."""
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        spec = backend._generate_pod_spec(
-            session_id="test-123",
-            image="paude:latest",
-            env={},
-            gcloud_secret="paude-gcloud-test-123",  # noqa: S106
-        )
-
-        container = spec["spec"]["containers"][0]
-        mounts = container["volumeMounts"]
-
-        gcloud_mount = next(
-            (m for m in mounts if m["name"] == "gcloud-creds"), None
-        )
-        assert gcloud_mount is not None
-        assert gcloud_mount["mountPath"] == "/home/paude/.config/gcloud"
-        assert gcloud_mount["readOnly"] is True
-
-        volumes = spec["spec"]["volumes"]
-        gcloud_vol = next((v for v in volumes if v["name"] == "gcloud-creds"), None)
-        assert gcloud_vol is not None
-        assert gcloud_vol["secret"]["secretName"] == "paude-gcloud-test-123"
-
-    def test_includes_gitconfig_configmap_mount(self) -> None:
-        """Pod spec includes gitconfig mount when provided."""
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        spec = backend._generate_pod_spec(
-            session_id="test-123",
-            image="paude:latest",
-            env={},
-            gitconfig_cm="paude-gitconfig-test-123",
-        )
-
-        container = spec["spec"]["containers"][0]
-        mounts = container["volumeMounts"]
-
-        git_mount = next((m for m in mounts if m["name"] == "gitconfig"), None)
-        assert git_mount is not None
-        assert git_mount["mountPath"] == "/home/paude/.gitconfig"
-        assert git_mount["subPath"] == ".gitconfig"
-
-    def test_includes_claude_secret_mount(self) -> None:
-        """Pod spec includes claude secret mount when provided."""
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        spec = backend._generate_pod_spec(
-            session_id="test-123",
-            image="paude:latest",
-            env={},
-            claude_secret="paude-claude-test-123",  # noqa: S106
-        )
-
-        container = spec["spec"]["containers"][0]
-        mounts = container["volumeMounts"]
-
-        claude_mount = next(
-            (m for m in mounts if m["name"] == "claude-config"), None
-        )
-        assert claude_mount is not None
-        assert claude_mount["mountPath"] == "/tmp/claude.seed"
-
-    def test_no_extra_mounts_when_no_credentials(self) -> None:
-        """Pod spec has only workspace mount when no credentials."""
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        spec = backend._generate_pod_spec(
-            session_id="test-123",
-            image="paude:latest",
-            env={},
-        )
-
-        container = spec["spec"]["containers"][0]
-        mounts = container["volumeMounts"]
-        volumes = spec["spec"]["volumes"]
-
-        # Only workspace mount
-        assert len(mounts) == 1
-        assert mounts[0]["name"] == "workspace"
-        assert len(volumes) == 1
-        assert volumes[0]["name"] == "workspace"
-
-
-class TestCreateCredentialsSecret:
-    """Tests for _create_credentials_secret method."""
-
-    @patch("subprocess.run")
-    def test_returns_none_when_no_gcloud_dir(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """Returns None when gcloud directory doesn't exist."""
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-            result = backend._create_credentials_secret("test-123")
-            assert result is None
-
-    @patch("subprocess.run")
-    def test_creates_secret_with_adc(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """Creates secret when ADC file exists."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        # Create fake gcloud directory with ADC
-        gcloud_dir = tmp_path / ".config" / "gcloud"
-        gcloud_dir.mkdir(parents=True)
-        (gcloud_dir / "application_default_credentials.json").write_text('{"test": true}')
-
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-            result = backend._create_credentials_secret("test-123")
-
-            assert result == "paude-gcloud-test-123"
-            mock_run.assert_called()
-
-
-class TestCreateGitconfigConfigmap:
-    """Tests for _create_gitconfig_configmap method."""
-
-    @patch("subprocess.run")
-    def test_returns_none_when_no_gitconfig(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """Returns None when .gitconfig doesn't exist."""
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-            result = backend._create_gitconfig_configmap("test-123")
-            assert result is None
-
-    @patch("subprocess.run")
-    def test_creates_configmap_when_gitconfig_exists(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """Creates ConfigMap when .gitconfig exists."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        # Create fake gitconfig
-        (tmp_path / ".gitconfig").write_text("[user]\n  name = Test\n")
-
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-            result = backend._create_gitconfig_configmap("test-123")
-
-            assert result == "paude-gitconfig-test-123"
-            mock_run.assert_called()
-
 
 # =============================================================================
 # Session Management Tests (New Backend Protocol)
@@ -1889,8 +1524,9 @@ class TestStartSessionWaitsForProxy:
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
 
         with patch.object(backend, "_wait_for_pod_ready"):
-            with patch.object(backend, "connect_session", return_value=0):
-                backend.start_session("test", sync=False)
+            with patch.object(backend, "_sync_config_to_pod"):
+                with patch.object(backend, "connect_session", return_value=0):
+                    backend.start_session("test", sync=False)
 
         # Verify proxy check happened
         assert "get_proxy_deployment" in call_order
@@ -1933,121 +1569,13 @@ class TestStartSessionWaitsForProxy:
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
 
         with patch.object(backend, "_wait_for_pod_ready"):
-            with patch.object(backend, "connect_session", return_value=0):
-                backend.start_session("test", sync=False)
+            with patch.object(backend, "_sync_config_to_pod"):
+                with patch.object(backend, "connect_session", return_value=0):
+                    backend.start_session("test", sync=False)
 
         # Verify proxy was checked but not waited for
         assert "get_proxy_deployment" in call_order
         assert "check_proxy_ready" not in call_order
-
-
-class TestLegacySessionWithProxy:
-    """Tests for legacy session methods with proxy support."""
-
-    @patch("subprocess.run")
-    def test_legacy_creates_proxy_when_network_restricted(
-        self, mock_run: MagicMock
-    ) -> None:
-        """start_session_legacy creates proxy when network_restricted=True."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="Running", stderr="")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch.object(backend, "_wait_for_pod_ready"):
-            with patch.object(backend, "_wait_for_proxy_ready"):
-                with patch("subprocess.call", return_value=0):
-                    backend.start_session_legacy(
-                        image="quay.io/test/paude-claude-centos9:v1",
-                        workspace=Path("/project"),
-                        env={},
-                        mounts=[],
-                        args=[],
-                        network_restricted=True,
-                    )
-
-        # Verify proxy deployment was created
-        calls_str = str(mock_run.call_args_list)
-        assert "paude-proxy" in calls_str
-        assert "Deployment" in calls_str
-
-    @patch("subprocess.run")
-    def test_legacy_sets_proxy_env_vars(
-        self, mock_run: MagicMock
-    ) -> None:
-        """start_session_legacy sets HTTP_PROXY env vars."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="Running", stderr="")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch.object(backend, "_wait_for_pod_ready"):
-            with patch.object(backend, "_wait_for_proxy_ready"):
-                with patch("subprocess.call", return_value=0):
-                    backend.start_session_legacy(
-                        image="quay.io/test/paude:v1",
-                        workspace=Path("/project"),
-                        env={},
-                        mounts=[],
-                        args=[],
-                        network_restricted=True,
-                    )
-
-        # Find Pod creation
-        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
-        pod_calls = [
-            c for c in apply_calls
-            if '"kind": "Pod"' in str(c[1].get("input", ""))
-        ]
-        assert len(pod_calls) >= 1
-
-        pod_spec = json.loads(pod_calls[0][1]["input"])
-        container = pod_spec["spec"]["containers"][0]
-        env_dict = {e["name"]: e["value"] for e in container["env"]}
-
-        # Verify proxy env vars (session ID is dynamic, so just check prefix)
-        assert any(k == "HTTP_PROXY" and "paude-proxy-" in v for k, v in env_dict.items())
-        assert any(k == "HTTPS_PROXY" and "paude-proxy-" in v for k, v in env_dict.items())
-
-    @patch("subprocess.run")
-    def test_legacy_no_proxy_when_allow_network(
-        self, mock_run: MagicMock
-    ) -> None:
-        """start_session_legacy doesn't create proxy when network_restricted=False."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="Running", stderr="")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch.object(backend, "_wait_for_pod_ready"):
-            with patch("subprocess.call", return_value=0):
-                backend.start_session_legacy(
-                    image="quay.io/test/paude:v1",
-                    workspace=Path("/project"),
-                    env={},
-                    mounts=[],
-                    args=[],
-                    network_restricted=False,
-                )
-
-        # Verify no proxy deployment was created
-        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
-        deployment_calls = [
-            c for c in apply_calls
-            if '"kind": "Deployment"' in str(c[1].get("input", ""))
-        ]
-        assert len(deployment_calls) == 0
-
-    @patch("subprocess.run")
-    def test_legacy_stop_cleans_up_proxy(
-        self, mock_run: MagicMock
-    ) -> None:
-        """stop_session_legacy cleans up proxy resources."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        backend.stop_session_legacy("abc123")
-
-        # Verify proxy cleanup was called
-        calls_str = str(mock_run.call_args_list)
-        assert "paude-proxy-abc123" in calls_str
 
 
 class TestCreateSessionWithProxyNetworkPolicy:
@@ -2079,3 +1607,151 @@ class TestCreateSessionWithProxyNetworkPolicy:
             if "paude-proxy-egress-test-session" in str(c[1].get("input", ""))
         ]
         assert len(proxy_policy_calls) >= 1
+
+
+class TestSyncConfigToPod:
+    """Tests for _sync_config_to_pod method (PVC-based credential sync)."""
+
+    @patch("subprocess.run")
+    def test_creates_config_directory_structure(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """_sync_config_to_pod creates /pvc/config directory structure."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with patch.object(Path, "home", return_value=tmp_path):
+            backend._sync_config_to_pod("test-pod-0")
+
+        # Find the exec call that creates the directory structure
+        exec_calls = [
+            c for c in mock_run.call_args_list
+            if "exec" in str(c) and "mkdir -p" in str(c)
+        ]
+        assert len(exec_calls) >= 1
+
+        # Verify the command includes rm -rf, mkdir, and chmod
+        exec_cmd = str(exec_calls[0])
+        assert "rm -rf /pvc/config" in exec_cmd
+        assert "mkdir -p /pvc/config/gcloud /pvc/config/claude" in exec_cmd
+        assert "chmod -R g+rwX /pvc/config" in exec_cmd
+
+    @patch("subprocess.run")
+    def test_syncs_gcloud_credentials(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """_sync_config_to_pod syncs gcloud credential files."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        # Create mock gcloud files
+        gcloud_dir = tmp_path / ".config" / "gcloud"
+        gcloud_dir.mkdir(parents=True)
+        (gcloud_dir / "application_default_credentials.json").write_text("{}")
+        (gcloud_dir / "credentials.db").write_text("db")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with patch.object(Path, "home", return_value=tmp_path):
+            backend._sync_config_to_pod("test-pod-0")
+
+        # Find oc cp calls for gcloud files
+        cp_calls = [c for c in mock_run.call_args_list if "cp" in str(c)]
+        cp_calls_str = str(cp_calls)
+
+        # Verify gcloud files are synced
+        assert "application_default_credentials.json" in cp_calls_str
+        assert "credentials.db" in cp_calls_str
+
+    @patch("subprocess.run")
+    def test_syncs_claude_config_files(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """_sync_config_to_pod syncs claude config files."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        # Create mock claude files
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir(parents=True)
+        (claude_dir / "settings.json").write_text("{}")
+        (claude_dir / "credentials.json").write_text("{}")
+        (tmp_path / ".claude.json").write_text("{}")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with patch.object(Path, "home", return_value=tmp_path):
+            backend._sync_config_to_pod("test-pod-0")
+
+        # Find oc cp calls
+        cp_calls = [c for c in mock_run.call_args_list if "cp" in str(c)]
+        cp_calls_str = str(cp_calls)
+
+        # Verify claude files are synced
+        assert "settings.json" in cp_calls_str
+        assert "credentials.json" in cp_calls_str
+        assert ".claude.json" in cp_calls_str
+
+    @patch("subprocess.run")
+    def test_syncs_gitconfig(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """_sync_config_to_pod syncs gitconfig."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        # Create mock gitconfig
+        (tmp_path / ".gitconfig").write_text("[user]\nname = Test")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with patch.object(Path, "home", return_value=tmp_path):
+            backend._sync_config_to_pod("test-pod-0")
+
+        # Find oc cp call for gitconfig
+        cp_calls = [c for c in mock_run.call_args_list if "cp" in str(c)]
+        cp_calls_str = str(cp_calls)
+
+        assert ".gitconfig" in cp_calls_str
+        assert "/pvc/config/gitconfig" in cp_calls_str
+
+    @patch("subprocess.run")
+    def test_creates_ready_marker(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """_sync_config_to_pod creates .ready marker file."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with patch.object(Path, "home", return_value=tmp_path):
+            backend._sync_config_to_pod("test-pod-0")
+
+        # Find the exec call that creates the .ready marker
+        exec_calls = [
+            c for c in mock_run.call_args_list
+            if "exec" in str(c) and ".ready" in str(c)
+        ]
+        assert len(exec_calls) >= 1
+
+        # Verify touch .ready is in the command
+        exec_cmd = str(exec_calls[0])
+        assert "touch /pvc/config/.ready" in exec_cmd
+
+    @patch("subprocess.run")
+    def test_handles_missing_files_gracefully(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """_sync_config_to_pod doesn't fail when files are missing."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        # No credential files exist in tmp_path
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        # Should not raise
+        with patch.object(Path, "home", return_value=tmp_path):
+            backend._sync_config_to_pod("test-pod-0")
+
+        # Should still create the directory structure and .ready marker
+        calls_str = str(mock_run.call_args_list)
+        assert "mkdir -p /pvc/config/gcloud /pvc/config/claude" in calls_str
+        assert ".ready" in calls_str

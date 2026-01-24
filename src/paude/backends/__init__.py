@@ -1,6 +1,6 @@
 """Backend abstraction for paude container execution."""
 
-from paude.backends.base import Backend, LegacyBackend, Session, SessionConfig
+from paude.backends.base import Backend, Session, SessionConfig
 from paude.backends.openshift import (
     BuildFailedError,
     NamespaceNotFoundError,
@@ -20,7 +20,6 @@ from paude.backends.podman import (
 __all__ = [
     "Backend",
     "BuildFailedError",
-    "LegacyBackend",
     "NamespaceNotFoundError",
     "OcNotInstalledError",
     "OcNotLoggedInError",
