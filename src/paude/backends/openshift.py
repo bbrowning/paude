@@ -695,11 +695,21 @@ class OpenShiftBackend:
                 },
                 "policyTypes": ["Egress"],
                 "egress": [
-                    # Allow DNS (to any destination)
+                    # Allow DNS to any pod in any namespace
+                    # Both namespaceSelector: {} AND podSelector: {} are required together
+                    # to match "any pod in any namespace" for cross-namespace DNS access
                     {
+                        "to": [
+                            {
+                                "namespaceSelector": {},
+                                "podSelector": {},
+                            },
+                        ],
                         "ports": [
                             {"protocol": "UDP", "port": 53},
                             {"protocol": "TCP", "port": 53},
+                            {"protocol": "UDP", "port": 5353},
+                            {"protocol": "TCP", "port": 5353},
                         ],
                     },
                     # Allow access to THIS session's proxy pod only

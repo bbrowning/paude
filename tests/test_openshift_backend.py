@@ -1277,9 +1277,10 @@ class TestNetworkPolicyWithProxySelector:
         egress = spec["spec"]["egress"]
         assert len(egress) == 2  # DNS and proxy access
 
-        # First rule should be DNS
+        # First rule should be DNS (port 53) and mDNS (port 5353)
         dns_rule = egress[0]
         assert any(p["port"] == 53 for p in dns_rule["ports"])
+        assert any(p["port"] == 5353 for p in dns_rule["ports"])
 
         # Second rule should use podSelector (not ipBlock/CIDRs)
         proxy_rule = egress[1]
@@ -1310,6 +1311,43 @@ class TestNetworkPolicyWithProxySelector:
             if "to" in rule:
                 for dest in rule["to"]:
                     assert "ipBlock" not in dest, "Should not use CIDR blocks"
+
+    @patch("subprocess.run")
+    def test_dns_rule_has_namespace_and_pod_selector(
+        self, mock_run: MagicMock
+    ) -> None:
+        """DNS rule uses both namespaceSelector AND podSelector for cross-namespace access.
+
+        OpenShift DNS pods run in openshift-dns namespace. The NetworkPolicy must
+        have BOTH namespaceSelector: {} AND podSelector: {} together in the same
+        'to' object to correctly match "any pod in any namespace".
+
+        Having just namespaceSelector: {} alone doesn't work in OVN-Kubernetes.
+        """
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._ensure_network_policy("my-session")
+
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        call_kwargs = apply_calls[0][1]
+        spec = json.loads(call_kwargs["input"])
+
+        # DNS rule should have both namespaceSelector and podSelector
+        dns_rule = spec["spec"]["egress"][0]
+        assert "to" in dns_rule, "DNS rule should have 'to' selector"
+        assert len(dns_rule["to"]) == 1
+        to_entry = dns_rule["to"][0]
+
+        # Both selectors must be present and empty to match "any pod in any namespace"
+        assert "namespaceSelector" in to_entry, (
+            "DNS rule must have namespaceSelector for cross-namespace access"
+        )
+        assert "podSelector" in to_entry, (
+            "DNS rule must have podSelector alongside namespaceSelector"
+        )
+        assert to_entry["namespaceSelector"] == {}, "namespaceSelector should be empty"
+        assert to_entry["podSelector"] == {}, "podSelector should be empty"
 
 
 class TestCreateSessionWithProxy:
