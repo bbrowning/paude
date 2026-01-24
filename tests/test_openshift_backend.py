@@ -764,6 +764,7 @@ class TestOpenShiftStartSession:
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
             if "get" in cmd and "statefulset" in cmd:
                 return MagicMock(
                     returncode=0,
@@ -780,6 +781,9 @@ class TestOpenShiftStartSession:
                     }),
                     stderr="",
                 )
+            # Proxy deployment doesn't exist (no proxy for this test)
+            if "get" in cmd and "deployment" in cmd and "paude-proxy" in cmd_str:
+                return MagicMock(returncode=1, stdout="", stderr="not found")
             # For scale and other commands
             return MagicMock(returncode=0, stdout="", stderr="")
 
@@ -1177,3 +1181,650 @@ class TestGetImagestreamReference:
         assert "image-registry.openshift-image-registry.svc:5000" in ref
         assert "test-ns" in ref
         assert "paude-abc123" in ref
+
+
+# =============================================================================
+# Proxy Pod Deployment Tests
+# =============================================================================
+
+
+class TestCreateProxyDeployment:
+    """Tests for _create_proxy_deployment method."""
+
+    @patch("subprocess.run")
+    def test_creates_deployment_with_correct_spec(
+        self, mock_run: MagicMock
+    ) -> None:
+        """_create_proxy_deployment creates Deployment with correct spec."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._create_proxy_deployment("my-session", "quay.io/test/proxy:latest")
+
+        # Find the apply call
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        assert len(apply_calls) >= 1
+
+        # Check the deployment spec from input_data
+        call_kwargs = apply_calls[0][1]
+        spec = json.loads(call_kwargs["input"])
+
+        assert spec["kind"] == "Deployment"
+        assert spec["metadata"]["name"] == "paude-proxy-my-session"
+        assert spec["metadata"]["labels"]["app"] == "paude-proxy"
+        assert spec["metadata"]["labels"]["paude.io/session-name"] == "my-session"
+        assert spec["spec"]["replicas"] == 1
+
+        container = spec["spec"]["template"]["spec"]["containers"][0]
+        assert container["name"] == "proxy"
+        assert container["image"] == "quay.io/test/proxy:latest"
+        assert container["ports"][0]["containerPort"] == 3128
+
+
+class TestCreateProxyService:
+    """Tests for _create_proxy_service method."""
+
+    @patch("subprocess.run")
+    def test_creates_service_with_correct_spec(
+        self, mock_run: MagicMock
+    ) -> None:
+        """_create_proxy_service creates Service with correct spec."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        service_name = backend._create_proxy_service("my-session")
+
+        assert service_name == "paude-proxy-my-session"
+
+        # Find the apply call
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        assert len(apply_calls) >= 1
+
+        call_kwargs = apply_calls[0][1]
+        spec = json.loads(call_kwargs["input"])
+
+        assert spec["kind"] == "Service"
+        assert spec["metadata"]["name"] == "paude-proxy-my-session"
+        assert spec["metadata"]["labels"]["app"] == "paude-proxy"
+        assert spec["spec"]["selector"]["app"] == "paude-proxy"
+        assert spec["spec"]["selector"]["paude.io/session-name"] == "my-session"
+        assert spec["spec"]["ports"][0]["port"] == 3128
+
+
+class TestNetworkPolicyWithProxySelector:
+    """Tests for NetworkPolicy using pod selector instead of CIDRs."""
+
+    @patch("subprocess.run")
+    def test_network_policy_uses_pod_selector(
+        self, mock_run: MagicMock
+    ) -> None:
+        """_ensure_network_policy uses pod selector for proxy access."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._ensure_network_policy("my-session")
+
+        # Find the apply call
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        assert len(apply_calls) >= 1
+
+        call_kwargs = apply_calls[0][1]
+        spec = json.loads(call_kwargs["input"])
+
+        assert spec["kind"] == "NetworkPolicy"
+
+        # Check egress rules
+        egress = spec["spec"]["egress"]
+        assert len(egress) == 2  # DNS and proxy access
+
+        # First rule should be DNS
+        dns_rule = egress[0]
+        assert any(p["port"] == 53 for p in dns_rule["ports"])
+
+        # Second rule should use podSelector (not ipBlock/CIDRs)
+        proxy_rule = egress[1]
+        assert "to" in proxy_rule
+        assert len(proxy_rule["to"]) == 1
+        assert "podSelector" in proxy_rule["to"][0]
+        selector = proxy_rule["to"][0]["podSelector"]
+        assert selector["matchLabels"]["app"] == "paude-proxy"
+        assert selector["matchLabels"]["paude.io/session-name"] == "my-session"
+        assert proxy_rule["ports"][0]["port"] == 3128
+
+    @patch("subprocess.run")
+    def test_network_policy_no_cidr_blocks(
+        self, mock_run: MagicMock
+    ) -> None:
+        """_ensure_network_policy does not use CIDR blocks anymore."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._ensure_network_policy("my-session")
+
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        call_kwargs = apply_calls[0][1]
+        spec = json.loads(call_kwargs["input"])
+
+        # Check that no ipBlock rules exist
+        for rule in spec["spec"]["egress"]:
+            if "to" in rule:
+                for dest in rule["to"]:
+                    assert "ipBlock" not in dest, "Should not use CIDR blocks"
+
+
+class TestCreateSessionWithProxy:
+    """Tests for create_session with proxy deployment."""
+
+    @patch("subprocess.run")
+    def test_creates_proxy_when_network_restricted(
+        self, mock_run: MagicMock
+    ) -> None:
+        """create_session creates proxy when network_restricted=True."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        from paude.backends.base import SessionConfig
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        config = SessionConfig(
+            name="test-session",
+            workspace=Path("/home/user/project"),
+            image="quay.io/test/paude-claude-centos9:v1",
+            network_restricted=True,
+        )
+
+        backend.create_session(config)
+
+        # Verify proxy deployment was created
+        calls_str = str(mock_run.call_args_list)
+        assert "paude-proxy-test-session" in calls_str
+
+        # Check that proxy image was derived correctly
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        deployment_calls = [
+            c for c in apply_calls
+            if "Deployment" in str(c[1].get("input", ""))
+        ]
+        assert len(deployment_calls) >= 1
+
+    @patch("subprocess.run")
+    def test_sets_proxy_env_vars_when_network_restricted(
+        self, mock_run: MagicMock
+    ) -> None:
+        """create_session sets HTTP_PROXY env vars when network_restricted."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        from paude.backends.base import SessionConfig
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        config = SessionConfig(
+            name="test-session",
+            workspace=Path("/home/user/project"),
+            image="quay.io/test/paude:v1",
+            network_restricted=True,
+        )
+
+        backend.create_session(config)
+
+        # Find StatefulSet creation
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        sts_calls = [
+            c for c in apply_calls
+            if "StatefulSet" in str(c[1].get("input", ""))
+        ]
+        assert len(sts_calls) >= 1
+
+        sts_spec = json.loads(sts_calls[0][1]["input"])
+        container = sts_spec["spec"]["template"]["spec"]["containers"][0]
+        env_dict = {e["name"]: e["value"] for e in container["env"]}
+
+        expected_proxy = "http://paude-proxy-test-session:3128"
+        assert env_dict.get("HTTP_PROXY") == expected_proxy
+        assert env_dict.get("HTTPS_PROXY") == expected_proxy
+        assert env_dict.get("http_proxy") == expected_proxy
+        assert env_dict.get("https_proxy") == expected_proxy
+
+    @patch("subprocess.run")
+    def test_no_proxy_when_allow_network(
+        self, mock_run: MagicMock
+    ) -> None:
+        """create_session does not create proxy when network_restricted=False."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        from paude.backends.base import SessionConfig
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        config = SessionConfig(
+            name="test-session",
+            workspace=Path("/home/user/project"),
+            image="quay.io/test/paude:v1",
+            network_restricted=False,
+        )
+
+        backend.create_session(config)
+
+        # Verify no proxy deployment was created
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        deployment_calls = [
+            c for c in apply_calls
+            if '"kind": "Deployment"' in str(c[1].get("input", ""))
+        ]
+        assert len(deployment_calls) == 0
+
+        # Verify no proxy env vars in StatefulSet
+        sts_calls = [
+            c for c in apply_calls
+            if "StatefulSet" in str(c[1].get("input", ""))
+        ]
+        if sts_calls:
+            sts_spec = json.loads(sts_calls[0][1]["input"])
+            container = sts_spec["spec"]["template"]["spec"]["containers"][0]
+            env_dict = {e["name"]: e["value"] for e in container["env"]}
+            assert "HTTP_PROXY" not in env_dict
+            assert "HTTPS_PROXY" not in env_dict
+
+
+class TestDeleteSessionWithProxy:
+    """Tests for delete_session cleaning up proxy resources."""
+
+    @patch("subprocess.run")
+    def test_deletes_proxy_resources(
+        self, mock_run: MagicMock
+    ) -> None:
+        """delete_session deletes proxy Deployment and Service."""
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "get" in cmd and "statefulset" in cmd:
+                return MagicMock(
+                    returncode=0,
+                    stdout=json.dumps({
+                        "apiVersion": "apps/v1",
+                        "kind": "StatefulSet",
+                        "metadata": {"name": "paude-test"},
+                    }),
+                    stderr="",
+                )
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend.delete_session("test", confirm=True)
+
+        # Verify proxy resources were deleted
+        calls_str = str(mock_run.call_args_list)
+        assert "paude-proxy-test" in calls_str
+        assert "deployment" in calls_str.lower()
+        assert "service" in calls_str.lower()
+
+
+class TestDeleteProxyResources:
+    """Tests for _delete_proxy_resources method."""
+
+    @patch("subprocess.run")
+    def test_deletes_deployment_and_service(
+        self, mock_run: MagicMock
+    ) -> None:
+        """_delete_proxy_resources deletes both Deployment and Service."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._delete_proxy_resources("my-session")
+
+        calls = mock_run.call_args_list
+        delete_calls = [c for c in calls if "delete" in str(c)]
+
+        # Should have 2 delete calls (Deployment and Service)
+        assert len(delete_calls) >= 2
+
+        # Check Deployment deletion
+        deployment_deleted = any(
+            "deployment" in str(c) and "paude-proxy-my-session" in str(c)
+            for c in delete_calls
+        )
+        assert deployment_deleted
+
+        # Check Service deletion
+        assert any(
+            "service" in str(c) and "paude-proxy-my-session" in str(c)
+            for c in delete_calls
+        )
+
+
+class TestEnsureProxyNetworkPolicy:
+    """Tests for _ensure_proxy_network_policy method."""
+
+    @patch("subprocess.run")
+    def test_creates_permissive_egress_policy(
+        self, mock_run: MagicMock
+    ) -> None:
+        """_ensure_proxy_network_policy creates policy allowing all egress."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._ensure_proxy_network_policy("my-session")
+
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        assert len(apply_calls) >= 1
+
+        call_kwargs = apply_calls[0][1]
+        spec = json.loads(call_kwargs["input"])
+
+        assert spec["kind"] == "NetworkPolicy"
+        assert spec["metadata"]["name"] == "paude-proxy-egress-my-session"
+        assert spec["metadata"]["labels"]["app"] == "paude-proxy"
+
+        # Verify pod selector targets proxy
+        selector = spec["spec"]["podSelector"]["matchLabels"]
+        assert selector["app"] == "paude-proxy"
+        assert selector["paude.io/session-name"] == "my-session"
+
+        # Verify egress allows all (empty rule)
+        egress = spec["spec"]["egress"]
+        assert len(egress) == 1
+        assert egress[0] == {}  # Empty rule = allow all
+
+
+class TestProxyImageDerivation:
+    """Tests for proxy image derivation logic."""
+
+    @patch("subprocess.run")
+    def test_derives_proxy_image_from_main_image(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Proxy image is derived by replacing image name pattern."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        from paude.backends.base import SessionConfig
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        config = SessionConfig(
+            name="test",
+            workspace=Path("/project"),
+            image="quay.io/bbrowning/paude-claude-centos9:v1.2.3",
+            network_restricted=True,
+        )
+
+        backend.create_session(config)
+
+        # Find the Deployment apply call
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        deployment_calls = [
+            c for c in apply_calls
+            if '"kind": "Deployment"' in str(c[1].get("input", ""))
+        ]
+        assert len(deployment_calls) >= 1
+
+        deployment_spec = json.loads(deployment_calls[0][1]["input"])
+        container = deployment_spec["spec"]["template"]["spec"]["containers"][0]
+
+        # Verify the proxy image was derived correctly
+        assert container["image"] == "quay.io/bbrowning/paude-proxy-centos9:v1.2.3"
+
+    @patch("subprocess.run")
+    def test_falls_back_to_default_when_pattern_not_found(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Falls back to default proxy image when pattern doesn't match."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        from paude.backends.base import SessionConfig
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        config = SessionConfig(
+            name="test",
+            workspace=Path("/project"),
+            image="custom-registry.io/some-other-image:latest",  # No pattern match
+            network_restricted=True,
+        )
+
+        backend.create_session(config)
+
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        deployment_calls = [
+            c for c in apply_calls
+            if '"kind": "Deployment"' in str(c[1].get("input", ""))
+        ]
+        assert len(deployment_calls) >= 1
+
+        deployment_spec = json.loads(deployment_calls[0][1]["input"])
+        container = deployment_spec["spec"]["template"]["spec"]["containers"][0]
+
+        # Verify fallback to default proxy image
+        assert container["image"] == "quay.io/bbrowning/paude-proxy-centos9:latest"
+
+
+class TestStartSessionWaitsForProxy:
+    """Tests for start_session waiting for proxy."""
+
+    @patch("subprocess.run")
+    def test_waits_for_proxy_when_exists(
+        self, mock_run: MagicMock
+    ) -> None:
+        """start_session waits for proxy deployment when it exists."""
+        call_order = []
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
+
+            if "get" in cmd and "statefulset" in cmd:
+                call_order.append("get_statefulset")
+                return MagicMock(
+                    returncode=0,
+                    stdout=json.dumps({
+                        "metadata": {
+                            "name": "paude-test",
+                            "annotations": {"paude.io/workspace": ""},
+                        },
+                        "spec": {"replicas": 0},
+                    }),
+                    stderr="",
+                )
+            if "get" in cmd and "deployment" in cmd and "paude-proxy" in cmd_str:
+                if "jsonpath" not in cmd_str:
+                    call_order.append("get_proxy_deployment")
+                    return MagicMock(returncode=0, stdout="{}", stderr="")
+            if "jsonpath" in cmd_str and "readyReplicas" in cmd_str:
+                call_order.append("check_proxy_ready")
+                return MagicMock(returncode=0, stdout="1", stderr="")
+            if "scale" in cmd:
+                call_order.append("scale")
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=0, stdout="Running", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with patch.object(backend, "_wait_for_pod_ready"):
+            with patch.object(backend, "connect_session", return_value=0):
+                backend.start_session("test", sync=False)
+
+        # Verify proxy check happened
+        assert "get_proxy_deployment" in call_order
+        assert "check_proxy_ready" in call_order
+
+    @patch("subprocess.run")
+    def test_skips_proxy_wait_when_not_exists(
+        self, mock_run: MagicMock
+    ) -> None:
+        """start_session skips proxy wait when no proxy deployment."""
+        call_order = []
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
+
+            if "get" in cmd and "statefulset" in cmd:
+                return MagicMock(
+                    returncode=0,
+                    stdout=json.dumps({
+                        "metadata": {
+                            "name": "paude-test",
+                            "annotations": {"paude.io/workspace": ""},
+                        },
+                        "spec": {"replicas": 0},
+                    }),
+                    stderr="",
+                )
+            if "get" in cmd and "deployment" in cmd and "paude-proxy" in cmd_str:
+                call_order.append("get_proxy_deployment")
+                # Proxy doesn't exist
+                return MagicMock(returncode=1, stdout="", stderr="not found")
+            if "readyReplicas" in cmd_str:
+                call_order.append("check_proxy_ready")
+                return MagicMock(returncode=0, stdout="1", stderr="")
+            return MagicMock(returncode=0, stdout="Running", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with patch.object(backend, "_wait_for_pod_ready"):
+            with patch.object(backend, "connect_session", return_value=0):
+                backend.start_session("test", sync=False)
+
+        # Verify proxy was checked but not waited for
+        assert "get_proxy_deployment" in call_order
+        assert "check_proxy_ready" not in call_order
+
+
+class TestLegacySessionWithProxy:
+    """Tests for legacy session methods with proxy support."""
+
+    @patch("subprocess.run")
+    def test_legacy_creates_proxy_when_network_restricted(
+        self, mock_run: MagicMock
+    ) -> None:
+        """start_session_legacy creates proxy when network_restricted=True."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="Running", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with patch.object(backend, "_wait_for_pod_ready"):
+            with patch.object(backend, "_wait_for_proxy_ready"):
+                with patch("subprocess.call", return_value=0):
+                    backend.start_session_legacy(
+                        image="quay.io/test/paude-claude-centos9:v1",
+                        workspace=Path("/project"),
+                        env={},
+                        mounts=[],
+                        args=[],
+                        network_restricted=True,
+                    )
+
+        # Verify proxy deployment was created
+        calls_str = str(mock_run.call_args_list)
+        assert "paude-proxy" in calls_str
+        assert "Deployment" in calls_str
+
+    @patch("subprocess.run")
+    def test_legacy_sets_proxy_env_vars(
+        self, mock_run: MagicMock
+    ) -> None:
+        """start_session_legacy sets HTTP_PROXY env vars."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="Running", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with patch.object(backend, "_wait_for_pod_ready"):
+            with patch.object(backend, "_wait_for_proxy_ready"):
+                with patch("subprocess.call", return_value=0):
+                    backend.start_session_legacy(
+                        image="quay.io/test/paude:v1",
+                        workspace=Path("/project"),
+                        env={},
+                        mounts=[],
+                        args=[],
+                        network_restricted=True,
+                    )
+
+        # Find Pod creation
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        pod_calls = [
+            c for c in apply_calls
+            if '"kind": "Pod"' in str(c[1].get("input", ""))
+        ]
+        assert len(pod_calls) >= 1
+
+        pod_spec = json.loads(pod_calls[0][1]["input"])
+        container = pod_spec["spec"]["containers"][0]
+        env_dict = {e["name"]: e["value"] for e in container["env"]}
+
+        # Verify proxy env vars (session ID is dynamic, so just check prefix)
+        assert any(k == "HTTP_PROXY" and "paude-proxy-" in v for k, v in env_dict.items())
+        assert any(k == "HTTPS_PROXY" and "paude-proxy-" in v for k, v in env_dict.items())
+
+    @patch("subprocess.run")
+    def test_legacy_no_proxy_when_allow_network(
+        self, mock_run: MagicMock
+    ) -> None:
+        """start_session_legacy doesn't create proxy when network_restricted=False."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="Running", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with patch.object(backend, "_wait_for_pod_ready"):
+            with patch("subprocess.call", return_value=0):
+                backend.start_session_legacy(
+                    image="quay.io/test/paude:v1",
+                    workspace=Path("/project"),
+                    env={},
+                    mounts=[],
+                    args=[],
+                    network_restricted=False,
+                )
+
+        # Verify no proxy deployment was created
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        deployment_calls = [
+            c for c in apply_calls
+            if '"kind": "Deployment"' in str(c[1].get("input", ""))
+        ]
+        assert len(deployment_calls) == 0
+
+    @patch("subprocess.run")
+    def test_legacy_stop_cleans_up_proxy(
+        self, mock_run: MagicMock
+    ) -> None:
+        """stop_session_legacy cleans up proxy resources."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend.stop_session_legacy("abc123")
+
+        # Verify proxy cleanup was called
+        calls_str = str(mock_run.call_args_list)
+        assert "paude-proxy-abc123" in calls_str
+
+
+class TestCreateSessionWithProxyNetworkPolicy:
+    """Tests for create_session creating proxy NetworkPolicy."""
+
+    @patch("subprocess.run")
+    def test_creates_proxy_network_policy(
+        self, mock_run: MagicMock
+    ) -> None:
+        """create_session creates NetworkPolicy for proxy."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        from paude.backends.base import SessionConfig
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        config = SessionConfig(
+            name="test-session",
+            workspace=Path("/project"),
+            image="quay.io/test/paude:v1",
+            network_restricted=True,
+        )
+
+        backend.create_session(config)
+
+        # Find proxy NetworkPolicy
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        proxy_policy_calls = [
+            c for c in apply_calls
+            if "paude-proxy-egress-test-session" in str(c[1].get("input", ""))
+        ]
+        assert len(proxy_policy_calls) >= 1

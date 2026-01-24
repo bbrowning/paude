@@ -656,12 +656,12 @@ class OpenShiftBackend:
         """Ensure a NetworkPolicy exists that restricts egress traffic for this session.
 
         Creates a NetworkPolicy that:
-        - Allows egress to Google Cloud APIs (Vertex AI)
-        - Allows egress to Anthropic API
-        - Allows egress to DNS (UDP 53)
+        - Allows egress to DNS (UDP/TCP 53)
+        - Allows egress to this session's proxy pod on port 3128
         - Denies all other egress traffic
 
-        The policy applies only to the pod for this specific session.
+        The paude pod can ONLY reach DNS and the squid proxy. The proxy handles
+        domain-based filtering via squid.conf.
 
         Args:
             session_id: The session ID to scope the policy to.
@@ -673,21 +673,6 @@ class OpenShiftBackend:
             f"Creating NetworkPolicy/{policy_name} in namespace {ns}...",
             file=sys.stderr,
         )
-
-        # Define allowed CIDR blocks
-        # Note: These are approximate ranges - production should use DNS-based policies
-        # or a more sophisticated egress controller
-        allowed_cidrs = [
-            # Google Cloud APIs (googleapis.com)
-            "142.250.0.0/16",
-            "172.217.0.0/16",
-            "216.58.0.0/16",
-            "172.253.0.0/16",
-            "74.125.0.0/16",
-            # Anthropic API (api.anthropic.com)
-            "104.18.0.0/16",
-            "172.66.0.0/16",
-        ]
 
         policy_spec: dict[str, Any] = {
             "apiVersion": "networking.k8s.io/v1",
@@ -710,21 +695,27 @@ class OpenShiftBackend:
                 },
                 "policyTypes": ["Egress"],
                 "egress": [
-                    # Allow DNS
+                    # Allow DNS (to any destination)
                     {
                         "ports": [
                             {"protocol": "UDP", "port": 53},
                             {"protocol": "TCP", "port": 53},
                         ],
                     },
-                    # Allow HTTPS to specific CIDRs
+                    # Allow access to THIS session's proxy pod only
                     {
-                        "ports": [
-                            {"protocol": "TCP", "port": 443},
-                        ],
                         "to": [
-                            {"ipBlock": {"cidr": cidr}}
-                            for cidr in allowed_cidrs
+                            {
+                                "podSelector": {
+                                    "matchLabels": {
+                                        "app": "paude-proxy",
+                                        "paude.io/session-name": session_id,
+                                    },
+                                },
+                            },
+                        ],
+                        "ports": [
+                            {"protocol": "TCP", "port": 3128},
                         ],
                     },
                 ],
@@ -769,6 +760,246 @@ class OpenShiftBackend:
                     "matchLabels": {
                         "app": "paude",
                         "paude.io/session-name": session_id,
+                    },
+                },
+                "policyTypes": ["Egress"],
+                "egress": [
+                    {},  # Empty rule allows all egress
+                ],
+            },
+        }
+
+        self._run_oc(
+            "apply", "-f", "-",
+            input_data=json.dumps(policy_spec),
+        )
+
+    def _create_proxy_deployment(
+        self,
+        session_name: str,
+        proxy_image: str,
+    ) -> None:
+        """Create a Deployment for the squid proxy pod.
+
+        The proxy pod handles domain-based filtering using squid.conf.
+        The paude container routes all HTTP/HTTPS traffic through this proxy.
+
+        Args:
+            session_name: Session name for labeling.
+            proxy_image: Container image for the proxy.
+        """
+        ns = self.namespace
+        deployment_name = f"paude-proxy-{session_name}"
+
+        print(
+            f"Creating Deployment/{deployment_name} in namespace {ns}...",
+            file=sys.stderr,
+        )
+
+        deployment_spec: dict[str, Any] = {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": {
+                "name": deployment_name,
+                "namespace": ns,
+                "labels": {
+                    "app": "paude-proxy",
+                    "paude.io/session-name": session_name,
+                },
+            },
+            "spec": {
+                "replicas": 1,
+                "selector": {
+                    "matchLabels": {
+                        "app": "paude-proxy",
+                        "paude.io/session-name": session_name,
+                    },
+                },
+                "template": {
+                    "metadata": {
+                        "labels": {
+                            "app": "paude-proxy",
+                            "paude.io/session-name": session_name,
+                        },
+                    },
+                    "spec": {
+                        "containers": [
+                            {
+                                "name": "proxy",
+                                "image": proxy_image,
+                                "imagePullPolicy": "Always",
+                                "ports": [{"containerPort": 3128}],
+                                "resources": {
+                                    "requests": {"cpu": "100m", "memory": "128Mi"},
+                                    "limits": {"cpu": "500m", "memory": "256Mi"},
+                                },
+                            },
+                        ],
+                    },
+                },
+            },
+        }
+
+        self._run_oc(
+            "apply", "-f", "-",
+            input_data=json.dumps(deployment_spec),
+        )
+
+    def _create_proxy_service(
+        self,
+        session_name: str,
+    ) -> str:
+        """Create a Service for the squid proxy pod.
+
+        Args:
+            session_name: Session name for labeling.
+
+        Returns:
+            The service hostname (e.g., "paude-proxy-{session_name}").
+        """
+        ns = self.namespace
+        service_name = f"paude-proxy-{session_name}"
+
+        print(
+            f"Creating Service/{service_name} in namespace {ns}...",
+            file=sys.stderr,
+        )
+
+        service_spec: dict[str, Any] = {
+            "apiVersion": "v1",
+            "kind": "Service",
+            "metadata": {
+                "name": service_name,
+                "namespace": ns,
+                "labels": {
+                    "app": "paude-proxy",
+                    "paude.io/session-name": session_name,
+                },
+            },
+            "spec": {
+                "selector": {
+                    "app": "paude-proxy",
+                    "paude.io/session-name": session_name,
+                },
+                "ports": [
+                    {
+                        "port": 3128,
+                        "targetPort": 3128,
+                        "protocol": "TCP",
+                    },
+                ],
+            },
+        }
+
+        self._run_oc(
+            "apply", "-f", "-",
+            input_data=json.dumps(service_spec),
+        )
+
+        return service_name
+
+    def _wait_for_proxy_ready(
+        self,
+        session_name: str,
+        timeout: int = 120,
+    ) -> None:
+        """Wait for the proxy deployment to be ready.
+
+        Args:
+            session_name: Session name.
+            timeout: Timeout in seconds.
+        """
+        deployment_name = f"paude-proxy-{session_name}"
+        ns = self.namespace
+
+        print(
+            f"Waiting for Deployment/{deployment_name} to be ready...",
+            file=sys.stderr,
+        )
+
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            result = self._run_oc(
+                "get", "deployment", deployment_name,
+                "-n", ns,
+                "-o", "jsonpath={.status.readyReplicas}",
+                check=False,
+            )
+
+            if result.returncode == 0:
+                ready = result.stdout.strip()
+                if ready and int(ready) > 0:
+                    print(
+                        f"Deployment/{deployment_name} is ready.",
+                        file=sys.stderr,
+                    )
+                    return
+
+            time.sleep(2)
+
+        print(
+            f"Warning: Deployment/{deployment_name} not ready after {timeout}s",
+            file=sys.stderr,
+        )
+
+    def _delete_proxy_resources(self, session_name: str) -> None:
+        """Delete proxy Deployment and Service for a session.
+
+        Args:
+            session_name: Session name.
+        """
+        ns = self.namespace
+        deployment_name = f"paude-proxy-{session_name}"
+        service_name = f"paude-proxy-{session_name}"
+
+        print(f"Deleting Deployment/{deployment_name}...", file=sys.stderr)
+        self._run_oc(
+            "delete", "deployment", deployment_name,
+            "-n", ns,
+            "--grace-period=0",
+            check=False,
+        )
+
+        print(f"Deleting Service/{service_name}...", file=sys.stderr)
+        self._run_oc(
+            "delete", "service", service_name,
+            "-n", ns,
+            check=False,
+        )
+
+    def _ensure_proxy_network_policy(self, session_name: str) -> None:
+        """Create a NetworkPolicy that allows all egress for the proxy pod.
+
+        The proxy pod needs unrestricted egress to reach the internet.
+        Domain-based filtering is handled by squid.conf, not NetworkPolicy.
+
+        Args:
+            session_name: Session name for labeling.
+        """
+        ns = self.namespace
+        policy_name = f"paude-proxy-egress-{session_name}"
+
+        print(
+            f"Creating NetworkPolicy/{policy_name} in namespace {ns}...",
+            file=sys.stderr,
+        )
+
+        policy_spec: dict[str, Any] = {
+            "apiVersion": "networking.k8s.io/v1",
+            "kind": "NetworkPolicy",
+            "metadata": {
+                "name": policy_name,
+                "namespace": ns,
+                "labels": {
+                    "app": "paude-proxy",
+                    "paude.io/session-name": session_name,
+                },
+            },
+            "spec": {
+                "podSelector": {
+                    "matchLabels": {
+                        "app": "paude-proxy",
+                        "paude.io/session-name": session_name,
                     },
                 },
                 "policyTypes": ["Egress"],
@@ -1427,6 +1658,22 @@ class OpenShiftBackend:
 
         # Apply network policy based on config
         if config.network_restricted:
+            # Create proxy pod and service first (before NetworkPolicy)
+            # Derive proxy image from the main image
+            proxy_image = config.image.replace(
+                "paude-claude-centos9", "paude-proxy-centos9"
+            )
+            # If image doesn't contain the expected pattern, use a default
+            if proxy_image == config.image:
+                proxy_image = "quay.io/bbrowning/paude-proxy-centos9:latest"
+
+            self._create_proxy_deployment(session_name, proxy_image)
+            self._create_proxy_service(session_name)
+
+            # Create NetworkPolicy for proxy (allows all egress for squid)
+            self._ensure_proxy_network_policy(session_name)
+
+            # Now create NetworkPolicy that allows traffic to the proxy
             self._ensure_network_policy(session_name)
         else:
             self._ensure_network_policy_permissive(session_name)
@@ -1438,6 +1685,14 @@ class OpenShiftBackend:
             claude_args = ["--dangerously-skip-permissions"] + claude_args
         if claude_args:
             session_env["PAUDE_CLAUDE_ARGS"] = " ".join(claude_args)
+
+        # Add proxy environment variables when network is restricted
+        if config.network_restricted:
+            proxy_url = f"http://paude-proxy-{session_name}:3128"
+            session_env["HTTP_PROXY"] = proxy_url
+            session_env["HTTPS_PROXY"] = proxy_url
+            session_env["http_proxy"] = proxy_url
+            session_env["https_proxy"] = proxy_url
 
         # Generate and apply StatefulSet spec
         sts_spec = self._generate_statefulset_spec(
@@ -1539,6 +1794,9 @@ class OpenShiftBackend:
             check=False,
         )
 
+        # Delete proxy Deployment and Service (if they exist)
+        self._delete_proxy_resources(name)
+
         print(f"Session '{name}' deleted.", file=sys.stderr)
 
     def start_session(
@@ -1569,6 +1827,18 @@ class OpenShiftBackend:
         # Scale to 1
         print(f"Starting session '{name}'...", file=sys.stderr)
         self._scale_statefulset(name, 1)
+
+        # Wait for proxy to be ready (if it exists)
+        # Check if proxy deployment exists for this session
+        proxy_deployment = f"paude-proxy-{name}"
+        result = self._run_oc(
+            "get", "deployment", proxy_deployment,
+            "-n", self.namespace,
+            check=False,
+        )
+        if result.returncode == 0:
+            # Proxy exists, wait for it to be ready
+            self._wait_for_proxy_ready(name)
 
         # Wait for pod to be ready
         print(f"Waiting for Pod/{pod_name} to be ready...", file=sys.stderr)
@@ -1907,6 +2177,16 @@ class OpenShiftBackend:
 
         # Apply network policy for this session based on network_restricted flag
         if network_restricted:
+            # Create proxy pod and service first
+            proxy_image = image.replace(
+                "paude-claude-centos9", "paude-proxy-centos9"
+            )
+            if proxy_image == image:
+                proxy_image = "quay.io/bbrowning/paude-proxy-centos9:latest"
+
+            self._create_proxy_deployment(session_id, proxy_image)
+            self._create_proxy_service(session_id)
+            self._ensure_proxy_network_policy(session_id)
             self._ensure_network_policy(session_id)
         else:
             self._ensure_network_policy_permissive(session_id)
@@ -1920,6 +2200,14 @@ class OpenShiftBackend:
         session_env = dict(env)
         if claude_args:
             session_env["PAUDE_CLAUDE_ARGS"] = " ".join(claude_args)
+
+        # Add proxy environment variables when network is restricted
+        if network_restricted:
+            proxy_url = f"http://paude-proxy-{session_id}:3128"
+            session_env["HTTP_PROXY"] = proxy_url
+            session_env["HTTPS_PROXY"] = proxy_url
+            session_env["http_proxy"] = proxy_url
+            session_env["https_proxy"] = proxy_url
 
         print(f"Creating session {session_id}...", file=sys.stderr)
 
@@ -1944,6 +2232,10 @@ class OpenShiftBackend:
             "apply", "-f", "-",
             input_data=json.dumps(pod_spec),
         )
+
+        # Wait for proxy to be ready first (if network restricted)
+        if network_restricted:
+            self._wait_for_proxy_ready(session_id)
 
         # Wait for pod to be ready
         print(f"Waiting for Pod/{pod_name} to be ready...", file=sys.stderr)
@@ -2085,6 +2377,9 @@ class OpenShiftBackend:
             "-l", f"session-id={session_id}",
             check=False,
         )
+
+        # Delete proxy resources (if they exist)
+        self._delete_proxy_resources(session_id)
 
         print(f"Session {session_id} stopped.", file=sys.stderr)
 
