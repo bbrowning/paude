@@ -21,7 +21,7 @@ LATEST_PROXY_IMAGE = $(REGISTRY)/$(PROXY_IMAGE_NAME):latest
 # Architectures for multi-arch builds
 PLATFORMS = linux/amd64,linux/arm64
 
-.PHONY: build run publish release clean login help test install lint format typecheck
+.PHONY: build run publish release clean login help test install lint format typecheck pypi-build pypi-publish
 
 help:
 	@echo "Paude build targets:"
@@ -32,6 +32,8 @@ help:
 	@echo "  make release VERSION=x.y.z - Full release: tag git, update version, build, push"
 	@echo "  make clean          - Remove local paude images"
 	@echo "  make login          - Authenticate with container registry"
+	@echo "  make pypi-build     - Build Python package for PyPI"
+	@echo "  make pypi-publish   - Upload Python package to PyPI"
 	@echo ""
 	@echo "Development targets:"
 	@echo "  make install        - Install Python package with dev dependencies"
@@ -130,18 +132,30 @@ release:
 	@echo ""
 	# Update version in pyproject.toml
 	sed -i.bak 's/^version = .*/version = "$(VERSION)"/' pyproject.toml && rm -f pyproject.toml.bak
-	# Commit the version change
-	git add pyproject.toml
-	git commit -m "Release v$(VERSION)"
+	# Update version in src/paude/__init__.py
+	sed -i.bak 's/^__version__ = .*/__version__ = "$(VERSION)"/' src/paude/__init__.py && rm -f src/paude/__init__.py.bak
+	# Commit the version change (only if there are changes)
+	git add pyproject.toml src/paude/__init__.py
+	git diff --cached --quiet || git commit -m "Release v$(VERSION)"
 	# Create git tag
 	git tag -a "v$(VERSION)" -m "Release v$(VERSION)"
 	@echo ""
 	@echo "Version updated and tagged. Now run:"
 	@echo "  make publish VERSION=$(VERSION)"
+	@echo "  make pypi-build && make pypi-publish"
 	@echo "  git push origin main --tags"
 	@echo ""
 	@echo "Then create a GitHub release at:"
 	@echo "  https://github.com/bbrowning/paude/releases/new?tag=v$(VERSION)"
+
+# Build Python package for PyPI
+pypi-build:
+	rm -rf dist/
+	python -m build
+
+# Upload Python package to PyPI
+pypi-publish:
+	python -m twine upload dist/*
 
 # Remove local images
 clean:

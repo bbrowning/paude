@@ -129,16 +129,23 @@ paude/
 
 ## Releasing
 
-Releases are published to Quay.io (quay.io/bbrowning).
+Releases are published to:
+- **PyPI** (pypi.org/project/paude) - Python package
+- **Quay.io** (quay.io/bbrowning) - Container images
 
 ### One-Time Setup
 
-Authenticate with your container registry:
+1. **PyPI**: Create an account at https://pypi.org and generate an API token at https://pypi.org/manage/account/token/
 
-```bash
-# For Quay.io (default)
-podman login quay.io
-```
+2. **Container Registry**: Authenticate with Quay.io:
+   ```bash
+   podman login quay.io
+   ```
+
+3. **Build Tools**: Install Python build and upload tools:
+   ```bash
+   pip install build twine
+   ```
 
 ### Release Process
 
@@ -148,45 +155,67 @@ git checkout main
 git pull origin main
 git status  # Should be clean
 
-# 2. Update version in pyproject.toml and create git tag
-make release VERSION=0.4.0
+# 2. Run tests to verify everything works
+make test
 
-# 3. Build multi-arch images and push to registry
-make publish VERSION=0.4.0
+# 3. Update version and create git tag
+make release VERSION=0.5.0
 
-# 4. Push the commit and tag to GitHub
+# 4. Build and publish container images
+make publish VERSION=0.5.0
+
+# 5. Build and publish Python package to PyPI
+make pypi-build
+make pypi-publish
+# When prompted: Username is __token__, Password is your PyPI API token
+
+# 6. Push the commit and tag to GitHub
 git push origin main --tags
 
-# 5. Create GitHub release
-#    Go to: https://github.com/bbrowning/paude/releases/new?tag=v0.4.0
-#    - Title: v0.4.0
+# 7. Create GitHub release
+#    Go to: https://github.com/bbrowning/paude/releases/new?tag=v0.5.0
+#    - Title: v0.5.0
 #    - Add release notes describing changes
 ```
 
 ### What the Release Does
 
 1. `make release VERSION=x.y.z`:
-   - Updates version in pyproject.toml
+   - Updates version in `pyproject.toml` and `src/paude/__init__.py`
    - Commits the change
    - Creates an annotated git tag `vx.y.z`
 
 2. `make publish VERSION=x.y.z`:
-   - Builds multi-arch images (amd64 + arm64)
-   - Pushes to quay.io/bbrowning/paude-claude-centos9:x.y.z
-   - Pushes to quay.io/bbrowning/paude-claude-centos9:latest
-   - Same for paude-proxy-centos9 image
+   - Builds multi-arch container images (amd64 + arm64)
+   - Pushes to quay.io/bbrowning/paude-claude-centos9:x.y.z and :latest
+   - Pushes to quay.io/bbrowning/paude-proxy-centos9:x.y.z and :latest
+
+3. `make pypi-build`:
+   - Cleans the `dist/` directory
+   - Builds source distribution and wheel
+
+4. `make pypi-publish`:
+   - Uploads the built packages to PyPI
 
 ### Verifying a Release
 
-After publishing, test the installed experience:
+After publishing, test the installed experience in a fresh environment:
 
 ```bash
+# Create a fresh test environment
+python -m venv /tmp/test-paude
+source /tmp/test-paude/bin/activate
+
 # Install from PyPI
 pip install paude
 
 # Test basic commands
 paude --version
 paude --help
+
+# Cleanup
+deactivate
+rm -rf /tmp/test-paude
 ```
 
 ## Code Style
