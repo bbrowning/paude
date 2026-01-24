@@ -221,7 +221,7 @@ def prepare_build_context(
         registry = os.environ.get("PAUDE_REGISTRY", "quay.io/bbrowning")
         if for_remote_build:
             # For remote builds, always use registry image (skip dev mode local builds)
-            base_image = f"{registry}/paude-claude-centos9:{__version__}"
+            base_image = f"{registry}/paude-base-centos9:{__version__}"
             print(f"  → Using registry image: {base_image}", file=sys.stderr)
         else:
             dev_mode = os.environ.get("PAUDE_DEV", "0") == "1"
@@ -241,7 +241,7 @@ def prepare_build_context(
                     cmd.append(str(context))
                     run_podman(*cmd, capture=False)
             else:
-                base_image = f"{registry}/paude-claude-centos9:{__version__}"
+                base_image = f"{registry}/paude-base-centos9:{__version__}"
                 if not image_exists(base_image):
                     print(f"Pulling {base_image}...", file=sys.stderr)
                     run_podman("pull", base_image, capture=False)
@@ -412,7 +412,7 @@ class ImageManager:
             return tag
         else:
             # Pull from registry with version tag
-            tag = f"{self.registry}/paude-claude-centos9:{self.version}"
+            tag = f"{self.registry}/paude-base-centos9:{self.version}"
             if not image_exists(tag):
                 print(f"Pulling {tag}...", file=sys.stderr)
                 try:

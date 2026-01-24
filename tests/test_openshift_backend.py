@@ -1405,7 +1405,7 @@ class TestCreateSessionWithProxy:
         config = SessionConfig(
             name="test-session",
             workspace=Path("/home/user/project"),
-            image="quay.io/test/paude-claude-centos9:v1",
+            image="quay.io/test/paude-base-centos9:v1",
             network_restricted=True,
         )
 
@@ -1618,7 +1618,7 @@ class TestProxyImageDerivation:
         config = SessionConfig(
             name="test",
             workspace=Path("/project"),
-            image="quay.io/bbrowning/paude-claude-centos9:v1.2.3",
+            image="quay.io/bbrowning/paude-base-centos9:v1.2.3",
             network_restricted=True,
         )
 

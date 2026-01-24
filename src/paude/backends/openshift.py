@@ -1392,7 +1392,7 @@ class OpenShiftBackend:
             # Create proxy pod and service first (before NetworkPolicy)
             # Derive proxy image from the main image
             proxy_image = config.image.replace(
-                "paude-claude-centos9", "paude-proxy-centos9"
+                "paude-base-centos9", "paude-proxy-centos9"
             )
             # If image doesn't contain the expected pattern, use a default
             if proxy_image == config.image:

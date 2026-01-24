@@ -187,7 +187,7 @@ git push origin main --tags
 
 2. `make publish VERSION=x.y.z`:
    - Builds multi-arch container images (amd64 + arm64)
-   - Pushes to quay.io/bbrowning/paude-claude-centos9:x.y.z and :latest
+   - Pushes to quay.io/bbrowning/paude-base-centos9:x.y.z and :latest
    - Pushes to quay.io/bbrowning/paude-proxy-centos9:x.y.z and :latest
 
 3. `make pypi-build`:

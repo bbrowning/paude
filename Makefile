@@ -7,7 +7,7 @@
 #   make clean          - Remove local images
 
 REGISTRY ?= quay.io/bbrowning
-IMAGE_NAME = paude-claude-centos9
+IMAGE_NAME = paude-base-centos9
 PROXY_IMAGE_NAME = paude-proxy-centos9
 
 # Get version from git tag, or use 'dev' if not on a tag
