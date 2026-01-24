@@ -297,6 +297,7 @@ def session_create(
             BuildFailedError,
             OpenShiftBackend,
             OpenShiftConfig,
+            _generate_session_name,
         )
         from paude.backends.openshift import (
             SessionExistsError as OpenshiftSessionExistsError,
@@ -316,6 +317,9 @@ def session_create(
         try:
             os_backend = OpenShiftBackend(config=openshift_config)
 
+            # Pre-compute session name for labeling builds
+            session_name = name if name else _generate_session_name(workspace)
+
             # Build image via OpenShift binary build
             typer.echo("Building image in OpenShift cluster...")
             image = os_backend.ensure_image_via_build(
@@ -323,11 +327,12 @@ def session_create(
                 workspace=workspace,
                 script_dir=os_script_dir,
                 force_rebuild=False,
+                session_name=session_name,
             )
 
             # Create session config
             session_config = SessionConfig(
-                name=name,
+                name=session_name,
                 workspace=workspace,
                 image=image,
                 env=env,
@@ -1234,6 +1239,7 @@ def _run_openshift_backend(ctx: typer.Context) -> None:
         OcNotInstalledError,
         OcNotLoggedInError,
         OpenShiftError,
+        _generate_session_name,
     )
     from paude.config import detect_config, parse_config
     from paude.environment import build_environment
@@ -1289,26 +1295,32 @@ def _run_openshift_backend(ctx: typer.Context) -> None:
     if (dev_path / "containers" / "paude" / "Dockerfile").exists():
         script_dir = dev_path
 
-    # Build image via OpenShift binary build
-    try:
-        typer.echo("Building image in OpenShift cluster...")
-        image = backend_instance.ensure_image_via_build(
-            config=config,
-            workspace=workspace,
-            script_dir=script_dir,
-            force_rebuild=rebuild,
-        )
-    except BuildFailedError as e:
-        typer.echo(f"Build failed: {e}", err=True)
-        raise typer.Exit(1) from None
-
     # Use persistent session workflow:
     # 1. Check for existing session for this workspace
     # 2. If found and running → connect
     # 3. If found and stopped → start
     # 4. If not found → create and start
     try:
+        # Check for existing session BEFORE building the image
+        # This lets us label the build with the session name for cleanup
         existing_session = backend_instance.find_session_for_workspace(workspace)
+
+        # Pre-compute session name for new sessions
+        # Don't label builds for existing sessions (they already have their builds)
+        if existing_session:
+            pre_session_name = None
+        else:
+            pre_session_name = _generate_session_name(workspace)
+
+        # Build image via OpenShift binary build
+        typer.echo("Building image in OpenShift cluster...")
+        image = backend_instance.ensure_image_via_build(
+            config=config,
+            workspace=workspace,
+            script_dir=script_dir,
+            force_rebuild=rebuild,
+            session_name=pre_session_name,
+        )
 
         if existing_session:
             session_name = existing_session.name
@@ -1321,9 +1333,9 @@ def _run_openshift_backend(ctx: typer.Context) -> None:
                     session_name, sync=True, verbose=verbose
                 )
         else:
-            # Create a new session
+            # Create a new session with pre-computed name
             session_config = SessionConfig(
-                name=None,  # Auto-generate name
+                name=pre_session_name,
                 workspace=workspace,
                 image=image,
                 env=env,
@@ -1340,6 +1352,9 @@ def _run_openshift_backend(ctx: typer.Context) -> None:
                 session.name, sync=True, verbose=verbose
             )
 
+    except BuildFailedError as e:
+        typer.echo(f"Build failed: {e}", err=True)
+        raise typer.Exit(1) from None
     except NamespaceNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
         typer.echo(

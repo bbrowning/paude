@@ -443,12 +443,14 @@ class OpenShiftBackend:
         self,
         config_hash: str,
         context_dir: Path,
+        session_name: str | None = None,
     ) -> str:
         """Start a binary build and return the build name.
 
         Args:
             config_hash: Hash of the configuration for naming.
             context_dir: Path to the build context directory.
+            session_name: Optional session name to label the build with.
 
         Returns:
             Name of the started build (e.g., "paude-abc123-1").
@@ -476,6 +478,16 @@ class OpenShiftBackend:
 
         build_name = build_name.strip('"').replace(" started", "")
         print(f"Build {build_name} started", file=sys.stderr)
+
+        # Label the build with session name for cleanup
+        if session_name:
+            self._run_oc(
+                "label", "build", build_name,
+                f"paude.io/session-name={session_name}",
+                "-n", ns,
+                check=False,
+            )
+
         return build_name
 
     def _wait_for_build(
@@ -586,6 +598,7 @@ class OpenShiftBackend:
         workspace: Path,
         script_dir: Path | None = None,
         force_rebuild: bool = False,
+        session_name: str | None = None,
     ) -> str:
         """Ensure an image is available via OpenShift binary build.
 
@@ -600,6 +613,7 @@ class OpenShiftBackend:
             workspace: Workspace directory.
             script_dir: Path to paude script directory (for dev mode).
             force_rebuild: Force rebuild even if image exists.
+            session_name: Optional session name to label the build with.
 
         Returns:
             Internal image reference for pod image pulls.
@@ -643,7 +657,11 @@ class OpenShiftBackend:
 
             self._create_build_config(config_hash)
 
-            build_name = self._start_binary_build(config_hash, build_ctx.context_dir)
+            build_name = self._start_binary_build(
+                config_hash,
+                build_ctx.context_dir,
+                session_name=session_name,
+            )
 
             self._wait_for_build(build_name)
 
@@ -696,8 +714,8 @@ class OpenShiftBackend:
                 "policyTypes": ["Egress"],
                 "egress": [
                     # Allow DNS to any pod in any namespace
-                    # Both namespaceSelector: {} AND podSelector: {} are required together
-                    # to match "any pod in any namespace" for cross-namespace DNS access
+                    # Both namespaceSelector: {} AND podSelector: {} are required
+                    # together to match "any pod" for cross-namespace DNS access
                     {
                         "to": [
                             {
@@ -974,6 +992,24 @@ class OpenShiftBackend:
         self._run_oc(
             "delete", "service", service_name,
             "-n", ns,
+            check=False,
+        )
+
+    def _delete_session_builds(self, session_name: str) -> None:
+        """Delete Build objects labeled for a session.
+
+        Args:
+            session_name: Session name.
+        """
+        ns = self.namespace
+        print(
+            f"Deleting Build objects for session '{session_name}'...",
+            file=sys.stderr,
+        )
+        self._run_oc(
+            "delete", "build",
+            "-n", ns,
+            "-l", f"paude.io/session-name={session_name}",
             check=False,
         )
 
@@ -1806,6 +1842,9 @@ class OpenShiftBackend:
 
         # Delete proxy Deployment and Service (if they exist)
         self._delete_proxy_resources(name)
+
+        # Delete Build objects created for this session
+        self._delete_session_builds(name)
 
         print(f"Session '{name}' deleted.", file=sys.stderr)
 

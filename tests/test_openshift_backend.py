@@ -1142,6 +1142,219 @@ class TestStartBinaryBuild:
         cmd = start_calls[0][0][0]
         assert any("--from-dir" in str(arg) for arg in cmd)
 
+    @patch("subprocess.run")
+    def test_labels_build_with_session_name(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """_start_binary_build labels build when session_name provided."""
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="build/paude-abc123-1 started", stderr=""
+        )
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._start_binary_build("abc123", tmp_path, session_name="my-session")
+
+        # Verify label command was called (look for "label" as a command, not substring)
+        calls = mock_run.call_args_list
+        label_calls = [
+            c for c in calls
+            if len(c[0]) > 0 and "label" in c[0][0]
+            and "start-build" not in str(c)
+        ]
+        assert len(label_calls) >= 1
+
+        # Check the label command
+        label_cmd = label_calls[0][0][0]
+        assert "label" in label_cmd
+        assert "build" in label_cmd
+        assert any("paude.io/session-name=my-session" in str(arg) for arg in label_cmd)
+
+    @patch("subprocess.run")
+    def test_does_not_label_when_session_name_is_none(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """_start_binary_build does not label when session_name is None."""
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="build/paude-abc123-1 started", stderr=""
+        )
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._start_binary_build("abc123", tmp_path, session_name=None)
+
+        # Verify no label command was called (look for "label" as a command, not substring)
+        calls = mock_run.call_args_list
+        label_calls = [
+            c for c in calls
+            if len(c[0]) > 0 and "label" in c[0][0]
+            and "start-build" not in str(c)
+        ]
+        assert len(label_calls) == 0
+
+
+class TestDeleteSessionBuilds:
+    """Tests for _delete_session_builds method."""
+
+    @patch("subprocess.run")
+    def test_deletes_builds_with_session_label(
+        self, mock_run: MagicMock
+    ) -> None:
+        """_delete_session_builds deletes builds with session label."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._delete_session_builds("my-session")
+
+        # Verify delete build command was called with correct label
+        calls = mock_run.call_args_list
+        delete_calls = [
+            c for c in calls
+            if "delete" in str(c) and "build" in str(c)
+        ]
+        assert len(delete_calls) >= 1
+
+        cmd = delete_calls[0][0][0]
+        assert "delete" in cmd
+        assert "build" in cmd
+        assert any("-l" in str(arg) for arg in cmd)
+        assert any("paude.io/session-name=my-session" in str(arg) for arg in cmd)
+
+
+class TestDeleteSessionCallsDeleteBuilds:
+    """Tests for delete_session calling _delete_session_builds."""
+
+    @patch("subprocess.run")
+    def test_delete_session_calls_delete_session_builds(
+        self, mock_run: MagicMock
+    ) -> None:
+        """delete_session calls _delete_session_builds."""
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "get" in cmd and "statefulset" in cmd:
+                return MagicMock(
+                    returncode=0,
+                    stdout=json.dumps({
+                        "apiVersion": "apps/v1",
+                        "kind": "StatefulSet",
+                        "metadata": {"name": "paude-test"},
+                    }),
+                    stderr="",
+                )
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend.delete_session("test", confirm=True)
+
+        # Verify _delete_session_builds was called (indirectly via oc delete build)
+        calls_str = str(mock_run.call_args_list)
+        assert "delete" in calls_str
+        assert "build" in calls_str
+        assert "paude.io/session-name=test" in calls_str
+
+
+class TestEnsureImageViaBuildPassesSessionName:
+    """Tests for ensure_image_via_build passing session_name to _start_binary_build."""
+
+    @patch("subprocess.run")
+    @patch("paude.backends.openshift.OpenShiftBackend._start_binary_build")
+    @patch("paude.backends.openshift.OpenShiftBackend._wait_for_build")
+    @patch("paude.backends.openshift.OpenShiftBackend._get_imagestream_reference")
+    @patch("paude.backends.openshift.OpenShiftBackend._create_build_config")
+    def test_passes_session_name_to_start_binary_build(
+        self,
+        mock_create_bc: MagicMock,
+        mock_get_ref: MagicMock,
+        mock_wait: MagicMock,
+        mock_start_build: MagicMock,
+        mock_run: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """ensure_image_via_build passes session_name to _start_binary_build."""
+        # Mock imagestreamtag check to return "not found" (need to build)
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
+        mock_start_build.return_value = "paude-abc123-1"
+        mock_get_ref.return_value = "image-registry.svc:5000/ns/paude-abc123:latest"
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend.ensure_image_via_build(
+            config=None,
+            workspace=tmp_path,
+            session_name="my-session",
+        )
+
+        # Verify _start_binary_build was called with session_name
+        mock_start_build.assert_called_once()
+        call_kwargs = mock_start_build.call_args
+        assert call_kwargs.kwargs.get("session_name") == "my-session"
+
+    @patch("subprocess.run")
+    @patch("paude.backends.openshift.OpenShiftBackend._start_binary_build")
+    @patch("paude.backends.openshift.OpenShiftBackend._wait_for_build")
+    @patch("paude.backends.openshift.OpenShiftBackend._get_imagestream_reference")
+    @patch("paude.backends.openshift.OpenShiftBackend._create_build_config")
+    def test_passes_none_when_session_name_not_provided(
+        self,
+        mock_create_bc: MagicMock,
+        mock_get_ref: MagicMock,
+        mock_wait: MagicMock,
+        mock_start_build: MagicMock,
+        mock_run: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """ensure_image_via_build passes None when session_name not provided."""
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
+        mock_start_build.return_value = "paude-abc123-1"
+        mock_get_ref.return_value = "image-registry.svc:5000/ns/paude-abc123:latest"
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend.ensure_image_via_build(
+            config=None,
+            workspace=tmp_path,
+            # session_name not provided - should default to None
+        )
+
+        # Verify _start_binary_build was called with session_name=None
+        mock_start_build.assert_called_once()
+        call_kwargs = mock_start_build.call_args
+        assert call_kwargs.kwargs.get("session_name") is None
+
+    @patch("subprocess.run")
+    def test_does_not_call_start_binary_build_when_image_exists(
+        self,
+        mock_run: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """ensure_image_via_build skips build when image already exists."""
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else []
+            # Return success for imagestreamtag check (image exists)
+            if "get" in cmd and "imagestreamtag" in cmd:
+                return MagicMock(returncode=0, stdout="found", stderr="")
+            # Return internal registry reference
+            if "get" in cmd and "imagestream" in cmd:
+                return MagicMock(
+                    returncode=0,
+                    stdout="image-registry.openshift-image-registry.svc:5000/ns/img",
+                    stderr="",
+                )
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend.ensure_image_via_build(
+            config=None,
+            workspace=tmp_path,
+            session_name="my-session",
+        )
+
+        # Verify start-build was NOT called (image exists, reused)
+        calls_str = str(mock_run.call_args_list)
+        assert "start-build" not in calls_str
+
 
 class TestGetImagestreamReference:
     """Tests for _get_imagestream_reference method."""
