@@ -9,9 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from paude import __version__
+from paude.config.claude_layer import generate_claude_layer_dockerfile
 from paude.config.models import PaudeConfig
 from paude.container.podman import image_exists, run_podman
-from paude.hash import compute_config_hash
+from paude.hash import compute_config_hash, compute_content_hash
 
 
 @dataclass
@@ -88,23 +89,107 @@ def prepare_build_context(
 
         if for_remote_build:
             # For remote builds, we can't build user's Dockerfile locally first.
-            # Copy the Dockerfile to context and use it directly.
+            # Use a multi-stage build: stage 1 is user's Dockerfile, stage 2 adds
+            # paude requirements (Claude, etc.) on top.
+            from paude.config.dockerfile import generate_workspace_dockerfile
+
             user_dockerfile = config.dockerfile.read_text()
-            base_image = "user-dockerfile"  # Placeholder, won't be used
             print(f"  → Using user Dockerfile: {config.dockerfile}", file=sys.stderr)
-            # Copy user's Dockerfile to context
-            (tmpdir / "Dockerfile").write_text(user_dockerfile)
-            # Copy build context if different from dockerfile parent
+
+            # Copy build context files first
             build_context = config.build_context or config.dockerfile.parent
             for item in build_context.iterdir():
                 if item.name == "Dockerfile":
-                    continue  # Already copied
+                    continue  # Will be generated
                 dest = tmpdir / item.name
                 if item.is_dir():
                     shutil.copytree(item, dest, dirs_exist_ok=True)
                 else:
                     shutil.copy2(item, dest)
-            # Return early - user's Dockerfile is complete
+
+            # Create multi-stage Dockerfile:
+            # Stage 1: User's original Dockerfile (as "user-base")
+            # Stage 2: Add paude requirements on top
+            stage1 = user_dockerfile.rstrip()
+            # Add AS user-base to the FROM line of user's Dockerfile
+            stage1_lines = stage1.split("\n")
+            for i, line in enumerate(stage1_lines):
+                if line.strip().upper().startswith("FROM "):
+                    # Add AS user-base to the first FROM
+                    if " AS " not in line.upper():
+                        stage1_lines[i] = line + " AS user-base"
+                    break
+            stage1 = "\n".join(stage1_lines)
+
+            # Stage 2 uses generate_workspace_dockerfile but with user-base as base
+            stage2 = generate_workspace_dockerfile(config)
+            # Replace the ARG/FROM with FROM user-base
+            stage2 = stage2.replace(
+                "ARG BASE_IMAGE\nFROM ${BASE_IMAGE}",
+                "FROM user-base",
+            )
+
+            combined_dockerfile = (
+                f"{stage1}\n\n"
+                f"# === Stage 2: Add paude requirements ===\n"
+                f"{stage2}"
+            )
+            (tmpdir / "Dockerfile").write_text(combined_dockerfile)
+
+            # Copy entrypoints for stage 2
+            base_path = Path(__file__).parent.parent.parent.parent
+            entrypoint = base_path / "containers" / "paude" / "entrypoint.sh"
+            if script_dir:
+                entrypoint = script_dir / "containers" / "paude" / "entrypoint.sh"
+
+            entrypoint_dest = tmpdir / "entrypoint.sh"
+            if entrypoint.exists():
+                content = entrypoint.read_text().replace("\r\n", "\n")
+                entrypoint_dest.write_text(content, newline="\n")
+            else:
+                entrypoint_dest.write_text(
+                    "#!/bin/bash\nexec claude \"$@\"\n", newline="\n"
+                )
+            entrypoint_dest.chmod(0o755)
+
+            entrypoint_session = entrypoint.parent / "entrypoint-session.sh"
+            entrypoint_session_dest = tmpdir / "entrypoint-session.sh"
+            if entrypoint_session.exists():
+                content = entrypoint_session.read_text().replace("\r\n", "\n")
+                entrypoint_session_dest.write_text(content, newline="\n")
+                entrypoint_session_dest.chmod(0o755)
+
+            # Copy workspace source for pip_install (stage 2 needs these files)
+            if config.pip_install and workspace:
+                print("  → Copying workspace for pip install...", file=sys.stderr)
+                for item in workspace.iterdir():
+                    if item.name.startswith("."):
+                        continue
+                    dest = tmpdir / item.name
+                    if dest.exists():
+                        # Don't overwrite files from Dockerfile context
+                        continue
+                    if item.is_dir():
+                        shutil.copytree(
+                            item,
+                            dest,
+                            ignore=shutil.ignore_patterns(
+                                "__pycache__",
+                                "*.pyc",
+                                ".git",
+                                ".venv",
+                                "venv",
+                                "*.egg-info",
+                                "build",
+                                "dist",
+                            ),
+                        )
+                    else:
+                        shutil.copy2(item, dest)
+
+            base_image = "user-base"
+            print("  → Adding paude requirements (multi-stage)...", file=sys.stderr)
+
             return BuildContext(
                 context_dir=tmpdir,
                 dockerfile_path=tmpdir / "Dockerfile",
@@ -143,9 +228,9 @@ def prepare_build_context(
             if dev_mode and script_dir:
                 if platform:
                     arch = platform.split("/")[-1]
-                    base_image = f"paude-claude-centos9:latest-{arch}"
+                    base_image = f"paude-base-centos9:latest-{arch}"
                 else:
-                    base_image = "paude-claude-centos9:latest"
+                    base_image = "paude-base-centos9:latest"
                 if not image_exists(base_image):
                     print(f"Building {base_image} image...", file=sys.stderr)
                     dockerfile = script_dir / "containers" / "paude" / "Dockerfile"
@@ -166,7 +251,11 @@ def prepare_build_context(
     if using_default_paude_image:
         from paude.config.dockerfile import generate_pip_install_dockerfile
 
-        dockerfile_content = generate_pip_install_dockerfile(config)
+        # Always include Claude installation since the base image doesn't have Claude
+        # (due to licensing restrictions that prohibit redistribution)
+        dockerfile_content = generate_pip_install_dockerfile(
+            config, include_claude_install=True
+        )
     else:
         from paude.config.dockerfile import generate_workspace_dockerfile
 
@@ -177,9 +266,12 @@ def prepare_build_context(
 
         features_block = generate_features_dockerfile(config.features)
         if features_block:
+            # Replace only FIRST "\nUSER paude" - features run as root.
+            # count=1 avoids duplicating when Dockerfile has multiple USER paude
             dockerfile_content = dockerfile_content.replace(
                 "\nUSER paude",
                 f"{features_block}\nUSER paude",
+                1,
             )
 
     # Replace ARG BASE_IMAGE / FROM ${BASE_IMAGE} with actual base image
@@ -284,19 +376,34 @@ class ImageManager:
     def ensure_default_image(self) -> str:
         """Ensure the default paude image is available.
 
+        This builds a two-layer image:
+        1. Base image (no Claude) - built locally in dev mode or pulled from registry
+        2. Runtime image (with Claude) - always built locally
+
+        Claude Code is installed at user-side build time (not in the published
+        image) due to licensing restrictions that prohibit redistribution.
+
         Returns:
-            Image tag to use.
+            Image tag to use (the runtime image with Claude installed).
+        """
+        base_tag = self._ensure_base_image()
+        return self._ensure_runtime_image(base_tag)
+
+    def _ensure_base_image(self) -> str:
+        """Ensure the base paude image (without Claude Code) is available.
+
+        Returns:
+            Base image tag.
         """
         import sys
 
         if self.dev_mode and self.script_dir:
             # Build locally in dev mode
-            # Use platform-specific tag to avoid arch conflicts
             if self.platform:
-                arch = self.platform.split("/")[-1]  # e.g., "linux/amd64" -> "amd64"
-                tag = f"paude-claude-centos9:latest-{arch}"
+                arch = self.platform.split("/")[-1]
+                tag = f"paude-base-centos9:latest-{arch}"
             else:
-                tag = "paude-claude-centos9:latest"
+                tag = "paude-base-centos9:latest"
             if not image_exists(tag):
                 print(f"Building {tag} image...", file=sys.stderr)
                 dockerfile = self.script_dir / "containers" / "paude" / "Dockerfile"
@@ -304,7 +411,7 @@ class ImageManager:
                 self.build_image(dockerfile, tag, context)
             return tag
         else:
-            # Pull from registry with version tag (matches bash)
+            # Pull from registry with version tag
             tag = f"{self.registry}/paude-claude-centos9:{self.version}"
             if not image_exists(tag):
                 print(f"Pulling {tag}...", file=sys.stderr)
@@ -318,6 +425,59 @@ class ImageManager:
                     )
                     raise
             return tag
+
+    def _ensure_runtime_image(self, base_image: str) -> str:
+        """Ensure the runtime image (with Claude Code installed) is available.
+
+        Args:
+            base_image: The base image tag to build on top of.
+
+        Returns:
+            Runtime image tag with Claude Code installed.
+        """
+        import sys
+
+        layer_content = generate_claude_layer_dockerfile()
+        layer_hash = compute_content_hash(
+            base_image.encode(),
+            self.version.encode(),
+            layer_content.encode(),
+        )
+
+        if self.platform:
+            arch = self.platform.split("/")[-1]
+            runtime_tag = f"paude-runtime:{layer_hash[:12]}-{arch}"
+        else:
+            runtime_tag = f"paude-runtime:{layer_hash[:12]}"
+
+        if image_exists(runtime_tag):
+            print(f"Using cached runtime image: {runtime_tag}", file=sys.stderr)
+            return runtime_tag
+
+        # First run: explain why we're building locally
+        print("Installing Claude Code (first run only)...", file=sys.stderr)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dockerfile_path = Path(tmpdir) / "Dockerfile"
+            dockerfile_path.write_text(layer_content)
+
+            build_args = {"BASE_IMAGE": base_image}
+            try:
+                self.build_image(
+                    dockerfile_path, runtime_tag, Path(tmpdir), build_args
+                )
+            except Exception:
+                print(
+                    "\nClaude Code installation failed. This usually means:\n"
+                    "  - Network connectivity issues (check your connection)\n"
+                    "  - Podman machine not running (run 'podman machine start')\n"
+                    "  - Disk space issues\n",
+                    file=sys.stderr,
+                )
+                raise
+
+        print("Claude Code installed successfully.", file=sys.stderr)
+        return runtime_tag
 
     def ensure_custom_image(
         self,
@@ -418,10 +578,11 @@ class ImageManager:
 
             features_block = generate_features_dockerfile(config.features)
             if features_block:
-                # Insert features before "USER paude" line
+                # Replace only FIRST "\nUSER paude" - features run as root
                 dockerfile_content = dockerfile_content.replace(
                     "\nUSER paude",
                     f"{features_block}\nUSER paude",
+                    1,
                 )
 
         # Write temporary Dockerfile

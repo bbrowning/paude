@@ -62,6 +62,238 @@ class TestImageManager:
         assert "-t" in call_args
         assert "test:tag" in call_args
 
+    @patch("paude.container.image.run_podman")
+    @patch("paude.container.image.image_exists")
+    def test_ensure_default_image_builds_runtime_layer(self, mock_exists, mock_run, tmp_path):
+        """ensure_default_image builds a runtime layer with Claude."""
+        import os
+
+        # Create test containers directory structure
+        containers_dir = tmp_path / "containers" / "paude"
+        containers_dir.mkdir(parents=True)
+        (containers_dir / "Dockerfile").write_text("FROM centos:stream9")
+        (containers_dir / "entrypoint.sh").write_text("#!/bin/bash\nexec $@")
+        (containers_dir / "entrypoint-session.sh").write_text("#!/bin/bash\nexec $@")
+
+        # First call: base image doesn't exist, second: runtime doesn't exist
+        mock_exists.side_effect = [False, False]
+
+        with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
+            from paude.container.image import ImageManager
+
+            manager = ImageManager(script_dir=tmp_path)
+            result = manager.ensure_default_image()
+
+        # Should build base image then runtime layer
+        assert mock_run.call_count == 2
+        # First call builds base, second builds runtime
+        first_call = mock_run.call_args_list[0][0]
+        assert "paude-base-centos9" in str(first_call)
+        second_call = mock_run.call_args_list[1][0]
+        assert "paude-runtime:" in str(second_call)
+        assert "paude-runtime:" in result
+
+    @patch("paude.container.image.run_podman")
+    @patch("paude.container.image.image_exists")
+    def test_ensure_default_image_uses_cached_runtime(self, mock_exists, mock_run, tmp_path):
+        """ensure_default_image skips build if runtime image is cached."""
+        import os
+
+        containers_dir = tmp_path / "containers" / "paude"
+        containers_dir.mkdir(parents=True)
+        (containers_dir / "Dockerfile").write_text("FROM centos:stream9")
+        (containers_dir / "entrypoint.sh").write_text("#!/bin/bash\nexec $@")
+        (containers_dir / "entrypoint-session.sh").write_text("#!/bin/bash\nexec $@")
+
+        # Base exists, runtime exists
+        mock_exists.return_value = True
+
+        with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
+            from paude.container.image import ImageManager
+
+            manager = ImageManager(script_dir=tmp_path)
+            result = manager.ensure_default_image()
+
+        # No builds should happen
+        mock_run.assert_not_called()
+        assert "paude-runtime:" in result
+
+class TestPrepareBuiltContext:
+    """Tests for prepare_build_context."""
+
+    def test_custom_dockerfile_remote_build_includes_claude(self, tmp_path):
+        """Remote build with custom Dockerfile uses multi-stage and includes Claude."""
+        import shutil
+
+        from paude.config.models import PaudeConfig
+        from paude.container.image import prepare_build_context
+
+        # Create a custom Dockerfile
+        dockerfile_path = tmp_path / "Dockerfile"
+        dockerfile_path.write_text("FROM python:3.11-slim\nRUN echo hello\n")
+
+        # Create entrypoints
+        containers_dir = tmp_path / "containers" / "paude"
+        containers_dir.mkdir(parents=True)
+        (containers_dir / "entrypoint.sh").write_text("#!/bin/bash\nexec $@")
+        (containers_dir / "entrypoint-session.sh").write_text("#!/bin/bash\nexec $@")
+
+        config = PaudeConfig(dockerfile=dockerfile_path)
+
+        ctx = prepare_build_context(
+            config,
+            script_dir=tmp_path,
+            for_remote_build=True,
+        )
+
+        try:
+            dockerfile_content = ctx.dockerfile_path.read_text()
+            # Should have multi-stage build with user-base
+            assert "AS user-base" in dockerfile_content, "Should have stage 1 AS user-base"
+            assert "FROM user-base" in dockerfile_content, "Should have stage 2 FROM user-base"
+            # Should include Claude installation in stage 2
+            assert "claude.ai/install.sh" in dockerfile_content, (
+                "Multi-stage build should include Claude installation"
+            )
+            # Stage 2 should start with USER root to handle non-root base images
+            stage2_start = dockerfile_content.find("FROM user-base")
+            stage2_content = dockerfile_content[stage2_start:]
+            first_user = stage2_content.find("USER ")
+            user_line = stage2_content[first_user:stage2_content.find("\n", first_user)]
+            assert "USER root" == user_line.strip(), (
+                f"Stage 2 should start with USER root, got '{user_line.strip()}'"
+            )
+        finally:
+            shutil.rmtree(ctx.context_dir)
+
+    def test_default_image_always_includes_claude_install(self, tmp_path):
+        """prepare_build_context always includes Claude installation for default image."""
+        import os
+        import shutil
+
+        from paude.config.models import PaudeConfig
+        from paude.container.image import prepare_build_context
+
+        config = PaudeConfig()
+
+        # Create minimal script_dir structure
+        containers_dir = tmp_path / "containers" / "paude"
+        containers_dir.mkdir(parents=True)
+        (containers_dir / "entrypoint.sh").write_text("#!/bin/bash\nexec $@")
+        (containers_dir / "entrypoint-session.sh").write_text("#!/bin/bash\nexec $@")
+
+        with patch("paude.container.image.image_exists", return_value=True):
+            with patch("paude.container.image.run_podman"):
+                with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
+                    ctx = prepare_build_context(
+                        config,
+                        script_dir=tmp_path,
+                        for_remote_build=True,
+                    )
+
+        try:
+            dockerfile_content = ctx.dockerfile_path.read_text()
+            assert "claude.ai/install.sh" in dockerfile_content
+        finally:
+            shutil.rmtree(ctx.context_dir)
+
+    def test_feature_injection_only_replaces_first_user_paude(self, tmp_path):
+        """Feature injection replaces only the first USER paude occurrence."""
+        import os
+        import shutil
+
+        from paude.config.models import FeatureSpec, PaudeConfig
+        from paude.container.image import prepare_build_context
+
+        # Create a config with pip_install AND features
+        config = PaudeConfig(pip_install=True)
+
+        # We need to mock the feature downloader (called from installer.py)
+        with patch("paude.features.downloader.download_feature") as mock_download:
+            # Create fake feature directory
+            feature_dir = tmp_path / "feature_cache" / "abc123"
+            feature_dir.mkdir(parents=True)
+            (feature_dir / "install.sh").write_text("#!/bin/bash\necho test")
+            (feature_dir / "devcontainer-feature.json").write_text('{"id": "test"}')
+            mock_download.return_value = feature_dir
+
+            # Add a feature to config
+            config.features = [FeatureSpec(url="ghcr.io/test/feature:1", options={})]
+
+            # Create minimal script_dir structure
+            containers_dir = tmp_path / "containers" / "paude"
+            containers_dir.mkdir(parents=True)
+            (containers_dir / "entrypoint.sh").write_text("#!/bin/bash\nexec $@")
+            (containers_dir / "entrypoint-session.sh").write_text("#!/bin/bash\nexec $@")
+
+            with patch("paude.container.image.image_exists", return_value=True):
+                with patch("paude.container.image.run_podman"):
+                    with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
+                        ctx = prepare_build_context(
+                            config,
+                            script_dir=tmp_path,
+                            for_remote_build=True,
+                        )
+
+        try:
+            dockerfile_content = ctx.dockerfile_path.read_text()
+            # Features should only be injected once
+            feature_count = dockerfile_content.count("# Feature: test")
+            assert feature_count == 1, f"Feature should appear once, found {feature_count} times"
+        finally:
+            shutil.rmtree(ctx.context_dir)
+
+    def test_features_injected_without_pip_install(self, tmp_path):
+        """Features are injected even without pip_install on default paude image.
+
+        This tests the edge case where someone uses features but not pip_install.
+        The Dockerfile must still have USER paude for feature injection to work.
+        """
+        import os
+        import shutil
+
+        from paude.config.models import FeatureSpec, PaudeConfig
+        from paude.container.image import prepare_build_context
+
+        # Create a config with features but NO pip_install
+        config = PaudeConfig(pip_install=False)
+
+        with patch("paude.features.downloader.download_feature") as mock_download:
+            # Create fake feature directory
+            feature_dir = tmp_path / "feature_cache" / "abc123"
+            feature_dir.mkdir(parents=True)
+            (feature_dir / "install.sh").write_text("#!/bin/bash\necho test")
+            (feature_dir / "devcontainer-feature.json").write_text('{"id": "myfeature"}')
+            mock_download.return_value = feature_dir
+
+            # Add a feature to config
+            config.features = [FeatureSpec(url="ghcr.io/test/myfeature:1", options={})]
+
+            # Create minimal script_dir structure
+            containers_dir = tmp_path / "containers" / "paude"
+            containers_dir.mkdir(parents=True)
+            (containers_dir / "entrypoint.sh").write_text("#!/bin/bash\nexec $@")
+            (containers_dir / "entrypoint-session.sh").write_text("#!/bin/bash\nexec $@")
+
+            with patch("paude.container.image.image_exists", return_value=True):
+                with patch("paude.container.image.run_podman"):
+                    with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
+                        ctx = prepare_build_context(
+                            config,
+                            script_dir=tmp_path,
+                            for_remote_build=True,
+                        )
+
+        try:
+            dockerfile_content = ctx.dockerfile_path.read_text()
+            # Features should be injected
+            assert "# Feature: myfeature" in dockerfile_content, (
+                "Feature should be injected even without pip_install"
+            )
+        finally:
+            shutil.rmtree(ctx.context_dir)
+
+
 class TestContainerRunner:
     """Tests for ContainerRunner."""
 

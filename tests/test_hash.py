@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from paude.hash import compute_config_hash
+from paude.hash import compute_config_hash, compute_content_hash
 
 
 class TestComputeConfigHash:
@@ -91,3 +91,44 @@ class TestComputeConfigHash:
         # To generate: use the inputs above and run through sha256sum
         assert len(result) == 12
         assert result.isalnum()
+
+
+class TestComputeContentHash:
+    """Tests for compute_content_hash."""
+
+    def test_returns_full_hex_digest(self):
+        """compute_content_hash returns full 64-char hex digest."""
+        result = compute_content_hash(b"test content")
+        assert len(result) == 64
+        assert all(c in "0123456789abcdef" for c in result)
+
+    def test_same_content_same_hash(self):
+        """Same content produces same hash."""
+        hash1 = compute_content_hash(b"test content")
+        hash2 = compute_content_hash(b"test content")
+        assert hash1 == hash2
+
+    def test_different_content_different_hash(self):
+        """Different content produces different hash."""
+        hash1 = compute_content_hash(b"content a")
+        hash2 = compute_content_hash(b"content b")
+        assert hash1 != hash2
+
+    def test_multiple_args_combined(self):
+        """Multiple arguments are combined into single hash."""
+        # Hash of combined should differ from hash of individual pieces
+        hash_combined = compute_content_hash(b"abc", b"def")
+        hash_single_a = compute_content_hash(b"abc")
+        hash_single_b = compute_content_hash(b"def")
+        hash_concatenated = compute_content_hash(b"abcdef")
+
+        assert hash_combined != hash_single_a
+        assert hash_combined != hash_single_b
+        # Combined should equal concatenated since we're just updating the hasher
+        assert hash_combined == hash_concatenated
+
+    def test_order_matters(self):
+        """Order of arguments affects hash."""
+        hash1 = compute_content_hash(b"abc", b"def")
+        hash2 = compute_content_hash(b"def", b"abc")
+        assert hash1 != hash2

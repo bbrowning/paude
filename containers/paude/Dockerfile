@@ -34,13 +34,9 @@ RUN useradd -m -s /bin/bash -g 0 paude && \
     mkdir -p /home/paude/.claude /home/paude/.config && \
     chmod -R g+rwX /home/paude/.claude /home/paude/.config
 
-# Install Claude Code (as paude user)
-USER paude
-WORKDIR /home/paude
-RUN curl -fsSL https://claude.ai/install.sh | bash
-
-ENV DISABLE_AUTOUPDATER=1
-ENV PATH="/home/paude/.local/bin:$PATH"
+# NOTE: Claude Code is NOT installed here due to licensing restrictions.
+# It gets installed at user-side build time via a runtime layer.
+# See src/paude/config/claude_layer.py for the installation logic.
 
 # Copy entrypoints
 USER root

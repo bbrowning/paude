@@ -64,6 +64,21 @@ def compute_config_hash(
     return hash_hex
 
 
+def compute_content_hash(*content: bytes) -> str:
+    """Compute a hash from arbitrary byte content.
+
+    Args:
+        *content: Variable number of bytes objects to hash together.
+
+    Returns:
+        Full hex digest of the combined content hash.
+    """
+    hasher = hashlib.sha256()
+    for item in content:
+        hasher.update(item)
+    return hasher.hexdigest()
+
+
 def is_image_stale(image_tag: str) -> bool:
     """Check if the image with the given tag exists.
 

@@ -70,7 +70,7 @@ paude --yolo -- -p "refactor this function"
 
 Arguments before `--` are interpreted by paude. Arguments after `--` are passed directly to Claude Code.
 
-Container images are pulled automatically on first run. For development, run from the cloned repo to build images locally.
+On first run, paude pulls the base container image and installs Claude Code locally. This one-time setup takes a few minutes. Subsequent runs use the cached image and start immediately.
 
 ## Session Management
 

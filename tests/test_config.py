@@ -14,6 +14,8 @@ from paude.config import (
     generate_workspace_dockerfile,
     parse_config,
 )
+from paude.config.claude_layer import generate_claude_layer_dockerfile
+from paude.config.dockerfile import generate_pip_install_dockerfile
 
 
 class TestDetectConfig:
@@ -314,3 +316,143 @@ class TestGenerateWorkspaceDockerfile:
 
         assert "/opt/workspace-src" not in dockerfile
         assert "/opt/venv" not in dockerfile
+
+
+class TestGeneratePipInstallDockerfile:
+    """Tests for pip_install Dockerfile generation."""
+
+    def test_generates_minimal_dockerfile(self):
+        """generate_pip_install_dockerfile produces minimal output."""
+        config = PaudeConfig()
+        dockerfile = generate_pip_install_dockerfile(config)
+
+        assert "ARG BASE_IMAGE" in dockerfile
+        assert "FROM ${BASE_IMAGE}" in dockerfile
+        # Should NOT include Claude installation by default
+        assert "claude.ai/install.sh" not in dockerfile
+
+    def test_include_claude_install(self):
+        """generate_pip_install_dockerfile includes Claude when requested."""
+        config = PaudeConfig()
+        dockerfile = generate_pip_install_dockerfile(config, include_claude_install=True)
+
+        assert "curl -fsSL https://claude.ai/install.sh | bash" in dockerfile
+        assert "DISABLE_AUTOUPDATER=1" in dockerfile
+        assert "/home/paude/.local/bin" in dockerfile
+        assert "chmod -R g+rwX /home/paude" in dockerfile
+
+    def test_include_claude_install_with_pip_install(self):
+        """generate_pip_install_dockerfile includes both Claude and pip_install."""
+        config = PaudeConfig(pip_install=True)
+        dockerfile = generate_pip_install_dockerfile(config, include_claude_install=True)
+
+        assert "claude.ai/install.sh" in dockerfile
+        assert "/opt/venv/bin/pip install -e /opt/workspace-src" in dockerfile
+
+    def test_claude_install_before_pip_install(self):
+        """Claude installation comes before pip_install in generated Dockerfile."""
+        config = PaudeConfig(pip_install=True)
+        dockerfile = generate_pip_install_dockerfile(config, include_claude_install=True)
+
+        # Find positions of key instructions
+        claude_pos = dockerfile.find("claude.ai/install.sh")
+        pip_pos = dockerfile.find("/opt/venv/bin/pip")
+
+        assert claude_pos != -1, "Claude install not found"
+        assert pip_pos != -1, "pip install not found"
+        assert claude_pos < pip_pos, "Claude should be installed before pip_install"
+
+    def test_multiple_user_paude_lines_with_pip_install(self):
+        """Dockerfile with pip_install has correct USER paude sequence."""
+        config = PaudeConfig(pip_install=True)
+        dockerfile = generate_pip_install_dockerfile(config, include_claude_install=True)
+
+        # Should have multiple USER paude lines (one for claude install, one at end)
+        user_paude_count = dockerfile.count("USER paude")
+        assert user_paude_count >= 2, f"Expected at least 2 'USER paude' lines, got {user_paude_count}"
+
+    def test_ends_with_user_paude_when_claude_only(self):
+        """Dockerfile with only Claude install ends with USER paude, not root."""
+        config = PaudeConfig(pip_install=False)
+        dockerfile = generate_pip_install_dockerfile(config, include_claude_install=True)
+
+        lines = dockerfile.strip().split("\n")
+        # Find the last USER directive
+        last_user_line = None
+        for line in reversed(lines):
+            if line.strip().startswith("USER"):
+                last_user_line = line.strip()
+                break
+
+        assert last_user_line == "USER paude", f"Expected 'USER paude', got '{last_user_line}'"
+
+    def test_starts_with_user_root_for_feature_injection(self):
+        """Dockerfile with include_claude_install has USER root before USER paude.
+
+        This ensures features (injected before first USER paude) run as root,
+        even when the base image ends with a non-root user.
+        """
+        config = PaudeConfig()
+        dockerfile = generate_pip_install_dockerfile(config, include_claude_install=True)
+
+        # Find positions of USER directives
+        lines = dockerfile.split("\n")
+        user_lines = [(i, line.strip()) for i, line in enumerate(lines)
+                      if line.strip().startswith("USER")]
+
+        assert len(user_lines) >= 2, "Expected at least 2 USER lines"
+        # First USER should be root
+        assert user_lines[0][1] == "USER root", f"First USER should be 'USER root', got '{user_lines[0][1]}'"
+        # Second USER should be paude
+        assert user_lines[1][1] == "USER paude", f"Second USER should be 'USER paude', got '{user_lines[1][1]}'"
+
+    def test_minimal_dockerfile_has_user_paude_for_features(self):
+        """Minimal Dockerfile (no claude, no pip_install) still has USER paude for features.
+
+        This ensures features can be injected even when using the default paude image
+        without pip_install. Features are injected before the first USER paude line.
+        """
+        config = PaudeConfig(pip_install=False)
+        dockerfile = generate_pip_install_dockerfile(config, include_claude_install=False)
+
+        # Should have USER paude even with minimal config
+        assert "USER paude" in dockerfile, "Minimal Dockerfile should have USER paude for feature injection"
+        # Should have USER root before USER paude for features to run as root
+        lines = dockerfile.split("\n")
+        user_lines = [(i, line.strip()) for i, line in enumerate(lines)
+                      if line.strip().startswith("USER")]
+
+        assert len(user_lines) >= 2, "Expected at least 2 USER lines"
+        assert user_lines[0][1] == "USER root", "First USER should be root for feature injection"
+        assert user_lines[1][1] == "USER paude", "Second USER should be paude"
+
+
+class TestGenerateClaudeLayerDockerfile:
+    """Tests for Claude layer Dockerfile generation."""
+
+    def test_generates_claude_layer(self):
+        """generate_claude_layer_dockerfile produces expected output."""
+        dockerfile = generate_claude_layer_dockerfile()
+
+        assert "ARG BASE_IMAGE" in dockerfile
+        assert "FROM ${BASE_IMAGE}" in dockerfile
+        assert "curl -fsSL https://claude.ai/install.sh | bash" in dockerfile
+        assert "DISABLE_AUTOUPDATER=1" in dockerfile
+        assert "/home/paude/.local/bin" in dockerfile
+        assert "chmod -R g+rwX /home/paude" in dockerfile
+        assert 'ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]' in dockerfile
+
+    def test_claude_layer_runs_as_paude_user(self):
+        """generate_claude_layer_dockerfile installs as paude user."""
+        dockerfile = generate_claude_layer_dockerfile()
+
+        # Find the Claude install line and verify it's preceded by USER paude
+        lines = dockerfile.split("\n")
+        for i, line in enumerate(lines):
+            if "claude.ai/install.sh" in line:
+                # Look backwards for USER paude
+                for j in range(i - 1, -1, -1):
+                    if lines[j].strip().startswith("USER"):
+                        assert "paude" in lines[j]
+                        break
+                break
