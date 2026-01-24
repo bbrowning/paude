@@ -1534,6 +1534,7 @@ class OpenShiftBackend:
         - gcloud credentials (ADC, credentials.db, access_tokens.db)
         - Claude config files (settings.json, credentials.json, etc.)
         - gitconfig
+        - global gitignore (~/.config/git/ignore)
 
         Uses mkdir -p (idempotent) with chmod g+rwX for OpenShift arbitrary UID.
 
@@ -1630,6 +1631,23 @@ class OpenShiftBackend:
                     "cp", str(gitconfig), f"{pod_name}:{config_path}/gitconfig",
                     "-n", ns, check=False,
                 )
+                if verbose:
+                    print("  Synced ~/.gitconfig", file=sys.stderr)
+            except Exception:  # noqa: S110
+                pass
+
+        # Sync global gitignore if it exists
+        global_gitignore = home / ".config" / "git" / "ignore"
+        if global_gitignore.exists():
+            try:
+                self._run_oc(
+                    "cp", str(global_gitignore),
+                    f"{pod_name}:{config_path}/gitignore-global",
+                    "-n", ns, check=False,
+                )
+                if verbose:
+                    print("  Synced ~/.config/git/ignore (global gitignore)",
+                          file=sys.stderr)
             except Exception:  # noqa: S110
                 pass
 

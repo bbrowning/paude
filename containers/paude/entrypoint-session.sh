@@ -103,6 +103,13 @@ setup_credentials_from_pvc() {
         rm -f "$HOME/.gitconfig" 2>/dev/null || true
         ln -sf "$config_path/gitconfig" "$HOME/.gitconfig"
     fi
+
+    # Set up global gitignore via symlink
+    if [[ -f "$config_path/gitignore-global" ]]; then
+        mkdir -p "$HOME/.config/git"
+        rm -f "$HOME/.config/git/ignore" 2>/dev/null || true
+        ln -sf "$config_path/gitignore-global" "$HOME/.config/git/ignore"
+    fi
 }
 
 # Wait for and set up PVC-based credentials

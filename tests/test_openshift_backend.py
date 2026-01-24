@@ -1910,6 +1910,68 @@ class TestSyncConfigToPod:
         assert "/pvc/config/gitconfig" in cp_calls_str
 
     @patch("subprocess.run")
+    def test_syncs_global_gitignore(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """_sync_config_to_pod syncs global gitignore from ~/.config/git/ignore."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        # Create mock global gitignore
+        git_config_dir = tmp_path / ".config" / "git"
+        git_config_dir.mkdir(parents=True)
+        (git_config_dir / "ignore").write_text("**/.claude/settings.local.json\n")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with patch.object(Path, "home", return_value=tmp_path):
+            backend._sync_config_to_pod("test-pod-0")
+
+        # Find oc cp call for global gitignore
+        cp_calls = [c for c in mock_run.call_args_list if "cp" in str(c)]
+        cp_calls_str = str(cp_calls)
+
+        assert ".config/git/ignore" in cp_calls_str
+        assert "/pvc/config/gitignore-global" in cp_calls_str
+
+    @patch("subprocess.run")
+    def test_skips_global_gitignore_when_missing(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """_sync_config_to_pod skips global gitignore when it doesn't exist."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        # Don't create the global gitignore file
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with patch.object(Path, "home", return_value=tmp_path):
+            backend._sync_config_to_pod("test-pod-0")
+
+        # Should not have a cp call for gitignore-global
+        cp_calls_str = str(mock_run.call_args_list)
+        assert "gitignore-global" not in cp_calls_str
+
+    @patch("subprocess.run")
+    def test_verbose_output_for_global_gitignore(
+        self, mock_run: MagicMock, tmp_path: Path, capsys: Any
+    ) -> None:
+        """_sync_config_to_pod prints verbose output for global gitignore."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        # Create mock global gitignore
+        git_config_dir = tmp_path / ".config" / "git"
+        git_config_dir.mkdir(parents=True)
+        (git_config_dir / "ignore").write_text("*.log\n")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with patch.object(Path, "home", return_value=tmp_path):
+            backend._sync_config_to_pod("test-pod-0", verbose=True)
+
+        captured = capsys.readouterr()
+        assert "global gitignore" in captured.err
+
+    @patch("subprocess.run")
     def test_creates_ready_marker(
         self, mock_run: MagicMock, tmp_path: Path
     ) -> None:

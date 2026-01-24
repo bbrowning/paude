@@ -311,6 +311,7 @@ The container intentionally restricts certain operations:
 | `~/.config/gcloud` | read-only | Vertex AI auth |
 | `~/.claude` | copied in, not mounted | Prevents host config poisoning |
 | `~/.gitconfig` | read-only | Git identity |
+| `~/.config/git/ignore` | read-only | Global gitignore patterns |
 | SSH keys | not mounted | Prevents git push via SSH |
 | GitHub CLI config | not mounted | Prevents gh operations |
 | Git credentials | not mounted | Prevents HTTPS git push |
