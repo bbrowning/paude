@@ -148,8 +148,8 @@ The OpenShift backend provides:
 - **Persistent sessions** using StatefulSets with PVC storage
 - **Survive network disconnects** via tmux attachment
 - **File synchronization** between local and remote workspace
+- **Full config sync** including plugins and CLAUDE.md from `~/.claude/`
 - **Automatic image push** to OpenShift internal registry
-- **Credential injection** via Kubernetes Secrets
 
 See [docs/OPENSHIFT.md](docs/OPENSHIFT.md) for detailed setup and usage.
 

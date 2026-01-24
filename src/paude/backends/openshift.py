@@ -16,6 +16,23 @@ from typing import Any
 
 from paude.backends.base import Session, SessionConfig
 
+CLAUDE_EXCLUDES = [
+    # Session-specific files (not useful on remote)
+    "/debug",          # Debug logs - session specific
+    "/file-history",   # File history - session specific
+    "/history.jsonl",  # Command history - session specific
+    "/paste-cache",    # Paste cache - session specific
+    "/session-env",    # Session environment - session specific
+    "/shell-snapshots",  # Shell snapshots - session specific
+    "/stats-cache.json",  # Stats cache - session specific
+    "/tasks",          # Task state - session specific
+    "/todos",          # Todo state - session specific
+    "/projects",       # Project state - may contain session data
+    # Leading / anchors to root - only matches top-level, not nested dirs
+    "/cache",          # General cache (NOT plugins/cache with plugin files)
+    "/.git",           # Git metadata (if user has versioned ~/.claude)
+]
+
 
 class OpenShiftError(Exception):
     """Base exception for OpenShift backend errors."""
@@ -1526,7 +1543,7 @@ class OpenShiftBackend:
         home = Path.home()
         config_path = "/pvc/config"
 
-        print("Syncing credentials to pod...", file=sys.stderr)
+        print("Syncing configuration to pod...", file=sys.stderr)
 
         # Prepare config directory with OpenShift UID pattern
         # Using mkdir -p (idempotent) instead of rm -rf to preserve working directories
@@ -1562,37 +1579,45 @@ class OpenShiftBackend:
                 except Exception:  # noqa: S110
                     pass  # Skip unreadable files
 
-        # Sync claude config files
+        # Sync entire ~/.claude/ directory (not individual files)
         claude_dir = home / ".claude"
         claude_json = home / ".claude.json"
-        claude_dest = f"{pod_name}:{config_path}/claude"
-        claude_files = [
-            "settings.json",
-            "credentials.json",
-            "statsig.json",
-        ]
+
+        if claude_dir.is_dir():
+            # Build exclude args for session-specific files
+            exclude_args = []
+            for pattern in CLAUDE_EXCLUDES:
+                exclude_args.extend(["--exclude", pattern])
+
+            # Rsync ~/.claude/ to /pvc/config/claude/
+            rsync_success = self._rsync_with_retry(
+                f"{claude_dir}/",
+                f"{pod_name}:{config_path}/claude",
+                ns,
+                exclude_args,
+                verbose=verbose,
+            )
+
+            # Rewrite absolute paths in plugin metadata (only if rsync succeeded)
+            if rsync_success:
+                self._rewrite_plugin_paths(pod_name, config_path)
+                if verbose:
+                    print("  Synced ~/.claude/ (including plugins)", file=sys.stderr)
+            else:
+                print(
+                    "  Warning: Failed to sync ~/.claude/ - plugins may not work",
+                    file=sys.stderr,
+                )
 
         # .claude.json (main config) goes to claude/claude.json
         if claude_json.exists():
             try:
+                dest = f"{pod_name}:{config_path}/claude/claude.json"
                 self._run_oc(
-                    "cp", str(claude_json), f"{claude_dest}/claude.json",
-                    "-n", ns, check=False,
+                    "cp", str(claude_json), dest, "-n", ns, check=False,
                 )
             except Exception:  # noqa: S110
                 pass
-
-        # Files from ~/.claude/
-        for filename in claude_files:
-            filepath = claude_dir / filename
-            if filepath.exists():
-                try:
-                    self._run_oc(
-                        "cp", str(filepath), f"{claude_dest}/{filename}",
-                        "-n", ns, check=False,
-                    )
-                except Exception:  # noqa: S110
-                    pass
 
         # Sync gitconfig
         gitconfig = home / ".gitconfig"
@@ -1616,8 +1641,59 @@ class OpenShiftBackend:
             check=False,
         )
 
-        if verbose:
-            print("Credentials synced successfully.", file=sys.stderr)
+        print("Configuration synced.", file=sys.stderr)
+
+    def _rewrite_plugin_paths(self, pod_name: str, config_path: str) -> None:
+        """Rewrite absolute paths in plugin metadata files using jq.
+
+        Claude Code writes plugin paths as absolute host paths. These need
+        to be rewritten to container paths (/home/paude/.claude/plugins/...).
+
+        Uses jq for field-specific rewriting to avoid accidental replacements.
+        """
+        ns = self.namespace
+        container_plugins_path = "/home/paude/.claude/plugins"
+
+        # Rewrite installed_plugins.json - installPath field
+        # Structure: { "plugins": { "<name>": [{ "installPath": "..." }] } }
+        installed_plugins = f"{config_path}/claude/plugins/installed_plugins.json"
+        # jq expression: extract last 3 path components and prepend container path
+        # Uses select() to skip entries where installPath is null/missing
+        jq_expr = (
+            '.plugins |= with_entries(.value |= map('
+            'if .installPath then '
+            '.installPath = ($prefix + "/" + '
+            '(.installPath | split("/") | .[-3:] | join("/"))) '
+            'else . end))'
+        )
+        self._run_oc(
+            "exec", pod_name, "-n", ns, "--",
+            "bash", "-c",
+            f'if [ -f "{installed_plugins}" ]; then '
+            f'jq --arg prefix "{container_plugins_path}/cache" \'{jq_expr}\' '
+            f'"{installed_plugins}" > "{installed_plugins}.tmp" && '
+            f'mv "{installed_plugins}.tmp" "{installed_plugins}"; fi',
+            check=False,
+        )
+
+        # Rewrite known_marketplaces.json - installLocation field
+        # Structure: { "<name>": { "installLocation": "..." } }
+        known_marketplaces = f"{config_path}/claude/plugins/known_marketplaces.json"
+        # Only rewrite if .value has installLocation field
+        jq_expr2 = (
+            'with_entries(if .value.installLocation then '
+            '.value.installLocation = ($prefix + "/marketplaces/" + .key) '
+            'else . end)'
+        )
+        self._run_oc(
+            "exec", pod_name, "-n", ns, "--",
+            "bash", "-c",
+            f'if [ -f "{known_marketplaces}" ]; then '
+            f'jq --arg prefix "{container_plugins_path}" \'{jq_expr2}\' '
+            f'"{known_marketplaces}" > "{known_marketplaces}.tmp" && '
+            f'mv "{known_marketplaces}.tmp" "{known_marketplaces}"; fi',
+            check=False,
+        )
 
     def start_session(
         self,

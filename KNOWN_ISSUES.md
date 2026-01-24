@@ -2,68 +2,6 @@
 
 Tracking known issues that need to be fixed. Each bug includes enough context for someone without prior knowledge to identify, reproduce, and solve the issue.
 
-## BUG-002: Claude Code plugins not available in OpenShift backend
-
-**Status**: Open
-**Severity**: Low (plugins are optional, core functionality works)
-**Discovered**: 2026-01-23 during OpenShift backend testing
-
-### Summary
-
-When using the OpenShift backend (`--backend=openshift`), Claude Code plugins from the host's `~/.claude/plugins/` directory are not available in the container. Claude reports that plugins failed to install.
-
-### How to Reproduce
-
-1. Have Claude Code plugins configured locally in `~/.claude/plugins/`
-2. Run `paude --backend=openshift`
-3. Observe Claude reporting plugin installation failures
-
-### Root Cause
-
-The OpenShift backend creates a Kubernetes Secret containing only core Claude config files:
-- `settings.json`
-- `credentials.json`
-- `statsig.json`
-- `claude.json`
-
-The `~/.claude/plugins/` directory is not included because:
-1. Plugins can contain large files that may exceed Kubernetes Secret size limits (1MB)
-2. Plugins may contain binaries or executables
-3. Plugin symlink structures may not transfer well via Secrets
-
-### Workaround
-
-Plugins must be installed manually inside the OpenShift container:
-
-```bash
-# Attach to the session
-paude attach <session-id> --backend=openshift
-
-# Install plugins manually inside the container
-# (plugin installation commands depend on the specific plugin)
-```
-
-### Proposed Fix Options
-
-1. **ConfigMap for plugins**: Use a ConfigMap instead of Secret for plugins (still has 1MB limit)
-
-2. **PersistentVolume**: Mount plugins via a PersistentVolume that's populated separately
-
-3. **Plugin download at runtime**: Have the entrypoint download/install plugins based on a list in settings.json
-
-4. **Increase Secret limit**: Split plugins across multiple Secrets if needed
-
-### Acceptance Criteria for Fix
-
-- [ ] Plugins from host `~/.claude/plugins/` are available in OpenShift containers
-- [ ] Plugin installation doesn't fail due to size limits
-- [ ] Plugins work correctly with OpenShift's arbitrary UID
-
-### Related Files
-
-- `src/paude/backends/openshift.py` (`_create_claude_secret` method)
-- `containers/paude/entrypoint.sh` (seed file copying)
-
 ## BUG-003: Multi-pod git sync conflicts when syncing .git directory
 
 **Status**: Open

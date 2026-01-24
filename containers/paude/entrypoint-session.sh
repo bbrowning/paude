@@ -75,25 +75,27 @@ setup_credentials_from_pvc() {
         ln -sf "$config_path/gcloud" "$HOME/.config/gcloud"
     fi
 
-    # Copy claude config files (need to be writable, so copy instead of symlink)
+    # Copy claude config (need to be writable, so copy instead of symlink)
     if [[ -d "$config_path/claude" ]]; then
         mkdir -p "$HOME/.claude"
         chmod g+rwX "$HOME/.claude" 2>/dev/null || true
 
-        # Copy each file from /pvc/config/claude/
-        for f in "$config_path/claude"/*; do
-            if [[ -f "$f" ]]; then
-                filename=$(basename "$f")
-                # claude.json goes to ~/.claude.json (root of home)
-                if [[ "$filename" == "claude.json" ]]; then
-                    cp -f "$f" "$HOME/.claude.json" 2>/dev/null || true
-                    chmod g+rw "$HOME/.claude.json" 2>/dev/null || true
-                else
-                    cp -f "$f" "$HOME/.claude/" 2>/dev/null || true
-                fi
-            fi
-        done
-        chmod -R g+rw "$HOME/.claude" 2>/dev/null || true
+        # Copy entire synced directory structure
+        cp -a "$config_path/claude/." "$HOME/.claude/" 2>/dev/null || true
+
+        # Handle claude.json specially - goes to ~/.claude.json
+        if [[ -f "$HOME/.claude/claude.json" ]]; then
+            mv "$HOME/.claude/claude.json" "$HOME/.claude.json" 2>/dev/null || true
+            chmod g+rw "$HOME/.claude.json" 2>/dev/null || true
+        fi
+
+        # Ensure plugins directory is writable (Claude may update metadata)
+        if [[ -d "$HOME/.claude/plugins" ]]; then
+            chmod -R g+rwX "$HOME/.claude/plugins" 2>/dev/null || true
+        fi
+
+        # g+rwX sets read/write and execute on directories (X = execute only if dir)
+        chmod -R g+rwX "$HOME/.claude" 2>/dev/null || true
     fi
 
     # Set up gitconfig via symlink

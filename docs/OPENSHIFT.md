@@ -116,13 +116,25 @@ paude create my-project --backend=openshift --storage-class=fast-ssd
 
 ## Security
 
-### Credential Mounting
+### Configuration Sync
 
-Credentials are injected as Kubernetes Secrets and ConfigMaps:
+Configuration is synced via `oc rsync` to PVC storage on session start:
 
-- `~/.config/gcloud` → Secret mounted at `/home/paude/.config/gcloud` (read-only)
-- `~/.gitconfig` → ConfigMap mounted at `/home/paude/.gitconfig` (read-only)
-- `~/.claude` → Secret mounted at `/home/paude/.claude` (read-only)
+**Synced from host:**
+- `~/.config/gcloud` → gcloud credentials for Vertex AI authentication
+- `~/.gitconfig` → Git identity configuration
+- `~/.claude/` → Full Claude config directory, including:
+  - `settings.json`, `credentials.json` - Core settings
+  - `plugins/` - Installed plugins and marketplace metadata
+  - `CLAUDE.md` - Global instructions
+- `~/.claude.json` → Claude preferences
+
+**Excluded (session-specific):**
+- `history.jsonl`, `tasks/`, `todos/` - Session state
+- `cache/`, `stats-cache.json` - Caches
+- `debug/`, `file-history/` - Debug logs
+
+Plugin paths are automatically rewritten from host paths to container paths.
 
 ### Network Filtering
 
@@ -249,21 +261,22 @@ oc rsync ./local-dir/ pod-name:/workspace/ -n paude
 │  │  │  │   paude    │  │    └───────────────────────┘ │ │
 │  │  │  │ container  │  │                              │ │
 │  │  │  │  + tmux    │  │    ┌───────────────────────┐ │ │
-│  │  │  └────────────┘  │    │      Secrets          │ │ │
+│  │  │  └────────────┘  │    │   PVC: paude-config   │ │ │
 │  │  │                  │    │  - gcloud creds       │ │ │
-│  │  │  Mounts:         │    │  - claude config      │ │ │
-│  │  │  - /workspace    │    └───────────────────────┘ │ │
-│  │  │  - credentials   │                              │ │
-│  │  └──────────────────┘    ┌───────────────────────┐ │ │
-│  │         ↑                │     ConfigMaps        │ │ │
-│  │         │ oc rsync       │  - gitconfig          │ │ │
-│  │         ↓                └───────────────────────┘ │ │
+│  │  │  Mounts:         │    │  - ~/.claude/ dir     │ │ │
+│  │  │  - /workspace    │    │    (incl. plugins)    │ │ │
+│  │  │  - /pvc/config   │    │  - gitconfig          │ │ │
+│  │  └──────────────────┘    └───────────────────────┘ │ │
+│  │         ↑                                          │ │
+│  │         │ oc rsync (workspace + config)            │ │
+│  │         ↓                                          │ │
 │  └─────────┼──────────────────────────────────────────┘ │
 └────────────┼────────────────────────────────────────────┘
              │
     ┌────────┴────────┐
     │  Local Machine  │
     │  - workspace    │
+    │  - ~/.claude/   │
     │  - credentials  │
     │  - paude CLI    │
     └─────────────────┘
@@ -276,6 +289,7 @@ oc rsync ./local-dir/ pod-name:/workspace/ -n paude
 | Session Persistence | No (ephemeral) | Yes (tmux) |
 | Network Disconnect | Session lost | Session preserved |
 | File Sync | Direct mount | oc rsync |
+| Plugin Sync | Direct mount | oc rsync (auto path rewrite) |
 | Multi-machine | No | Yes |
 | Resource Isolation | Container | Pod + namespace |
 | Setup Complexity | Low | Medium |
