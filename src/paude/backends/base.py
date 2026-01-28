@@ -61,6 +61,7 @@ class SessionConfig:
     pvc_size: str = "10Gi"
     storage_class: str | None = None
     network: str | None = None
+    proxy_image: str | None = None
 
 
 class Backend(Protocol):

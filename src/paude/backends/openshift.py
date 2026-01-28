@@ -410,16 +410,21 @@ class OpenShiftBackend:
                 f"Please create it or switch to an existing namespace."
             )
 
-    def _create_build_config(self, config_hash: str) -> None:
+    def _create_build_config(
+        self,
+        config_hash: str,
+        name_prefix: str = "paude",
+    ) -> None:
         """Create a BuildConfig and ImageStream for binary builds.
 
         If the BuildConfig already exists, this is a no-op.
 
         Args:
             config_hash: Hash of the configuration for naming.
+            name_prefix: Prefix for build config name (default: "paude").
         """
         ns = self.namespace
-        bc_name = f"paude-{config_hash}"
+        bc_name = f"{name_prefix}-{config_hash}"
 
         result = self._run_oc(
             "get", "buildconfig", bc_name,
@@ -485,6 +490,7 @@ class OpenShiftBackend:
         config_hash: str,
         context_dir: Path,
         session_name: str | None = None,
+        name_prefix: str = "paude",
     ) -> str:
         """Start a binary build and return the build name.
 
@@ -492,12 +498,13 @@ class OpenShiftBackend:
             config_hash: Hash of the configuration for naming.
             context_dir: Path to the build context directory.
             session_name: Optional session name to label the build with.
+            name_prefix: Prefix for build config name (default: "paude").
 
         Returns:
             Name of the started build (e.g., "paude-abc123-1").
         """
         ns = self.namespace
-        bc_name = f"paude-{config_hash}"
+        bc_name = f"{name_prefix}-{config_hash}"
 
         print(
             f"Starting build from {context_dir}...",
@@ -610,17 +617,22 @@ class OpenShiftBackend:
             f"Build {build_name} did not complete within {timeout} seconds"
         )
 
-    def _get_imagestream_reference(self, config_hash: str) -> str:
+    def _get_imagestream_reference(
+        self,
+        config_hash: str,
+        name_prefix: str = "paude",
+    ) -> str:
         """Get the internal image reference from an ImageStream.
 
         Args:
             config_hash: Hash of the configuration for naming.
+            name_prefix: Prefix for imagestream name (default: "paude").
 
         Returns:
             Internal image reference for pod image pulls.
         """
         ns = self.namespace
-        is_name = f"paude-{config_hash}"
+        is_name = f"{name_prefix}-{config_hash}"
 
         result = self._run_oc(
             "get", "imagestream", is_name,
@@ -710,6 +722,97 @@ class OpenShiftBackend:
 
         finally:
             shutil.rmtree(build_ctx.context_dir, ignore_errors=True)
+
+    def ensure_proxy_image_via_build(
+        self,
+        script_dir: Path,
+        force_rebuild: bool = False,
+        session_name: str | None = None,
+    ) -> str:
+        """Ensure the proxy image is available via OpenShift binary build.
+
+        This method builds the proxy container (squid-based) from the
+        containers/proxy/ directory in the paude source tree.
+
+        Args:
+            script_dir: Path to paude script directory containing containers/proxy/.
+            force_rebuild: Force rebuild even if image exists.
+            session_name: Optional session name to label the build with.
+
+        Returns:
+            Internal image reference for proxy pod image pulls.
+        """
+        import shutil
+        import tempfile
+
+        ns = self.namespace
+        name_prefix = "paude-proxy"
+
+        proxy_dir = script_dir / "containers" / "proxy"
+        if not proxy_dir.is_dir():
+            raise OpenShiftError(
+                f"Proxy container directory not found: {proxy_dir}"
+            )
+
+        # Validate Dockerfile exists - required for build
+        dockerfile_path = proxy_dir / "Dockerfile"
+        if not dockerfile_path.exists():
+            raise OpenShiftError(
+                f"Proxy Dockerfile not found: {dockerfile_path}"
+            )
+
+        # Compute hash from proxy files for caching
+        proxy_files = ["Dockerfile", "squid.conf", "entrypoint.sh"]
+        hash_content = ""
+        for filename in sorted(proxy_files):
+            filepath = proxy_dir / filename
+            if filepath.exists():
+                hash_content += filepath.read_text()
+        config_hash = hashlib.sha256(hash_content.encode()).hexdigest()[:12]
+        is_name = f"{name_prefix}-{config_hash}"
+
+        # Check if image already exists
+        if not force_rebuild:
+            result = self._run_oc(
+                "get", "imagestreamtag",
+                f"{is_name}:latest",
+                "-n", ns,
+                check=False,
+            )
+            if result.returncode == 0:
+                print(
+                    f"Proxy image {is_name}:latest already exists, reusing...",
+                    file=sys.stderr,
+                )
+                return self._get_imagestream_reference(config_hash, name_prefix)
+
+        # Create temp directory with proxy build context
+        context_dir = Path(tempfile.mkdtemp(prefix="paude-proxy-build-"))
+        try:
+            # Copy proxy files to build context
+            for filename in proxy_files:
+                src = proxy_dir / filename
+                if src.exists():
+                    shutil.copy2(src, context_dir / filename)
+
+            # Create BuildConfig and ImageStream
+            self._create_build_config(config_hash, name_prefix)
+
+            # Start binary build
+            build_name = self._start_binary_build(
+                config_hash,
+                context_dir,
+                session_name=session_name,
+                name_prefix=name_prefix,
+            )
+
+            # Wait for build to complete
+            self._wait_for_build(build_name)
+
+            return self._get_imagestream_reference(config_hash, name_prefix)
+
+        finally:
+            shutil.rmtree(context_dir, ignore_errors=True)
 
     def _ensure_network_policy(self, session_id: str) -> None:
         """Ensure a NetworkPolicy exists that restricts egress traffic for this session.
@@ -1415,13 +1518,16 @@ class OpenShiftBackend:
         # allowed_domains is list → create proxy with those domains
         if config.allowed_domains is not None:
             # Create proxy pod and service first (before NetworkPolicy)
-            # Derive proxy image from the main image
-            proxy_image = config.image.replace(
-                "paude-base-centos9", "paude-proxy-centos9"
-            )
-            # If image doesn't contain the expected pattern, use a default
-            if proxy_image == config.image:
-                proxy_image = "quay.io/bbrowning/paude-proxy-centos9:latest"
+            # Use provided proxy_image or derive from the main image
+            if config.proxy_image:
+                proxy_image = config.proxy_image
+            else:
+                proxy_image = config.image.replace(
+                    "paude-base-centos9", "paude-proxy-centos9"
+                )
+                # If image doesn't contain the expected pattern, use a default
+                if proxy_image == config.image:
+                    proxy_image = "quay.io/bbrowning/paude-proxy-centos9:latest"
 
             self._create_proxy_deployment(
                 session_name, proxy_image, config.allowed_domains

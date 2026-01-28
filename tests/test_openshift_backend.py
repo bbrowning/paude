@@ -3118,3 +3118,341 @@ class TestClaudeExcludes:
         from paude.backends.openshift import CLAUDE_EXCLUDES
 
         assert "plugins" not in CLAUDE_EXCLUDES
+
+
+class TestEnsureProxyImageViaBuild:
+    """Tests for ensure_proxy_image_via_build method."""
+
+    @patch("subprocess.run")
+    def test_ensure_proxy_image_via_build_creates_build_context(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """ensure_proxy_image_via_build creates build context from proxy dir."""
+        # Create mock proxy directory
+        proxy_dir = tmp_path / "containers" / "proxy"
+        proxy_dir.mkdir(parents=True)
+        (proxy_dir / "Dockerfile").write_text("FROM centos:9")
+        (proxy_dir / "squid.conf").write_text("http_port 3128")
+        (proxy_dir / "entrypoint.sh").write_text("#!/bin/bash")
+
+        def run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
+            cmd = args[0] if args else kwargs.get("args", [])
+            # Simulate image does not exist
+            if "get" in cmd and "imagestreamtag" in cmd:
+                return MagicMock(returncode=1, stdout="", stderr="not found")
+            # Simulate buildconfig does not exist
+            if "get" in cmd and "buildconfig" in cmd:
+                return MagicMock(returncode=1, stdout="", stderr="not found")
+            # Simulate successful build
+            if "start-build" in cmd:
+                return MagicMock(
+                    returncode=0, stdout="build/paude-proxy-abc123-1 started", stderr=""
+                )
+            # Simulate build completion
+            if "get" in cmd and "build" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(returncode=0, stdout="Complete", stderr="")
+            # Simulate imagestream reference
+            if "get" in cmd and "imagestream" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(
+                    returncode=0,
+                    stdout="image-registry.svc:5000/test-ns/paude-proxy-abc123",
+                    stderr="",
+                )
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        # Mock build log streaming
+        with patch("subprocess.Popen") as mock_popen:
+            mock_popen.return_value = MagicMock()
+            mock_popen.return_value.terminate = MagicMock()
+            result = backend.ensure_proxy_image_via_build(
+                script_dir=tmp_path,
+                force_rebuild=False,
+                session_name="test-session",
+            )
+
+        assert "paude-proxy" in result
+        # Verify start-build was called
+        start_build_calls = [
+            c for c in mock_run.call_args_list if "start-build" in str(c)
+        ]
+        assert len(start_build_calls) >= 1
+
+    @patch("subprocess.run")
+    def test_ensure_proxy_image_via_build_reuses_existing(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """ensure_proxy_image_via_build reuses existing image when available."""
+        # Create mock proxy directory
+        proxy_dir = tmp_path / "containers" / "proxy"
+        proxy_dir.mkdir(parents=True)
+        (proxy_dir / "Dockerfile").write_text("FROM centos:9")
+        (proxy_dir / "squid.conf").write_text("http_port 3128")
+        (proxy_dir / "entrypoint.sh").write_text("#!/bin/bash")
+
+        def run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
+            cmd = args[0] if args else kwargs.get("args", [])
+            # Simulate image exists
+            if "get" in cmd and "imagestreamtag" in cmd:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            # Simulate imagestream reference
+            if "get" in cmd and "imagestream" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(
+                    returncode=0,
+                    stdout="image-registry.svc:5000/test-ns/paude-proxy-abc123",
+                    stderr="",
+                )
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        result = backend.ensure_proxy_image_via_build(
+            script_dir=tmp_path,
+            force_rebuild=False,
+        )
+
+        assert "paude-proxy" in result
+        # Verify no start-build was called
+        start_build_calls = [
+            c for c in mock_run.call_args_list if "start-build" in str(c)
+        ]
+        assert len(start_build_calls) == 0
+
+    @patch("subprocess.run")
+    def test_ensure_proxy_image_via_build_force_rebuild(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """ensure_proxy_image_via_build rebuilds when force_rebuild=True."""
+        # Create mock proxy directory
+        proxy_dir = tmp_path / "containers" / "proxy"
+        proxy_dir.mkdir(parents=True)
+        (proxy_dir / "Dockerfile").write_text("FROM centos:9")
+        (proxy_dir / "squid.conf").write_text("http_port 3128")
+        (proxy_dir / "entrypoint.sh").write_text("#!/bin/bash")
+
+        def run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
+            cmd = args[0] if args else kwargs.get("args", [])
+            # Simulate successful build
+            if "start-build" in cmd:
+                return MagicMock(
+                    returncode=0, stdout="build/paude-proxy-abc123-1 started", stderr=""
+                )
+            # Simulate build completion
+            if "get" in cmd and "build" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(returncode=0, stdout="Complete", stderr="")
+            # Simulate imagestream reference
+            if "get" in cmd and "imagestream" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(
+                    returncode=0,
+                    stdout="image-registry.svc:5000/test-ns/paude-proxy-abc123",
+                    stderr="",
+                )
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with patch("subprocess.Popen") as mock_popen:
+            mock_popen.return_value = MagicMock()
+            mock_popen.return_value.terminate = MagicMock()
+            result = backend.ensure_proxy_image_via_build(
+                script_dir=tmp_path,
+                force_rebuild=True,
+            )
+
+        assert "paude-proxy" in result
+        # Verify start-build was called (forced rebuild)
+        start_build_calls = [
+            c for c in mock_run.call_args_list if "start-build" in str(c)
+        ]
+        assert len(start_build_calls) == 1
+
+    def test_ensure_proxy_image_via_build_raises_if_no_proxy_dir(
+        self, tmp_path: Path
+    ) -> None:
+        """ensure_proxy_image_via_build raises if proxy dir not found."""
+        from paude.backends.openshift import OpenShiftError
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with pytest.raises(OpenShiftError, match="Proxy container directory"):
+            backend.ensure_proxy_image_via_build(script_dir=tmp_path)
+
+    def test_ensure_proxy_image_via_build_raises_if_dockerfile_missing(
+        self, tmp_path: Path
+    ) -> None:
+        """ensure_proxy_image_via_build raises if Dockerfile is missing."""
+        from paude.backends.openshift import OpenShiftError
+
+        # Create proxy directory but without Dockerfile
+        proxy_dir = tmp_path / "containers" / "proxy"
+        proxy_dir.mkdir(parents=True)
+        (proxy_dir / "squid.conf").write_text("http_port 3128")
+        (proxy_dir / "entrypoint.sh").write_text("#!/bin/bash")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with pytest.raises(OpenShiftError, match="Proxy Dockerfile not found"):
+            backend.ensure_proxy_image_via_build(script_dir=tmp_path)
+
+
+class TestSessionConfigProxyImage:
+    """Tests for proxy_image field in SessionConfig."""
+
+    def test_session_config_has_proxy_image_field(self) -> None:
+        """SessionConfig has optional proxy_image field."""
+        from paude.backends.base import SessionConfig
+
+        config = SessionConfig(
+            name="test",
+            workspace=Path("/test"),
+            image="paude:latest",
+            proxy_image="paude-proxy:latest",
+        )
+        assert config.proxy_image == "paude-proxy:latest"
+
+    def test_session_config_proxy_image_defaults_to_none(self) -> None:
+        """SessionConfig.proxy_image defaults to None."""
+        from paude.backends.base import SessionConfig
+
+        config = SessionConfig(
+            name="test",
+            workspace=Path("/test"),
+            image="paude:latest",
+        )
+        assert config.proxy_image is None
+
+    @patch("subprocess.run")
+    def test_create_session_uses_provided_proxy_image(
+        self, mock_run: MagicMock
+    ) -> None:
+        """create_session uses config.proxy_image when provided."""
+        proxy_image_used = []
+
+        def run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
+            cmd = args[0] if args else kwargs.get("args", [])
+            input_data = kwargs.get("input")
+            # Capture proxy image from deployment spec
+            if "apply" in cmd and input_data and "paude-proxy" in input_data:
+                proxy_image_used.append(input_data)
+            # Return "Running" for pod status check
+            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return ready for proxy deployment
+            if (
+                "get" in cmd
+                and "deployment" in cmd
+                and "jsonpath" in str(cmd)
+                and "readyReplicas" in str(cmd)
+            ):
+                return MagicMock(returncode=0, stdout="1", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        from paude.backends.base import SessionConfig
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        config = SessionConfig(
+            name="test-session",
+            workspace=Path("/home/user/project"),
+            image="paude:latest",
+            allowed_domains=[".example.com"],
+            proxy_image="custom-proxy:v1",
+        )
+
+        backend.create_session(config)
+
+        # Verify custom proxy image was used
+        assert len(proxy_image_used) >= 1
+
+        # Parse deployment spec and verify exact image field
+        deployment_spec = json.loads(proxy_image_used[0])
+        assert deployment_spec["kind"] == "Deployment"
+        container = deployment_spec["spec"]["template"]["spec"]["containers"][0]
+        assert container["image"] == "custom-proxy:v1"
+
+
+class TestBuildConfigNamePrefix:
+    """Tests for name_prefix parameter in build helper methods."""
+
+    @patch("subprocess.run")
+    def test_create_build_config_uses_name_prefix(
+        self, mock_run: MagicMock
+    ) -> None:
+        """_create_build_config uses name_prefix in resource names."""
+
+        def run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
+            cmd = args[0] if args else kwargs.get("args", [])
+            # BuildConfig does not exist
+            if "get" in cmd and "buildconfig" in cmd:
+                return MagicMock(returncode=1, stdout="", stderr="not found")
+            # Apply succeeds
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._create_build_config("abc123", name_prefix="paude-proxy")
+
+        # Verify apply calls use the correct name
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        assert len(apply_calls) >= 1
+        for call in apply_calls:
+            input_data = call[1].get("input", "")
+            if input_data:
+                spec = json.loads(input_data)
+                assert spec["metadata"]["name"] == "paude-proxy-abc123"
+
+    @patch("subprocess.run")
+    def test_start_binary_build_uses_name_prefix(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """_start_binary_build uses name_prefix in build config name."""
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="build/paude-proxy-abc123-1 started", stderr=""
+        )
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        build_name = backend._start_binary_build(
+            "abc123", tmp_path, name_prefix="paude-proxy"
+        )
+
+        # Verify build name contains the prefix
+        assert "paude-proxy" in build_name
+
+        # Verify start-build was called with correct build config name
+        start_calls = [c for c in mock_run.call_args_list if "start-build" in str(c)]
+        assert len(start_calls) >= 1
+        cmd = start_calls[0][0][0]
+        assert "paude-proxy-abc123" in str(cmd)
+
+    @patch("subprocess.run")
+    def test_get_imagestream_reference_uses_name_prefix(
+        self, mock_run: MagicMock
+    ) -> None:
+        """_get_imagestream_reference uses name_prefix in imagestream name."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="image-registry.svc:5000/test-ns/paude-proxy-abc123",
+            stderr="",
+        )
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        ref = backend._get_imagestream_reference("abc123", name_prefix="paude-proxy")
+
+        assert "paude-proxy-abc123" in ref
+
+        # Verify get imagestream was called with correct name
+        get_calls = [
+            c for c in mock_run.call_args_list
+            if "get" in str(c) and "imagestream" in str(c)
+        ]
+        assert len(get_calls) >= 1
+        cmd = get_calls[0][0][0]
+        assert "paude-proxy-abc123" in str(cmd)

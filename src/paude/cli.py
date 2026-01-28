@@ -445,6 +445,18 @@ def session_create(
             domains_input = allowed_domains if allowed_domains else ["default"]
             expanded_domains = expand_domains(domains_input)
 
+            # Build proxy image when needed (PAUDE_DEV=1 and proxy is used)
+            proxy_image: str | None = None
+            if not is_unrestricted(expanded_domains):
+                dev_mode = os.environ.get("PAUDE_DEV", "0") == "1"
+                if dev_mode and os_script_dir:
+                    typer.echo("Building proxy image in OpenShift cluster...")
+                    proxy_image = os_backend.ensure_proxy_image_via_build(
+                        script_dir=os_script_dir,
+                        force_rebuild=rebuild,
+                        session_name=session_name,
+                    )
+
             # Show warnings for dangerous configurations
             if yolo and is_unrestricted(expanded_domains):
                 typer.echo(
@@ -471,6 +483,7 @@ def session_create(
                 yolo=yolo,
                 pvc_size=pvc_size,
                 storage_class=storage_class,
+                proxy_image=proxy_image,
             )
 
             session = os_backend.create_session(session_config)
