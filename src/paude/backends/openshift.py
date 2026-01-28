@@ -225,6 +225,7 @@ class OpenShiftBackend:
         check: bool = True,
         input_data: str | None = None,
         timeout: int | None = None,
+        namespace: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Run an oc command.
 
@@ -235,6 +236,10 @@ class OpenShiftBackend:
             input_data: Optional input to pass to stdin.
             timeout: Timeout in seconds (default OC_DEFAULT_TIMEOUT).
                      Use None to inherit class default, 0 for no timeout.
+            namespace: Optional namespace to pass via -n flag. This is inserted
+                      as a global oc flag before the subcommand, not passed to
+                      the subcommand itself (important for rsync where -n means
+                      dry-run to rsync, not namespace).
 
         Returns:
             CompletedProcess result.
@@ -249,6 +254,10 @@ class OpenShiftBackend:
         # Add context if specified
         if self._config.context:
             cmd.extend(["--context", self._config.context])
+
+        # Add namespace as global flag (before subcommand)
+        if namespace:
+            cmd.extend(["-n", namespace])
 
         cmd.extend(args)
 
@@ -315,13 +324,12 @@ class OpenShiftBackend:
         """
         for attempt in range(1, self.RSYNC_MAX_RETRIES + 1):
             try:
-                # Build rsync args
+                # Build rsync args (namespace is passed to _run_oc, not here)
                 rsync_args = [
                     "rsync",
                     "--progress",
                     source,
                     dest,
-                    "-n", namespace,
                     "--no-perms",
                 ]
                 if delete:
@@ -335,6 +343,7 @@ class OpenShiftBackend:
                     timeout=self.RSYNC_TIMEOUT,
                     capture=True,
                     check=False,
+                    namespace=namespace,
                 )
 
                 # Show output when verbose is enabled
