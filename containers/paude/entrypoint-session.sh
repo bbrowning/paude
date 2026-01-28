@@ -2,7 +2,7 @@
 set -e
 
 # Entrypoint for persistent sessions (Podman and OpenShift)
-# Handles: HOME setup, credentials from PVC, venv creation, dependency installation, Claude startup
+# Handles: HOME setup, credentials from tmpfs, venv creation, dependency installation, Claude startup
 
 # Ensure HOME is set correctly for OpenShift arbitrary UID
 # OpenShift runs containers with random UIDs that don't exist in /etc/passwd
@@ -34,14 +34,14 @@ touch "$HOME/.gitconfig" 2>/dev/null || true
 git config --global --add safe.directory '*' 2>/dev/null || true
 
 # Wait for credentials to be synced by the host (via oc cp)
-# The host creates /pvc/config/.ready when sync is complete
+# The host creates /credentials/.ready when sync is complete
 wait_for_credentials() {
-    local ready_file="/pvc/config/.ready"
+    local ready_file="/credentials/.ready"
     local timeout=300
     local elapsed=0
 
-    # Only wait if /pvc exists (OpenShift with PVC-based credentials)
-    if [[ ! -d /pvc ]]; then
+    # Only wait if /credentials exists (OpenShift with tmpfs-based credentials)
+    if [[ ! -d /credentials ]]; then
         return 0
     fi
 
@@ -59,11 +59,11 @@ wait_for_credentials() {
     echo "Credentials ready." >&2
 }
 
-# Set up credentials from PVC-based storage
-setup_credentials_from_pvc() {
-    local config_path="/pvc/config"
+# Set up credentials from tmpfs-based storage (/credentials)
+setup_credentials() {
+    local config_path="/credentials"
 
-    # Only set up if /pvc/config exists
+    # Only set up if /credentials exists (OpenShift with tmpfs volume)
     if [[ ! -d "$config_path" ]]; then
         return 0
     fi
@@ -112,12 +112,12 @@ setup_credentials_from_pvc() {
     fi
 }
 
-# Wait for and set up PVC-based credentials
+# Wait for and set up tmpfs-based credentials
 wait_for_credentials
-setup_credentials_from_pvc
+setup_credentials
 
 # Legacy: Copy seed files if provided via Secret mount (Podman backend fallback)
-if [[ -d /tmp/claude.seed ]] && [[ ! -d /pvc/config ]]; then
+if [[ -d /tmp/claude.seed ]] && [[ ! -d /credentials ]]; then
     mkdir -p "$HOME/.claude"
     chmod g+rwX "$HOME/.claude" 2>/dev/null || true
     for f in /tmp/claude.seed/*; do

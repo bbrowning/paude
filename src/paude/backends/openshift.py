@@ -1168,8 +1168,9 @@ class OpenShiftBackend:
     ) -> dict[str, Any]:
         """Generate a Kubernetes StatefulSet specification for persistent sessions.
 
-        Credentials (gcloud, claude, gitconfig) are synced to /pvc/config via
-        _sync_config_to_pod() after the pod starts, not mounted as Secrets.
+        Credentials (gcloud, claude, gitconfig) are synced to /credentials via
+        _sync_config_to_pod() after the pod starts. The /credentials path is a
+        tmpfs emptyDir (RAM-only) for security - credentials never persist to disk.
 
         Args:
             session_name: Session name.
@@ -1188,16 +1189,29 @@ class OpenShiftBackend:
         # Convert env dict to list of name/value dicts
         env_list = [{"name": k, "value": v} for k, v in env.items()]
 
-        # PVC mounted at /pvc - credentials and workspace synced there
+        # tmpfs volume for credentials (RAM-only, never persisted to disk)
+        # Automatically cleared when pod stops/restarts
+        volumes: list[dict[str, Any]] = [
+            {
+                "name": "credentials",
+                "emptyDir": {
+                    "medium": "Memory",
+                    "sizeLimit": "100Mi",
+                },
+            },
+        ]
+
+        # PVC mounted at /pvc for workspace, tmpfs at /credentials for secrets
         volume_mounts: list[dict[str, Any]] = [
             {
                 "name": "workspace",
                 "mountPath": "/pvc",
             },
+            {
+                "name": "credentials",
+                "mountPath": "/credentials",
+            },
         ]
-
-        # No additional volumes - credentials are synced via oc cp to /pvc/config
-        volumes: list[dict[str, Any]] = []
 
         # Build PVC spec for volumeClaimTemplates
         pvc_spec: dict[str, Any] = {
@@ -1439,7 +1453,7 @@ class OpenShiftBackend:
             session_env["https_proxy"] = proxy_url
 
         # Generate and apply StatefulSet spec
-        # Credentials are synced to /pvc/config when session starts, not via Secrets
+        # Credentials are synced to /credentials (tmpfs) when session starts
         sts_spec = self._generate_statefulset_spec(
             session_name=session_name,
             image=config.image,
@@ -1536,20 +1550,32 @@ class OpenShiftBackend:
 
         print(f"Session '{name}' deleted.", file=sys.stderr)
 
-    def _sync_config_to_pod(
+    def _is_config_synced(self, pod_name: str) -> bool:
+        """Check if configuration has already been synced to the pod.
+
+        Returns True if /credentials/.ready exists, indicating a previous
+        full config sync. Used to determine if we need a full sync or just
+        a credentials refresh.
+        """
+        config_path = "/credentials"
+        result = self._run_oc(
+            "exec", pod_name, "-n", self.namespace, "--",
+            "test", "-f", f"{config_path}/.ready",
+            check=False,
+            timeout=self.OC_EXEC_TIMEOUT,
+        )
+        return result.returncode == 0
+
+    def _sync_credentials_to_pod(
         self,
         pod_name: str,
         verbose: bool = False,
     ) -> None:
-        """Sync credentials to pod /pvc/config/ directory.
+        """Refresh gcloud credentials on the pod (fast, every connect).
 
-        Creates the config directory structure and syncs:
-        - gcloud credentials (ADC, credentials.db, access_tokens.db)
-        - Claude config files (settings.json, credentials.json, etc.)
-        - gitconfig
-        - global gitignore (~/.config/git/ignore)
-
-        Uses mkdir -p (idempotent) with chmod g+rwX for OpenShift arbitrary UID.
+        Only syncs gcloud credential files. Used on reconnects when full
+        config is already present. This ensures fresh OAuth tokens without
+        re-syncing static configuration.
 
         Args:
             pod_name: Name of the pod to sync to.
@@ -1557,7 +1583,70 @@ class OpenShiftBackend:
         """
         ns = self.namespace
         home = Path.home()
-        config_path = "/pvc/config"
+        config_path = "/credentials"
+
+        print("Refreshing credentials...", file=sys.stderr)
+
+        # Sync gcloud credentials
+        gcloud_dir = home / ".config" / "gcloud"
+        gcloud_files = [
+            "application_default_credentials.json",
+            "credentials.db",
+            "access_tokens.db",
+        ]
+        gcloud_dest = f"{pod_name}:{config_path}/gcloud"
+        for filename in gcloud_files:
+            filepath = gcloud_dir / filename
+            if filepath.exists():
+                try:
+                    self._run_oc(
+                        "cp", str(filepath), f"{gcloud_dest}/{filename}",
+                        "-n", ns, check=False,
+                    )
+                except Exception:  # noqa: S110
+                    pass  # Skip unreadable files
+
+        # Touch .ready to update timestamp
+        self._run_oc(
+            "exec", pod_name, "-n", ns, "--",
+            "touch", f"{config_path}/.ready",
+            check=False,
+            timeout=self.OC_EXEC_TIMEOUT,
+        )
+
+        if verbose:
+            print("  Refreshed gcloud credentials", file=sys.stderr)
+        print("Credentials refreshed.", file=sys.stderr)
+
+    def _sync_config_to_pod(
+        self,
+        pod_name: str,
+        verbose: bool = False,
+    ) -> None:
+        """Sync all configuration to pod /credentials/ directory (tmpfs).
+
+        Full sync including:
+        - gcloud credentials (ADC, credentials.db, access_tokens.db)
+        - Claude config files (settings.json, credentials.json, etc.)
+        - gitconfig
+        - global gitignore (~/.config/git/ignore)
+
+        Called on first connect after pod start. Subsequent connects use
+        _sync_credentials_to_pod() for faster credential-only refresh.
+
+        Uses mkdir -p (idempotent) with chmod g+rwX for OpenShift arbitrary UID.
+
+        The /credentials path is a tmpfs (RAM-only) volume, so credentials:
+        - Never persist to disk
+        - Are automatically cleared when pod stops
+
+        Args:
+            pod_name: Name of the pod to sync to.
+            verbose: Whether to show sync progress.
+        """
+        ns = self.namespace
+        home = Path.home()
+        config_path = "/credentials"
 
         print("Syncing configuration to pod...", file=sys.stderr)
 
@@ -1606,7 +1695,7 @@ class OpenShiftBackend:
             for pattern in CLAUDE_EXCLUDES:
                 exclude_args.extend(["--exclude", pattern])
 
-            # Rsync ~/.claude/ to /pvc/config/claude/
+            # Rsync ~/.claude/ to /credentials/claude/
             rsync_success = self._rsync_with_retry(
                 f"{claude_dir}/",
                 f"{pod_name}:{config_path}/claude",
@@ -1664,17 +1753,31 @@ class OpenShiftBackend:
             except Exception:  # noqa: S110
                 pass
 
-        # Make synced files read-only (but group-readable for OpenShift)
-        # and create .ready marker
+        # Make synced files group-readable for OpenShift (non-fatal if chmod fails)
+        # and create .ready marker to signal entrypoint that credentials are ready
         self._run_oc(
             "exec", pod_name, "-n", ns, "--",
             "bash", "-c",
-            f"chmod -R g+rX {config_path} && "
+            # chmod may fail on files we don't own, so suppress errors
+            f"(chmod -R g+rX {config_path} 2>/dev/null || true) && "
             f"touch {config_path}/.ready && "
             f"chmod g+r {config_path}/.ready",
             check=False,
             timeout=self.OC_EXEC_TIMEOUT,
         )
+
+        # Verify .ready was created (critical for entrypoint to proceed)
+        verify_result = self._run_oc(
+            "exec", pod_name, "-n", ns, "--",
+            "test", "-f", f"{config_path}/.ready",
+            check=False,
+            timeout=self.OC_EXEC_TIMEOUT,
+        )
+        if verify_result.returncode != 0:
+            print(
+                f"Warning: Failed to create {config_path}/.ready marker",
+                file=sys.stderr,
+            )
 
         print("Configuration synced.", file=sys.stderr)
 
@@ -1782,8 +1885,8 @@ class OpenShiftBackend:
             print(f"Pod failed to start: {e}", file=sys.stderr)
             return 1
 
-        # Sync credentials to pod (gcloud, claude config, gitconfig)
-        self._sync_config_to_pod(pod_name, verbose=verbose)
+        # Note: Credentials are synced in connect_session() which is called below.
+        # This ensures credentials are refreshed on every connect, not just start.
 
         # Sync workspace if requested
         if sync:
@@ -1841,6 +1944,9 @@ class OpenShiftBackend:
     def connect_session(self, name: str) -> int:
         """Attach to a running session.
 
+        On first connect: syncs full configuration (gcloud, claude, git).
+        On reconnect: only refreshes gcloud credentials (fast).
+
         Args:
             name: Session name.
 
@@ -1865,6 +1971,14 @@ class OpenShiftBackend:
         if result.returncode != 0 or result.stdout.strip() != "Running":
             print(f"Session '{name}' is not running.", file=sys.stderr)
             return 1
+
+        # Check if this is first connect or reconnect
+        if self._is_config_synced(pod_name):
+            # Reconnect: only refresh gcloud credentials (fast)
+            self._sync_credentials_to_pod(pod_name, verbose=False)
+        else:
+            # First connect: full config sync (gcloud + claude + git)
+            self._sync_config_to_pod(pod_name, verbose=False)
 
         # Attach using oc exec with interactive TTY
         exec_cmd = ["oc", "exec", "-it", "-n", ns, pod_name, "--"]

@@ -112,9 +112,20 @@ paude create my-project --backend=openshift --storage-class=fast-ssd
 
 ## Security
 
-### Configuration Sync
+### Credential Security (tmpfs)
 
-Configuration is synced via `oc rsync` to PVC storage on session start:
+Credentials are stored in RAM-only storage for enhanced security:
+
+**Security Model:**
+- Credentials use a tmpfs (Memory-backed) emptyDir volume at `/credentials`
+- Credentials never persist to disk - stored only in RAM
+- Automatically cleared when pod stops or restarts
+- Cannot be recovered from PVC snapshots or disk images
+- Refreshed on every `paude connect` for fresh tokens
+
+**Configuration Sync:**
+
+Configuration is synced via `oc cp` to tmpfs on session start and reconnect:
 
 **Synced from host:**
 - `~/.config/gcloud` → gcloud credentials for Vertex AI authentication
@@ -131,6 +142,12 @@ Configuration is synced via `oc rsync` to PVC storage on session start:
 - `debug/`, `file-history/` - Debug logs
 
 Plugin paths are automatically rewritten from host paths to container paths.
+
+**Credential Refresh:**
+- **First connect** (after pod start): Full sync of gcloud, claude config, and gitconfig
+- **Reconnect** (subsequent connects): Only gcloud credentials refreshed (fast)
+- This ensures fresh OAuth tokens propagate if you re-authenticate locally
+- Long-running pods stay current with local credential changes
 
 ### Network Filtering
 
@@ -257,14 +274,15 @@ oc rsync ./local-dir/ pod-name:/workspace/ -n paude
 │  │  │  │   paude    │  │    └───────────────────────┘ │ │
 │  │  │  │ container  │  │                              │ │
 │  │  │  │  + tmux    │  │    ┌───────────────────────┐ │ │
-│  │  │  └────────────┘  │    │   PVC: paude-config   │ │ │
-│  │  │                  │    │  - gcloud creds       │ │ │
-│  │  │  Mounts:         │    │  - ~/.claude/ dir     │ │ │
-│  │  │  - /workspace    │    │    (incl. plugins)    │ │ │
-│  │  │  - /pvc/config   │    │  - gitconfig          │ │ │
-│  │  └──────────────────┘    └───────────────────────┘ │ │
+│  │  │  └────────────┘  │    │  tmpfs: /credentials  │ │ │
+│  │  │                  │    │  (RAM-only, ephemeral) │ │ │
+│  │  │  Mounts:         │    │  - gcloud creds       │ │ │
+│  │  │  - /pvc (PVC)    │    │  - ~/.claude/ dir     │ │ │
+│  │  │  - /credentials  │    │  - gitconfig          │ │ │
+│  │  │    (tmpfs)       │    └───────────────────────┘ │ │
+│  │  └──────────────────┘                              │ │
 │  │         ↑                                          │ │
-│  │         │ oc rsync (workspace + config)            │ │
+│  │         │ oc rsync (workspace) / oc cp (creds)     │ │
 │  │         ↓                                          │ │
 │  └─────────┼──────────────────────────────────────────┘ │
 └────────────┼────────────────────────────────────────────┘
