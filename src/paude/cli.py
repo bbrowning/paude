@@ -480,8 +480,8 @@ def session_create(
             if yolo:
                 typer.echo("  Mode: YOLO (no permission prompts)")
             typer.echo("")
-            typer.echo("To start working:")
-            typer.echo("  paude start --backend=openshift")
+            typer.echo("Session is running. Connect with:")
+            typer.echo("  paude connect --backend=openshift")
         except BuildFailedError as e:
             typer.echo(f"Build failed: {e}", err=True)
             raise typer.Exit(1) from None

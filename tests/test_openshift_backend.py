@@ -252,7 +252,14 @@ class TestOpenShiftCreateSession:
         self, mock_run: MagicMock
     ) -> None:
         """Create session creates a StatefulSet."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            # Return "Running" for pod status check
+            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(returncode=0, stdout="Running", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
 
         from paude.backends.base import SessionConfig
 
@@ -266,7 +273,7 @@ class TestOpenShiftCreateSession:
         session = backend.create_session(config)
 
         assert session.name == "test-session"
-        assert session.status == "stopped"
+        assert session.status == "running"
         assert session.backend_type == "openshift"
         assert session.container_id == "paude-test-session-0"
         assert session.volume_name == "workspace-paude-test-session-0"
@@ -310,6 +317,51 @@ class TestOpenShiftCreateSession:
 
         with pytest.raises(SessionExistsError):
             backend.create_session(config)
+
+    @patch("subprocess.run")
+    def test_create_session_waits_for_pod_and_syncs_config(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Create session waits for pod ready and syncs config."""
+        calls_log = []
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            calls_log.append(cmd)
+            # Return "Running" for pod status check
+            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(returncode=0, stdout="Running", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        from paude.backends.base import SessionConfig
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        config = SessionConfig(
+            name="test-session",
+            workspace=Path("/home/user/project"),
+            image="paude:latest",
+        )
+
+        session = backend.create_session(config)
+
+        # Verify pod status check was called (waiting for pod ready)
+        pod_status_calls = [
+            c for c in calls_log
+            if "get" in c and "pod" in c and "jsonpath" in str(c)
+        ]
+        assert len(pod_status_calls) >= 1, "Should check pod status"
+
+        # Verify sync was called (exec mkdir for config directory)
+        sync_calls = [
+            c for c in calls_log
+            if "exec" in c and "mkdir" in str(c)
+        ]
+        assert len(sync_calls) >= 1, "Should sync config to pod"
+
+        # Verify session is returned as running
+        assert session.status == "running"
 
 
 class TestOpenShiftDeleteSession:
@@ -810,7 +862,7 @@ class TestOpenShiftStatefulSetSpec:
 
         assert spec["kind"] == "StatefulSet"
         assert spec["metadata"]["name"] == "paude-test-session"
-        assert spec["spec"]["replicas"] == 0  # Created stopped
+        assert spec["spec"]["replicas"] == 1  # Created running
         assert "volumeClaimTemplates" in spec["spec"]
         assert len(spec["spec"]["volumeClaimTemplates"]) > 0
 
@@ -1431,7 +1483,17 @@ class TestCreateSessionWithProxy:
         self, mock_run: MagicMock
     ) -> None:
         """create_session creates proxy when allowed_domains is set."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            # Return "Running" for pod status check
+            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return "1" for deployment readiness check (proxy)
+            if "get" in cmd and "deployment" in cmd and "readyReplicas" in str(cmd):
+                return MagicMock(returncode=0, stdout="1", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
 
         from paude.backends.base import SessionConfig
 
@@ -1462,7 +1524,17 @@ class TestCreateSessionWithProxy:
         self, mock_run: MagicMock
     ) -> None:
         """create_session passes ALLOWED_DOMAINS to proxy deployment."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            # Return "Running" for pod status check
+            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return "1" for deployment readiness check (proxy)
+            if "get" in cmd and "deployment" in cmd and "readyReplicas" in str(cmd):
+                return MagicMock(returncode=0, stdout="1", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
 
         from paude.backends.base import SessionConfig
 
@@ -1497,7 +1569,17 @@ class TestCreateSessionWithProxy:
         self, mock_run: MagicMock
     ) -> None:
         """create_session sets HTTP_PROXY env vars when allowed_domains is set."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            # Return "Running" for pod status check
+            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return "1" for deployment readiness check (proxy)
+            if "get" in cmd and "deployment" in cmd and "readyReplicas" in str(cmd):
+                return MagicMock(returncode=0, stdout="1", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
 
         from paude.backends.base import SessionConfig
 
@@ -1534,7 +1616,13 @@ class TestCreateSessionWithProxy:
         self, mock_run: MagicMock
     ) -> None:
         """create_session does not create proxy when allowed_domains=None."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(returncode=0, stdout="Running", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
 
         from paude.backends.base import SessionConfig
 
@@ -1679,7 +1767,17 @@ class TestProxyImageDerivation:
         self, mock_run: MagicMock
     ) -> None:
         """Proxy image is derived by replacing image name pattern."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            # Return "Running" for pod status check
+            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return "1" for deployment readiness check (proxy)
+            if "get" in cmd and "deployment" in cmd and "readyReplicas" in str(cmd):
+                return MagicMock(returncode=0, stdout="1", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
 
         from paude.backends.base import SessionConfig
 
@@ -1712,7 +1810,17 @@ class TestProxyImageDerivation:
         self, mock_run: MagicMock
     ) -> None:
         """Falls back to default proxy image when pattern doesn't match."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            # Return "Running" for pod status check
+            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return "1" for deployment readiness check (proxy)
+            if "get" in cmd and "deployment" in cmd and "readyReplicas" in str(cmd):
+                return MagicMock(returncode=0, stdout="1", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
 
         from paude.backends.base import SessionConfig
 
@@ -2053,7 +2161,17 @@ class TestCreateSessionWithProxyNetworkPolicy:
         self, mock_run: MagicMock
     ) -> None:
         """create_session creates NetworkPolicy for proxy."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            # Return "Running" for pod status check
+            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return "1" for deployment readiness check (proxy)
+            if "get" in cmd and "deployment" in cmd and "readyReplicas" in str(cmd):
+                return MagicMock(returncode=0, stdout="1", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
 
         from paude.backends.base import SessionConfig
 
