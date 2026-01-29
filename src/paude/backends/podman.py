@@ -161,13 +161,15 @@ class PodmanBackend:
         # The actual session setup happens when attaching via exec
         print(f"Creating container {container_name}...", file=sys.stderr)
         try:
-            # Use /pvc/workspace as workdir - users sync code via git remote
+            # Use /pvc as workdir - /pvc/workspace is created by entrypoint
+            # We can't use /pvc/workspace directly because it doesn't exist
+            # on first container start (volume is empty)
             self._runner.create_container(
                 name=container_name,
                 image=config.image,
                 mounts=mounts,
                 env=env,
-                workdir="/pvc/workspace",
+                workdir="/pvc",
                 labels=labels,
                 entrypoint="sleep",
                 command=["infinity"],
