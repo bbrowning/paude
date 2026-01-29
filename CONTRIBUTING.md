@@ -226,6 +226,17 @@ rm -rf /tmp/test-paude
 - Run `make typecheck` to verify types (uses mypy in strict mode)
 - Follow existing patterns in the codebase
 
+## Code Quality Standards
+
+This project enforces strict code quality standards to maintain long-term maintainability:
+
+- **File size:** Maximum 400 lines (evaluate splitting at 300+)
+- **Method size:** Maximum 50 lines (evaluate extraction at 30+)
+- **Class size:** Maximum 20 methods per class
+- **No duplication:** Extract repeated code to shared utilities
+
+For detailed standards including abstraction patterns, refactoring triggers, and testability requirements, see `.claude/CLAUDE.md`.
+
 ## Adding New Features
 
 For significant features, follow the structured development process:

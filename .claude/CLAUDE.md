@@ -89,6 +89,76 @@ PAUDE_DEV=1 paude --help
 When adding Python functionality, add tests in `tests/test_<module>.py`.
 When adding a new CLI flag, add tests in `tests/test_cli.py`.
 
+## Code Quality Standards
+
+### File Organization
+
+**Maximum file length: 400 lines** (excluding tests)
+- Files over 300 lines: evaluate for splitting
+- Files over 400 lines: MUST split before adding new functionality
+
+**When to split files:**
+- Multiple unrelated classes in one file
+- File handles multiple layers of abstraction
+- Class has internal helpers that could stand alone
+
+**How to split:** Create a package directory with `__init__.py` preserving the public API.
+
+### Method/Function Standards
+
+**Maximum method length: 50 lines** (excluding docstrings)
+- Methods over 30 lines: evaluate for extraction
+- Methods over 50 lines: MUST refactor before adding logic
+
+**Single responsibility:** If you need "and" to describe what a method does, split it.
+
+**Extract when:**
+- Logic is repeated (even twice)
+- A code block has a comment explaining what it does
+- A conditional block exceeds 10 lines
+
+### Class Standards
+
+**Single Responsibility Principle:** A class should have only one reason to change.
+
+**Maximum methods per class: 20** (public + private combined)
+
+**Decompose when:**
+- Class file exceeds 400 lines
+- Methods group into 2+ distinct categories
+- Testing requires mocking many unrelated dependencies
+
+### Code Reuse
+
+**No duplication:** If code appears twice, extract to shared function.
+
+**Shared utilities locations:**
+- Cross-cutting: `src/paude/utils.py`
+- Backend-shared: `src/paude/backends/shared.py`
+
+### Abstraction Patterns
+
+**Protocols:** Use when 2+ implementations share the same API.
+
+**Builders:** Use for complex object construction (K8s specs, CLI arguments).
+
+**Dependency injection:** Accept dependencies via `__init__` for testability.
+
+### Refactoring Triggers
+
+| Metric | Threshold | Action |
+|--------|-----------|--------|
+| File length | > 400 lines | Split file |
+| Method length | > 50 lines | Extract methods |
+| Class methods | > 20 | Decompose class |
+| Duplicated code | 2+ occurrences | Extract to shared |
+
+### Testability
+
+- Accept dependencies via constructor, not created internally
+- Keep I/O at edges; business logic as pure functions
+- Wrap external commands (podman, oc) in testable classes
+
 ## Documentation Requirements
 
 When adding or changing user-facing features (flags, options, behavior):

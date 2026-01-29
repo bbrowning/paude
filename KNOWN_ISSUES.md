@@ -185,3 +185,66 @@ devspace sync --local-path=./src --container-path=/workspace \
 
 - `docs/features/2026-01-22-openshift-backend/RESEARCH.md` (detailed comparison)
 - `src/paude/backends/openshift.py` (would need new sync implementation)
+
+## Refactoring Backlog
+
+Technical debt identified during codebase analysis. Address these before adding significant new functionality to affected files.
+
+### REFACTOR-001: backends/openshift.py (2,397 lines)
+
+**Status**: Open
+**Priority**: High (blocks future OpenShift development)
+**Discovered**: 2026-01-29 during code quality analysis
+
+**Problem:** Single file with 7+ responsibilities, 40+ methods.
+
+**Recommended split:**
+```
+backends/openshift/
+├── __init__.py      # Public API
+├── backend.py       # OpenShiftBackend (session lifecycle only)
+├── config.py        # OpenShiftConfig dataclass
+├── exceptions.py    # OpenShift-specific exceptions
+├── resources.py     # K8s resource builders
+├── sync.py          # Config/credential sync
+└── build.py         # Binary build orchestration
+```
+
+**Long methods to extract:**
+- `_sync_config_to_pod` (162 lines) → split into sync_gcloud, sync_claude, sync_git
+- `_generate_statefulset_spec` → use builder pattern
+
+### REFACTOR-002: cli.py (1,601 lines)
+
+**Status**: Open
+**Priority**: High (every new command adds complexity)
+**Discovered**: 2026-01-29 during code quality analysis
+
+**Problem:** Commands implement logic instead of delegating. Backend detection repeated in every command.
+
+**Recommended changes:**
+- Extract `find_session_backend()` to shared function
+- Move image building orchestration to dedicated module
+- Each command should be < 50 lines, delegating to helpers
+
+### REFACTOR-003: container/image.py (708 lines)
+
+**Status**: Open
+**Priority**: Medium
+**Discovered**: 2026-01-29 during code quality analysis
+
+**Problem:** `prepare_build_context` is 319 lines mixing local and remote build logic.
+
+**Recommended split:**
+- Separate `BuildContextBuilder` class
+- Split remote vs local build paths
+
+### REFACTOR-004: Extract Duplicated Utilities
+
+**Status**: Open
+**Priority**: Medium
+**Discovered**: 2026-01-29 during code quality analysis
+
+**Duplicated code to extract to `backends/shared.py`:**
+- `_encode_path()` / `_decode_path()` (in both openshift.py and podman.py)
+- `_generate_session_name()` (in both backends)
