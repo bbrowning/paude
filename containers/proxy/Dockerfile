@@ -13,4 +13,4 @@ COPY --chmod=755 entrypoint.sh /usr/local/bin/paude-entrypoint.sh
 EXPOSE 3128
 
 ENTRYPOINT ["/usr/local/bin/paude-entrypoint.sh"]
-CMD ["-f", "/etc/squid/squid.conf", "-NYC"]
+CMD ["-NYC"]

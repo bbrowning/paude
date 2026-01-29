@@ -15,8 +15,6 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
     "pypi": [
         ".pypi.org",
         ".pythonhosted.org",
-        "pypi.org",
-        "files.pythonhosted.org",
     ],
 }
 
