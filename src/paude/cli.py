@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any
@@ -567,6 +568,7 @@ def session_delete(
             try:
                 backend_obj.delete_session(name, confirm=True)  # type: ignore[attr-defined]
                 typer.echo(f"Session '{name}' deleted.")
+                _cleanup_session_git_remote(name)
                 return
             except Exception as e:
                 typer.echo(f"Error deleting session: {e}", err=True)
@@ -580,6 +582,7 @@ def session_delete(
             backend_instance = PodmanBackend()
             backend_instance.delete_session(name, confirm=True)
             typer.echo(f"Session '{name}' deleted.")
+            _cleanup_session_git_remote(name)
         except SessionNotFoundError as e:
             typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1) from None
@@ -604,6 +607,7 @@ def session_delete(
             os_backend = OpenShiftBackend(config=openshift_config)
             os_backend.delete_session(name, confirm=True)
             typer.echo(f"Session '{name}' deleted.")
+            _cleanup_session_git_remote(name)
         except OpenshiftSessionNotFoundError as e:
             typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1) from None
@@ -1474,6 +1478,34 @@ def remote_command(
     typer.echo(f"Unknown action: {action}", err=True)
     typer.echo("Valid actions: add, list, remove", err=True)
     raise typer.Exit(1)
+
+
+def _cleanup_session_git_remote(session_name: str) -> None:
+    """Remove git remote for a session if it exists in current directory.
+
+    This is called after session deletion to clean up any associated git remote.
+    Failures are silently ignored to not disrupt the deletion workflow.
+    """
+    from paude.git_remote import is_git_repository
+
+    if not is_git_repository():
+        return
+
+    remote_name = f"paude-{session_name}"
+
+    # Run git remote remove directly to handle "No such remote" silently
+    result = subprocess.run(
+        ["git", "remote", "remove", remote_name],
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode == 0:
+        typer.echo(f"Removed git remote '{remote_name}'.")
+    elif "No such remote" not in result.stderr:
+        # Warn about unexpected failures, but don't fail the delete
+        err_msg = result.stderr.strip()
+        typer.echo(f"Warning: Failed to remove git remote: {err_msg}", err=True)
 
 
 def _find_session_for_remote(

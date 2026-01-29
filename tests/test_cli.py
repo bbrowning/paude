@@ -945,3 +945,192 @@ class TestStopMultiBackend:
 
         assert result.exit_code == 1
         assert "No running sessions to stop." in result.output
+
+
+class TestDeleteGitRemoteCleanup:
+    """Tests for git remote cleanup when deleting sessions."""
+
+    @patch("paude.cli._cleanup_session_git_remote")
+    @patch("paude.backends.PodmanBackend")
+    def test_delete_removes_git_remote(
+        self,
+        mock_podman_class: MagicMock,
+        mock_cleanup: MagicMock,
+    ):
+        """Delete calls git remote cleanup after successful session deletion."""
+        mock_podman = MagicMock()
+        mock_podman_class.return_value = mock_podman
+
+        result = runner.invoke(
+            app, ["delete", "my-session", "--confirm", "--backend=podman"]
+        )
+
+        assert result.exit_code == 0
+        assert "Session 'my-session' deleted." in result.output
+        mock_cleanup.assert_called_once_with("my-session")
+
+    @patch("paude.cli.subprocess.run")
+    @patch("paude.git_remote.is_git_repository")
+    @patch("paude.backends.PodmanBackend")
+    def test_delete_works_when_not_in_git_repo(
+        self,
+        mock_podman_class: MagicMock,
+        mock_is_git: MagicMock,
+        mock_subprocess_run: MagicMock,
+    ):
+        """Delete works when not in a git repository."""
+        mock_is_git.return_value = False
+        mock_podman = MagicMock()
+        mock_podman_class.return_value = mock_podman
+
+        result = runner.invoke(
+            app, ["delete", "my-session", "--confirm", "--backend=podman"]
+        )
+
+        assert result.exit_code == 0
+        assert "Session 'my-session' deleted." in result.output
+        # Should not show "Removed git remote" since not in git repo
+        assert "Removed git remote" not in result.output
+        # Should not have called git remote remove since not in git repo
+        mock_subprocess_run.assert_not_called()
+
+    @patch("paude.cli.subprocess.run")
+    @patch("paude.git_remote.is_git_repository")
+    @patch("paude.backends.PodmanBackend")
+    def test_delete_works_when_remote_does_not_exist(
+        self,
+        mock_podman_class: MagicMock,
+        mock_is_git: MagicMock,
+        mock_run: MagicMock,
+    ):
+        """Delete works when git remote doesn't exist."""
+        mock_is_git.return_value = True
+        mock_run.return_value = MagicMock(
+            returncode=1, stderr="error: No such remote: 'paude-my-session'"
+        )
+        mock_podman = MagicMock()
+        mock_podman_class.return_value = mock_podman
+
+        result = runner.invoke(
+            app, ["delete", "my-session", "--confirm", "--backend=podman"]
+        )
+
+        assert result.exit_code == 0
+        assert "Session 'my-session' deleted." in result.output
+        # Should not print anything about git remote since it didn't exist
+        assert "Removed git remote" not in result.output
+        assert "Warning" not in result.output
+        # Verify correct command was called
+        mock_run.assert_called_once_with(
+            ["git", "remote", "remove", "paude-my-session"],
+            capture_output=True,
+            text=True,
+        )
+
+    @patch("paude.cli.subprocess.run")
+    @patch("paude.git_remote.is_git_repository")
+    @patch("paude.backends.PodmanBackend")
+    def test_delete_shows_message_when_remote_removed(
+        self,
+        mock_podman_class: MagicMock,
+        mock_is_git: MagicMock,
+        mock_run: MagicMock,
+    ):
+        """Delete shows message when git remote is successfully removed."""
+        mock_is_git.return_value = True
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        mock_podman = MagicMock()
+        mock_podman_class.return_value = mock_podman
+
+        result = runner.invoke(
+            app, ["delete", "my-session", "--confirm", "--backend=podman"]
+        )
+
+        assert result.exit_code == 0
+        assert "Session 'my-session' deleted." in result.output
+        assert "Removed git remote 'paude-my-session'." in result.output
+
+    @patch("paude.cli.subprocess.run")
+    @patch("paude.git_remote.is_git_repository")
+    @patch("paude.backends.PodmanBackend")
+    def test_delete_continues_on_git_remote_failure(
+        self,
+        mock_podman_class: MagicMock,
+        mock_is_git: MagicMock,
+        mock_run: MagicMock,
+    ):
+        """Delete continues even if git remote removal fails unexpectedly."""
+        mock_is_git.return_value = True
+        mock_run.return_value = MagicMock(
+            returncode=1, stderr="fatal: some other error"
+        )
+        mock_podman = MagicMock()
+        mock_podman_class.return_value = mock_podman
+
+        result = runner.invoke(
+            app, ["delete", "my-session", "--confirm", "--backend=podman"]
+        )
+
+        # Session delete should still succeed
+        assert result.exit_code == 0
+        assert "Session 'my-session' deleted." in result.output
+        # Should show warning about git failure with the error message
+        output = result.stdout + (result.stderr or "")
+        assert "Warning: Failed to remove git remote: fatal: some other error" in output
+
+    @patch("paude.cli._cleanup_session_git_remote")
+    @patch("paude.backends.PodmanBackend")
+    def test_delete_does_not_cleanup_git_remote_on_failure(
+        self,
+        mock_podman_class: MagicMock,
+        mock_cleanup: MagicMock,
+    ):
+        """Git remote cleanup is NOT called when session deletion fails."""
+        mock_podman = MagicMock()
+        mock_podman.delete_session.side_effect = Exception("Deletion failed")
+        mock_podman_class.return_value = mock_podman
+
+        result = runner.invoke(
+            app, ["delete", "my-session", "--confirm", "--backend=podman"]
+        )
+
+        assert result.exit_code == 1
+        # Cleanup should NOT have been called since deletion failed
+        mock_cleanup.assert_not_called()
+
+    @patch("paude.cli._cleanup_session_git_remote")
+    @patch("paude.cli.find_session_backend")
+    def test_delete_cleans_git_remote_with_auto_detected_backend(
+        self,
+        mock_find_backend: MagicMock,
+        mock_cleanup: MagicMock,
+    ):
+        """Delete cleans up git remote when backend is auto-detected."""
+        mock_backend = MagicMock()
+        mock_find_backend.return_value = ("podman", mock_backend)
+
+        result = runner.invoke(app, ["delete", "auto-session", "--confirm"])
+
+        assert result.exit_code == 0
+        mock_cleanup.assert_called_once_with("auto-session")
+
+    @patch("paude.cli._cleanup_session_git_remote")
+    @patch("paude.backends.openshift.OpenShiftBackend")
+    @patch("paude.backends.openshift.OpenShiftConfig")
+    def test_delete_cleans_git_remote_with_openshift_backend(
+        self,
+        mock_os_config_class: MagicMock,
+        mock_os_backend_class: MagicMock,
+        mock_cleanup: MagicMock,
+    ):
+        """Delete cleans up git remote when using OpenShift backend."""
+        mock_os_backend = MagicMock()
+        mock_os_backend_class.return_value = mock_os_backend
+
+        result = runner.invoke(
+            app, ["delete", "os-session", "--confirm", "--backend=openshift"]
+        )
+
+        assert result.exit_code == 0
+        assert "Session 'os-session' deleted." in result.output
+        mock_cleanup.assert_called_once_with("os-session")
