@@ -1167,70 +1167,80 @@ class TestDeleteSessionCallsDeleteBuilds:
 
 
 class TestEnsureImageViaBuildPassesSessionName:
-    """Tests for ensure_image_via_build passing session_name to _start_binary_build."""
+    """Tests for ensure_image_via_build passing session_name to start_binary_build."""
 
     @patch("subprocess.run")
-    @patch("paude.backends.openshift.OpenShiftBackend._start_binary_build")
-    @patch("paude.backends.openshift.OpenShiftBackend._wait_for_build")
-    @patch("paude.backends.openshift.OpenShiftBackend._get_imagestream_reference")
-    @patch("paude.backends.openshift.OpenShiftBackend._create_build_config")
     def test_passes_session_name_to_start_binary_build(
         self,
-        mock_create_bc: MagicMock,
-        mock_get_ref: MagicMock,
-        mock_wait: MagicMock,
-        mock_start_build: MagicMock,
         mock_run: MagicMock,
         tmp_path: Path,
     ) -> None:
-        """ensure_image_via_build passes session_name to _start_binary_build."""
+        """ensure_image_via_build passes session_name to start_binary_build."""
         # Mock imagestreamtag check to return "not found" (need to build)
         mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
-        mock_start_build.return_value = "paude-abc123-1"
-        mock_get_ref.return_value = "image-registry.svc:5000/ns/paude-abc123:latest"
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        backend.ensure_image_via_build(
-            config=None,
-            workspace=tmp_path,
-            session_name="my-session",
-        )
 
-        # Verify _start_binary_build was called with session_name
-        mock_start_build.assert_called_once()
-        call_kwargs = mock_start_build.call_args
-        assert call_kwargs.kwargs.get("session_name") == "my-session"
+        # Patch the builder's methods directly
+        with patch.object(
+            backend._builder, "start_binary_build"
+        ) as mock_start_build:
+            with patch.object(backend._builder, "wait_for_build"):
+                with patch.object(
+                    backend._builder, "get_imagestream_reference"
+                ) as mock_get_ref:
+                    with patch.object(backend._builder, "create_build_config"):
+                        mock_start_build.return_value = "paude-abc123-1"
+                        mock_get_ref.return_value = (
+                            "image-registry.svc:5000/ns/paude-abc123:latest"
+                        )
+
+                        backend.ensure_image_via_build(
+                            config=None,
+                            workspace=tmp_path,
+                            session_name="my-session",
+                        )
+
+                        # Verify start_binary_build was called with session_name
+                        mock_start_build.assert_called_once()
+                        call_kwargs = mock_start_build.call_args.kwargs
+                        assert call_kwargs.get("session_name") == "my-session"
 
     @patch("subprocess.run")
-    @patch("paude.backends.openshift.OpenShiftBackend._start_binary_build")
-    @patch("paude.backends.openshift.OpenShiftBackend._wait_for_build")
-    @patch("paude.backends.openshift.OpenShiftBackend._get_imagestream_reference")
-    @patch("paude.backends.openshift.OpenShiftBackend._create_build_config")
     def test_passes_none_when_session_name_not_provided(
         self,
-        mock_create_bc: MagicMock,
-        mock_get_ref: MagicMock,
-        mock_wait: MagicMock,
-        mock_start_build: MagicMock,
         mock_run: MagicMock,
         tmp_path: Path,
     ) -> None:
         """ensure_image_via_build passes None when session_name not provided."""
         mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
-        mock_start_build.return_value = "paude-abc123-1"
-        mock_get_ref.return_value = "image-registry.svc:5000/ns/paude-abc123:latest"
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        backend.ensure_image_via_build(
-            config=None,
-            workspace=tmp_path,
-            # session_name not provided - should default to None
-        )
 
-        # Verify _start_binary_build was called with session_name=None
-        mock_start_build.assert_called_once()
-        call_kwargs = mock_start_build.call_args
-        assert call_kwargs.kwargs.get("session_name") is None
+        # Patch the builder's methods directly
+        with patch.object(
+            backend._builder, "start_binary_build"
+        ) as mock_start_build:
+            with patch.object(backend._builder, "wait_for_build"):
+                with patch.object(
+                    backend._builder, "get_imagestream_reference"
+                ) as mock_get_ref:
+                    with patch.object(backend._builder, "create_build_config"):
+                        mock_start_build.return_value = "paude-abc123-1"
+                        mock_get_ref.return_value = (
+                            "image-registry.svc:5000/ns/paude-abc123:latest"
+                        )
+
+                        backend.ensure_image_via_build(
+                            config=None,
+                            workspace=tmp_path,
+                            # session_name not provided - should default to None
+                        )
+
+                        # Verify start_binary_build was called with None
+                        mock_start_build.assert_called_once()
+                        call_kwargs = mock_start_build.call_args.kwargs
+                        assert call_kwargs.get("session_name") is None
 
     @patch("subprocess.run")
     def test_does_not_call_start_binary_build_when_image_exists(
@@ -1374,6 +1384,40 @@ class TestCreateProxyService:
         assert spec["spec"]["selector"]["app"] == "paude-proxy"
         assert spec["spec"]["selector"]["paude.io/session-name"] == "my-session"
         assert spec["spec"]["ports"][0]["port"] == 3128
+
+
+class TestEnsureNetworkPolicyPermissive:
+    """Tests for _ensure_network_policy_permissive method."""
+
+    @patch("subprocess.run")
+    def test_creates_permissive_egress_policy_for_paude_pod(
+        self, mock_run: MagicMock
+    ) -> None:
+        """_ensure_network_policy_permissive creates policy allowing all egress."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._ensure_network_policy_permissive("my-session")
+
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        assert len(apply_calls) >= 1
+
+        call_kwargs = apply_calls[0][1]
+        spec = json.loads(call_kwargs["input"])
+
+        assert spec["kind"] == "NetworkPolicy"
+        assert spec["metadata"]["name"] == "paude-egress-my-session"
+        assert spec["metadata"]["namespace"] == "test-ns"
+
+        # Verify pod selector targets paude (not proxy)
+        selector = spec["spec"]["podSelector"]["matchLabels"]
+        assert selector["app"] == "paude"
+        assert selector["paude.io/session-name"] == "my-session"
+
+        # Verify egress allows all (empty rule)
+        egress = spec["spec"]["egress"]
+        assert len(egress) == 1
+        assert egress[0] == {}  # Empty rule = allow all
 
 
 class TestNetworkPolicyWithProxySelector:
@@ -2886,7 +2930,10 @@ class TestSyncConfigWithPlugins:
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
 
         with patch("pathlib.Path.home", return_value=tmp_path):
-            with patch.object(backend, "_rewrite_plugin_paths") as mock_rewrite:
+            # Patch the syncer's method since sync is now delegated to ConfigSyncer
+            with patch.object(
+                backend._syncer, "_rewrite_plugin_paths"
+            ) as mock_rewrite:
                 backend._sync_config_to_pod("test-pod-0")
                 mock_rewrite.assert_called_once_with("test-pod-0", "/credentials")
 
