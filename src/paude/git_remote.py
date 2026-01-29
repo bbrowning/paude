@@ -210,3 +210,132 @@ def get_current_branch() -> str | None:
     if result.returncode == 0:
         return result.stdout.strip()
     return None
+
+
+def initialize_container_workspace_podman(container_name: str) -> bool:
+    """Initialize git repository in a Podman container's workspace.
+
+    Args:
+        container_name: Name of the container.
+
+    Returns:
+        True if successful, False if failed.
+    """
+    init_cmd = (
+        "test -d /pvc/workspace/.git || git init /pvc/workspace && "
+        "git -C /pvc/workspace config receive.denyCurrentBranch updateInstead"
+    )
+    result = subprocess.run(
+        ["podman", "exec", container_name, "bash", "-c", init_cmd],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"Failed to init workspace: {result.stderr}", file=sys.stderr)
+        return False
+    return True
+
+
+def initialize_container_workspace_openshift(
+    pod_name: str,
+    namespace: str,
+    context: str | None = None,
+) -> bool:
+    """Initialize git repository in an OpenShift pod's workspace.
+
+    Args:
+        pod_name: Name of the pod.
+        namespace: Kubernetes namespace.
+        context: Optional kubeconfig context.
+
+    Returns:
+        True if successful, False if failed.
+    """
+    init_cmd = (
+        "test -d /pvc/workspace/.git || git init /pvc/workspace && "
+        "git -C /pvc/workspace config receive.denyCurrentBranch updateInstead"
+    )
+    oc_cmd = ["oc"]
+    if context:
+        oc_cmd.extend(["--context", context])
+    oc_cmd.extend(["exec", pod_name, "-n", namespace, "--", "bash", "-c", init_cmd])
+
+    result = subprocess.run(
+        oc_cmd,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"Failed to init workspace: {result.stderr}", file=sys.stderr)
+        return False
+    return True
+
+
+def is_container_running_podman(container_name: str) -> bool:
+    """Check if a Podman container is running.
+
+    Args:
+        container_name: Name of the container.
+
+    Returns:
+        True if running, False otherwise.
+    """
+    result = subprocess.run(
+        ["podman", "inspect", "--format", "{{.State.Running}}", container_name],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return result.stdout.strip().lower() == "true"
+    return False
+
+
+def is_pod_running_openshift(
+    pod_name: str,
+    namespace: str,
+    context: str | None = None,
+) -> bool:
+    """Check if an OpenShift pod is running.
+
+    Args:
+        pod_name: Name of the pod.
+        namespace: Kubernetes namespace.
+        context: Optional kubeconfig context.
+
+    Returns:
+        True if running, False otherwise.
+    """
+    oc_cmd = ["oc"]
+    if context:
+        oc_cmd.extend(["--context", context])
+    oc_cmd.extend([
+        "get", "pod", pod_name, "-n", namespace,
+        "-o", "jsonpath={.status.phase}"
+    ])
+
+    result = subprocess.run(
+        oc_cmd,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return result.stdout.strip().lower() == "running"
+    return False
+
+
+def git_push_to_remote(remote_name: str, branch: str | None = None) -> bool:
+    """Push to a git remote.
+
+    Args:
+        remote_name: Name of the remote to push to.
+        branch: Branch to push (uses current branch if None).
+
+    Returns:
+        True if successful, False if failed.
+    """
+    branch = branch or get_current_branch() or "main"
+    result = subprocess.run(
+        ["git", "push", remote_name, branch],
+        capture_output=False,  # Show output to user
+    )
+    return result.returncode == 0

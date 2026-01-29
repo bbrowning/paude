@@ -11,8 +11,6 @@ def compute_config_hash(
     dockerfile: Path | None,
     base_image: str | None,
     entrypoint: Path,
-    workspace: Path | None = None,
-    pip_install: bool | str = False,
 ) -> str:
     """Compute a deterministic hash of the configuration.
 
@@ -24,8 +22,6 @@ def compute_config_hash(
         dockerfile: Path to Dockerfile if specified in config.
         base_image: Base image name if specified.
         entrypoint: Path to entrypoint.sh.
-        workspace: Path to workspace directory (for pip_install hash).
-        pip_install: Whether pip_install is enabled (bool or string command).
 
     Returns:
         12-character hash string.
@@ -47,13 +43,6 @@ def compute_config_hash(
     # Include entrypoint.sh content
     if entrypoint.exists():
         hash_input += entrypoint.read_text()
-
-    # Include dependency files when pip_install is enabled
-    if pip_install and workspace:
-        for dep_file in ["pyproject.toml", "requirements.txt"]:
-            dep_path = workspace / dep_file
-            if dep_path.exists():
-                hash_input += dep_path.read_text()
 
     # Generate hash - match bash behavior exactly
     # bash: echo "$hash_input" | sha256sum | cut -c1-12

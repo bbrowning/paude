@@ -121,17 +121,25 @@ OPTIONS (global):
     -V, --version       Show paude version and exit
 
 WORKFLOW:
-    paude create                    # Create session for current workspace
-    paude start                     # Start and connect to session
-    paude remote add                # Set up git remote for sync
-    git push paude-<name> main      # Push code to session
+    # Terminal 1:
+    paude create my-project         # Create session
+    paude start my-project          # Start and connect (stays attached)
+
+    # Terminal 2 (while container running):
+    paude remote add --push my-project  # Init git repo in container + push code
+
+    # In container (Terminal 1):
+    pip install -e .                # Install deps manually if needed
+
+    # Later:
     paude connect                   # Reconnect to running session
-    git pull paude-<name> main      # Pull changes from session
+    git push paude-<name> main      # Push more changes to container
     paude stop                      # Stop session (preserves data)
     paude delete NAME --confirm     # Delete session permanently
 
 SYNCING CODE (via git):
-    paude remote add [NAME]         Add git remote for session
+    paude remote add [NAME]         Add git remote (requires running container)
+    paude remote add --push [NAME]  Add remote AND push current branch
     paude remote list               List all paude git remotes
     paude remote remove [NAME]      Remove git remote for session
     git push paude-<name> main      Push code to container
@@ -334,7 +342,7 @@ def session_create(
         try:
             has_custom = (
                 config
-                and (config.base_image or config.dockerfile or config.pip_install)
+                and (config.base_image or config.dockerfile)
             )
             if has_custom and config is not None:
                 image = image_manager.ensure_custom_image(
@@ -1398,6 +1406,13 @@ def remote_command(
         str | None,
         typer.Argument(help="Session name (optional if only one exists)"),
     ] = None,
+    push: Annotated[
+        bool,
+        typer.Option(
+            "--push",
+            help="Push current branch after adding remote (for 'add' action).",
+        ),
+    ] = False,
     openshift_context: Annotated[
         str | None,
         typer.Option(
@@ -1451,7 +1466,7 @@ def remote_command(
             typer.echo("Initialize git first: git init", err=True)
             raise typer.Exit(1)
 
-        _remote_add(name, openshift_context, openshift_namespace)
+        _remote_add(name, openshift_context, openshift_namespace, push=push)
         return
 
     if action == "remove":
@@ -1550,6 +1565,7 @@ def _remote_add(
     name: str | None,
     openshift_context: str | None,
     openshift_namespace: str | None,
+    push: bool = False,
 ) -> None:
     """Add a git remote for a session."""
     from paude.git_remote import (
@@ -1557,8 +1573,13 @@ def _remote_add(
         build_podman_remote_url,
         enable_ext_protocol,
         get_current_branch,
+        git_push_to_remote,
         git_remote_add,
+        initialize_container_workspace_openshift,
+        initialize_container_workspace_podman,
+        is_container_running_podman,
         is_ext_protocol_allowed,
+        is_pod_running_openshift,
     )
 
     # Check if ext protocol is enabled (required for ext:: remotes)
@@ -1574,16 +1595,19 @@ def _remote_add(
 
     # Find the session
     session = None
+    backend_obj = None
 
     if name:
         # Look up by name
         result = find_session_backend(name, openshift_context, openshift_namespace)
         if result:
-            _, backend = result
-            session = backend.get_session(name)  # type: ignore[attr-defined]
+            _, backend_obj = result
+            session = backend_obj.get_session(name)  # type: ignore[attr-defined]
     else:
         # Auto-detect from workspace
-        session, _ = _find_session_for_remote(openshift_context, openshift_namespace)
+        session, backend_obj = _find_session_for_remote(
+            openshift_context, openshift_namespace
+        )
 
     if not session:
         typer.echo("Error: No session found.", err=True)
@@ -1620,6 +1644,27 @@ def _remote_add(
                 namespace = "default"
 
         pod_name = f"paude-{session.name}-0"
+
+        # Check if pod is running (live check, not cached status)
+        if not is_pod_running_openshift(
+            pod_name=pod_name,
+            namespace=namespace,
+            context=openshift_context,
+        ):
+            typer.echo("Error: Container not running.", err=True)
+            typer.echo("Start it first:", err=True)
+            typer.echo(f"  paude start {session.name}", err=True)
+            raise typer.Exit(1)
+
+        # Initialize git repository in container
+        typer.echo("Initializing git repository in container...")
+        if not initialize_container_workspace_openshift(
+            pod_name=pod_name,
+            namespace=namespace,
+            context=openshift_context,
+        ):
+            raise typer.Exit(1)
+
         remote_url = build_openshift_remote_url(
             pod_name=pod_name,
             namespace=namespace,
@@ -1627,17 +1672,40 @@ def _remote_add(
         )
     else:
         container_name = f"paude-{session.name}"
+
+        # Check if container is running
+        if not is_container_running_podman(container_name):
+            typer.echo("Error: Container not running.", err=True)
+            typer.echo("Start it first:", err=True)
+            typer.echo(f"  paude start {session.name}", err=True)
+            raise typer.Exit(1)
+
+        # Initialize git repository in container
+        typer.echo("Initializing git repository in container...")
+        if not initialize_container_workspace_podman(container_name):
+            raise typer.Exit(1)
+
         remote_url = build_podman_remote_url(container_name=container_name)
 
     # Add the remote
     if git_remote_add(remote_name, remote_url):
         typer.echo(f"Added git remote '{remote_name}'.")
-        typer.echo("")
-        typer.echo("Usage:")
+
         branch = get_current_branch() or "main"
-        typer.echo(f"  git push {remote_name} {branch}  # Push code to container")
-        typer.echo(f"  git pull {remote_name} {branch}  # Pull changes")
-        typer.echo(f"  git fetch {remote_name}          # Fetch without merging")
+
+        if push:
+            typer.echo("")
+            typer.echo(f"Pushing {branch} to container...")
+            if not git_push_to_remote(remote_name, branch):
+                typer.echo("Push failed.", err=True)
+                raise typer.Exit(1)
+            typer.echo("Push complete.")
+        else:
+            typer.echo("")
+            typer.echo("Usage:")
+            typer.echo(f"  git push {remote_name} {branch}  # Push code to container")
+            typer.echo(f"  git pull {remote_name} {branch}  # Pull changes")
+            typer.echo(f"  git fetch {remote_name}          # Fetch without merging")
     else:
         raise typer.Exit(1)
 

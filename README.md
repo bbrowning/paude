@@ -149,24 +149,28 @@ paude create my-project --backend=openshift \
 Sessions use git for code synchronization. Use `paude remote` to set up git remotes:
 
 ```bash
-# Create and start a session
+# Terminal 1: Create and start a session
 paude create my-project
-paude start my-project
+paude start my-project           # Stays attached to container
 
-# Set up git remote for sync
-paude remote add my-project
+# Terminal 2: Set up remote and push code (while container is running)
+paude remote add --push my-project  # Init git in container + push
 
-# Push code to session
+# In container (Terminal 1): Install dependencies manually
+pip install -e .                 # Or your preferred install command
+
+# Later: Push more changes
 git push paude-my-project main
-
-# Connect and work with Claude
-paude connect my-project
 
 # After Claude makes changes, pull them locally
 git pull paude-my-project main
 ```
 
-The `paude remote add` command creates a git remote using the `ext::` protocol, enabling git operations to tunnel through `podman exec` or `oc exec`.
+The `paude remote add` command:
+1. Checks that the container is running (required)
+2. Initializes a git repository in the container's workspace
+3. Adds a git remote using the `ext::` protocol
+4. Optionally pushes current branch with `--push`
 
 ## OpenShift Backend
 
@@ -174,9 +178,8 @@ For remote execution on OpenShift/Kubernetes clusters:
 
 ```bash
 paude create --backend=openshift
-paude start
-paude remote add
-git push paude-<session> main
+paude start                       # In one terminal
+paude remote add --push           # In another terminal (while running)
 paude connect
 ```
 
@@ -305,36 +308,6 @@ Venv isolation is controlled via the `venv` field in `paude.json`:
 {"venv": "auto"}              // Default: auto-detect and shadow
 {"venv": "none"}              // Disable: share venvs (will be broken)
 {"venv": [".venv", "my-env"]} // Manual: specific directories to shadow
-```
-
-### Build-Time Dependencies with pip_install
-
-For projects where you want dependencies pre-installed in the container image, use the `pip_install` option:
-
-```json
-{
-  "pip_install": true,
-  "venv": "auto"
-}
-```
-
-This creates a venv at `/opt/venv` during image build with your dependencies installed. At runtime, the shadowed venv directories are symlinked to `/opt/venv`, giving you instant access to pre-installed packages.
-
-Options:
-- `pip_install: true` - Runs `pip install -e .` (editable install from pyproject.toml)
-- `pip_install: "pip install -r requirements.txt"` - Custom install command
-- `pip_install: false` (default) - No build-time install
-
-The image hash includes `pyproject.toml` and `requirements.txt`, so the image is automatically rebuilt when dependencies change.
-
-Example with requirements.txt:
-
-```json
-{
-  "base": "python:3.11-slim",
-  "pip_install": "pip install -r requirements.txt",
-  "venv": "auto"
-}
 ```
 
 ## Workspace Protection
@@ -469,7 +442,6 @@ Create `paude.json` at project root:
 | `packages` | Additional system packages to install |
 | `setup` | Run after first start |
 | `venv` | Venv isolation: `"auto"`, `"none"`, or list of directories |
-| `pip_install` | Build-time pip install: `true`, `false`, or custom command |
 
 ### Unsupported Properties (Security)
 

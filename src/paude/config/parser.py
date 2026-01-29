@@ -186,10 +186,14 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
                     "Invalid venv config: list items must be strings"
                 )
 
-    pip_install = data.get("pip_install", False)
-    if not isinstance(pip_install, (bool, str)):
-        raise ConfigError(
-            "Invalid pip_install config: expected boolean or string command"
+    if "pip_install" in data:
+        print(
+            "Warning: 'pip_install' is deprecated and ignored.",
+            file=sys.stderr,
+        )
+        print(
+            "  → Use 'paude remote add --push' to sync, then install manually.",
+            file=sys.stderr,
         )
 
     return PaudeConfig(
@@ -202,7 +206,6 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
         packages=packages,
         post_create_command=setup_command,
         venv=venv_config,
-        pip_install=pip_install,
     )
 
 

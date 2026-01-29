@@ -360,6 +360,121 @@ class TestRemoteCommand:
         assert "Unknown action: invalid" in output
         assert "Valid actions: add, list, remove" in output
 
+    @patch("paude.cli.find_session_backend")
+    @patch("paude.git_remote.is_git_repository")
+    @patch("paude.git_remote.is_ext_protocol_allowed")
+    @patch("paude.git_remote.is_container_running_podman")
+    def test_remote_add_fails_when_container_not_running(
+        self, mock_running, mock_ext, mock_is_git, mock_find
+    ):
+        """remote add fails if container is not running."""
+        mock_is_git.return_value = True
+        mock_ext.return_value = True
+        mock_running.return_value = False
+
+        # Create a mock session
+        mock_session = MagicMock()
+        mock_session.name = "test-session"
+        mock_session.backend_type = "podman"
+
+        mock_backend = MagicMock()
+        mock_backend.get_session.return_value = mock_session
+        mock_find.return_value = (mock_session, mock_backend)
+
+        result = runner.invoke(app, ["remote", "add", "test-session"])
+
+        assert result.exit_code == 1
+        output = result.stdout + (result.stderr or "")
+        assert "Container not running" in output
+        assert "paude start test-session" in output
+
+    @patch("paude.cli.find_session_backend")
+    @patch("paude.git_remote.is_git_repository")
+    @patch("paude.git_remote.is_ext_protocol_allowed")
+    @patch("paude.git_remote.is_container_running_podman")
+    @patch("paude.git_remote.initialize_container_workspace_podman")
+    @patch("paude.git_remote.git_remote_add")
+    @patch("paude.git_remote.get_current_branch")
+    @patch("paude.git_remote.git_push_to_remote")
+    def test_remote_add_with_push_flag(
+        self,
+        mock_push,
+        mock_branch,
+        mock_add,
+        mock_init,
+        mock_running,
+        mock_ext,
+        mock_is_git,
+        mock_find,
+    ):
+        """remote add --push adds remote and pushes."""
+        mock_is_git.return_value = True
+        mock_ext.return_value = True
+        mock_running.return_value = True
+        mock_init.return_value = True
+        mock_add.return_value = True
+        mock_branch.return_value = "main"
+        mock_push.return_value = True
+
+        # Create a mock session
+        mock_session = MagicMock()
+        mock_session.name = "test-session"
+        mock_session.backend_type = "podman"
+
+        mock_backend = MagicMock()
+        mock_backend.get_session.return_value = mock_session
+        mock_find.return_value = (mock_session, mock_backend)
+
+        result = runner.invoke(app, ["remote", "add", "--push", "test-session"])
+
+        assert result.exit_code == 0
+        output = result.stdout + (result.stderr or "")
+        assert "Added git remote" in output
+        assert "Pushing main to container" in output
+        assert "Push complete" in output
+        mock_push.assert_called_once_with("paude-test-session", "main")
+
+    @patch("paude.cli.find_session_backend")
+    @patch("paude.git_remote.is_git_repository")
+    @patch("paude.git_remote.is_ext_protocol_allowed")
+    @patch("paude.git_remote.is_container_running_podman")
+    @patch("paude.git_remote.initialize_container_workspace_podman")
+    @patch("paude.git_remote.git_remote_add")
+    @patch("paude.git_remote.get_current_branch")
+    def test_remote_add_initializes_container_workspace(
+        self,
+        mock_branch,
+        mock_add,
+        mock_init,
+        mock_running,
+        mock_ext,
+        mock_is_git,
+        mock_find,
+    ):
+        """remote add initializes git in container before adding remote."""
+        mock_is_git.return_value = True
+        mock_ext.return_value = True
+        mock_running.return_value = True
+        mock_init.return_value = True
+        mock_add.return_value = True
+        mock_branch.return_value = "main"
+
+        # Create a mock session
+        mock_session = MagicMock()
+        mock_session.name = "test-session"
+        mock_session.backend_type = "podman"
+
+        mock_backend = MagicMock()
+        mock_backend.get_session.return_value = mock_session
+        mock_find.return_value = (mock_session, mock_backend)
+
+        result = runner.invoke(app, ["remote", "add", "test-session"])
+
+        assert result.exit_code == 0
+        output = result.stdout + (result.stderr or "")
+        assert "Initializing git repository in container" in output
+        mock_init.assert_called_once_with("paude-test-session")
+
 
 def test_subcommand_runs_without_main_execution():
     """Subcommands run without triggering main execution logic."""

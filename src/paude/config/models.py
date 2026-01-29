@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, Literal
 
 VenvMode = Literal["auto", "none"] | list[str]
-PipInstallMode = bool | str
 
 
 @dataclass
@@ -55,6 +54,3 @@ class PaudeConfig:
 
     # venv isolation mode: "auto" (default), "none", or list of directory names
     venv: VenvMode = "auto"
-
-    # pip install at build time: False (default), True (auto-detect), or custom command
-    pip_install: PipInstallMode = False

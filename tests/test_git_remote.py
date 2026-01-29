@@ -283,3 +283,211 @@ class TestEnableExtProtocol:
         result = enable_ext_protocol()
 
         assert result is False
+
+
+class TestInitializeContainerWorkspacePodman:
+    """Tests for initialize_container_workspace_podman."""
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_true_on_success(self, mock_run) -> None:
+        """Return True when git init succeeds."""
+        from paude.git_remote import initialize_container_workspace_podman
+
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        result = initialize_container_workspace_podman("paude-test")
+
+        assert result is True
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert call_args[0:2] == ["podman", "exec"]
+        assert "paude-test" in call_args
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_false_on_failure(self, mock_run) -> None:
+        """Return False when git init fails."""
+        from paude.git_remote import initialize_container_workspace_podman
+
+        mock_run.return_value.returncode = 1
+        mock_run.return_value.stderr = "exec error"
+
+        result = initialize_container_workspace_podman("paude-test")
+
+        assert result is False
+
+
+class TestInitializeContainerWorkspaceOpenshift:
+    """Tests for initialize_container_workspace_openshift."""
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_true_on_success(self, mock_run) -> None:
+        """Return True when git init succeeds."""
+        from paude.git_remote import initialize_container_workspace_openshift
+
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        result = initialize_container_workspace_openshift("pod-0", "namespace")
+
+        assert result is True
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert "oc" in call_args
+        assert "pod-0" in call_args
+        assert "-n" in call_args
+        assert "namespace" in call_args
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_with_context(self, mock_run) -> None:
+        """Include context when specified."""
+        from paude.git_remote import initialize_container_workspace_openshift
+
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        result = initialize_container_workspace_openshift("pod-0", "ns", context="my-ctx")
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        assert "--context" in call_args
+        assert "my-ctx" in call_args
+
+
+class TestIsContainerRunningPodman:
+    """Tests for is_container_running_podman."""
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_true_when_running(self, mock_run) -> None:
+        """Return True when container is running."""
+        from paude.git_remote import is_container_running_podman
+
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "true\n"
+
+        result = is_container_running_podman("paude-test")
+
+        assert result is True
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_false_when_not_running(self, mock_run) -> None:
+        """Return False when container is not running."""
+        from paude.git_remote import is_container_running_podman
+
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "false\n"
+
+        result = is_container_running_podman("paude-test")
+
+        assert result is False
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_false_when_not_found(self, mock_run) -> None:
+        """Return False when container doesn't exist."""
+        from paude.git_remote import is_container_running_podman
+
+        mock_run.return_value.returncode = 125
+
+        result = is_container_running_podman("paude-test")
+
+        assert result is False
+
+
+class TestIsPodRunningOpenshift:
+    """Tests for is_pod_running_openshift."""
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_true_when_running(self, mock_run) -> None:
+        """Return True when pod is running."""
+        from paude.git_remote import is_pod_running_openshift
+
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "Running\n"
+
+        result = is_pod_running_openshift("pod-0", "namespace")
+
+        assert result is True
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_false_when_not_running(self, mock_run) -> None:
+        """Return False when pod is not running."""
+        from paude.git_remote import is_pod_running_openshift
+
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "Pending\n"
+
+        result = is_pod_running_openshift("pod-0", "namespace")
+
+        assert result is False
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_false_when_not_found(self, mock_run) -> None:
+        """Return False when pod doesn't exist."""
+        from paude.git_remote import is_pod_running_openshift
+
+        mock_run.return_value.returncode = 1
+
+        result = is_pod_running_openshift("pod-0", "namespace")
+
+        assert result is False
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_with_context(self, mock_run) -> None:
+        """Include context when specified."""
+        from paude.git_remote import is_pod_running_openshift
+
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "Running"
+
+        result = is_pod_running_openshift("pod-0", "ns", context="my-ctx")
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        assert "--context" in call_args
+        assert "my-ctx" in call_args
+
+
+class TestGitPushToRemote:
+    """Tests for git_push_to_remote."""
+
+    @patch("paude.git_remote.get_current_branch")
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_true_on_success(self, mock_run, mock_branch) -> None:
+        """Return True when push succeeds."""
+        from paude.git_remote import git_push_to_remote
+
+        mock_branch.return_value = "main"
+        mock_run.return_value.returncode = 0
+
+        result = git_push_to_remote("paude-test")
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        assert call_args == ["git", "push", "paude-test", "main"]
+
+    @patch("paude.git_remote.get_current_branch")
+    @patch("paude.git_remote.subprocess.run")
+    def test_uses_specified_branch(self, mock_run, mock_branch) -> None:
+        """Use specified branch instead of current."""
+        from paude.git_remote import git_push_to_remote
+
+        mock_run.return_value.returncode = 0
+
+        result = git_push_to_remote("paude-test", "feature-branch")
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        assert call_args == ["git", "push", "paude-test", "feature-branch"]
+
+    @patch("paude.git_remote.get_current_branch")
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_false_on_failure(self, mock_run, mock_branch) -> None:
+        """Return False when push fails."""
+        from paude.git_remote import git_push_to_remote
+
+        mock_branch.return_value = "main"
+        mock_run.return_value.returncode = 1
+
+        result = git_push_to_remote("paude-test")
+
+        assert result is False

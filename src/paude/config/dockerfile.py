@@ -8,7 +8,7 @@ from paude.config.models import PaudeConfig
 def generate_pip_install_dockerfile(
     config: PaudeConfig, include_claude_install: bool = False
 ) -> str:
-    """Generate a minimal Dockerfile that just adds pip_install to a paude base image.
+    """Generate a minimal Dockerfile that layers on a paude base image.
 
     Use this when layering on top of the default paude image which already has
     entrypoints and all system packages installed.
@@ -53,32 +53,7 @@ def generate_pip_install_dockerfile(
         lines.append("USER paude")
         lines.append("WORKDIR /home/paude")
 
-    if config.pip_install:
-        lines.append("")
-        lines.append("# Build-time pip install for venv isolation")
-        lines.append("USER root")
-        lines.append("COPY . /opt/workspace-src")
-        lines.append("RUN python3 -m venv /opt/venv")
-
-        if isinstance(config.pip_install, str):
-            pip_cmd = config.pip_install
-        else:
-            pip_cmd = "pip install -e /opt/workspace-src"
-
-        # Prepend full paths for pip and uv commands
-        if pip_cmd.startswith("pip "):
-            lines.append(f"RUN /opt/venv/bin/{pip_cmd}")
-        elif pip_cmd.startswith("uv "):
-            lines.append(f"RUN /usr/local/bin/{pip_cmd}")
-        else:
-            lines.append(f"RUN {pip_cmd}")
-        lines.append("RUN chown -R paude:0 /opt/venv && chmod -R g+rwX /opt/venv")
-
-        lines.append("")
-        lines.append("USER paude")
-        lines.append("WORKDIR /home/paude")
-    elif not include_claude_install:
-        # Neither include_claude_install nor pip_install is set.
+    if not include_claude_install:
         # Add minimal structure for feature injection compatibility.
         # Features are injected before the first USER paude line.
         lines.append("")
@@ -177,27 +152,6 @@ RUN if command -v apt-get >/dev/null 2>&1; then \\
     lines.append("")
     lines.append("# Ensure claude is in PATH")
     lines.append('ENV PATH="/home/paude/.local/bin:$PATH"')
-
-    if config.pip_install:
-        lines.append("")
-        lines.append("# Build-time pip install for venv isolation")
-        lines.append("USER root")
-        lines.append("COPY . /opt/workspace-src")
-        lines.append("RUN python3 -m venv /opt/venv")
-
-        if isinstance(config.pip_install, str):
-            pip_cmd = config.pip_install
-        else:
-            pip_cmd = "pip install -e /opt/workspace-src"
-
-        # Prepend full paths for pip and uv commands
-        if pip_cmd.startswith("pip "):
-            lines.append(f"RUN /opt/venv/bin/{pip_cmd}")
-        elif pip_cmd.startswith("uv "):
-            lines.append(f"RUN /usr/local/bin/{pip_cmd}")
-        else:
-            lines.append(f"RUN {pip_cmd}")
-        lines.append("RUN chown -R paude:0 /opt/venv && chmod -R g+rwX /opt/venv")
 
     lines.append("")
     lines.append("# Copy entrypoints (requires root)")

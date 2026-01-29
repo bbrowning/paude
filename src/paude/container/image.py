@@ -42,13 +42,12 @@ def prepare_build_context(
     """Prepare a build context directory for container image builds.
 
     This function creates a temporary directory containing all files needed
-    to build a container image, including the Dockerfile, entrypoints, and
-    workspace source (for pip_install). The context can be used by both
-    local Podman builds and OpenShift binary builds.
+    to build a container image, including the Dockerfile and entrypoints.
+    The context can be used by both local Podman builds and OpenShift binary builds.
 
     Args:
         config: Parsed paude configuration.
-        workspace: Path to workspace directory (for pip_install).
+        workspace: Deprecated, ignored. Code sync is done via git push.
         script_dir: Path to paude script directory (for dev mode).
         platform: Target platform (for image tagging).
         for_remote_build: If True, skip local podman operations and use
@@ -73,8 +72,6 @@ def prepare_build_context(
         config.dockerfile,
         config.base_image,
         entrypoint,
-        workspace=workspace,
-        pip_install=config.pip_install,
     )
 
     tmpdir = Path(tempfile.mkdtemp(prefix="paude-build-"))
@@ -158,34 +155,6 @@ def prepare_build_context(
                 content = entrypoint_session.read_text().replace("\r\n", "\n")
                 entrypoint_session_dest.write_text(content, newline="\n")
                 entrypoint_session_dest.chmod(0o755)
-
-            # Copy workspace source for pip_install (stage 2 needs these files)
-            if config.pip_install and workspace:
-                print("  → Copying workspace for pip install...", file=sys.stderr)
-                for item in workspace.iterdir():
-                    if item.name.startswith("."):
-                        continue
-                    dest = tmpdir / item.name
-                    if dest.exists():
-                        # Don't overwrite files from Dockerfile context
-                        continue
-                    if item.is_dir():
-                        shutil.copytree(
-                            item,
-                            dest,
-                            ignore=shutil.ignore_patterns(
-                                "__pycache__",
-                                "*.pyc",
-                                ".git",
-                                ".venv",
-                                "venv",
-                                "*.egg-info",
-                                "build",
-                                "dist",
-                            ),
-                        )
-                    else:
-                        shutil.copy2(item, dest)
 
             base_image = "user-base"
             print("  → Adding paude requirements (multi-stage)...", file=sys.stderr)
@@ -308,30 +277,6 @@ def prepare_build_context(
         if FEATURE_CACHE_DIR.exists():
             features_dest = tmpdir / "features"
             shutil.copytree(FEATURE_CACHE_DIR, features_dest)
-
-    if config.pip_install and workspace:
-        print("  → Copying workspace for pip install...", file=sys.stderr)
-        for item in workspace.iterdir():
-            if item.name.startswith("."):
-                continue
-            dest = tmpdir / item.name
-            if item.is_dir():
-                shutil.copytree(
-                    item,
-                    dest,
-                    ignore=shutil.ignore_patterns(
-                        "__pycache__",
-                        "*.pyc",
-                        ".git",
-                        ".venv",
-                        "venv",
-                        "*.egg-info",
-                        "build",
-                        "dist",
-                    ),
-                )
-            else:
-                shutil.copy2(item, dest)
 
     dockerignore_content = """.venv
 venv
@@ -490,7 +435,7 @@ class ImageManager:
         Args:
             config: Parsed paude configuration.
             force_rebuild: Force rebuild even if image exists.
-            workspace: Path to the workspace directory (for pip_install).
+            workspace: Deprecated, ignored. Code sync is done via git push.
 
         Returns:
             Image tag to use.
@@ -510,8 +455,6 @@ class ImageManager:
             config.dockerfile,
             config.base_image,
             entrypoint,
-            workspace=workspace,
-            pip_install=config.pip_install,
         )
         # Use platform-specific tag to avoid arch conflicts
         if self.platform:
@@ -562,7 +505,7 @@ class ImageManager:
 
         # Generate the workspace Dockerfile
         if using_default_paude_image:
-            # Simpler Dockerfile - just add pip_install layer on top of complete image
+            # Simpler Dockerfile - just add features layer on top of complete image
             from paude.config.dockerfile import generate_pip_install_dockerfile
 
             dockerfile_content = generate_pip_install_dockerfile(config)
@@ -620,21 +563,6 @@ class ImageManager:
                 if FEATURE_CACHE_DIR.exists():
                     features_dest = Path(tmpdir) / "features"
                     shutil.copytree(FEATURE_CACHE_DIR, features_dest)
-
-            # Copy workspace source for pip_install
-            if config.pip_install and workspace:
-                print("  → Copying workspace for pip install...", file=sys.stderr)
-                for item in workspace.iterdir():
-                    if item.name.startswith("."):
-                        continue
-                    dest = Path(tmpdir) / item.name
-                    if item.is_dir():
-                        shutil.copytree(item, dest, ignore=shutil.ignore_patterns(
-                            "__pycache__", "*.pyc", ".git", ".venv", "venv",
-                            "*.egg-info", "build", "dist"
-                        ))
-                    else:
-                        shutil.copy2(item, dest)
 
             # Build with the determined base image
             build_args = {"BASE_IMAGE": base_image}

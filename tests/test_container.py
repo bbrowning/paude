@@ -205,8 +205,8 @@ class TestPrepareBuiltContext:
         from paude.config.models import FeatureSpec, PaudeConfig
         from paude.container.image import prepare_build_context
 
-        # Create a config with pip_install AND features
-        config = PaudeConfig(pip_install=True)
+        # Create a config with features
+        config = PaudeConfig()
 
         # We need to mock the feature downloader (called from installer.py)
         with patch("paude.features.downloader.download_feature") as mock_download:
@@ -243,11 +243,10 @@ class TestPrepareBuiltContext:
         finally:
             shutil.rmtree(ctx.context_dir)
 
-    def test_features_injected_without_pip_install(self, tmp_path):
-        """Features are injected even without pip_install on default paude image.
+    def test_features_injected_on_default_paude_image(self, tmp_path):
+        """Features are injected on default paude image.
 
-        This tests the edge case where someone uses features but not pip_install.
-        The Dockerfile must still have USER paude for feature injection to work.
+        The Dockerfile must have USER paude for feature injection to work.
         """
         import os
         import shutil
@@ -255,8 +254,8 @@ class TestPrepareBuiltContext:
         from paude.config.models import FeatureSpec, PaudeConfig
         from paude.container.image import prepare_build_context
 
-        # Create a config with features but NO pip_install
-        config = PaudeConfig(pip_install=False)
+        # Create a config with features
+        config = PaudeConfig()
 
         with patch("paude.features.downloader.download_feature") as mock_download:
             # Create fake feature directory
@@ -288,7 +287,7 @@ class TestPrepareBuiltContext:
             dockerfile_content = ctx.dockerfile_path.read_text()
             # Features should be injected
             assert "# Feature: myfeature" in dockerfile_content, (
-                "Feature should be injected even without pip_install"
+                "Feature should be injected"
             )
         finally:
             shutil.rmtree(ctx.context_dir)
