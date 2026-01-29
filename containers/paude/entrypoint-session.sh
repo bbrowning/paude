@@ -116,6 +116,46 @@ setup_credentials() {
 wait_for_credentials
 setup_credentials
 
+# Install Claude Code if not already installed
+# This allows the base image to work without Claude Code pre-installed
+# Claude Code gets installed to the PVC so it persists across restarts
+install_claude_code() {
+    local claude_bin="/pvc/.local/bin/claude"
+
+    # Check if claude is already installed and executable
+    if [[ -x "$claude_bin" ]]; then
+        return 0
+    fi
+
+    # Also check if it's in the home directory (from image build)
+    if [[ -x "$HOME/.local/bin/claude" ]]; then
+        return 0
+    fi
+
+    echo "Installing Claude Code to PVC..." >&2
+
+    # Set up installation directory in PVC for persistence
+    mkdir -p /pvc/.local/bin
+    export CLAUDE_INSTALL_DIR=/pvc/.local
+
+    # Install Claude Code using the official installer
+    if curl -fsSL https://claude.ai/install.sh | bash 2>&1; then
+        echo "Claude Code installed successfully." >&2
+    else
+        echo "Warning: Failed to install Claude Code. You may need to install it manually." >&2
+        return 1
+    fi
+}
+
+# Add PVC local bin to PATH (for Claude Code and other tools installed to PVC)
+# Also keep home .local/bin for tools installed during image build
+export PATH="/pvc/.local/bin:$HOME/.local/bin:$PATH"
+
+# Install Claude Code if needed (skip if PAUDE_SKIP_CLAUDE_INSTALL is set, useful for CI)
+if [[ -z "${PAUDE_SKIP_CLAUDE_INSTALL:-}" ]]; then
+    install_claude_code
+fi
+
 # Legacy: Copy seed files if provided via Secret mount (Podman backend fallback)
 if [[ -d /tmp/claude.seed ]] && [[ ! -d /credentials ]]; then
     mkdir -p "$HOME/.claude"

@@ -86,3 +86,8 @@ warn_unused_configs = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v"
+markers = [
+    "integration: integration tests requiring real infrastructure",
+    "podman: tests requiring real podman installation",
+    "kubernetes: tests requiring kubernetes cluster (Kind or OpenShift)",
+]

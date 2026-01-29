@@ -21,19 +21,26 @@ LATEST_PROXY_IMAGE = $(REGISTRY)/$(PROXY_IMAGE_NAME):latest
 # Architectures for multi-arch builds
 PLATFORMS = linux/amd64,linux/arm64
 
-.PHONY: build run publish release clean login help test install lint format typecheck pypi-build pypi-publish
+.PHONY: build run publish release clean login help test test-unit test-integration test-podman test-kubernetes install lint format typecheck pypi-build pypi-publish
 
 help:
 	@echo "Paude build targets:"
 	@echo "  make build          - Build images locally for current arch"
 	@echo "  make run            - Run paude in dev mode (builds locally)"
-	@echo "  make test           - Run all tests"
+	@echo "  make test           - Run all tests (unit + integration)"
 	@echo "  make publish        - Build multi-arch images and push to registry"
 	@echo "  make release VERSION=x.y.z - Full release: tag git, update version, build, push"
 	@echo "  make clean          - Remove local paude images"
 	@echo "  make login          - Authenticate with container registry"
 	@echo "  make pypi-build     - Build Python package for PyPI"
 	@echo "  make pypi-publish   - Upload Python package to PyPI"
+	@echo ""
+	@echo "Testing targets:"
+	@echo "  make test           - Run all tests (unit + integration)"
+	@echo "  make test-unit      - Run unit tests only (no infrastructure required)"
+	@echo "  make test-integration - Run all integration tests"
+	@echo "  make test-podman    - Run Podman integration tests (requires podman)"
+	@echo "  make test-kubernetes - Run Kubernetes integration tests (requires cluster)"
 	@echo ""
 	@echo "Development targets:"
 	@echo "  make install        - Install Python package with dev dependencies"
@@ -57,9 +64,25 @@ build:
 run:
 	PAUDE_DEV=1 paude
 
-# Run all tests
+# Run all tests (unit + integration)
 test:
 	pytest --cov=paude --cov-report=term-missing
+
+# Run unit tests only (fast, no infrastructure required)
+test-unit:
+	pytest tests/ --ignore=tests/integration/ -v
+
+# Run all integration tests
+test-integration:
+	pytest tests/integration/ -v -m integration
+
+# Run Podman integration tests
+test-podman:
+	pytest tests/integration/ -v -m podman
+
+# Run Kubernetes integration tests
+test-kubernetes:
+	pytest tests/integration/ -v -m kubernetes
 
 # Development targets
 install:

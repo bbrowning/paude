@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run linter
+        run: make lint
+
+      - name: Run type checker
+        run: make typecheck
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run unit tests
+        run: make test-unit
+
+  podman-integration:
+    name: Podman Integration Tests
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Verify Podman
+        run: |
+          podman version
+          podman info
+
+      - name: Build test images
+        run: make build
+
+      - name: Run Podman integration tests
+        run: make test-podman
+
+  kubernetes-integration:
+    name: Kubernetes Integration Tests
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Install oc CLI
+        run: |
+          curl -sL https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz | tar xzf - -C /usr/local/bin oc kubectl
+          oc version --client
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: paude-test
+
+      - name: Verify cluster access
+        run: |
+          kubectl cluster-info
+          oc cluster-info
+
+      - name: Build and load images into Kind
+        run: |
+          # Build images locally with Podman
+          make build
+
+          # Save podman images to tarballs (kind can't read from podman storage directly)
+          podman save paude-base-centos9:latest -o /tmp/paude-base.tar
+          podman save paude-proxy-centos9:latest -o /tmp/paude-proxy.tar
+
+          # Load images into Kind cluster from tarballs
+          kind load image-archive /tmp/paude-base.tar --name paude-test
+          kind load image-archive /tmp/paude-proxy.tar --name paude-test
+
+          # Cleanup tarballs
+          rm -f /tmp/paude-base.tar /tmp/paude-proxy.tar
+
+          # Verify images are available in cluster
+          docker exec paude-test-control-plane crictl images | grep paude || true
+
+      - name: Run Kubernetes integration tests
+        env:
+          # Use the local image loaded into Kind, not the registry image
+          PAUDE_K8S_TEST_IMAGE: paude-base-centos9:latest
+        run: make test-kubernetes
