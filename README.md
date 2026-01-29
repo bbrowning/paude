@@ -1,18 +1,121 @@
 # Paude
 
-A container runtime for [Claude Code](https://claude.ai/code) that provides isolated, secure execution with Google Vertex AI authentication. Supports local execution via Podman or remote execution via OpenShift/Kubernetes.
+Run Claude Code autonomously in a container. Claude makes commits, you pull them back.
 
-## Features
+## Why Paude?
 
-- Runs Claude Code in an isolated container
-- Authenticates via Google Vertex AI (gcloud Application Default Credentials)
-- Read-write access to current working directory only
-- Git read operations work (clone, pull, local commits) - push blocked by design
-- **Persistent sessions**: Survive restarts with named volumes/PVCs
-- **Unified session management**: Same commands for both backends
-- **Multiple backends**: Local (Podman) or remote (OpenShift/Kubernetes)
+- **Isolated execution**: Claude Code runs in a container, not on your host machine
+- **Safe autonomous mode**: Enable `--yolo` without fear—Claude can't send your code anywhere
+- **Git-based workflow**: Claude commits inside the container, you `git pull` the changes
+- **Run anywhere**: Locally with Podman or remotely on OpenShift
 
-**Status**: Paude is a work-in-progress. See the [roadmap](docs/ROADMAP.md) for planned features and priorities.
+## Demo
+
+_Video walkthrough coming soon. Follow the Quick Start below to try it yourself._
+
+## Quick Start
+
+### Prerequisites
+
+**For local (Podman)**:
+- [Podman](https://podman.io/getting-started/installation) installed
+
+**For remote (OpenShift)**:
+- OpenShift CLI (`oc`) and cluster access
+
+**Both require**:
+- Google Cloud SDK with `gcloud auth application-default login`
+- Environment variables (find your project ID in [Google Cloud Console](https://console.cloud.google.com)):
+  ```bash
+  export CLAUDE_CODE_USE_VERTEX=1
+  export ANTHROPIC_VERTEX_PROJECT_ID=your-project-id
+  export GOOGLE_CLOUD_PROJECT=your-project-id
+  ```
+
+### Install
+
+```bash
+pip install paude
+```
+
+> **First run**: Paude pulls container images on first use. This takes a few minutes; subsequent runs start immediately.
+
+### The Workflow (Podman)
+
+You'll use two terminals: one stays connected to Claude (interactive session), the other manages code sync via git.
+
+```bash
+# Terminal 1: Create and start session
+cd your-project
+paude create --yolo my-project
+paude start my-project          # Opens tmux with Claude Code
+
+# Terminal 2: Push your code (while Terminal 1 is running)
+paude remote add --push my-project
+
+# Claude works autonomously in Terminal 1...
+# When ready, pull Claude's commits (use your branch name):
+git pull paude-my-project main
+```
+
+**You'll know it's working when**: Terminal 1 shows the Claude Code interface, and `git pull` brings back commits that Claude made.
+
+### The Workflow (OpenShift)
+
+Same two-terminal approach, but runs on your cluster instead of locally.
+
+```bash
+# Terminal 1: Create and start on OpenShift
+cd your-project
+paude create --yolo --backend=openshift my-project
+paude start my-project          # Opens tmux with Claude Code
+
+# Terminal 2: Push your code (while pod is running)
+paude remote add --push my-project
+
+# Pull Claude's commits (use your branch name):
+git pull paude-my-project main
+```
+
+### Passing a Task to Claude
+
+Give Claude a specific task using the `-a` flag:
+
+```bash
+paude create --yolo my-project -a '-p "refactor the auth module"'
+```
+
+Or just start the session and type your request in the Claude Code interface.
+
+### Something Not Working?
+
+- Run `paude --help` for all options and examples
+- Run `paude list` to check session status
+- Use `paude create --dry-run` to verify configuration
+- Use `paude start -v` for verbose output (shows sync progress)
+- Check that your gcloud credentials are valid: `gcloud auth application-default print-access-token`
+
+---
+
+**Next steps**:
+- Customize your environment → [Configuration](#configuration)
+- Understand the security model → [Security Model](#security-model)
+- Run on OpenShift → [OpenShift Backend](#openshift-backend)
+
+## How It Works
+
+```
+Your Machine                    Container
+    │                              │
+    ├── git push ────────────────▶ │  Claude works here
+    │                              │  (network-filtered)
+    ◀── git pull ─────────────────┤
+    │                              │
+```
+
+- **Git is the sync mechanism**—your local files stay untouched until you pull
+- **`--yolo` is safe** because network filtering blocks Claude from sending data to arbitrary URLs
+- Claude can only reach Vertex AI (for the API) and PyPI (for packages) by default
 
 ## Installation
 
@@ -34,64 +137,53 @@ pip install -e .
 
 ### Requirements
 
-- [Podman](https://podman.io/getting-started/installation) installed
 - Python 3.11+ (for the Python package)
+- [Podman](https://podman.io/getting-started/installation) (for local backend)
+- OpenShift CLI `oc` (for OpenShift backend)
 - Google Cloud SDK configured (`gcloud auth application-default login`)
-- Vertex AI environment variables set:
-  ```bash
-  export CLAUDE_CODE_USE_VERTEX=1
-  export ANTHROPIC_VERTEX_PROJECT_ID=your-project-id
-  export GOOGLE_CLOUD_PROJECT=your-project-id
-  ```
 
-## Usage
+### macOS Setup
+
+On macOS, Podman runs in a Linux VM that only mounts `/Users` by default. If your working directory is outside `/Users` (e.g., on a separate volume), configure the Podman machine:
 
 ```bash
-# Show paude help (options, examples, security notes)
-paude --help
-
-# List all sessions
-paude
-
-# Create a session for the current workspace
-paude create
-
-# Create with YOLO mode (no permission prompts)
-paude create --yolo
-
-# Create with full network access (unrestricted)
-paude create --allowed-domains all
-
-# Create with specific domains allowed
-paude create --allowed-domains pypi --allowed-domains .example.com
-
-# Combine flags for full autonomous mode with network access
-paude create --yolo --allowed-domains all
-
-# Pass arguments to Claude Code
-paude create -a '-p "explain this code"'
-paude create --yolo -a '-p "refactor this function"'
-
-# Force rebuild after changing config
-paude create --rebuild
-
-# Verify configuration without creating session
-paude create --dry-run
-
-# Start and connect to a session
-paude start
-
-# Verbose output (shows rsync progress, etc.)
-paude start -v
+podman machine stop
+podman machine rm
+podman machine init \
+  --volume /Users:/Users \
+  --volume /private:/private \
+  --volume /var/folders:/var/folders \
+  --volume /Volumes/YourVolume:/Volumes/YourVolume
+podman machine start
 ```
-
-On first run, paude pulls the base container image and installs Claude Code locally. This one-time setup takes a few minutes. Subsequent runs use the cached image and start immediately.
 
 ## Session Management
 
-Paude provides persistent sessions that survive container/pod restarts with consistent commands across both Podman and OpenShift backends.
+Paude provides persistent sessions that survive container/pod restarts.
 
-### Persistent Sessions
+```bash
+# Quick start: create session for current directory (uses directory name)
+paude create
+paude start
+
+# List all sessions (shorthand: just `paude`)
+paude list
+paude
+```
+
+### Commands
+
+| Command | What It Does |
+|---------|--------------|
+| `create` | Creates session resources (container/StatefulSet, volume/PVC) |
+| `start` | Starts container/pod and connects |
+| `stop` | Stops container/pod, preserves volume |
+| `connect` | Attaches to running session |
+| `remote` | Manages git remotes for code sync |
+| `delete` | Removes all resources including volume |
+| `list` | Shows all sessions |
+
+### Examples
 
 ```bash
 # Create a named session (without starting)
@@ -111,16 +203,11 @@ paude stop my-project
 # Restart - instant resume, no reinstall
 paude start my-project
 
-# List all sessions
-paude list
-
 # Delete session completely
 paude delete my-project --confirm
 ```
 
 ### Backend Selection
-
-All session commands work with both backends:
 
 ```bash
 # Explicit backend selection
@@ -133,18 +220,7 @@ paude create my-project --backend=openshift \
   --storage-class=fast-ssd
 ```
 
-### Session Lifecycle
-
-| Command | What It Does |
-|---------|--------------|
-| `create` | Creates session resources (container/StatefulSet, volume/PVC) |
-| `start` | Starts container/pod and connects |
-| `stop` | Stops container/pod, preserves volume |
-| `connect` | Attaches to running session |
-| `remote` | Manages git remotes for code sync |
-| `delete` | Removes all resources including volume |
-
-### Code Synchronization
+## Code Synchronization
 
 Sessions use git for code synchronization. Use `paude remote` to set up git remotes:
 
@@ -192,97 +268,110 @@ The OpenShift backend provides:
 
 See [docs/OPENSHIFT.md](docs/OPENSHIFT.md) for detailed setup and usage.
 
-## Workflow: Research vs Execution
+## Configuration
 
-Paude encourages separating research from execution for security:
+### Network Domains
 
-**Execution mode** (default): `paude create`
-- Network filtered via proxy - only Vertex AI and PyPI domains accessible
-- Claude Code API calls work, but arbitrary exfiltration blocked
-- Claude prompts for confirmation before edits and commands
-
-**Autonomous mode**: `paude create --yolo`
-- Same network filtering as execution mode
-- Claude edits files and runs commands without confirmation prompts
-- Passes `--dangerously-skip-permissions` to Claude Code inside the container
-- Your host machine's Claude environment is unaffected (container isolation)
-
-**Research mode**: `paude create --allowed-domains all`
-- Full network access for web searches, documentation, package installation
-- Treat outputs more carefully (prompt injection via web content is possible)
-- A warning is displayed when network access is unrestricted
-
-**Custom domains**: `paude create --allowed-domains default --allowed-domains .example.com`
-- Add specific domains by combining with `default`
-- Specifying domains without `default` replaces the allowlist entirely
-- Special values: `all` (unrestricted), `default`, `vertexai`, `pypi`
-
-This separation makes trust boundaries explicit. Do your research in one session, then execute changes in an isolated session.
-
-## Network Architecture
-
-By default, paude runs a proxy sidecar that filters network access:
+By default, paude runs a proxy sidecar that filters network access to Vertex AI and PyPI only.
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  paude-internal network (no direct internet)        │
-│  ┌───────────┐      ┌─────────────────────────────┐ │
-│  │  Claude   │─────▶│  Proxy (squid allowlist)    │─┼──▶ *.googleapis.com
-│  │ Container │      │                             │ │    *.pypi.org
-│  └───────────┘      └─────────────────────────────┘ │
-└─────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  paude-internal network (no direct internet)            │
+│  ┌───────────┐        ┌───────────────────────────────┐ │
+│  │  Claude   │───────▶│  Proxy (squid allowlist)      │─┼──▶ *.googleapis.com
+│  │ Container │        │                               │ │    *.pypi.org
+│  └───────────┘        └───────────────────────────────┘ │
+└─────────────────────────────────────────────────────────┘
+```
+
+```bash
+# Add custom domain to defaults (must include 'default')
+paude create --allowed-domains default --allowed-domains .example.com
+
+# Full network access (unrestricted) - use with caution
+paude create --allowed-domains all
+
+# Use only vertexai (replaces default)
+paude create --allowed-domains vertexai
 ```
 
 The default allowlist includes:
 - **vertexai**: Vertex AI and Google OAuth domains (`.googleapis.com`, `.google.com`)
 - **pypi**: Python package repositories (`.pypi.org`, `.pythonhosted.org`)
 
-Use `--allowed-domains` to customize:
-```bash
-# Add custom domain to defaults (must include 'default')
-paude create --allowed-domains default --allowed-domains .example.com
+**Special values**: `all` (unrestricted), `default` (vertexai + pypi), `vertexai`, `pypi`. Specifying domains without `default` replaces the allowlist entirely.
 
-# Use only vertexai (replaces default)
-paude create --allowed-domains vertexai
+### Workflow Modes
 
-# Disable proxy entirely (unrestricted)
-paude create --allowed-domains all
+**Execution mode** (default): `paude create`
+- Network filtered via proxy
+- Claude prompts for confirmation before edits and commands
+
+**Autonomous mode**: `paude create --yolo`
+- Same network filtering
+- Claude edits files and runs commands without confirmation prompts
+- Passes `--dangerously-skip-permissions` to Claude Code
+
+**Research mode**: `paude create --allowed-domains all`
+- Full network access for web searches, documentation
+- Treat outputs more carefully (prompt injection via web content is possible)
+
+### Custom Container Environments (BYOC)
+
+Paude supports custom container configurations via devcontainer.json or paude.json.
+
+**Using paude.json** (simpler):
+
+```json
+{
+    "base": "python:3.11-slim",
+    "packages": ["make", "gcc"],
+    "setup": "pip install -r requirements.txt"
+}
 ```
 
-## macOS Setup
+**Using devcontainer.json**:
 
-On macOS, Podman runs in a Linux VM that only mounts `/Users` by default. If your working directory is outside `/Users` (e.g., on a separate volume), you need to configure the Podman machine:
-
-```bash
-podman machine stop
-podman machine rm
-podman machine init \
-  --volume /Users:/Users \
-  --volume /private:/private \
-  --volume /var/folders:/var/folders \
-  --volume /Volumes/YourVolume:/Volumes/YourVolume
-podman machine start
+```json
+{
+    "image": "python:3.11-slim",
+    "postCreateCommand": "pip install -r requirements.txt"
+}
 ```
 
-## Python Virtual Environments
+See [`examples/README.md`](examples/README.md) for more configurations (Python, Node.js, Go).
 
-Paude automatically detects Python virtual environment directories (`.venv`, `venv`, `.virtualenv`, `env`, `.env`) and shadows them with empty tmpfs mounts. This allows you to:
+**paude.json properties:**
+
+| Property | Description |
+|----------|-------------|
+| `base` | Base container image |
+| `build.dockerfile` | Path to custom Dockerfile |
+| `build.context` | Build context directory |
+| `build.args` | Build arguments for Dockerfile |
+| `packages` | Additional system packages to install |
+| `setup` | Run after first start |
+| `venv` | Venv isolation: `"auto"`, `"none"`, or list of directories |
+
+**devcontainer.json properties:**
+
+| Property | Description |
+|----------|-------------|
+| `image` | Base container image |
+| `build.dockerfile` | Path to custom Dockerfile |
+| `build.context` | Build context directory |
+| `build.args` | Build arguments for Dockerfile |
+| `features` | Dev container features (ghcr.io OCI artifacts) |
+| `postCreateCommand` | Run after first start |
+| `containerEnv` | Environment variables |
+
+### Python Virtual Environments
+
+Paude automatically detects Python venv directories (`.venv`, `venv`, etc.) and shadows them with empty tmpfs mounts. This allows you to:
 
 - Use your host venv on your Mac
 - Create a separate container venv inside paude
 - Share source code between both
-
-### How It Works
-
-```
-Host (.venv exists):         Container (.venv is empty tmpfs):
-~/project/.venv/             ~/project/.venv/  <- empty, create new venv here
-~/project/src/       <---->  ~/project/src/    <- shared
-```
-
-When a venv is detected, you'll see: `Shadowing venv: .venv`
-
-### Automatic Setup
 
 Add to your `paude.json` to auto-create the venv:
 
@@ -292,17 +381,7 @@ Add to your `paude.json` to auto-create the venv:
 }
 ```
 
-Or with uv for faster setup:
-
-```json
-{
-  "setup": "uv venv && uv pip install -r requirements.txt"
-}
-```
-
-### Configuration
-
-Venv isolation is controlled via the `venv` field in `paude.json`:
+Configuration via the `venv` field:
 
 ```json
 {"venv": "auto"}              // Default: auto-detect and shadow
@@ -310,23 +389,15 @@ Venv isolation is controlled via the `venv` field in `paude.json`:
 {"venv": [".venv", "my-env"]} // Manual: specific directories to shadow
 ```
 
-## Workspace Protection
-
-The container has full read-write access to your working directory. This means Claude Code can create, modify, or delete any files in your project, including the `.git` directory.
-
-**Your protection is git itself.** Push important work to a remote before running in autonomous mode (`--yolo`):
+### Verifying Configuration
 
 ```bash
-# Before autonomous sessions, push your work
-git push origin main
+# Verify configuration without building or running
+paude create --dry-run
 
-# Your remote can be GitHub, GitLab, or a local bare repo
-git clone --bare . /backup/myproject.git
-git remote add backup /backup/myproject.git
-git push backup main
+# Force rebuild after changing config
+paude create --rebuild
 ```
-
-If something goes wrong, recovery is a clone away. This matches how git is designed to work - every remote is a complete backup.
 
 ## Security Model
 
@@ -369,7 +440,17 @@ paude create --yolo --allowed-domains all
 
 The `--yolo` flag enables autonomous execution (no confirmation prompts). This is safe when network filtering is active because Claude cannot exfiltrate files or secrets even if it reads them.
 
-**Do not combine `--yolo` with `--allowed-domains all`** unless you fully trust the task. The combination allows Claude to read any file in your workspace and send it to arbitrary URLs.
+**Do not combine `--yolo` with `--allowed-domains all`** unless you fully trust the task.
+
+### Workspace Protection
+
+The container has full read-write access to your working directory. **Your protection is git itself.** Push important work to a remote before running in autonomous mode:
+
+```bash
+git push origin main
+```
+
+If something goes wrong, recovery is a clone away.
 
 ### Residual Risks
 
@@ -379,71 +460,7 @@ These risks are accepted by design:
 2. **Secrets readable**: `.env` files in workspace are readable. Mitigation: network filtering prevents exfiltration; don't use `--allowed-domains all` with sensitive workspaces.
 3. **No audit logging**: Commands executed aren't logged. This is a forensics gap, not a security breach vector.
 
-## Custom Container Environments (BYOC)
-
-Paude supports custom container configurations via devcontainer.json or paude.json. This allows you to use paude with any project type (Python, Go, Rust, etc.) while maintaining security guarantees.
-
-### Using devcontainer.json
-
-Create `.devcontainer/devcontainer.json` in your project:
-
-```json
-{
-    "image": "python:3.11-slim",
-    "postCreateCommand": "pip install -r requirements.txt"
-}
-```
-
-Or with a custom Dockerfile:
-
-```json
-{
-    "build": {
-        "dockerfile": "Dockerfile",
-        "context": ".."
-    }
-}
-```
-
-### Using paude.json (simpler)
-
-Create `paude.json` at project root:
-
-```json
-{
-    "base": "python:3.11-slim",
-    "packages": ["make", "gcc"],
-    "setup": "pip install -r requirements.txt"
-}
-```
-
-### Supported Properties
-
-**devcontainer.json properties:**
-
-| Property | Description |
-|----------|-------------|
-| `image` | Base container image |
-| `build.dockerfile` | Path to custom Dockerfile |
-| `build.context` | Build context directory |
-| `build.args` | Build arguments for Dockerfile |
-| `features` | Dev container features (ghcr.io OCI artifacts) |
-| `postCreateCommand` | Run after first start |
-| `containerEnv` | Environment variables |
-
-**paude.json properties:**
-
-| Property | Description |
-|----------|-------------|
-| `base` | Base container image |
-| `build.dockerfile` | Path to custom Dockerfile |
-| `build.context` | Build context directory |
-| `build.args` | Build arguments for Dockerfile |
-| `packages` | Additional system packages to install |
-| `setup` | Run after first start |
-| `venv` | Venv isolation: `"auto"`, `"none"`, or list of directories |
-
-### Unsupported Properties (Security)
+### Unsupported devcontainer Properties (Security)
 
 These properties are ignored for security reasons:
 - `mounts` - paude controls mounts
@@ -453,35 +470,11 @@ These properties are ignored for security reasons:
 - `forwardPorts` - paude controls networking
 - `remoteUser` - paude controls user
 
-### Caching and Rebuilding
-
-Custom images are cached based on a hash of the configuration. To force a rebuild after changing your config:
-
-```bash
-paude create --rebuild
-```
-
-### Verifying Configuration
-
-Use `--dry-run` to verify your configuration without building or running anything:
-
-```bash
-paude create --dry-run
-```
-
-This shows the detected configuration, base image, packages, and the Dockerfile that would be generated. Useful for debugging paude.json or devcontainer.json issues.
-
-### Example Configurations
-
-See [`examples/README.md`](examples/README.md) for detailed instructions on running paude with different container environments. Sample configurations include:
-
-- `examples/python/` - Python 3.11 with pytest
-- `examples/node/` - Node.js 20
-- `examples/go/` - Go 1.21
-
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and release instructions.
+
+**Status**: Paude is a work-in-progress. See the [roadmap](docs/ROADMAP.md) for planned features.
 
 ## License
 
