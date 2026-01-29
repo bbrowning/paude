@@ -432,6 +432,7 @@ class TestRemoteCommand:
         assert "Added git remote" in output
         assert "Pushing main to container" in output
         assert "Push complete" in output
+        mock_init.assert_called_once_with("paude-test-session", branch="main")
         mock_push.assert_called_once_with("paude-test-session", "main")
 
     @patch("paude.cli.find_session_backend")
@@ -473,7 +474,7 @@ class TestRemoteCommand:
         assert result.exit_code == 0
         output = result.stdout + (result.stderr or "")
         assert "Initializing git repository in container" in output
-        mock_init.assert_called_once_with("paude-test-session")
+        mock_init.assert_called_once_with("paude-test-session", branch="main")
 
 
 def test_subcommand_runs_without_main_execution():

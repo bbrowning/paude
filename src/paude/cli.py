@@ -1622,6 +1622,7 @@ def _remote_add(
 
     # Build the remote URL based on backend type
     remote_name = f"paude-{session.name}"
+    branch = get_current_branch() or "main"
 
     if session.backend_type == "openshift":
         from paude.backends.openshift import OpenShiftConfig
@@ -1662,6 +1663,7 @@ def _remote_add(
             pod_name=pod_name,
             namespace=namespace,
             context=openshift_context,
+            branch=branch,
         ):
             raise typer.Exit(1)
 
@@ -1682,7 +1684,7 @@ def _remote_add(
 
         # Initialize git repository in container
         typer.echo("Initializing git repository in container...")
-        if not initialize_container_workspace_podman(container_name):
+        if not initialize_container_workspace_podman(container_name, branch=branch):
             raise typer.Exit(1)
 
         remote_url = build_podman_remote_url(container_name=container_name)
@@ -1690,8 +1692,6 @@ def _remote_add(
     # Add the remote
     if git_remote_add(remote_name, remote_url):
         typer.echo(f"Added git remote '{remote_name}'.")
-
-        branch = get_current_branch() or "main"
 
         if push:
             typer.echo("")

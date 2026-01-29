@@ -316,6 +316,23 @@ class TestInitializeContainerWorkspacePodman:
 
         assert result is False
 
+    @patch("paude.git_remote.subprocess.run")
+    def test_uses_branch_name(self, mock_run) -> None:
+        """Use specified branch name in git init."""
+        from paude.git_remote import initialize_container_workspace_podman
+
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        result = initialize_container_workspace_podman("paude-test", branch="develop")
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        # Find the bash -c command argument
+        bash_cmd_idx = call_args.index("-c") + 1
+        bash_cmd = call_args[bash_cmd_idx]
+        assert "git init -b develop" in bash_cmd
+
 
 class TestInitializeContainerWorkspaceOpenshift:
     """Tests for initialize_container_workspace_openshift."""
@@ -352,6 +369,25 @@ class TestInitializeContainerWorkspaceOpenshift:
         call_args = mock_run.call_args[0][0]
         assert "--context" in call_args
         assert "my-ctx" in call_args
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_uses_branch_name(self, mock_run) -> None:
+        """Use specified branch name in git init."""
+        from paude.git_remote import initialize_container_workspace_openshift
+
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        result = initialize_container_workspace_openshift(
+            "pod-0", "ns", branch="feature-branch"
+        )
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        # Find the bash -c command argument
+        bash_cmd_idx = call_args.index("-c") + 1
+        bash_cmd = call_args[bash_cmd_idx]
+        assert "git init -b feature-branch" in bash_cmd
 
 
 class TestIsContainerRunningPodman:

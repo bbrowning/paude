@@ -212,17 +212,21 @@ def get_current_branch() -> str | None:
     return None
 
 
-def initialize_container_workspace_podman(container_name: str) -> bool:
+def initialize_container_workspace_podman(
+    container_name: str,
+    branch: str = "main",
+) -> bool:
     """Initialize git repository in a Podman container's workspace.
 
     Args:
         container_name: Name of the container.
+        branch: Branch name to use for initial branch (matches local).
 
     Returns:
         True if successful, False if failed.
     """
     init_cmd = (
-        "test -d /pvc/workspace/.git || git init /pvc/workspace && "
+        f"test -d /pvc/workspace/.git || git init -b {branch} /pvc/workspace && "
         "git -C /pvc/workspace config receive.denyCurrentBranch updateInstead"
     )
     result = subprocess.run(
@@ -240,6 +244,7 @@ def initialize_container_workspace_openshift(
     pod_name: str,
     namespace: str,
     context: str | None = None,
+    branch: str = "main",
 ) -> bool:
     """Initialize git repository in an OpenShift pod's workspace.
 
@@ -247,12 +252,13 @@ def initialize_container_workspace_openshift(
         pod_name: Name of the pod.
         namespace: Kubernetes namespace.
         context: Optional kubeconfig context.
+        branch: Branch name to use for initial branch (matches local).
 
     Returns:
         True if successful, False if failed.
     """
     init_cmd = (
-        "test -d /pvc/workspace/.git || git init /pvc/workspace && "
+        f"test -d /pvc/workspace/.git || git init -b {branch} /pvc/workspace && "
         "git -C /pvc/workspace config receive.denyCurrentBranch updateInstead"
     )
     oc_cmd = ["oc"]
