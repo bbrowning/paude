@@ -145,6 +145,7 @@ class PodmanBackend:
 
         # Prepare environment
         env = dict(config.env)
+        env["PAUDE_WORKSPACE"] = "/pvc/workspace"
 
         # Add YOLO flag to args if enabled
         claude_args = list(config.args)
