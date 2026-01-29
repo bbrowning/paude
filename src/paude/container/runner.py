@@ -221,6 +221,30 @@ class ContainerRunner:
         result = subprocess.run(cmd)
         return result.returncode
 
+    def exec_in_container(
+        self,
+        name: str,
+        command: list[str],
+        check: bool = True,
+    ) -> subprocess.CompletedProcess[str]:
+        """Execute a command in a running container and capture output.
+
+        Args:
+            name: Container name.
+            command: Command to execute.
+            check: Raise exception on non-zero exit code.
+
+        Returns:
+            CompletedProcess with stdout, stderr, and returncode.
+        """
+        cmd = ["podman", "exec", name, *command]
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=check,
+        )
+
     def container_exists(self, name: str) -> bool:
         """Check if a container exists.
 

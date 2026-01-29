@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from enum import Enum
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -97,7 +97,7 @@ COMMANDS:
     stop [NAME]         Stop a session (preserves data)
     connect [NAME]      Attach to a running session
     list                List all sessions
-    sync [NAME]         Sync files between local and remote workspace
+    remote <ACTION>     Manage git remotes for code sync
     delete NAME         Delete a session and all its resources
 
 OPTIONS (for 'create' command):
@@ -109,7 +109,6 @@ OPTIONS (for 'create' command):
     --rebuild           Force rebuild of workspace container image
     --dry-run           Show configuration without creating session
     -a, --args          Arguments to pass to claude (e.g., -a '-p "prompt"')
-    -v, --verbose       Enable verbose output (rsync progress on start/stop)
     --backend           Container backend: podman (default), openshift
     --platform          Target platform for image builds (e.g., linux/amd64)
     --openshift-context Kubeconfig context for OpenShift
@@ -121,13 +120,21 @@ OPTIONS (global):
     -V, --version       Show paude version and exit
 
 WORKFLOW:
-    paude                           # List sessions
     paude create                    # Create session for current workspace
-    paude create --yolo             # Create with YOLO mode enabled
     paude start                     # Start and connect to session
+    paude remote add                # Set up git remote for sync
+    git push paude-<name> main      # Push code to session
     paude connect                   # Reconnect to running session
+    git pull paude-<name> main      # Pull changes from session
     paude stop                      # Stop session (preserves data)
     paude delete NAME --confirm     # Delete session permanently
+
+SYNCING CODE (via git):
+    paude remote add [NAME]         Add git remote for session
+    paude remote list               List all paude git remotes
+    paude remote remove [NAME]      Remove git remote for session
+    git push paude-<name> main      Push code to container
+    git pull paude-<name> main      Pull changes from container
 
 EXAMPLES:
     paude create --yolo --allowed-domains all
@@ -611,13 +618,6 @@ def session_start(
         str | None,
         typer.Argument(help="Session name (auto-select if not specified)"),
     ] = None,
-    no_sync: Annotated[
-        bool,
-        typer.Option(
-            "--no-sync",
-            help="Skip file synchronization before connecting.",
-        ),
-    ] = False,
     backend: Annotated[
         BackendType | None,
         typer.Option(
@@ -639,14 +639,6 @@ def session_start(
             help="OpenShift namespace (default: current context namespace).",
         ),
     ] = None,
-    verbose: Annotated[
-        bool,
-        typer.Option(
-            "--verbose",
-            "-v",
-            help="Enable verbose output (show rsync progress).",
-        ),
-    ] = False,
 ) -> None:
     """Start a session and connect to it."""
     from paude.backends import PodmanBackend, SessionNotFoundError
@@ -657,9 +649,7 @@ def session_start(
         if result:
             backend, backend_obj = result
             try:
-                exit_code = backend_obj.start_session(  # type: ignore[attr-defined]
-                    name, sync=not no_sync, verbose=verbose
-                )
+                exit_code = backend_obj.start_session(name)  # type: ignore[attr-defined]
                 raise typer.Exit(exit_code)
             except Exception as e:
                 typer.echo(f"Error starting session: {e}", err=True)
@@ -709,14 +699,7 @@ def session_start(
                 f"Starting '{workspace_session.name}' "
                 f"({workspace_session.backend_type})..."
             )
-            if workspace_session.backend_type == "openshift":
-                exit_code = workspace_backend.start_session(  # type: ignore[call-arg]
-                    workspace_session.name, sync=not no_sync, verbose=verbose
-                )
-            else:
-                exit_code = workspace_backend.start_session(
-                    workspace_session.name, sync=not no_sync
-                )
+            exit_code = workspace_backend.start_session(workspace_session.name)
             raise typer.Exit(exit_code)
 
         # Collect all sessions from available backends
@@ -758,14 +741,7 @@ def session_start(
         if len(all_sessions) == 1:
             session, backend_obj = all_sessions[0]
             typer.echo(f"Starting '{session.name}' ({session.backend_type})...")
-            if session.backend_type == "openshift":
-                exit_code = backend_obj.start_session(  # type: ignore[call-arg]
-                    session.name, sync=not no_sync, verbose=verbose
-                )
-            else:
-                exit_code = backend_obj.start_session(
-                    session.name, sync=not no_sync
-                )
+            exit_code = backend_obj.start_session(session.name)
             raise typer.Exit(exit_code)
         else:
             typer.echo(
@@ -810,7 +786,7 @@ def session_start(
                     raise typer.Exit(1)
 
         try:
-            exit_code = backend_instance.start_session(name, sync=not no_sync)
+            exit_code = backend_instance.start_session(name)
             raise typer.Exit(exit_code)
         except SessionNotFoundError as e:
             typer.echo(f"Error: {e}", err=True)
@@ -861,9 +837,7 @@ def session_start(
                     raise typer.Exit(1)
 
         try:
-            exit_code = os_backend.start_session(
-                name, sync=not no_sync, verbose=verbose
-            )
+            exit_code = os_backend.start_session(name)
             raise typer.Exit(exit_code)
         except OpenshiftSessionNotFoundError as e:
             typer.echo(f"Error: {e}", err=True)
@@ -879,13 +853,6 @@ def session_stop(
         str | None,
         typer.Argument(help="Session name (auto-select if not specified)"),
     ] = None,
-    do_sync: Annotated[
-        bool,
-        typer.Option(
-            "--sync",
-            help="Sync files back to local before stopping.",
-        ),
-    ] = False,
     backend: Annotated[
         BackendType | None,
         typer.Option(
@@ -907,14 +874,6 @@ def session_stop(
             help="OpenShift namespace (default: current context namespace).",
         ),
     ] = None,
-    verbose: Annotated[
-        bool,
-        typer.Option(
-            "--verbose",
-            "-v",
-            help="Enable verbose output (show rsync progress).",
-        ),
-    ] = False,
 ) -> None:
     """Stop a session (preserves data)."""
     from paude.backends import PodmanBackend
@@ -925,7 +884,7 @@ def session_stop(
         if result:
             backend, backend_obj = result
             try:
-                backend_obj.stop_session(name, sync=do_sync, verbose=verbose)  # type: ignore[attr-defined]
+                backend_obj.stop_session(name)  # type: ignore[attr-defined]
                 typer.echo(f"Session '{name}' stopped.")
                 return
             except Exception as e:
@@ -976,12 +935,7 @@ def session_stop(
                 f"Stopping '{workspace_session.name}' "
                 f"({workspace_session.backend_type})..."
             )
-            if workspace_session.backend_type == "openshift":
-                workspace_backend.stop_session(  # type: ignore[call-arg]
-                    workspace_session.name, sync=do_sync, verbose=verbose
-                )
-            else:
-                workspace_backend.stop_session(workspace_session.name, sync=do_sync)
+            workspace_backend.stop_session(workspace_session.name)
             typer.echo(f"Session '{workspace_session.name}' stopped.")
             return
 
@@ -1024,12 +978,7 @@ def session_stop(
         if len(all_sessions) == 1:
             session, backend_obj = all_sessions[0]
             typer.echo(f"Stopping '{session.name}' ({session.backend_type})...")
-            if session.backend_type == "openshift":
-                backend_obj.stop_session(  # type: ignore[call-arg]
-                    session.name, sync=do_sync, verbose=verbose
-                )
-            else:
-                backend_obj.stop_session(session.name, sync=do_sync)
+            backend_obj.stop_session(session.name)
             typer.echo(f"Session '{session.name}' stopped.")
             return
         else:
@@ -1075,7 +1024,7 @@ def session_stop(
                     raise typer.Exit(1)
 
         try:
-            backend_instance.stop_session(name, sync=do_sync)
+            backend_instance.stop_session(name)
             typer.echo(f"Session '{name}' stopped.")
         except Exception as e:
             typer.echo(f"Error stopping session: {e}", err=True)
@@ -1122,7 +1071,7 @@ def session_stop(
                     raise typer.Exit(1)
 
         try:
-            os_backend.stop_session(name, sync=do_sync, verbose=verbose)
+            os_backend.stop_session(name)
             typer.echo(f"Session '{name}' stopped.")
         except OpenshiftSessionNotFoundError as e:
             typer.echo(f"Error: {e}", err=True)
@@ -1435,25 +1384,15 @@ def session_list(
         typer.echo(line)
 
 
-@app.command("sync")
-def session_sync(
+@app.command("remote")
+def remote_command(
+    action: Annotated[
+        str,
+        typer.Argument(help="Action: add, list, or remove"),
+    ],
     name: Annotated[
         str | None,
-        typer.Argument(help="Session name (auto-select if not specified)"),
-    ] = None,
-    direction: Annotated[
-        str,
-        typer.Option(
-            "--direction", "-d",
-            help="Sync direction: 'local' (pull), 'remote' (push), 'both'.",
-        ),
-    ] = "both",
-    backend: Annotated[
-        BackendType | None,
-        typer.Option(
-            "--backend",
-            help="Container backend (auto-detected from session if not specified).",
-        ),
+        typer.Argument(help="Session name (optional if only one exists)"),
     ] = None,
     openshift_context: Annotated[
         str | None,
@@ -1469,103 +1408,206 @@ def session_sync(
             help="OpenShift namespace (default: current context namespace).",
         ),
     ] = None,
-    verbose: Annotated[
-        bool,
-        typer.Option(
-            "--verbose",
-            "-v",
-            help="Enable verbose output (show rsync progress).",
-        ),
-    ] = False,
 ) -> None:
-    """Sync files between local workspace and remote session."""
-    from paude.backends import PodmanBackend
+    """Manage git remotes for paude sessions.
 
-    if direction not in ("local", "remote", "both"):
-        typer.echo(
-            f"Invalid direction: {direction}. Use 'local', 'remote', or 'both'.",
-            err=True,
-        )
-        raise typer.Exit(1)
+    Actions:
+      add [NAME]     Add a git remote for a session (uses ext:: protocol)
+      list           List all paude git remotes
+      remove [NAME]  Remove a git remote for a session
+    """
+    from paude.git_remote import (
+        git_remote_remove,
+        is_git_repository,
+        list_paude_remotes,
+    )
 
-    # Auto-detect backend if name is provided but backend is not
-    if name and backend is None:
-        result = find_session_backend(name, openshift_context, openshift_namespace)
-        if result:
-            backend, backend_obj = result
-            try:
-                backend_obj.sync_session(name, direction=direction, verbose=verbose)  # type: ignore[attr-defined]
-                typer.echo(f"Synced session '{name}'.")
-                return
-            except Exception as e:
-                typer.echo(f"Error syncing session: {e}", err=True)
-                raise typer.Exit(1) from None
-        else:
-            typer.echo(f"Session '{name}' not found.", err=True)
+    if action == "list":
+        remotes = list_paude_remotes()
+        if not remotes:
+            typer.echo("No paude git remotes found.")
+            typer.echo("")
+            typer.echo("To add a remote for a session:")
+            typer.echo("  paude remote add [SESSION]")
+            return
+
+        typer.echo(f"{'REMOTE':<25} {'URL':<60}")
+        typer.echo("-" * 85)
+        for remote_name, remote_url in remotes:
+            # Truncate URL if too long
+            url_display = remote_url
+            if len(url_display) > 60:
+                url_display = url_display[:57] + "..."
+            typer.echo(f"{remote_name:<25} {url_display:<60}")
+        return
+
+    if action == "add":
+        if not is_git_repository():
+            typer.echo("Error: Not a git repository.", err=True)
+            typer.echo("Initialize git first: git init", err=True)
             raise typer.Exit(1)
 
-    # Default to podman if no backend specified and no name
-    if backend is None:
-        backend = BackendType.podman
+        _remote_add(name, openshift_context, openshift_namespace)
+        return
 
-    if backend == BackendType.podman:
-        backend_instance = PodmanBackend()
+    if action == "remove":
+        if not is_git_repository():
+            typer.echo("Error: Not a git repository.", err=True)
+            raise typer.Exit(1)
 
-        # If no name provided, find session for current workspace
         if not name:
-            session = backend_instance.find_session_for_workspace(Path.cwd())
-            if session:
-                name = session.name
+            # Auto-detect session for workspace
+            sess, _ = _find_session_for_remote(openshift_context, openshift_namespace)
+            if sess:
+                name = sess.name
             else:
-                typer.echo(
-                    "No session found for current workspace. Specify a name.",
-                    err=True,
-                )
+                typer.echo("Error: Specify a session name to remove.", err=True)
                 raise typer.Exit(1)
 
-        try:
-            backend_instance.sync_session(name, direction=direction)
-            typer.echo(f"Synced session '{name}'.")
-        except Exception as e:
-            typer.echo(f"Error syncing session: {e}", err=True)
-            raise typer.Exit(1) from None
-    else:
-        from paude.backends.openshift import (
-            OpenShiftBackend,
-            OpenShiftConfig,
-        )
-        from paude.backends.openshift import (
-            SessionNotFoundError as OpenshiftSessionNotFoundError,
-        )
+        remote_name = f"paude-{name}"
+        if git_remote_remove(remote_name):
+            typer.echo(f"Removed git remote '{remote_name}'.")
+        else:
+            raise typer.Exit(1)
+        return
 
-        openshift_config = OpenShiftConfig(
+    typer.echo(f"Unknown action: {action}", err=True)
+    typer.echo("Valid actions: add, list, remove", err=True)
+    raise typer.Exit(1)
+
+
+def _find_session_for_remote(
+    openshift_context: str | None,
+    openshift_namespace: str | None,
+) -> tuple[Any, Any]:
+    """Find a session for the current workspace.
+
+    Returns:
+        Tuple of (session, backend) if found, (None, None) otherwise.
+    """
+    from paude.backends import PodmanBackend
+
+    # Try Podman first
+    try:
+        podman = PodmanBackend()
+        session = podman.find_session_for_workspace(Path.cwd())
+        if session:
+            return (session, podman)
+    except Exception:  # noqa: S110
+        pass
+
+    # Try OpenShift
+    try:
+        from paude.backends.openshift import OpenShiftBackend, OpenShiftConfig
+
+        os_config = OpenShiftConfig(
+            context=openshift_context,
+            namespace=openshift_namespace,
+        )
+        os_backend = OpenShiftBackend(config=os_config)
+        session = os_backend.find_session_for_workspace(Path.cwd())
+        if session:
+            return (session, os_backend)
+    except Exception:  # noqa: S110
+        pass
+
+    return (None, None)
+
+
+def _remote_add(
+    name: str | None,
+    openshift_context: str | None,
+    openshift_namespace: str | None,
+) -> None:
+    """Add a git remote for a session."""
+    from paude.git_remote import (
+        build_openshift_remote_url,
+        build_podman_remote_url,
+        enable_ext_protocol,
+        get_current_branch,
+        git_remote_add,
+        is_ext_protocol_allowed,
+    )
+
+    # Check if ext protocol is enabled (required for ext:: remotes)
+    if not is_ext_protocol_allowed():
+        typer.echo("Enabling git ext:: protocol for this repository...", err=True)
+        if not enable_ext_protocol():
+            typer.echo("Error: Failed to enable git ext:: protocol.", err=True)
+            typer.echo(
+                "Run manually: git config protocol.ext.allow always",
+                err=True,
+            )
+            raise typer.Exit(1)
+
+    # Find the session
+    session = None
+
+    if name:
+        # Look up by name
+        result = find_session_backend(name, openshift_context, openshift_namespace)
+        if result:
+            _, backend = result
+            session = backend.get_session(name)  # type: ignore[attr-defined]
+    else:
+        # Auto-detect from workspace
+        session, _ = _find_session_for_remote(openshift_context, openshift_namespace)
+
+    if not session:
+        typer.echo("Error: No session found.", err=True)
+        if name:
+            typer.echo(f"Session '{name}' does not exist.", err=True)
+        else:
+            typer.echo("No session exists for current workspace.", err=True)
+            typer.echo("", err=True)
+            typer.echo("Create one first:", err=True)
+            typer.echo("  paude create", err=True)
+        raise typer.Exit(1)
+
+    # Build the remote URL based on backend type
+    remote_name = f"paude-{session.name}"
+
+    if session.backend_type == "openshift":
+        from paude.backends.openshift import OpenShiftConfig
+
+        os_config = OpenShiftConfig(
             context=openshift_context,
             namespace=openshift_namespace,
         )
 
-        os_backend = OpenShiftBackend(config=openshift_config)
+        # Get namespace
+        if os_config.namespace:
+            namespace = os_config.namespace
+        else:
+            try:
+                from paude.backends.openshift import OpenShiftBackend
 
-        # If no name provided, find session for current workspace
-        if not name:
-            session = os_backend.find_session_for_workspace(Path.cwd())
-            if session:
-                name = session.name
-            else:
-                typer.echo(
-                    "No session found for current workspace. Specify a name.",
-                    err=True,
-                )
-                raise typer.Exit(1)
+                os_backend = OpenShiftBackend(config=os_config)
+                namespace = os_backend.namespace
+            except Exception:
+                namespace = "default"
 
-        try:
-            os_backend.sync_session(name, direction=direction, verbose=verbose)
-            typer.echo(f"Synced session '{name}'.")
-        except OpenshiftSessionNotFoundError as e:
-            typer.echo(f"Error: {e}", err=True)
-            raise typer.Exit(1) from None
-        except Exception as e:
-            typer.echo(f"Error syncing session: {e}", err=True)
-            raise typer.Exit(1) from None
+        pod_name = f"paude-{session.name}-0"
+        remote_url = build_openshift_remote_url(
+            pod_name=pod_name,
+            namespace=namespace,
+            context=openshift_context,
+        )
+    else:
+        container_name = f"paude-{session.name}"
+        remote_url = build_podman_remote_url(container_name=container_name)
+
+    # Add the remote
+    if git_remote_add(remote_name, remote_url):
+        typer.echo(f"Added git remote '{remote_name}'.")
+        typer.echo("")
+        typer.echo("Usage:")
+        branch = get_current_branch() or "main"
+        typer.echo(f"  git push {remote_name} {branch}  # Push code to container")
+        typer.echo(f"  git pull {remote_name} {branch}  # Pull changes")
+        typer.echo(f"  git fetch {remote_name}          # Fetch without merging")
+    else:
+        raise typer.Exit(1)
 
 
 @app.callback(invoke_without_command=True)

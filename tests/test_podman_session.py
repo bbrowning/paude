@@ -460,6 +460,8 @@ class TestPodmanBackendConnectSession:
         mock_runner.container_exists.return_value = True
         mock_runner.container_running.return_value = True
         mock_runner.attach_container.return_value = 0
+        # Workspace has .git directory
+        mock_runner.exec_in_container.return_value = MagicMock(returncode=0)
         mock_runner_class.return_value = mock_runner
 
         backend = PodmanBackend()
@@ -469,6 +471,30 @@ class TestPodmanBackendConnectSession:
 
         mock_runner.attach_container.assert_called_once()
         assert exit_code == 0
+
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_connect_session_shows_empty_workspace_message(
+        self, mock_runner_class: MagicMock, capsys
+    ) -> None:
+        """Connect session shows message when workspace is empty."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = True
+        mock_runner.container_running.return_value = True
+        mock_runner.attach_container.return_value = 0
+        # Workspace is empty (no .git directory)
+        mock_runner.exec_in_container.return_value = MagicMock(returncode=1)
+        mock_runner_class.return_value = mock_runner
+
+        backend = PodmanBackend()
+        backend._runner = mock_runner
+
+        exit_code = backend.connect_session("my-session")
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "Workspace is empty" in captured.err
+        assert "paude remote add my-session" in captured.err
+        assert "git push paude-my-session main" in captured.err
 
     @patch("paude.backends.podman.ContainerRunner")
     def test_connect_session_fails_if_not_running(
@@ -638,27 +664,6 @@ class TestPodmanBackendGetSession:
         session = backend.get_session("nonexistent")
 
         assert session is None
-
-
-class TestPodmanBackendSyncSession:
-    """Tests for PodmanBackend.sync_session."""
-
-    @patch("paude.backends.podman.ContainerRunner")
-    def test_sync_session_is_noop_for_podman(
-        self, mock_runner_class: MagicMock
-    ) -> None:
-        """Sync session is a no-op for Podman (volumes are live-mounted)."""
-        mock_runner = MagicMock()
-        mock_runner_class.return_value = mock_runner
-
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-
-        # Should not raise, just print message
-        backend.sync_session("my-session", direction="both")
-
-        # No rsync or copy operations should be performed
-        # (Podman uses direct volume mounts)
 
 
 class TestPodmanBackendFindSessionForWorkspace:

@@ -267,13 +267,98 @@ def test_connect_help():
     assert "paude - Run Claude Code" not in result.stdout
 
 
-def test_sync_help():
-    """'sync --help' shows subcommand help."""
-    result = runner.invoke(app, ["sync", "--help"])
+def test_remote_help():
+    """'remote --help' shows subcommand help."""
+    result = runner.invoke(app, ["remote", "--help"])
     assert result.exit_code == 0
-    assert "sync" in result.stdout.lower()
-    assert "Sync files" in result.stdout
+    assert "remote" in result.stdout.lower()
+    assert "git" in result.stdout.lower() or "ACTION" in result.stdout
     assert "paude - Run Claude Code" not in result.stdout
+
+
+class TestRemoteCommand:
+    """Tests for paude remote command."""
+
+    @patch("paude.git_remote.list_paude_remotes")
+    def test_remote_list_shows_remotes(self, mock_list):
+        """remote list shows all paude git remotes."""
+        mock_list.return_value = [
+            ("paude-my-session", "ext::podman exec paude-my-session %S /pvc/workspace"),
+            ("paude-other", "ext::oc exec pod -n ns -- %S /pvc/workspace"),
+        ]
+
+        result = runner.invoke(app, ["remote", "list"])
+
+        assert result.exit_code == 0
+        assert "paude-my-session" in result.stdout
+        assert "paude-other" in result.stdout
+
+    @patch("paude.git_remote.list_paude_remotes")
+    def test_remote_list_empty(self, mock_list):
+        """remote list shows helpful message when no remotes."""
+        mock_list.return_value = []
+
+        result = runner.invoke(app, ["remote", "list"])
+
+        assert result.exit_code == 0
+        assert "No paude git remotes found" in result.stdout
+        assert "paude remote add" in result.stdout
+
+    @patch("paude.git_remote.is_git_repository")
+    def test_remote_add_requires_git_repo(self, mock_is_git):
+        """remote add fails if not in git repository."""
+        mock_is_git.return_value = False
+
+        result = runner.invoke(app, ["remote", "add", "my-session"])
+
+        assert result.exit_code == 1
+        output = result.stdout + (result.stderr or "")
+        assert "Not a git repository" in output
+
+    @patch("paude.git_remote.is_git_repository")
+    def test_remote_remove_requires_git_repo(self, mock_is_git):
+        """remote remove fails if not in git repository."""
+        mock_is_git.return_value = False
+
+        result = runner.invoke(app, ["remote", "remove", "my-session"])
+
+        assert result.exit_code == 1
+        output = result.stdout + (result.stderr or "")
+        assert "Not a git repository" in output
+
+    @patch("paude.git_remote.is_git_repository")
+    @patch("paude.git_remote.git_remote_remove")
+    def test_remote_remove_success(self, mock_remove, mock_is_git):
+        """remote remove successfully removes a remote."""
+        mock_is_git.return_value = True
+        mock_remove.return_value = True
+
+        result = runner.invoke(app, ["remote", "remove", "my-session"])
+
+        assert result.exit_code == 0
+        assert "Removed git remote 'paude-my-session'" in result.stdout
+        mock_remove.assert_called_once_with("paude-my-session")
+
+    @patch("paude.git_remote.is_git_repository")
+    @patch("paude.git_remote.git_remote_remove")
+    def test_remote_remove_not_found(self, mock_remove, mock_is_git):
+        """remote remove fails when remote doesn't exist."""
+        mock_is_git.return_value = True
+        mock_remove.return_value = False
+
+        result = runner.invoke(app, ["remote", "remove", "nonexistent"])
+
+        assert result.exit_code == 1
+
+    def test_remote_unknown_action(self):
+        """remote with unknown action shows error."""
+        result = runner.invoke(app, ["remote", "invalid"])
+
+        assert result.exit_code == 1
+        # Error goes to stderr, which typer may redirect to stdout
+        output = result.stdout + (result.stderr or "")
+        assert "Unknown action: invalid" in output
+        assert "Valid actions: add, list, remove" in output
 
 
 def test_subcommand_runs_without_main_execution():

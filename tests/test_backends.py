@@ -137,7 +137,6 @@ class TestBackendProtocol:
         assert hasattr(backend, "stop_session")
         assert hasattr(backend, "connect_session")
         assert hasattr(backend, "list_sessions")
-        assert hasattr(backend, "sync_session")
         assert hasattr(backend, "get_session")
 
         assert callable(backend.create_session)
@@ -146,5 +145,4 @@ class TestBackendProtocol:
         assert callable(backend.stop_session)
         assert callable(backend.connect_session)
         assert callable(backend.list_sessions)
-        assert callable(backend.sync_session)
         assert callable(backend.get_session)

@@ -29,9 +29,9 @@ paude start
 ## How It Works
 
 1. **Image Push**: Local paude container image is pushed to the OpenShift internal registry
-2. **Pod Creation**: A pod is created with your workspace mounted and credentials injected
+2. **Pod Creation**: A pod is created with persistent storage and credentials injected
 3. **Session Persistence**: tmux inside the pod preserves your Claude session across reconnects
-4. **File Sync**: `oc rsync` synchronizes files between local and remote workspace
+4. **Git-Based Sync**: Use `paude remote add` and `git push/pull` to sync code
 5. **Network Filtering**: NetworkPolicy restricts pod egress to approved destinations
 
 ## Session Management
@@ -44,13 +44,20 @@ Paude uses a unified session model across all backends. Sessions are persistent 
 # Create a named session (without starting)
 paude create my-project --backend=openshift
 
-# Start the session (scales StatefulSet, syncs files, connects)
+# Start the session (scales StatefulSet, connects)
 paude start my-project --backend=openshift
 
-# Work in Claude... then detach with Ctrl+b d
+# Set up git remote for code sync
+paude remote add my-project
 
-# Reconnect later
+# Push code to the session
+git push paude-my-project main
+
+# Connect and work with Claude... then detach with Ctrl+b d
 paude connect my-project --backend=openshift
+
+# Pull changes made by Claude
+git pull paude-my-project main
 
 # Stop to save cluster resources (scales to 0, preserves PVC)
 paude stop my-project --backend=openshift
@@ -70,7 +77,7 @@ paude delete my-project --confirm --backend=openshift
 | State | StatefulSet Replicas | Pod | PVC | Files |
 |-------|---------------------|-----|-----|-------|
 | Created | 0 | None | Created | Empty |
-| Started | 1 | Running | Bound | Synced from local |
+| Started | 1 | Running | Bound | Push via git |
 | Stopped | 0 | None | Retained | Preserved |
 | Deleted | Deleted | Deleted | Deleted | Gone |
 
@@ -249,17 +256,20 @@ Common causes:
 - Image pull failures
 - PVC provisioning issues
 
-### File sync issues
+### Code sync issues
 
-Manual sync:
+Paude uses git for code synchronization. Set up the remote first:
 ```bash
-paude sync SESSION_ID --backend=openshift
+paude remote add SESSION_ID
 ```
 
-Or use oc rsync directly:
+Then use standard git commands:
 ```bash
-oc rsync ./local-dir/ pod-name:/workspace/ -n paude
+git push paude-SESSION_ID main     # Push code to session
+git pull paude-SESSION_ID main     # Pull changes from session
 ```
+
+For merge conflicts, use normal git workflows (rebase, merge, etc.).
 
 ## Architecture
 
@@ -282,7 +292,7 @@ oc rsync ./local-dir/ pod-name:/workspace/ -n paude
 │  │  │    (tmpfs)       │    └───────────────────────┘ │ │
 │  │  └──────────────────┘                              │ │
 │  │         ↑                                          │ │
-│  │         │ oc rsync (workspace) / oc cp (creds)     │ │
+│  │         │ git push/pull (code) / oc cp (creds)     │ │
 │  │         ↓                                          │ │
 │  └─────────┼──────────────────────────────────────────┘ │
 └────────────┼────────────────────────────────────────────┘
@@ -300,10 +310,10 @@ oc rsync ./local-dir/ pod-name:/workspace/ -n paude
 
 | Feature | Podman | OpenShift |
 |---------|--------|-----------|
-| Session Persistence | No (ephemeral) | Yes (tmux) |
+| Session Persistence | Yes (named volumes) | Yes (tmux + PVC) |
 | Network Disconnect | Session lost | Session preserved |
-| File Sync | Direct mount | oc rsync |
-| Plugin Sync | Direct mount | oc rsync (auto path rewrite) |
+| Code Sync | git push/pull | git push/pull |
+| Config Sync | Mounted at start | oc cp at connect |
 | Multi-machine | No | Yes |
 | Resource Isolation | Container | Pod + namespace |
 | Setup Complexity | Low | Medium |
@@ -312,5 +322,5 @@ oc rsync ./local-dir/ pod-name:/workspace/ -n paude
 
 - **No SSH mounts**: Git push via SSH is not available (same as Podman backend)
 - **No GitHub CLI**: `gh` operations are not available (same as Podman backend)
-- **Initial sync delay**: Large workspaces take time to sync initially
+- **Git workflow required**: Must use git to sync code (no automatic file sync)
 - **Cluster dependency**: Requires active OpenShift cluster access

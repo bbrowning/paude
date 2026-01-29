@@ -107,32 +107,26 @@ class Backend(Protocol):
         """
         ...
 
-    def start_session(
-        self,
-        name: str,
-        sync: bool = True,
-    ) -> int:
+    def start_session(self, name: str) -> int:
         """Start a session and connect to it.
 
-        Starts the container/scales to 1, optionally syncs files, connects.
+        Starts the container/scales to 1 and connects.
 
         Args:
             name: Session name.
-            sync: Whether to sync workspace files before connecting.
 
         Returns:
             Exit code from the connected session.
         """
         ...
 
-    def stop_session(self, name: str, sync: bool = False) -> None:
+    def stop_session(self, name: str) -> None:
         """Stop a session (preserves volume).
 
         Stops the container/scales to 0 but keeps the volume intact.
 
         Args:
             name: Session name.
-            sync: Whether to sync files back to local before stopping.
         """
         ...
 
@@ -152,23 +146,6 @@ class Backend(Protocol):
 
         Returns:
             List of Session objects.
-        """
-        ...
-
-    def sync_session(
-        self,
-        name: str,
-        direction: str = "both",
-    ) -> None:
-        """Sync files between local and remote workspace.
-
-        Args:
-            name: Session name.
-            direction: Sync direction ("local", "remote", "both").
-
-        Note:
-            For Podman backend with volume mounts, this may be a no-op
-            or rsync for performance. For OpenShift, uses oc rsync.
         """
         ...
 

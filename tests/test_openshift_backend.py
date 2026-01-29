@@ -131,9 +131,6 @@ class TestRunOc:
         # OC_EXEC_TIMEOUT: exec operations may be slow after pod restart
         assert OpenShiftBackend.OC_EXEC_TIMEOUT == 120
 
-        # RSYNC_TIMEOUT: large workspaces take time to sync
-        assert OpenShiftBackend.RSYNC_TIMEOUT == 300
-
     @patch("subprocess.run")
     def test_run_oc_uses_default_timeout(self, mock_run: MagicMock) -> None:
         """_run_oc uses default timeout when none specified."""
@@ -493,7 +490,7 @@ class TestOpenShiftStartSession:
         # Mock wait_for_pod_ready and connect_session to avoid actual waits
         with patch.object(backend, "_wait_for_pod_ready"):
             with patch.object(backend, "connect_session", return_value=0):
-                exit_code = backend.start_session("test", sync=False)
+                exit_code = backend.start_session("test")
 
         assert exit_code == 0
 
@@ -549,7 +546,7 @@ class TestOpenShiftStartSession:
         with patch.object(backend, "_wait_for_pod_ready"):
             with patch.object(backend, "_wait_for_proxy_ready"):
                 with patch.object(backend, "connect_session", return_value=0):
-                    exit_code = backend.start_session("test", sync=False)
+                    exit_code = backend.start_session("test")
 
         assert exit_code == 0
 
@@ -1937,7 +1934,7 @@ class TestStartSessionWaitsForProxy:
 
         with patch.object(backend, "_wait_for_pod_ready"):
             with patch.object(backend, "connect_session", return_value=0):
-                backend.start_session("test", sync=False)
+                backend.start_session("test")
 
         # Verify proxy check happened
         assert "get_proxy_deployment" in call_order
@@ -1981,7 +1978,7 @@ class TestStartSessionWaitsForProxy:
 
         with patch.object(backend, "_wait_for_pod_ready"):
             with patch.object(backend, "connect_session", return_value=0):
-                backend.start_session("test", sync=False)
+                backend.start_session("test")
 
         # Verify proxy was checked but not waited for
         assert "get_proxy_deployment" in call_order
@@ -2095,6 +2092,38 @@ class TestConnectSessionRefreshesCredentials:
                 assert result == 1
                 mock_full_sync.assert_not_called()
                 mock_creds.assert_not_called()
+
+    @patch("subprocess.run")
+    def test_connect_session_shows_empty_workspace_message(
+        self, mock_run: MagicMock, capsys: Any
+    ) -> None:
+        """connect_session shows message when workspace is empty."""
+        call_order = []
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
+
+            if "get" in cmd and "pod" in cmd:
+                return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Empty workspace - no .git directory
+            if "test" in cmd and "-d" in cmd and ".git" in cmd_str:
+                call_order.append("check_git_dir")
+                return MagicMock(returncode=1, stdout="", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with patch.object(backend, "_is_config_synced", return_value=True):
+            with patch.object(backend, "_sync_credentials_to_pod"):
+                backend.connect_session("test")
+
+        captured = capsys.readouterr()
+        assert "Workspace is empty" in captured.err
+        assert "paude remote add test" in captured.err
+        assert "git push paude-test main" in captured.err
 
 
 class TestIsConfigSynced:
@@ -2535,336 +2564,6 @@ class TestSyncConfigToPod:
         # There should be at least 2 exec calls:
         # 1. mkdir + chmod for config directory prep
         # 2. chmod + touch for .ready marker
-        assert len(exec_calls) >= 2, f"Expected at least 2 exec calls, got {len(exec_calls)}"
-
-        # All exec calls should use the extended timeout
-        for call in exec_calls:
-            timeout = call[1].get("timeout")
-            assert timeout == OpenShiftBackend.OC_EXEC_TIMEOUT, (
-                f"exec call should use OC_EXEC_TIMEOUT ({OpenShiftBackend.OC_EXEC_TIMEOUT}), "
-                f"got {timeout}. Call: {call}"
-            )
-
-
-class TestRsyncWithRetry:
-    """Tests for _rsync_with_retry method."""
-
-    @patch("subprocess.run")
-    def test_rsync_with_delete_flag(self, mock_run: MagicMock) -> None:
-        """_rsync_with_retry includes --delete when delete=True."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        result = backend._rsync_with_retry(
-            "/local/path/",
-            "test-pod-0:/remote/path",
-            "test-ns",
-            exclude_args=["--exclude", ".git"],
-            delete=True,
-        )
-
-        assert result is True
-        # Find the rsync call
-        rsync_calls = [
-            c for c in mock_run.call_args_list if "rsync" in str(c)
-        ]
-        assert len(rsync_calls) == 1
-        rsync_cmd = str(rsync_calls[0])
-        assert "--delete" in rsync_cmd
-
-    @patch("subprocess.run")
-    def test_rsync_without_delete_flag(self, mock_run: MagicMock) -> None:
-        """_rsync_with_retry does not include --delete when delete=False."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        result = backend._rsync_with_retry(
-            "/local/path/",
-            "test-pod-0:/remote/path",
-            "test-ns",
-            exclude_args=[],
-            delete=False,
-        )
-
-        assert result is True
-        rsync_calls = [
-            c for c in mock_run.call_args_list if "rsync" in str(c)
-        ]
-        assert len(rsync_calls) == 1
-        rsync_cmd = str(rsync_calls[0])
-        assert "--delete" not in rsync_cmd
-
-    @patch("subprocess.run")
-    def test_rsync_default_delete_is_false(self, mock_run: MagicMock) -> None:
-        """_rsync_with_retry defaults to delete=False when not specified."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        # Call without specifying delete parameter - should default to False
-        result = backend._rsync_with_retry(
-            "/local/path/",
-            "test-pod-0:/remote/path",
-            "test-ns",
-            exclude_args=[],
-        )
-
-        assert result is True
-        rsync_calls = [
-            c for c in mock_run.call_args_list if "rsync" in str(c)
-        ]
-        assert len(rsync_calls) == 1
-        rsync_cmd = str(rsync_calls[0])
-        assert "--delete" not in rsync_cmd
-
-    @patch("subprocess.run")
-    def test_rsync_returns_false_on_failure(
-        self, mock_run: MagicMock, capsys: Any
-    ) -> None:
-        """_rsync_with_retry returns False and prints error when rsync fails."""
-        mock_run.return_value = MagicMock(
-            returncode=1,
-            stdout="",
-            stderr="error: Permission denied",
-        )
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        result = backend._rsync_with_retry(
-            "/local/path/",
-            "test-pod-0:/remote/path",
-            "test-ns",
-            exclude_args=[],
-        )
-
-        assert result is False
-        captured = capsys.readouterr()
-        assert "Rsync failed" in captured.err
-        assert "Permission denied" in captured.err
-
-    @patch("subprocess.run")
-    def test_rsync_prints_error_even_without_verbose(
-        self, mock_run: MagicMock, capsys: Any
-    ) -> None:
-        """_rsync_with_retry prints error message even when verbose=False."""
-        mock_run.return_value = MagicMock(
-            returncode=23,
-            stdout="",
-            stderr="rsync error: some files could not be transferred",
-        )
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        result = backend._rsync_with_retry(
-            "/local/path/",
-            "test-pod-0:/remote/path",
-            "test-ns",
-            exclude_args=[],
-            verbose=False,
-        )
-
-        assert result is False
-        captured = capsys.readouterr()
-        assert "Rsync failed" in captured.err
-        assert "some files could not be transferred" in captured.err
-
-
-class TestSyncSession:
-    """Tests for sync_session method."""
-
-    @patch("subprocess.run")
-    def test_sync_session_does_not_delete_directory(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """sync_session uses mkdir -p instead of rm -rf to preserve CWD."""
-        import base64
-
-        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
-            # Check for pod status request and return "Running"
-            cmd = args[0] if args else []
-            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
-                return MagicMock(returncode=0, stdout="Running", stderr="")
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = mock_run_side_effect
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        # Mock _get_statefulset to return a session with base64-encoded workspace
-        workspace_encoded = base64.b64encode(str(tmp_path).encode()).decode()
-        mock_sts = {
-            "metadata": {
-                "annotations": {
-                    "paude.io/workspace": workspace_encoded,
-                },
-            },
-        }
-        with patch.object(backend, "_get_statefulset", return_value=mock_sts):
-            backend.sync_session("test-session", direction="remote")
-
-        # Check all exec calls
-        exec_calls = [
-            c for c in mock_run.call_args_list
-            if "exec" in str(c) and "bash" in str(c)
-        ]
-
-        # Verify no rm -rf /pvc/workspace
-        for call in exec_calls:
-            call_str = str(call)
-            assert "rm -rf /pvc/workspace" not in call_str
-
-        # Verify mkdir -p is used instead
-        mkdir_calls = [c for c in exec_calls if "mkdir -p" in str(c)]
-        assert len(mkdir_calls) >= 1
-
-    @patch("subprocess.run")
-    def test_sync_session_uses_rsync_delete(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """sync_session uses rsync --delete for incremental cleanup."""
-        import base64
-
-        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
-            cmd = args[0] if args else []
-            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
-                return MagicMock(returncode=0, stdout="Running", stderr="")
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = mock_run_side_effect
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        workspace_encoded = base64.b64encode(str(tmp_path).encode()).decode()
-        mock_sts = {
-            "metadata": {
-                "annotations": {
-                    "paude.io/workspace": workspace_encoded,
-                },
-            },
-        }
-        with patch.object(backend, "_get_statefulset", return_value=mock_sts):
-            backend.sync_session("test-session", direction="remote")
-
-        # Find rsync calls
-        rsync_calls = [
-            c for c in mock_run.call_args_list if "rsync" in str(c)
-        ]
-        assert len(rsync_calls) >= 1
-
-        # Verify --delete flag is present for remote sync
-        rsync_cmd = str(rsync_calls[0])
-        assert "--delete" in rsync_cmd
-
-    @patch("subprocess.run")
-    def test_sync_session_local_does_not_use_delete(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """sync_session with direction='local' does NOT use --delete.
-
-        Local files should not be deleted when syncing from remote.
-        """
-        import base64
-
-        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
-            cmd = args[0] if args else []
-            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
-                return MagicMock(returncode=0, stdout="Running", stderr="")
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = mock_run_side_effect
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        workspace_encoded = base64.b64encode(str(tmp_path).encode()).decode()
-        mock_sts = {
-            "metadata": {
-                "annotations": {
-                    "paude.io/workspace": workspace_encoded,
-                },
-            },
-        }
-        with patch.object(backend, "_get_statefulset", return_value=mock_sts):
-            backend.sync_session("test-session", direction="local")
-
-        # Find rsync calls
-        rsync_calls = [
-            c for c in mock_run.call_args_list if "rsync" in str(c)
-        ]
-        assert len(rsync_calls) >= 1
-
-        # Verify --delete flag is NOT present for local sync
-        rsync_cmd = str(rsync_calls[0])
-        assert "--delete" not in rsync_cmd
-
-    @patch("subprocess.run")
-    def test_sync_session_reports_failure(
-        self, mock_run: MagicMock, tmp_path: Path, capsys: Any
-    ) -> None:
-        """sync_session prints FAILED message when rsync fails."""
-        import base64
-
-        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
-            cmd = args[0] if args else []
-            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
-                return MagicMock(returncode=0, stdout="Running", stderr="")
-            # Fail rsync calls
-            if "rsync" in cmd:
-                return MagicMock(
-                    returncode=1,
-                    stdout="",
-                    stderr="error: Permission denied",
-                )
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = mock_run_side_effect
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        workspace_encoded = base64.b64encode(str(tmp_path).encode()).decode()
-        mock_sts = {
-            "metadata": {
-                "annotations": {
-                    "paude.io/workspace": workspace_encoded,
-                },
-            },
-        }
-        with patch.object(backend, "_get_statefulset", return_value=mock_sts):
-            backend.sync_session("test-session", direction="remote")
-
-        captured = capsys.readouterr()
-        assert "FAILED" in captured.err
-        assert "Permission denied" in captured.err
-
-    @patch("subprocess.run")
-    def test_sync_session_exec_uses_extended_timeout(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """sync_session exec calls use OC_EXEC_TIMEOUT (not default)."""
-        import base64
-
-        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
-            # Check for pod status request and return "Running"
-            cmd = args[0] if args else []
-            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
-                return MagicMock(returncode=0, stdout="Running", stderr="")
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = mock_run_side_effect
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        workspace_encoded = base64.b64encode(str(tmp_path).encode()).decode()
-        mock_sts = {
-            "metadata": {
-                "annotations": {
-                    "paude.io/workspace": workspace_encoded,
-                },
-            },
-        }
-        with patch.object(backend, "_get_statefulset", return_value=mock_sts):
-            backend.sync_session("test-session", direction="remote")
-
-        # Find all exec calls (mkdir/chmod operations)
-        exec_calls = [
-            c for c in mock_run.call_args_list
-            if len(c[0]) > 0 and "exec" in c[0][0]
-        ]
-
-        # There should be at least 2 exec calls:
-        # 1. mkdir + chmod for workspace prep
-        # 2. chmod after rsync
         assert len(exec_calls) >= 2, f"Expected at least 2 exec calls, got {len(exec_calls)}"
 
         # All exec calls should use the extended timeout

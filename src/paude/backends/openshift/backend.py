@@ -15,7 +15,6 @@ from paude.backends.base import Session, SessionConfig
 from paude.backends.openshift.build import BuildOrchestrator
 from paude.backends.openshift.config import OpenShiftConfig
 from paude.backends.openshift.exceptions import (
-    OcTimeoutError,
     PodNotReadyError,
     SessionExistsError,
     SessionNotFoundError,
@@ -23,8 +22,6 @@ from paude.backends.openshift.exceptions import (
 from paude.backends.openshift.oc import (
     OC_DEFAULT_TIMEOUT,
     OC_EXEC_TIMEOUT,
-    RSYNC_MAX_RETRIES,
-    RSYNC_TIMEOUT,
     OcClient,
 )
 from paude.backends.openshift.proxy import ProxyManager
@@ -46,8 +43,6 @@ class OpenShiftBackend:
     # Class-level constants for backward compatibility
     OC_DEFAULT_TIMEOUT = OC_DEFAULT_TIMEOUT
     OC_EXEC_TIMEOUT = OC_EXEC_TIMEOUT
-    RSYNC_TIMEOUT = RSYNC_TIMEOUT
-    RSYNC_MAX_RETRIES = RSYNC_MAX_RETRIES
 
     def __init__(self, config: OpenShiftConfig | None = None) -> None:
         """Initialize the OpenShift backend.
@@ -128,80 +123,6 @@ class OpenShiftBackend:
             timeout=timeout,
             namespace=namespace,
         )
-
-    def _rsync_with_retry(
-        self,
-        source: str,
-        dest: str,
-        namespace: str,
-        exclude_args: list[str],
-        verbose: bool = False,
-        delete: bool = False,
-    ) -> bool:
-        """Run oc rsync with retry logic for timeouts.
-
-        Args:
-            source: Source path (local or pod:path format).
-            dest: Destination path (local or pod:path format).
-            namespace: Kubernetes namespace.
-            exclude_args: List of --exclude arguments.
-            verbose: Whether to show rsync output (default False).
-            delete: Whether to delete files not in source (default False).
-
-        Returns:
-            True if sync succeeded, False if all retries failed.
-        """
-        for attempt in range(1, self.RSYNC_MAX_RETRIES + 1):
-            try:
-                # Build rsync args (namespace is passed to _run_oc, not here)
-                rsync_args = [
-                    "rsync",
-                    "--progress",
-                    source,
-                    dest,
-                    "--no-perms",
-                ]
-                if delete:
-                    rsync_args.append("--delete")
-                rsync_args.extend(exclude_args)
-
-                # Always capture output so we can report errors
-                # When verbose, we'll print stdout/stderr after
-                result = self._run_oc(
-                    *rsync_args,
-                    timeout=self.RSYNC_TIMEOUT,
-                    capture=True,
-                    check=False,
-                    namespace=namespace,
-                )
-
-                # Show output when verbose is enabled
-                if verbose and result.stdout:
-                    print(result.stdout, file=sys.stderr)
-
-                # Check for rsync failure
-                if result.returncode != 0:
-                    print(
-                        f"Rsync failed: {result.stderr.strip() or 'unknown error'}",
-                        file=sys.stderr,
-                    )
-                    return False
-
-                return True
-            except OcTimeoutError:
-                retries = self.RSYNC_MAX_RETRIES
-                if attempt < retries:
-                    print(
-                        f"Rsync timed out (attempt {attempt}/{retries}), retrying...",
-                        file=sys.stderr,
-                    )
-                else:
-                    print(
-                        f"Rsync failed after {retries} attempts",
-                        file=sys.stderr,
-                    )
-                    return False
-        return False
 
     def _check_connection(self) -> bool:
         """Check if logged in to OpenShift (delegates to OcClient)."""
@@ -697,20 +618,13 @@ class OpenShiftBackend:
         """Rewrite plugin paths (delegates to ConfigSyncer)."""
         self._syncer._rewrite_plugin_paths(pod_name, config_path)
 
-    def start_session(
-        self,
-        name: str,
-        sync: bool = True,
-        verbose: bool = False,
-    ) -> int:
+    def start_session(self, name: str) -> int:
         """Start a session and connect to it.
 
-        Scales StatefulSet to 1, syncs files, connects.
+        Scales StatefulSet to 1 and connects.
 
         Args:
             name: Session name.
-            sync: Whether to sync workspace files before connecting.
-            verbose: Whether to show rsync output (default False).
 
         Returns:
             Exit code from the connected session.
@@ -750,41 +664,21 @@ class OpenShiftBackend:
         # Note: Credentials are synced in connect_session() which is called below.
         # This ensures credentials are refreshed on every connect, not just start.
 
-        # Sync workspace if requested
-        if sync:
-            print("Syncing workspace to pod...", file=sys.stderr)
-            self.sync_session(name, direction="remote", verbose=verbose)
-
         # Connect to session
         return self.connect_session(name)
 
-    def stop_session(
-        self,
-        name: str,
-        sync: bool = False,
-        verbose: bool = False,
-    ) -> None:
+    def stop_session(self, name: str) -> None:
         """Stop a session (preserves volume).
 
         Scales StatefulSet to 0 but keeps PVC intact.
 
         Args:
             name: Session name.
-            sync: Whether to sync files back to local before stopping.
-            verbose: Whether to show rsync output (default False).
         """
         # Check if session exists
         sts = self._get_statefulset(name)
         if sts is None:
             raise SessionNotFoundError(f"Session '{name}' not found")
-
-        # Sync if requested
-        if sync:
-            print("Syncing workspace from pod...", file=sys.stderr)
-            try:
-                self.sync_session(name, direction="local", verbose=verbose)
-            except Exception as e:
-                print(f"Warning: Sync failed: {e}", file=sys.stderr)
 
         # Scale to 0
         print(f"Stopping session '{name}'...", file=sys.stderr)
@@ -841,6 +735,20 @@ class OpenShiftBackend:
         else:
             # First connect: full config sync (gcloud + claude + git)
             self._sync_config_to_pod(pod_name, verbose=False)
+
+        # Check if workspace is empty (no .git directory)
+        check_result = self._run_oc(
+            "exec", pod_name, "-n", ns, "--",
+            "test", "-d", "/pvc/workspace/.git",
+            check=False,
+            timeout=self.OC_EXEC_TIMEOUT,
+        )
+        if check_result.returncode != 0:
+            print("", file=sys.stderr)
+            print("Workspace is empty. To sync code:", file=sys.stderr)
+            print(f"  paude remote add {name}", file=sys.stderr)
+            print(f"  git push paude-{name} main", file=sys.stderr)
+            print("", file=sys.stderr)
 
         # Attach using oc exec with interactive TTY
         exec_cmd = ["oc", "exec", "-it", "-n", ns, pod_name, "--"]
@@ -909,141 +817,6 @@ class OpenShiftBackend:
             container_id=f"paude-{name}-0",
             volume_name=f"workspace-paude-{name}-0",
         )
-
-    def sync_session(
-        self,
-        name: str,
-        direction: str = "both",
-        verbose: bool = False,
-    ) -> None:
-        """Sync files between local and remote workspace.
-
-        Args:
-            name: Session name.
-            direction: Sync direction ("local", "remote", "both").
-            verbose: Whether to show rsync output (default False).
-        """
-        # Get session to find workspace
-        sts = self._get_statefulset(name)
-        if sts is None:
-            raise SessionNotFoundError(f"Session '{name}' not found")
-
-        # Get workspace from annotations
-        annotations = sts.get("metadata", {}).get("annotations", {})
-        workspace_encoded = annotations.get("paude.io/workspace")
-        if not workspace_encoded:
-            print("No workspace path found in session.", file=sys.stderr)
-            return
-
-        workspace = _decode_path(workspace_encoded)
-        remote_path = "/pvc/workspace"
-
-        # StatefulSet pod name is paude-{session-name}-0
-        pod_name = f"paude-{name}-0"
-        ns = self.namespace
-
-        # Verify pod is running
-        result = self._run_oc(
-            "get", "pod", pod_name,
-            "-n", ns,
-            "-o", "jsonpath={.status.phase}",
-            check=False,
-        )
-
-        if result.returncode != 0:
-            print(f"Session '{name}' pod not found. Is it running?", file=sys.stderr)
-            return
-
-        phase = result.stdout.strip()
-        if phase != "Running":
-            print(
-                f"Session '{name}' is not running (status: {phase}).",
-                file=sys.stderr,
-            )
-            return
-
-        # Default excludes - exclude venvs and build artifacts, but NOT .git
-        excludes = [
-            ".venv",
-            "venv",
-            ".virtualenv",
-            "env",
-            ".env",
-            "__pycache__",
-            "*.pyc",
-            ".mypy_cache",
-            ".pytest_cache",
-            ".ruff_cache",
-            ".tox",
-            ".nox",
-            ".coverage",
-            "htmlcov",
-            "*.egg-info",
-            "dist",
-            "build",
-            "node_modules",
-        ]
-
-        exclude_args: list[str] = []
-        for pattern in excludes:
-            exclude_args.extend(["--exclude", pattern])
-
-        # Sync based on direction
-        if direction in ("remote", "both"):
-            # Prepare workspace directory with proper permissions
-            # Use mkdir -p (idempotent) instead of rm -rf to preserve CWD
-            # g+rwX allows any pod (all run as GID 0) to access the directory
-            # Chmod may fail if different UID owns it, but perms already set
-            prep_result = self._run_oc(
-                "exec", pod_name, "-n", ns, "--",
-                "bash", "-c",
-                f"mkdir -p {remote_path} && "
-                f"(chmod g+rwX {remote_path} 2>/dev/null || true)",
-                check=False,
-                timeout=self.OC_EXEC_TIMEOUT,
-            )
-            if prep_result.returncode != 0:
-                print(
-                    f"Warning: workspace prep failed: {prep_result.stderr}",
-                    file=sys.stderr,
-                )
-            # Local to remote with --delete for incremental cleanup
-            print(f"Syncing local → {pod_name}:{remote_path}...", file=sys.stderr)
-            success = self._rsync_with_retry(
-                f"{workspace}/",
-                f"{pod_name}:{remote_path}",
-                ns,
-                exclude_args,
-                verbose=verbose,
-                delete=True,
-            )
-            if success:
-                # Make synced subdirectories group-writable for OpenShift arbitrary UID
-                # rsync/tar creates directories with restrictive permissions
-                self._run_oc(
-                    "exec", pod_name, "-n", ns, "--",
-                    "chmod", "-R", "g+rwX", remote_path,
-                    check=False,
-                    timeout=self.OC_EXEC_TIMEOUT,
-                )
-                print("Sync to remote completed.", file=sys.stderr)
-            else:
-                print("Sync to remote FAILED.", file=sys.stderr)
-
-        if direction in ("local", "both"):
-            # Remote to local
-            print(f"Syncing {pod_name}:{remote_path} → local...", file=sys.stderr)
-            success = self._rsync_with_retry(
-                f"{pod_name}:{remote_path}/",
-                str(workspace),
-                ns,
-                exclude_args,
-                verbose=verbose,
-            )
-            if success:
-                print("Sync to local completed.", file=sys.stderr)
-            else:
-                print("Sync to local FAILED.", file=sys.stderr)
 
     def find_session_for_workspace(self, workspace: Path) -> Session | None:
         """Find an existing session for the given workspace.

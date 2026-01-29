@@ -138,11 +138,35 @@ paude create my-project --backend=openshift \
 | Command | What It Does |
 |---------|--------------|
 | `create` | Creates session resources (container/StatefulSet, volume/PVC) |
-| `start` | Starts container/pod, syncs files, connects |
+| `start` | Starts container/pod and connects |
 | `stop` | Stops container/pod, preserves volume |
 | `connect` | Attaches to running session |
-| `sync` | Syncs files between local and remote workspace |
+| `remote` | Manages git remotes for code sync |
 | `delete` | Removes all resources including volume |
+
+### Code Synchronization
+
+Sessions use git for code synchronization. Use `paude remote` to set up git remotes:
+
+```bash
+# Create and start a session
+paude create my-project
+paude start my-project
+
+# Set up git remote for sync
+paude remote add my-project
+
+# Push code to session
+git push paude-my-project main
+
+# Connect and work with Claude
+paude connect my-project
+
+# After Claude makes changes, pull them locally
+git pull paude-my-project main
+```
+
+The `paude remote add` command creates a git remote using the `ext::` protocol, enabling git operations to tunnel through `podman exec` or `oc exec`.
 
 ## OpenShift Backend
 
@@ -151,12 +175,15 @@ For remote execution on OpenShift/Kubernetes clusters:
 ```bash
 paude create --backend=openshift
 paude start
+paude remote add
+git push paude-<session> main
+paude connect
 ```
 
 The OpenShift backend provides:
 - **Persistent sessions** using StatefulSets with PVC storage
 - **Survive network disconnects** via tmux attachment
-- **File synchronization** between local and remote workspace
+- **Git-based sync** via `paude remote` and git push/pull
 - **Full config sync** including plugins and CLAUDE.md from `~/.claude/`
 - **Automatic image push** to OpenShift internal registry
 

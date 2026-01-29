@@ -160,12 +160,13 @@ class PodmanBackend:
         # The actual session setup happens when attaching via exec
         print(f"Creating container {container_name}...", file=sys.stderr)
         try:
+            # Use /pvc/workspace as workdir - users sync code via git remote
             self._runner.create_container(
                 name=container_name,
                 image=config.image,
                 mounts=mounts,
                 env=env,
-                workdir=config.workdir or str(config.workspace),
+                workdir="/pvc/workspace",
                 labels=labels,
                 entrypoint="sleep",
                 command=["infinity"],
@@ -235,15 +236,13 @@ class PodmanBackend:
 
         print(f"Session '{name}' deleted.", file=sys.stderr)
 
-    def start_session(self, name: str, sync: bool = True) -> int:
+    def start_session(self, name: str) -> int:
         """Start a session and connect to it.
 
         Starts the container and attaches to it via tmux.
 
         Args:
             name: Session name.
-            sync: Whether to sync workspace files (for Podman, volumes are
-                  live-mounted so this is typically not needed).
 
         Returns:
             Exit code from the connected session.
@@ -276,15 +275,13 @@ class PodmanBackend:
             entrypoint="/usr/local/bin/entrypoint.sh",
         )
 
-    def stop_session(self, name: str, sync: bool = False) -> None:
+    def stop_session(self, name: str) -> None:
         """Stop a session (preserves volume).
 
         Stops the container but keeps the volume intact.
 
         Args:
             name: Session name.
-            sync: Whether to sync files back to local (no-op for Podman
-                  with direct volume mounts).
         """
         container_name = self._container_name(name)
 
@@ -322,6 +319,19 @@ class PodmanBackend:
                 file=sys.stderr,
             )
             return 1
+
+        # Check if workspace is empty (no .git directory)
+        check_result = self._runner.exec_in_container(
+            container_name,
+            ["test", "-d", "/pvc/workspace/.git"],
+            check=False,
+        )
+        if check_result.returncode != 0:
+            print("", file=sys.stderr)
+            print("Workspace is empty. To sync code:", file=sys.stderr)
+            print(f"  paude remote add {name}", file=sys.stderr)
+            print(f"  git push paude-{name} main", file=sys.stderr)
+            print("", file=sys.stderr)
 
         print(f"Connecting to session '{name}'...", file=sys.stderr)
         return self._runner.attach_container(
@@ -377,28 +387,6 @@ class PodmanBackend:
             ))
 
         return sessions
-
-    def sync_session(
-        self,
-        name: str,
-        direction: str = "both",
-    ) -> None:
-        """Sync files between local and remote workspace.
-
-        For Podman with direct volume mounts, this is typically a no-op
-        since files are already synchronized via the mount.
-
-        Args:
-            name: Session name.
-            direction: Sync direction ("local", "remote", "both").
-        """
-        # For Podman with direct volume mounts, sync is not needed
-        # The workspace is mounted directly from the host
-        print(
-            "Podman sessions use direct volume mounts - "
-            "files are already synchronized.",
-            file=sys.stderr,
-        )
 
     def get_session(self, name: str) -> Session | None:
         """Get a session by name.
