@@ -48,9 +48,18 @@ class TestPodmanBackend:
         backend = PodmanBackend()
         assert backend is not None
 
-    def test_list_sessions_returns_empty(self) -> None:
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_list_sessions_returns_empty(
+        self, mock_runner_class: MagicMock
+    ) -> None:
         """list_sessions returns empty list for Podman when no sessions exist."""
+        mock_runner = MagicMock()
+        mock_runner.list_containers.return_value = []
+        mock_runner_class.return_value = mock_runner
+
         backend = PodmanBackend()
+        backend._runner = mock_runner
+
         sessions = backend.list_sessions()
         assert sessions == []
 
