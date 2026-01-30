@@ -7,6 +7,7 @@ import secrets
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from paude.backends.base import Session, SessionConfig
 from paude.container.runner import (
@@ -30,7 +31,7 @@ class SessionNotFoundError(Exception):
     pass
 
 
-def _get_container_status(container: dict) -> str:
+def _get_container_status(container: dict[str, Any]) -> str:
     """Extract session status from container info.
 
     Handles different Podman versions which may return State as:
