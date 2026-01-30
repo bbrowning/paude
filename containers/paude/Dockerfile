@@ -28,15 +28,6 @@ ENV LC_ALL=en_US.UTF-8
 # Install uv package manager system-wide (available to root for pip_install builds)
 RUN curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh
 
-# Install kubectl for Kubernetes/OpenShift cluster access
-# Use explicit version to avoid network timing issues with nested curl
-RUN ARCH=$(uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/') && \
-    KUBECTL_VERSION=$(curl -L -s --retry 3 --retry-delay 2 https://dl.k8s.io/release/stable.txt) && \
-    if [ -z "$KUBECTL_VERSION" ]; then KUBECTL_VERSION="v1.31.0"; fi && \
-    curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl" && \
-    chmod +x kubectl && \
-    mv kubectl /usr/local/bin/
-
 # Create non-root user with GID 0 for OpenShift compatibility
 RUN useradd -m -s /bin/bash -g 0 paude && \
     chmod -R g+rwX /home/paude && \
