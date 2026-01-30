@@ -237,6 +237,94 @@ class OpenShiftBackend:
         """Create a NetworkPolicy for the proxy pod (delegates to ProxyManager)."""
         self._proxy.ensure_proxy_network_policy(session_name)
 
+    # Terminal failure states that indicate immediate failure (no point waiting)
+    TERMINAL_WAITING_REASONS = frozenset({
+        "ImagePullBackOff",
+        "ErrImagePull",
+        "CrashLoopBackOff",
+        "CreateContainerConfigError",
+        "InvalidImageName",
+        "CreateContainerError",
+    })
+
+    def _get_container_status(self, pod_name: str) -> tuple[str | None, str | None]:
+        """Get container waiting reason and message from pod status.
+
+        Args:
+            pod_name: Name of the pod.
+
+        Returns:
+            Tuple of (waiting_reason, waiting_message) or (None, None).
+        """
+        ns = self.namespace
+        result = self._run_oc(
+            "get", "pod", pod_name,
+            "-n", ns,
+            "-o", "jsonpath={.status.containerStatuses[0].state.waiting.reason},"
+            "{.status.containerStatuses[0].state.waiting.message}",
+            check=False,
+        )
+
+        if result.returncode != 0:
+            return None, None
+
+        parts = result.stdout.strip().split(",", 1)
+        reason = parts[0] if parts[0] else None
+        message = parts[1] if len(parts) > 1 and parts[1] else None
+        return reason, message
+
+    def _collect_pod_debug_info(self, pod_name: str) -> str:
+        """Collect debug information for a failed pod.
+
+        Args:
+            pod_name: Name of the pod.
+
+        Returns:
+            Formatted debug information string.
+        """
+        ns = self.namespace
+        lines = []
+
+        # Get pod events
+        events_result = self._run_oc(
+            "get", "events",
+            "-n", ns,
+            "--field-selector", f"involvedObject.name={pod_name}",
+            "--sort-by=.lastTimestamp",
+            "-o", "custom-columns=TIME:.lastTimestamp,TYPE:.type,"
+            "REASON:.reason,MESSAGE:.message",
+            check=False,
+        )
+        if events_result.returncode == 0 and events_result.stdout.strip():
+            lines.append("=== Pod Events ===")
+            lines.append(events_result.stdout.strip())
+
+        # Get pod describe (truncated)
+        describe_result = self._run_oc(
+            "describe", "pod", pod_name,
+            "-n", ns,
+            check=False,
+        )
+        if describe_result.returncode == 0 and describe_result.stdout.strip():
+            lines.append("\n=== Pod Describe (truncated) ===")
+            describe_lines = describe_result.stdout.strip().split("\n")
+            lines.append("\n".join(describe_lines[:50]))
+            if len(describe_lines) > 50:
+                lines.append(f"... ({len(describe_lines) - 50} more lines)")
+
+        # Try to get container logs (may not exist if container never started)
+        logs_result = self._run_oc(
+            "logs", pod_name,
+            "-n", ns,
+            "--tail=30",
+            check=False,
+        )
+        if logs_result.returncode == 0 and logs_result.stdout.strip():
+            lines.append("\n=== Container Logs (last 30 lines) ===")
+            lines.append(logs_result.stdout.strip())
+
+        return "\n".join(lines) if lines else "No debug information available"
+
     def _wait_for_pod_ready(
         self,
         pod_name: str,
@@ -246,15 +334,24 @@ class OpenShiftBackend:
 
         Args:
             pod_name: Name of the pod.
-            timeout: Timeout in seconds.
+            timeout: Timeout in seconds. Can be overridden via
+                PAUDE_POD_READY_TIMEOUT environment variable.
 
         Raises:
             PodNotReadyError: If pod is not ready within timeout.
         """
+        # Allow environment variable to override timeout
+        timeout = int(os.environ.get("PAUDE_POD_READY_TIMEOUT", str(timeout)))
+
         start_time = time.time()
         ns = self.namespace
+        last_status_time = start_time
+        progress_interval = 15  # Print status every 15 seconds
 
         while time.time() - start_time < timeout:
+            elapsed = int(time.time() - start_time)
+            remaining = timeout - elapsed
+
             result = self._run_oc(
                 "get", "pod", pod_name,
                 "-n", ns,
@@ -262,24 +359,47 @@ class OpenShiftBackend:
                 check=False,
             )
 
+            phase = result.stdout.strip() if result.returncode == 0 else "Unknown"
+
             if result.returncode == 0:
-                phase = result.stdout.strip()
                 if phase == "Running":
                     return
                 elif phase in ("Failed", "Error"):
-                    # Get pod events for debugging
-                    events = self._run_oc(
-                        "get", "events",
-                        "-n", ns,
-                        "--field-selector", f"involvedObject.name={pod_name}",
-                        "-o", "jsonpath={.items[-1].message}",
-                        check=False,
-                    )
-                    msg = events.stdout.strip() if events.returncode == 0 else ""
-                    raise PodNotReadyError(f"Pod {pod_name} failed: {phase}. {msg}")
+                    debug_info = self._collect_pod_debug_info(pod_name)
+                    print(f"\n{debug_info}", file=sys.stderr)
+                    raise PodNotReadyError(f"Pod {pod_name} failed: {phase}")
+
+            # Check for terminal waiting states (e.g., ImagePullBackOff)
+            waiting_reason, waiting_message = self._get_container_status(pod_name)
+            if waiting_reason in self.TERMINAL_WAITING_REASONS:
+                debug_info = self._collect_pod_debug_info(pod_name)
+                print(f"\n{debug_info}", file=sys.stderr)
+                if waiting_message:
+                    msg = f"{waiting_reason}: {waiting_message}"
+                else:
+                    msg = waiting_reason
+                raise PodNotReadyError(
+                    f"Pod {pod_name} failed with terminal error: {msg}"
+                )
+
+            # Print progress every 15 seconds
+            current_time = time.time()
+            if current_time - last_status_time >= progress_interval:
+                status_parts = [f"phase={phase}"]
+                if waiting_reason:
+                    status_parts.append(f"waiting={waiting_reason}")
+                status_str = ", ".join(status_parts)
+                print(
+                    f"  Waiting for pod... ({elapsed}s/{remaining}s, {status_str})",
+                    file=sys.stderr,
+                )
+                last_status_time = current_time
 
             time.sleep(2)
 
+        # Timeout reached - collect debug info
+        debug_info = self._collect_pod_debug_info(pod_name)
+        print(f"\n{debug_info}", file=sys.stderr)
         raise PodNotReadyError(
             f"Pod {pod_name} not ready within {timeout} seconds"
         )

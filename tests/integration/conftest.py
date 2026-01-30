@@ -160,3 +160,15 @@ def kubernetes_test_image() -> str:
     For CI with Kind, set this to the local image name that was loaded.
     """
     return os.environ.get("PAUDE_K8S_TEST_IMAGE", DEFAULT_K8S_IMAGE)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def shorter_pod_timeout() -> None:
+    """Set a shorter pod ready timeout for integration tests.
+
+    Uses 60 seconds instead of the default 300 seconds to fail faster
+    in CI when pods have issues like ImagePullBackOff.
+    """
+    # Only set if not already configured
+    if "PAUDE_POD_READY_TIMEOUT" not in os.environ:
+        os.environ["PAUDE_POD_READY_TIMEOUT"] = "60"
