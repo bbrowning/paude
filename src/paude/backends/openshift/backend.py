@@ -690,11 +690,13 @@ class OpenShiftBackend:
         )
 
         # Delete PVC (volumeClaimTemplates don't delete PVCs automatically)
+        # Use longer timeout since PVC deletion waits for pod termination
         print(f"Deleting PVC/{pvc_name}...", file=sys.stderr)
         self._run_oc(
             "delete", "pvc", pvc_name,
             "-n", ns,
             check=False,
+            timeout=90,
         )
 
         # Delete session-specific NetworkPolicies
