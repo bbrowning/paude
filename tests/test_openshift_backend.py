@@ -962,6 +962,67 @@ class TestOpenShiftStatefulSetSpec:
         assert creds_mount is not None, "Should have credentials mount"
         assert creds_mount["mountPath"] == "/credentials"
 
+    def test_statefulset_image_pull_policy_defaults_to_always(self) -> None:
+        """StatefulSet defaults imagePullPolicy to Always."""
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        spec = backend._generate_statefulset_spec(
+            session_name="test",
+            image="paude:latest",
+            env={},
+            workspace=Path("/project"),
+        )
+
+        container = spec["spec"]["template"]["spec"]["containers"][0]
+        assert container["imagePullPolicy"] == "Always"
+
+    def test_statefulset_image_pull_policy_from_env(self) -> None:
+        """StatefulSet uses imagePullPolicy from PAUDE_IMAGE_PULL_POLICY env var."""
+        import os
+
+        original = os.environ.get("PAUDE_IMAGE_PULL_POLICY")
+        try:
+            os.environ["PAUDE_IMAGE_PULL_POLICY"] = "IfNotPresent"
+
+            backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+            spec = backend._generate_statefulset_spec(
+                session_name="test",
+                image="paude:latest",
+                env={},
+                workspace=Path("/project"),
+            )
+
+            container = spec["spec"]["template"]["spec"]["containers"][0]
+            assert container["imagePullPolicy"] == "IfNotPresent"
+        finally:
+            if original is None:
+                os.environ.pop("PAUDE_IMAGE_PULL_POLICY", None)
+            else:
+                os.environ["PAUDE_IMAGE_PULL_POLICY"] = original
+
+    def test_statefulset_image_pull_policy_never(self) -> None:
+        """StatefulSet can use Never imagePullPolicy for local images."""
+        import os
+
+        original = os.environ.get("PAUDE_IMAGE_PULL_POLICY")
+        try:
+            os.environ["PAUDE_IMAGE_PULL_POLICY"] = "Never"
+
+            backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+            spec = backend._generate_statefulset_spec(
+                session_name="test",
+                image="my-local-image:latest",
+                env={},
+                workspace=Path("/project"),
+            )
+
+            container = spec["spec"]["template"]["spec"]["containers"][0]
+            assert container["imagePullPolicy"] == "Never"
+        finally:
+            if original is None:
+                os.environ.pop("PAUDE_IMAGE_PULL_POLICY", None)
+            else:
+                os.environ["PAUDE_IMAGE_PULL_POLICY"] = original
+
 
 class TestBuildFailedError:
     """Tests for BuildFailedError exception."""

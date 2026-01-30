@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -193,10 +194,13 @@ class StatefulSetBuilder:
         env_list = [{"name": k, "value": v} for k, v in self._env.items()]
         env_list.append({"name": "PAUDE_WORKSPACE", "value": "/pvc/workspace"})
 
+        # Allow override for testing with locally-loaded images in Kind
+        image_pull_policy = os.environ.get("PAUDE_IMAGE_PULL_POLICY", "Always")
+
         return {
             "name": "paude",
             "image": self._image,
-            "imagePullPolicy": "Always",
+            "imagePullPolicy": image_pull_policy,
             "command": ["/usr/local/bin/entrypoint-session.sh"],
             "stdin": True,
             "tty": True,

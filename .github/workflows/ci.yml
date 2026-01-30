@@ -127,4 +127,6 @@ jobs:
         env:
           # Use the local image loaded into Kind, not the registry image
           PAUDE_K8S_TEST_IMAGE: paude-base-centos9:latest
+          # Use IfNotPresent since images are pre-loaded into Kind
+          PAUDE_IMAGE_PULL_POLICY: IfNotPresent
         run: make test-kubernetes
