@@ -30,6 +30,44 @@ class SessionNotFoundError(Exception):
     pass
 
 
+def _get_container_status(container: dict) -> str:
+    """Extract session status from container info.
+
+    Handles different Podman versions which may return State as:
+    - A string: "running", "exited", "created", etc.
+    - A dict: {"Status": "running", ...}
+
+    Also checks "Status" field as fallback.
+    """
+    state = container.get("State", "")
+
+    # Handle dict format (some Podman versions)
+    if isinstance(state, dict):
+        state = state.get("Status", "") or state.get("status", "")
+
+    # Fallback to Status field if State is empty/missing
+    if not state:
+        state = container.get("Status", "unknown")
+
+    # Normalize to lowercase string
+    if not isinstance(state, str):
+        state = str(state)
+    state = state.lower()
+
+    # Map container state to session status
+    status_map = {
+        "running": "running",
+        "exited": "stopped",
+        "stopped": "stopped",
+        "created": "stopped",
+        "paused": "stopped",
+        "configured": "stopped",  # Podman 4.x uses this for newly created
+        "dead": "error",
+        "removing": "error",
+    }
+    return status_map.get(state, "stopped")  # Default to stopped, not error
+
+
 def _generate_session_name(workspace: Path) -> str:
     """Generate a session name from workspace path.
 
@@ -367,17 +405,8 @@ class PodmanBackend:
             )
             created_at = labels.get(PAUDE_LABEL_CREATED, "")
 
-            # Map container state to session status
-            state = container.get("State", "unknown")
-            status_map = {
-                "running": "running",
-                "exited": "stopped",
-                "stopped": "stopped",
-                "created": "stopped",
-                "paused": "stopped",
-                "dead": "error",
-            }
-            status = status_map.get(state.lower(), "error")
+            # Get session status from container state
+            status = _get_container_status(container)
 
             sessions.append(Session(
                 name=session_name,
@@ -418,16 +447,8 @@ class PodmanBackend:
             )
                 created_at = labels.get(PAUDE_LABEL_CREATED, "")
 
-                state = container.get("State", "unknown")
-                status_map = {
-                    "running": "running",
-                    "exited": "stopped",
-                    "stopped": "stopped",
-                    "created": "stopped",
-                    "paused": "stopped",
-                    "dead": "error",
-                }
-                status = status_map.get(state.lower(), "error")
+                # Get session status from container state
+                status = _get_container_status(container)
 
                 return Session(
                     name=name,
