@@ -109,6 +109,11 @@ jobs:
           # Build images locally with Podman
           make build
 
+          # Podman tags images with localhost/ prefix, but Kind needs the short name
+          # Re-tag to remove the prefix so the image name matches what tests expect
+          podman tag localhost/paude-base-centos9:latest paude-base-centos9:latest
+          podman tag localhost/paude-proxy-centos9:latest paude-proxy-centos9:latest
+
           # Save podman images to tarballs (kind can't read from podman storage directly)
           podman save paude-base-centos9:latest -o /tmp/paude-base.tar
           podman save paude-proxy-centos9:latest -o /tmp/paude-proxy.tar
