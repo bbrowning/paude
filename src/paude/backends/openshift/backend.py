@@ -604,6 +604,12 @@ class OpenShiftBackend:
             session_env["http_proxy"] = proxy_url
             session_env["https_proxy"] = proxy_url
 
+        # Add credential watchdog environment variables
+        session_env["PAUDE_CREDENTIAL_TIMEOUT"] = str(config.credential_timeout)
+        session_env["PAUDE_CREDENTIAL_WATCHDOG"] = (
+            "1" if config.credential_timeout > 0 else "0"
+        )
+
         # Generate and apply StatefulSet spec
         # Credentials are synced to /credentials (tmpfs) when session starts
         sts_spec = self._generate_statefulset_spec(

@@ -267,6 +267,13 @@ def session_create(
             help="Target platform for image builds (e.g., linux/amd64, linux/arm64).",
         ),
     ] = None,
+    credential_timeout: Annotated[
+        int,
+        typer.Option(
+            "--credential-timeout",
+            help="Inactivity minutes before removing credentials (OpenShift).",
+        ),
+    ] = 60,
 ) -> None:
     """Create a new persistent session (does not start it)."""
     import shlex
@@ -500,6 +507,7 @@ def session_create(
                 pvc_size=pvc_size,
                 storage_class=storage_class,
                 proxy_image=proxy_image,
+                credential_timeout=credential_timeout,
             )
 
             session = os_backend.create_session(session_config)

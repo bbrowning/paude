@@ -116,6 +116,16 @@ setup_credentials() {
 wait_for_credentials
 setup_credentials
 
+# Start credential watchdog in background (OpenShift only)
+# The watchdog removes credentials after inactivity when no tmux clients are attached
+# Only start if not already running (avoid duplicates on reconnect)
+if [[ -d /credentials ]] && [[ "${PAUDE_CREDENTIAL_WATCHDOG:-1}" == "1" ]]; then
+    if ! pgrep -f "credential-watchdog.sh" >/dev/null 2>&1; then
+        nohup /usr/local/bin/credential-watchdog.sh >> /tmp/credential-watchdog.log 2>&1 &
+        echo "Credential watchdog started (timeout: ${PAUDE_CREDENTIAL_TIMEOUT:-60}m)"
+    fi
+fi
+
 # Install Claude Code if not already installed
 # This allows the base image to work without Claude Code pre-installed
 # Claude Code gets installed to the PVC so it persists across restarts

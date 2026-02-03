@@ -16,6 +16,7 @@ RUN dnf install -y epel-release && \
         glibc-langpack-en \
         python3.11 \
         python3.11-pip \
+        procps-ng \
         tmux \
     && dnf clean all && \
     alternatives --install /usr/bin/python python /usr/bin/python3.11 1 && \
@@ -38,10 +39,11 @@ RUN useradd -m -s /bin/bash -g 0 paude && \
 # It gets installed at user-side build time via a runtime layer.
 # See src/paude/config/claude_layer.py for the installation logic.
 
-# Copy entrypoints
+# Copy entrypoints and watchdog script
 USER root
 COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY --chmod=755 entrypoint-session.sh /usr/local/bin/entrypoint-session.sh
+COPY --chmod=755 credential-watchdog.sh /usr/local/bin/credential-watchdog.sh
 
 RUN chmod -R g+rwX /home/paude
 
