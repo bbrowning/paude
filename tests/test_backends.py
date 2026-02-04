@@ -49,9 +49,7 @@ class TestPodmanBackend:
         assert backend is not None
 
     @patch("paude.backends.podman.ContainerRunner")
-    def test_list_sessions_returns_empty(
-        self, mock_runner_class: MagicMock
-    ) -> None:
+    def test_list_sessions_returns_empty(self, mock_runner_class: MagicMock) -> None:
         """list_sessions returns empty list for Podman when no sessions exist."""
         mock_runner = MagicMock()
         mock_runner.list_containers.return_value = []
@@ -64,9 +62,7 @@ class TestPodmanBackend:
         assert sessions == []
 
     @patch("paude.backends.podman.ContainerRunner")
-    def test_run_proxy_delegates_to_runner(
-        self, mock_runner_class: MagicMock
-    ) -> None:
+    def test_run_proxy_delegates_to_runner(self, mock_runner_class: MagicMock) -> None:
         """run_proxy calls runner.run_proxy."""
         mock_runner = MagicMock()
         mock_runner.run_proxy.return_value = "proxy-container-123"

@@ -8,9 +8,11 @@ import shutil
 import subprocess
 from pathlib import Path
 
-FEATURE_CACHE_DIR = Path(
-    os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")
-) / "paude" / "features"
+FEATURE_CACHE_DIR = (
+    Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    / "paude"
+    / "features"
+)
 
 
 def download_feature(feature_url: str) -> Path:
@@ -60,9 +62,7 @@ def download_feature(feature_url: str) -> Path:
             shutil.rmtree(feature_dir, ignore_errors=True)
             msg = f"Failed to download feature {feature_url}: {result.stderr}"
             raise RuntimeError(msg)
-        subprocess.run(
-            ["tar", "-xf", str(tmp_tar), "-C", str(feature_dir)], check=True
-        )
+        subprocess.run(["tar", "-xf", str(tmp_tar), "-C", str(feature_dir)], check=True)
         tmp_tar.unlink()
     else:
         # Fallback: curl-based download

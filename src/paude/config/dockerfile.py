@@ -130,8 +130,12 @@ RUN if command -v apt-get >/dev/null 2>&1; then \\
     lines.append("ENV LC_ALL=en_US.UTF-8")
 
     lines.append("")
-    lines.append("# Create paude user with root group (GID 0) for OpenShift compatibility")
-    lines.append("# OpenShift runs containers with arbitrary UIDs but GID 0, so home must be group-writable")
+    lines.append(
+        "# Create paude user with root group (GID 0) for OpenShift compatibility"
+    )
+    lines.append(
+        "# OpenShift runs containers with arbitrary UIDs but GID 0, so home must be group-writable"
+    )
     lines.append(
         "RUN (id paude >/dev/null 2>&1 || useradd -m -s /bin/bash -g 0 paude 2>/dev/null || adduser -D -s /bin/bash -G root paude) && "
         "chmod -R g+rwX /home/paude && "
@@ -158,16 +162,20 @@ RUN if command -v apt-get >/dev/null 2>&1; then \\
     lines.append("USER root")
     lines.append("COPY entrypoint.sh /usr/local/bin/entrypoint.sh")
     lines.append("COPY entrypoint-session.sh /usr/local/bin/entrypoint-session.sh")
-    lines.append("RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/entrypoint-session.sh")
+    lines.append(
+        "RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/entrypoint-session.sh"
+    )
 
     lines.append("")
     lines.append("# Fix permissions on directories created by Claude install")
-    lines.append("# Must be done as root after Claude install, for OpenShift arbitrary UID")
+    lines.append(
+        "# Must be done as root after Claude install, for OpenShift arbitrary UID"
+    )
     lines.append("RUN chmod -R g+rwX /home/paude")
 
     lines.append("")
     lines.append("USER paude")
     lines.append("WORKDIR /home/paude")
-    lines.append("ENTRYPOINT [\"/usr/local/bin/entrypoint.sh\"]")
+    lines.append('ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]')
 
     return "\n".join(lines)

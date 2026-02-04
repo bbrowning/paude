@@ -73,9 +73,12 @@ class ContainerRunner:
         cmd = [
             "podman",
             "create",
-            "--name", name,
-            "--hostname", "paude",
-            "-w", workdir,
+            "--name",
+            name,
+            "--hostname",
+            "paude",
+            "-w",
+            workdir,
             "-it",
         ]
 
@@ -125,8 +128,10 @@ class ContainerRunner:
             if "no such container" in result.stderr.lower():
                 raise ContainerNotFoundError(f"Container not found: {name}")
             raise subprocess.CalledProcessError(
-                result.returncode, ["podman", "start", name],
-                result.stdout, result.stderr
+                result.returncode,
+                ["podman", "start", name],
+                result.stdout,
+                result.stderr,
             )
 
     def stop_container(self, name: str) -> None:

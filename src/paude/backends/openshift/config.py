@@ -18,11 +18,15 @@ class OpenShiftConfig:
 
     context: str | None = None
     namespace: str | None = None  # None means use current namespace
-    resources: dict[str, dict[str, str]] = field(default_factory=lambda: {
-        "requests": {"cpu": "1", "memory": "4Gi"},
-        "limits": {"cpu": "4", "memory": "8Gi"},
-    })
-    build_resources: dict[str, dict[str, str]] = field(default_factory=lambda: {
-        "requests": {"cpu": "1", "memory": "2Gi"},
-        "limits": {"cpu": "4", "memory": "8Gi"},
-    })
+    resources: dict[str, dict[str, str]] = field(
+        default_factory=lambda: {
+            "requests": {"cpu": "1", "memory": "4Gi"},
+            "limits": {"cpu": "4", "memory": "8Gi"},
+        }
+    )
+    build_resources: dict[str, dict[str, str]] = field(
+        default_factory=lambda: {
+            "requests": {"cpu": "1", "memory": "2Gi"},
+            "limits": {"cpu": "4", "memory": "8Gi"},
+        }
+    )

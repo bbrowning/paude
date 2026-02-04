@@ -44,8 +44,7 @@ class ProxyManager:
         policy_name = f"paude-egress-{session_id}"
 
         print(
-            f"Creating NetworkPolicy/{policy_name} in namespace "
-            f"{self._namespace}...",
+            f"Creating NetworkPolicy/{policy_name} in namespace {self._namespace}...",
             file=sys.stderr,
         )
 
@@ -106,7 +105,9 @@ class ProxyManager:
         }
 
         self._oc.run(
-            "apply", "-f", "-",
+            "apply",
+            "-f",
+            "-",
             input_data=json.dumps(policy_spec),
         )
 
@@ -121,8 +122,7 @@ class ProxyManager:
         policy_name = f"paude-egress-{session_id}"
 
         print(
-            f"Creating NetworkPolicy/{policy_name} in namespace "
-            f"{self._namespace}...",
+            f"Creating NetworkPolicy/{policy_name} in namespace {self._namespace}...",
             file=sys.stderr,
         )
 
@@ -153,7 +153,9 @@ class ProxyManager:
         }
 
         self._oc.run(
-            "apply", "-f", "-",
+            "apply",
+            "-f",
+            "-",
             input_data=json.dumps(policy_spec),
         )
 
@@ -169,8 +171,7 @@ class ProxyManager:
         policy_name = f"paude-proxy-egress-{session_name}"
 
         print(
-            f"Creating NetworkPolicy/{policy_name} in namespace "
-            f"{self._namespace}...",
+            f"Creating NetworkPolicy/{policy_name} in namespace {self._namespace}...",
             file=sys.stderr,
         )
 
@@ -200,7 +201,9 @@ class ProxyManager:
         }
 
         self._oc.run(
-            "apply", "-f", "-",
+            "apply",
+            "-f",
+            "-",
             input_data=json.dumps(policy_spec),
         )
 
@@ -223,8 +226,7 @@ class ProxyManager:
         deployment_name = f"paude-proxy-{session_name}"
 
         print(
-            f"Creating Deployment/{deployment_name} in namespace "
-            f"{self._namespace}...",
+            f"Creating Deployment/{deployment_name} in namespace {self._namespace}...",
             file=sys.stderr,
         )
 
@@ -279,7 +281,9 @@ class ProxyManager:
         }
 
         self._oc.run(
-            "apply", "-f", "-",
+            "apply",
+            "-f",
+            "-",
             input_data=json.dumps(deployment_spec),
         )
 
@@ -326,7 +330,9 @@ class ProxyManager:
         }
 
         self._oc.run(
-            "apply", "-f", "-",
+            "apply",
+            "-f",
+            "-",
             input_data=json.dumps(service_spec),
         )
 
@@ -349,9 +355,13 @@ class ProxyManager:
         start_time = time.time()
         while time.time() - start_time < timeout:
             result = self._oc.run(
-                "get", "deployment", deployment_name,
-                "-n", self._namespace,
-                "-o", "jsonpath={.status.readyReplicas}",
+                "get",
+                "deployment",
+                deployment_name,
+                "-n",
+                self._namespace,
+                "-o",
+                "jsonpath={.status.readyReplicas}",
                 check=False,
             )
 
@@ -382,15 +392,21 @@ class ProxyManager:
 
         print(f"Deleting Deployment/{deployment_name}...", file=sys.stderr)
         self._oc.run(
-            "delete", "deployment", deployment_name,
-            "-n", self._namespace,
+            "delete",
+            "deployment",
+            deployment_name,
+            "-n",
+            self._namespace,
             "--grace-period=0",
             check=False,
         )
 
         print(f"Deleting Service/{service_name}...", file=sys.stderr)
         self._oc.run(
-            "delete", "service", service_name,
-            "-n", self._namespace,
+            "delete",
+            "service",
+            service_name,
+            "-n",
+            self._namespace,
             check=False,
         )

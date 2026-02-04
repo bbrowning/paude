@@ -123,9 +123,7 @@ class TestPodmanBackendCreateSession:
         assert len(session.name) > len("my-project-")
 
     @patch("paude.backends.podman.ContainerRunner")
-    def test_create_session_creates_volume(
-        self, mock_runner_class: MagicMock
-    ) -> None:
+    def test_create_session_creates_volume(self, mock_runner_class: MagicMock) -> None:
         """Create session creates a named volume."""
         mock_runner = MagicMock()
         mock_runner.container_exists.return_value = False
@@ -218,9 +216,7 @@ class TestPodmanBackendCreateSession:
         mock_runner.remove_volume.assert_called_once()
 
     @patch("paude.backends.podman.ContainerRunner")
-    def test_create_session_with_yolo_mode(
-        self, mock_runner_class: MagicMock
-    ) -> None:
+    def test_create_session_with_yolo_mode(self, mock_runner_class: MagicMock) -> None:
         """Create session with yolo=True adds permission skip flag."""
         mock_runner = MagicMock()
         mock_runner.container_exists.return_value = False
@@ -431,9 +427,7 @@ class TestPodmanBackendStopSession:
         mock_runner.stop_container_graceful.assert_not_called()
 
     @patch("paude.backends.podman.ContainerRunner")
-    def test_stop_session_noop_if_not_found(
-        self, mock_runner_class: MagicMock
-    ) -> None:
+    def test_stop_session_noop_if_not_found(self, mock_runner_class: MagicMock) -> None:
         """Stop session is no-op if session doesn't exist."""
         mock_runner = MagicMock()
         mock_runner.container_exists.return_value = False

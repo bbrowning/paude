@@ -144,8 +144,11 @@ class OcClient:
             Current namespace name.
         """
         result = self.run(
-            "config", "view", "--minify", "-o",
-            "jsonpath={.contexts[0].context.namespace}"
+            "config",
+            "view",
+            "--minify",
+            "-o",
+            "jsonpath={.contexts[0].context.namespace}",
         )
         ns = result.stdout.strip()
         return ns if ns else "default"

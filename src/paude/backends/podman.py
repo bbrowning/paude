@@ -400,24 +400,24 @@ class PodmanBackend:
 
             workspace_encoded = labels.get(PAUDE_LABEL_WORKSPACE, "")
             workspace = (
-                _decode_path(workspace_encoded)
-                if workspace_encoded
-                else Path("/")
+                _decode_path(workspace_encoded) if workspace_encoded else Path("/")
             )
             created_at = labels.get(PAUDE_LABEL_CREATED, "")
 
             # Get session status from container state
             status = _get_container_status(container)
 
-            sessions.append(Session(
-                name=session_name,
-                status=status,
-                workspace=workspace,
-                created_at=created_at,
-                backend_type="podman",
-                container_id=container.get("Id", ""),
-                volume_name=self._volume_name(session_name),
-            ))
+            sessions.append(
+                Session(
+                    name=session_name,
+                    status=status,
+                    workspace=workspace,
+                    created_at=created_at,
+                    backend_type="podman",
+                    container_id=container.get("Id", ""),
+                    volume_name=self._volume_name(session_name),
+                )
+            )
 
         return sessions
 
@@ -442,10 +442,8 @@ class PodmanBackend:
             if labels.get(PAUDE_LABEL_SESSION) == name:
                 workspace_encoded = labels.get(PAUDE_LABEL_WORKSPACE, "")
                 workspace = (
-                _decode_path(workspace_encoded)
-                if workspace_encoded
-                else Path("/")
-            )
+                    _decode_path(workspace_encoded) if workspace_encoded else Path("/")
+                )
                 created_at = labels.get(PAUDE_LABEL_CREATED, "")
 
                 # Get session status from container state

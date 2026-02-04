@@ -64,7 +64,9 @@ class TestImageManager:
 
     @patch("paude.container.image.run_podman")
     @patch("paude.container.image.image_exists")
-    def test_ensure_default_image_builds_runtime_layer(self, mock_exists, mock_run, tmp_path):
+    def test_ensure_default_image_builds_runtime_layer(
+        self, mock_exists, mock_run, tmp_path
+    ):
         """ensure_default_image builds a runtime layer with Claude."""
         import os
 
@@ -95,7 +97,9 @@ class TestImageManager:
 
     @patch("paude.container.image.run_podman")
     @patch("paude.container.image.image_exists")
-    def test_ensure_default_image_uses_cached_runtime(self, mock_exists, mock_run, tmp_path):
+    def test_ensure_default_image_uses_cached_runtime(
+        self, mock_exists, mock_run, tmp_path
+    ):
         """ensure_default_image skips build if runtime image is cached."""
         import os
 
@@ -117,6 +121,7 @@ class TestImageManager:
         # No builds should happen
         mock_run.assert_not_called()
         assert "paude-runtime:" in result
+
 
 class TestPrepareBuiltContext:
     """Tests for prepare_build_context."""
@@ -149,8 +154,12 @@ class TestPrepareBuiltContext:
         try:
             dockerfile_content = ctx.dockerfile_path.read_text()
             # Should have multi-stage build with user-base
-            assert "AS user-base" in dockerfile_content, "Should have stage 1 AS user-base"
-            assert "FROM user-base" in dockerfile_content, "Should have stage 2 FROM user-base"
+            assert "AS user-base" in dockerfile_content, (
+                "Should have stage 1 AS user-base"
+            )
+            assert "FROM user-base" in dockerfile_content, (
+                "Should have stage 2 FROM user-base"
+            )
             # Should include Claude installation in stage 2
             assert "claude.ai/install.sh" in dockerfile_content, (
                 "Multi-stage build should include Claude installation"
@@ -159,7 +168,9 @@ class TestPrepareBuiltContext:
             stage2_start = dockerfile_content.find("FROM user-base")
             stage2_content = dockerfile_content[stage2_start:]
             first_user = stage2_content.find("USER ")
-            user_line = stage2_content[first_user:stage2_content.find("\n", first_user)]
+            user_line = stage2_content[
+                first_user : stage2_content.find("\n", first_user)
+            ]
             assert "USER root" == user_line.strip(), (
                 f"Stage 2 should start with USER root, got '{user_line.strip()}'"
             )
@@ -224,7 +235,9 @@ class TestPrepareBuiltContext:
             containers_dir = tmp_path / "containers" / "paude"
             containers_dir.mkdir(parents=True)
             (containers_dir / "entrypoint.sh").write_text("#!/bin/bash\nexec $@")
-            (containers_dir / "entrypoint-session.sh").write_text("#!/bin/bash\nexec $@")
+            (containers_dir / "entrypoint-session.sh").write_text(
+                "#!/bin/bash\nexec $@"
+            )
 
             with patch("paude.container.image.image_exists", return_value=True):
                 with patch("paude.container.image.run_podman"):
@@ -239,7 +252,9 @@ class TestPrepareBuiltContext:
             dockerfile_content = ctx.dockerfile_path.read_text()
             # Features should only be injected once
             feature_count = dockerfile_content.count("# Feature: test")
-            assert feature_count == 1, f"Feature should appear once, found {feature_count} times"
+            assert feature_count == 1, (
+                f"Feature should appear once, found {feature_count} times"
+            )
         finally:
             shutil.rmtree(ctx.context_dir)
 
@@ -262,7 +277,9 @@ class TestPrepareBuiltContext:
             feature_dir = tmp_path / "feature_cache" / "abc123"
             feature_dir.mkdir(parents=True)
             (feature_dir / "install.sh").write_text("#!/bin/bash\necho test")
-            (feature_dir / "devcontainer-feature.json").write_text('{"id": "myfeature"}')
+            (feature_dir / "devcontainer-feature.json").write_text(
+                '{"id": "myfeature"}'
+            )
             mock_download.return_value = feature_dir
 
             # Add a feature to config
@@ -272,7 +289,9 @@ class TestPrepareBuiltContext:
             containers_dir = tmp_path / "containers" / "paude"
             containers_dir.mkdir(parents=True)
             (containers_dir / "entrypoint.sh").write_text("#!/bin/bash\nexec $@")
-            (containers_dir / "entrypoint-session.sh").write_text("#!/bin/bash\nexec $@")
+            (containers_dir / "entrypoint-session.sh").write_text(
+                "#!/bin/bash\nexec $@"
+            )
 
             with patch("paude.container.image.image_exists", return_value=True):
                 with patch("paude.container.image.run_podman"):
@@ -475,9 +494,7 @@ class TestNetworkManager:
 
     @patch("paude.container.network.network_exists")
     @patch("paude.container.network.run_podman")
-    def test_create_internal_network_only_if_not_exists(
-        self, mock_run, mock_exists
-    ):
+    def test_create_internal_network_only_if_not_exists(self, mock_run, mock_exists):
         """create_internal_network only creates if network doesn't exist."""
         mock_exists.return_value = True
         from paude.container.network import NetworkManager
@@ -490,9 +507,7 @@ class TestNetworkManager:
 
     @patch("paude.container.network.network_exists")
     @patch("paude.container.network.run_podman")
-    def test_create_internal_network_creates_when_missing(
-        self, mock_run, mock_exists
-    ):
+    def test_create_internal_network_creates_when_missing(self, mock_run, mock_exists):
         """create_internal_network creates network when it doesn't exist."""
         mock_exists.return_value = False
         from paude.container.network import NetworkManager

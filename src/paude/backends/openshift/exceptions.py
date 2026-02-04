@@ -48,9 +48,7 @@ class NamespaceNotFoundError(OpenShiftError):
 class BuildFailedError(OpenShiftError):
     """OpenShift binary build failed."""
 
-    def __init__(
-        self, build_name: str, reason: str, logs: str | None = None
-    ) -> None:
+    def __init__(self, build_name: str, reason: str, logs: str | None = None) -> None:
         self.build_name = build_name
         self.reason = reason
         self.logs = logs

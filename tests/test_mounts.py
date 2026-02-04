@@ -127,7 +127,9 @@ class TestBuildVenvMounts:
 
         assert mounts == []
 
-    def test_finds_venvs_in_auto_mode(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    def test_finds_venvs_in_auto_mode(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ):
         """build_venv_mounts finds venvs automatically in auto mode."""
         venv = tmp_path / ".venv"
         venv.mkdir()
@@ -171,7 +173,9 @@ class TestBuildVenvMounts:
 
         assert mounts == []
 
-    def test_uses_manual_list_when_provided(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    def test_uses_manual_list_when_provided(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ):
         """build_venv_mounts uses specified directories when mode is list."""
         venv = tmp_path / "my-custom-venv"
         venv.mkdir()
@@ -200,7 +204,9 @@ class TestBuildVenvMounts:
 
         assert mounts == []
 
-    def test_finds_multiple_venvs(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    def test_finds_multiple_venvs(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ):
         """build_venv_mounts handles multiple venvs."""
         for name in [".venv", "venv"]:
             venv = tmp_path / name
@@ -215,14 +221,18 @@ class TestBuildVenvMounts:
         assert ".venv" in captured.err
         assert "venv" in captured.err
 
-    def test_no_message_when_no_venvs(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    def test_no_message_when_no_venvs(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ):
         """build_venv_mounts prints no message when no venvs found."""
         build_venv_mounts(tmp_path, "auto")
 
         captured = capsys.readouterr()
         assert "Shadowing" not in captured.err
 
-    def test_no_message_when_mode_none(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    def test_no_message_when_mode_none(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ):
         """build_venv_mounts prints no message when mode is none."""
         venv = tmp_path / ".venv"
         venv.mkdir()

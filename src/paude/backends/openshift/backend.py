@@ -238,14 +238,16 @@ class OpenShiftBackend:
         self._proxy.ensure_proxy_network_policy(session_name)
 
     # Terminal failure states that indicate immediate failure (no point waiting)
-    TERMINAL_WAITING_REASONS = frozenset({
-        "ImagePullBackOff",
-        "ErrImagePull",
-        "CrashLoopBackOff",
-        "CreateContainerConfigError",
-        "InvalidImageName",
-        "CreateContainerError",
-    })
+    TERMINAL_WAITING_REASONS = frozenset(
+        {
+            "ImagePullBackOff",
+            "ErrImagePull",
+            "CrashLoopBackOff",
+            "CreateContainerConfigError",
+            "InvalidImageName",
+            "CreateContainerError",
+        }
+    )
 
     def _get_container_status(self, pod_name: str) -> tuple[str | None, str | None]:
         """Get container waiting reason and message from pod status.
@@ -258,9 +260,13 @@ class OpenShiftBackend:
         """
         ns = self.namespace
         result = self._run_oc(
-            "get", "pod", pod_name,
-            "-n", ns,
-            "-o", "jsonpath={.status.containerStatuses[0].state.waiting.reason},"
+            "get",
+            "pod",
+            pod_name,
+            "-n",
+            ns,
+            "-o",
+            "jsonpath={.status.containerStatuses[0].state.waiting.reason},"
             "{.status.containerStatuses[0].state.waiting.message}",
             check=False,
         )
@@ -287,11 +293,15 @@ class OpenShiftBackend:
 
         # Get pod events
         events_result = self._run_oc(
-            "get", "events",
-            "-n", ns,
-            "--field-selector", f"involvedObject.name={pod_name}",
+            "get",
+            "events",
+            "-n",
+            ns,
+            "--field-selector",
+            f"involvedObject.name={pod_name}",
             "--sort-by=.lastTimestamp",
-            "-o", "custom-columns=TIME:.lastTimestamp,TYPE:.type,"
+            "-o",
+            "custom-columns=TIME:.lastTimestamp,TYPE:.type,"
             "REASON:.reason,MESSAGE:.message",
             check=False,
         )
@@ -301,8 +311,11 @@ class OpenShiftBackend:
 
         # Get pod describe (truncated)
         describe_result = self._run_oc(
-            "describe", "pod", pod_name,
-            "-n", ns,
+            "describe",
+            "pod",
+            pod_name,
+            "-n",
+            ns,
             check=False,
         )
         if describe_result.returncode == 0 and describe_result.stdout.strip():
@@ -314,8 +327,10 @@ class OpenShiftBackend:
 
         # Try to get container logs (may not exist if container never started)
         logs_result = self._run_oc(
-            "logs", pod_name,
-            "-n", ns,
+            "logs",
+            pod_name,
+            "-n",
+            ns,
             "--tail=30",
             check=False,
         )
@@ -353,9 +368,13 @@ class OpenShiftBackend:
             remaining = timeout - elapsed
 
             result = self._run_oc(
-                "get", "pod", pod_name,
-                "-n", ns,
-                "-o", "jsonpath={.status.phase}",
+                "get",
+                "pod",
+                pod_name,
+                "-n",
+                ns,
+                "-o",
+                "jsonpath={.status.phase}",
                 check=False,
             )
 
@@ -400,9 +419,7 @@ class OpenShiftBackend:
         # Timeout reached - collect debug info
         debug_info = self._collect_pod_debug_info(pod_name)
         print(f"\n{debug_info}", file=sys.stderr)
-        raise PodNotReadyError(
-            f"Pod {pod_name} not ready within {timeout} seconds"
-        )
+        raise PodNotReadyError(f"Pod {pod_name} not ready within {timeout} seconds")
 
     def _generate_statefulset_spec(
         self,
@@ -454,9 +471,13 @@ class OpenShiftBackend:
         ns = self.namespace
 
         result = self._run_oc(
-            "get", "statefulset", sts_name,
-            "-n", ns,
-            "-o", "json",
+            "get",
+            "statefulset",
+            sts_name,
+            "-n",
+            ns,
+            "-o",
+            "json",
             check=False,
         )
 
@@ -484,9 +505,13 @@ class OpenShiftBackend:
         ns = self.namespace
 
         result = self._run_oc(
-            "get", "pod", pod_name,
-            "-n", ns,
-            "-o", "jsonpath={.status.phase}",
+            "get",
+            "pod",
+            pod_name,
+            "-n",
+            ns,
+            "-o",
+            "jsonpath={.status.phase}",
             check=False,
         )
 
@@ -506,8 +531,11 @@ class OpenShiftBackend:
         ns = self.namespace
 
         self._run_oc(
-            "scale", "statefulset", sts_name,
-            "-n", ns,
+            "scale",
+            "statefulset",
+            sts_name,
+            "-n",
+            ns,
             f"--replicas={replicas}",
         )
 
@@ -520,8 +548,11 @@ class OpenShiftBackend:
         """
         ns = self.namespace
         self._run_oc(
-            "scale", "deployment", deployment_name,
-            "-n", ns,
+            "scale",
+            "deployment",
+            deployment_name,
+            "-n",
+            ns,
             f"--replicas={replicas}",
             check=False,  # Don't fail if deployment doesn't exist
         )
@@ -621,10 +652,14 @@ class OpenShiftBackend:
             storage_class=config.storage_class,
         )
 
-        print(f"Creating StatefulSet/paude-{session_name} in namespace {ns}...",
-              file=sys.stderr)
+        print(
+            f"Creating StatefulSet/paude-{session_name} in namespace {ns}...",
+            file=sys.stderr,
+        )
         self._run_oc(
-            "apply", "-f", "-",
+            "apply",
+            "-f",
+            "-",
             input_data=json.dumps(sts_spec),
         )
 
@@ -680,8 +715,11 @@ class OpenShiftBackend:
         # Scale to 0 first to gracefully stop pod
         print(f"Scaling StatefulSet/{sts_name} to 0...", file=sys.stderr)
         self._run_oc(
-            "scale", "statefulset", sts_name,
-            "-n", ns,
+            "scale",
+            "statefulset",
+            sts_name,
+            "-n",
+            ns,
             "--replicas=0",
             check=False,
         )
@@ -689,8 +727,11 @@ class OpenShiftBackend:
         # Delete StatefulSet
         print(f"Deleting StatefulSet/{sts_name}...", file=sys.stderr)
         self._run_oc(
-            "delete", "statefulset", sts_name,
-            "-n", ns,
+            "delete",
+            "statefulset",
+            sts_name,
+            "-n",
+            ns,
             "--grace-period=0",
             check=False,
         )
@@ -699,8 +740,11 @@ class OpenShiftBackend:
         # Use longer timeout since PVC deletion waits for pod termination
         print(f"Deleting PVC/{pvc_name}...", file=sys.stderr)
         self._run_oc(
-            "delete", "pvc", pvc_name,
-            "-n", ns,
+            "delete",
+            "pvc",
+            pvc_name,
+            "-n",
+            ns,
             check=False,
             timeout=90,
         )
@@ -708,9 +752,12 @@ class OpenShiftBackend:
         # Delete session-specific NetworkPolicies
         print("Deleting NetworkPolicy for session...", file=sys.stderr)
         self._run_oc(
-            "delete", "networkpolicy",
-            "-n", ns,
-            "-l", f"paude.io/session-name={name}",
+            "delete",
+            "networkpolicy",
+            "-n",
+            ns,
+            "-l",
+            f"paude.io/session-name={name}",
             check=False,
         )
 
@@ -772,8 +819,11 @@ class OpenShiftBackend:
         # Check if proxy deployment exists for this session
         proxy_deployment = f"paude-proxy-{name}"
         result = self._run_oc(
-            "get", "deployment", proxy_deployment,
-            "-n", self.namespace,
+            "get",
+            "deployment",
+            proxy_deployment,
+            "-n",
+            self.namespace,
             check=False,
         )
         if result.returncode == 0:
@@ -815,8 +865,11 @@ class OpenShiftBackend:
         # Scale proxy to 0 if it exists
         proxy_deployment = f"paude-proxy-{name}"
         result = self._run_oc(
-            "get", "deployment", proxy_deployment,
-            "-n", self.namespace,
+            "get",
+            "deployment",
+            proxy_deployment,
+            "-n",
+            self.namespace,
             check=False,
         )
         if result.returncode == 0:
@@ -846,9 +899,13 @@ class OpenShiftBackend:
 
         # Verify pod is running
         result = self._run_oc(
-            "get", "pod", pod_name,
-            "-n", ns,
-            "-o", "jsonpath={.status.phase}",
+            "get",
+            "pod",
+            pod_name,
+            "-n",
+            ns,
+            "-o",
+            "jsonpath={.status.phase}",
             check=False,
         )
 
@@ -866,8 +923,14 @@ class OpenShiftBackend:
 
         # Check if workspace is empty (no .git directory)
         check_result = self._run_oc(
-            "exec", pod_name, "-n", ns, "--",
-            "test", "-d", "/pvc/workspace/.git",
+            "exec",
+            pod_name,
+            "-n",
+            ns,
+            "--",
+            "test",
+            "-d",
+            "/pvc/workspace/.git",
             check=False,
             timeout=self.OC_EXEC_TIMEOUT,
         )
@@ -883,8 +946,15 @@ class OpenShiftBackend:
 
         if self._config.context:
             exec_cmd = [
-                "oc", "--context", self._config.context,
-                "exec", "-it", "-n", ns, pod_name, "--",
+                "oc",
+                "--context",
+                self._config.context,
+                "exec",
+                "-it",
+                "-n",
+                ns,
+                pod_name,
+                "--",
             ]
 
         # Use session entrypoint for session persistence
@@ -974,10 +1044,14 @@ class OpenShiftBackend:
         sessions = []
 
         result = self._run_oc(
-            "get", "statefulsets",
-            "-n", ns,
-            "-l", "app=paude",
-            "-o", "json",
+            "get",
+            "statefulsets",
+            "-n",
+            ns,
+            "-l",
+            "app=paude",
+            "-o",
+            "json",
             check=False,
         )
 
@@ -1018,15 +1092,17 @@ class OpenShiftBackend:
                     created_at = annotations.get(
                         "paude.io/created-at", metadata.get("creationTimestamp", "")
                     )
-                    sessions.append(Session(
-                        name=session_name,
-                        status=status,
-                        workspace=workspace,
-                        created_at=created_at,
-                        backend_type="openshift",
-                        container_id=f"paude-{session_name}-0",
-                        volume_name=f"workspace-paude-{session_name}-0",
-                    ))
+                    sessions.append(
+                        Session(
+                            name=session_name,
+                            status=status,
+                            workspace=workspace,
+                            created_at=created_at,
+                            backend_type="openshift",
+                            container_id=f"paude-{session_name}-0",
+                            volume_name=f"workspace-paude-{session_name}-0",
+                        )
+                    )
             except json.JSONDecodeError:
                 pass
 

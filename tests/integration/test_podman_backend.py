@@ -70,7 +70,12 @@ class TestPodmanSessionLifecycle:
 
             # Verify volume exists
             result = subprocess.run(
-                ["podman", "volume", "exists", f"paude-{unique_session_name}-workspace"],
+                [
+                    "podman",
+                    "volume",
+                    "exists",
+                    f"paude-{unique_session_name}-workspace",
+                ],
                 capture_output=True,
             )
             assert result.returncode == 0, "Volume should exist"
@@ -304,8 +309,12 @@ class TestPodmanVolumes:
             test_content = "integration-test-data"
             subprocess.run(
                 [
-                    "podman", "exec", container_name,
-                    "bash", "-c", f"echo '{test_content}' > /pvc/test-file.txt",
+                    "podman",
+                    "exec",
+                    container_name,
+                    "bash",
+                    "-c",
+                    f"echo '{test_content}' > /pvc/test-file.txt",
                 ],
                 capture_output=True,
                 check=True,
@@ -324,8 +333,11 @@ class TestPodmanVolumes:
             # Verify the file still exists
             result = subprocess.run(
                 [
-                    "podman", "exec", container_name,
-                    "cat", "/pvc/test-file.txt",
+                    "podman",
+                    "exec",
+                    container_name,
+                    "cat",
+                    "/pvc/test-file.txt",
                 ],
                 capture_output=True,
                 text=True,
@@ -367,8 +379,12 @@ class TestPodmanVolumes:
             # Check that /pvc directory exists and is writable
             result = subprocess.run(
                 [
-                    "podman", "exec", container_name,
-                    "test", "-d", "/pvc",
+                    "podman",
+                    "exec",
+                    container_name,
+                    "test",
+                    "-d",
+                    "/pvc",
                 ],
                 capture_output=True,
             )
@@ -377,8 +393,12 @@ class TestPodmanVolumes:
             # Check that we can write to /pvc/workspace
             result = subprocess.run(
                 [
-                    "podman", "exec", container_name,
-                    "bash", "-c", "mkdir -p /pvc/workspace && touch /pvc/workspace/test",
+                    "podman",
+                    "exec",
+                    container_name,
+                    "bash",
+                    "-c",
+                    "mkdir -p /pvc/workspace && touch /pvc/workspace/test",
                 ],
                 capture_output=True,
             )
@@ -422,8 +442,11 @@ class TestPodmanEnvironment:
             # Check PAUDE_WORKSPACE is set
             result = subprocess.run(
                 [
-                    "podman", "exec", container_name,
-                    "printenv", "PAUDE_WORKSPACE",
+                    "podman",
+                    "exec",
+                    container_name,
+                    "printenv",
+                    "PAUDE_WORKSPACE",
                 ],
                 capture_output=True,
                 text=True,
@@ -466,8 +489,11 @@ class TestPodmanEnvironment:
             # Check PAUDE_CLAUDE_ARGS contains the skip permissions flag
             result = subprocess.run(
                 [
-                    "podman", "exec", container_name,
-                    "printenv", "PAUDE_CLAUDE_ARGS",
+                    "podman",
+                    "exec",
+                    container_name,
+                    "printenv",
+                    "PAUDE_CLAUDE_ARGS",
                 ],
                 capture_output=True,
                 text=True,

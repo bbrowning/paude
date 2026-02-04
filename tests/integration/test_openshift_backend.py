@@ -74,25 +74,34 @@ def cleanup_test_resources(test_namespace: str, unique_session_name: str):
 
     # Delete StatefulSet
     run_oc(
-        "delete", "statefulset", sts_name,
-        "-n", test_namespace,
+        "delete",
+        "statefulset",
+        sts_name,
+        "-n",
+        test_namespace,
         "--ignore-not-found",
         check=False,
     )
 
     # Delete PVC
     run_oc(
-        "delete", "pvc", pvc_name,
-        "-n", test_namespace,
+        "delete",
+        "pvc",
+        pvc_name,
+        "-n",
+        test_namespace,
         "--ignore-not-found",
         check=False,
     )
 
     # Delete NetworkPolicies
     run_oc(
-        "delete", "networkpolicy",
-        "-n", test_namespace,
-        "-l", f"paude.io/session-name={unique_session_name}",
+        "delete",
+        "networkpolicy",
+        "-n",
+        test_namespace,
+        "-l",
+        f"paude.io/session-name={unique_session_name}",
         "--ignore-not-found",
         check=False,
     )
@@ -132,10 +141,14 @@ class TestOpenShiftSessionLifecycle:
 
         # Verify NetworkPolicy exists
         result = run_oc(
-            "get", "networkpolicy",
-            "-n", test_namespace,
-            "-l", f"paude.io/session-name={unique_session_name}",
-            "-o", "name",
+            "get",
+            "networkpolicy",
+            "-n",
+            test_namespace,
+            "-l",
+            f"paude.io/session-name={unique_session_name}",
+            "-o",
+            "name",
             check=False,
         )
         assert result.returncode == 0
@@ -277,9 +290,13 @@ class TestOpenShiftStatefulSetSpec:
 
         sts_name = f"paude-{unique_session_name}"
         result = run_oc(
-            "get", "statefulset", sts_name,
-            "-n", test_namespace,
-            "-o", "json",
+            "get",
+            "statefulset",
+            sts_name,
+            "-n",
+            test_namespace,
+            "-o",
+            "json",
         )
 
         sts = json.loads(result.stdout)
@@ -308,9 +325,13 @@ class TestOpenShiftStatefulSetSpec:
 
         sts_name = f"paude-{unique_session_name}"
         result = run_oc(
-            "get", "statefulset", sts_name,
-            "-n", test_namespace,
-            "-o", "json",
+            "get",
+            "statefulset",
+            sts_name,
+            "-n",
+            test_namespace,
+            "-o",
+            "json",
         )
 
         sts = json.loads(result.stdout)
@@ -347,9 +368,13 @@ class TestOpenShiftScaling:
         # Verify replicas is 0
         sts_name = f"paude-{unique_session_name}"
         result = run_oc(
-            "get", "statefulset", sts_name,
-            "-n", test_namespace,
-            "-o", "jsonpath={.spec.replicas}",
+            "get",
+            "statefulset",
+            sts_name,
+            "-n",
+            test_namespace,
+            "-o",
+            "jsonpath={.spec.replicas}",
         )
 
         assert result.stdout.strip() == "0"

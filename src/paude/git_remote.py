@@ -314,10 +314,9 @@ def is_pod_running_openshift(
     oc_cmd = ["oc"]
     if context:
         oc_cmd.extend(["--context", context])
-    oc_cmd.extend([
-        "get", "pod", pod_name, "-n", namespace,
-        "-o", "jsonpath={.status.phase}"
-    ])
+    oc_cmd.extend(
+        ["get", "pod", pod_name, "-n", namespace, "-o", "jsonpath={.status.phase}"]
+    )
 
     result = subprocess.run(
         oc_cmd,

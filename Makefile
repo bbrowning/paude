@@ -21,7 +21,7 @@ LATEST_PROXY_IMAGE = $(REGISTRY)/$(PROXY_IMAGE_NAME):latest
 # Architectures for multi-arch builds
 PLATFORMS = linux/amd64,linux/arm64
 
-.PHONY: build run publish release clean login help test test-all test-integration test-podman test-kubernetes install lint format typecheck pypi-build pypi-publish
+.PHONY: build run publish release clean login help test test-all test-integration test-podman test-kubernetes install install-hooks lint format typecheck pypi-build pypi-publish
 
 help:
 	@echo "Paude build targets:"
@@ -44,6 +44,7 @@ help:
 	@echo ""
 	@echo "Development targets:"
 	@echo "  make install        - Install Python package with dev dependencies"
+	@echo "  make install-hooks  - Install pre-commit hooks"
 	@echo "  make lint           - Run ruff linter"
 	@echo "  make format         - Format code with ruff"
 	@echo "  make typecheck      - Run mypy type checker"
@@ -86,7 +87,10 @@ test-kubernetes:
 
 # Development targets
 install:
-	pip install -e ".[dev]"
+	uv pip install -e ".[dev]"
+
+install-hooks:
+	uv run pre-commit install
 
 lint:
 	ruff check src tests

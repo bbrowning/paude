@@ -80,7 +80,13 @@ class TestGitRemoteAdd:
         assert result is True
         mock_run.assert_called_once()
         call_args = mock_run.call_args[0][0]
-        assert call_args == ["git", "remote", "add", "paude-test", "ext::podman exec -i test %S /workspace"]
+        assert call_args == [
+            "git",
+            "remote",
+            "add",
+            "paude-test",
+            "ext::podman exec -i test %S /workspace",
+        ]
 
     @patch("paude.git_remote.subprocess.run")
     def test_remote_already_exists(self, mock_run) -> None:
@@ -137,7 +143,10 @@ paude-other\text::oc exec pod -n ns -- %S /pvc/workspace (push)
         remotes = list_paude_remotes()
 
         assert len(remotes) == 2
-        assert ("paude-my-session", "ext::podman exec paude-my-session %S /pvc/workspace") in remotes
+        assert (
+            "paude-my-session",
+            "ext::podman exec paude-my-session %S /pvc/workspace",
+        ) in remotes
         assert ("paude-other", "ext::oc exec pod -n ns -- %S /pvc/workspace") in remotes
 
     @patch("paude.git_remote.subprocess.run")
@@ -363,7 +372,9 @@ class TestInitializeContainerWorkspaceOpenshift:
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
 
-        result = initialize_container_workspace_openshift("pod-0", "ns", context="my-ctx")
+        result = initialize_container_workspace_openshift(
+            "pod-0", "ns", context="my-ctx"
+        )
 
         assert result is True
         call_args = mock_run.call_args[0][0]

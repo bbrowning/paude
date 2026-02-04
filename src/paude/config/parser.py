@@ -182,9 +182,7 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
     if isinstance(venv_config, list):
         for item in venv_config:
             if not isinstance(item, str):
-                raise ConfigError(
-                    "Invalid venv config: list items must be strings"
-                )
+                raise ConfigError("Invalid venv config: list items must be strings")
 
     if "pip_install" in data:
         print(
@@ -212,7 +210,12 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
 def _warn_unsupported_properties(data: dict[str, Any]) -> None:
     """Warn about unsupported properties in devcontainer.json."""
     unsupported = [
-        "mounts", "runArgs", "privileged", "capAdd", "forwardPorts", "remoteUser"
+        "mounts",
+        "runArgs",
+        "privileged",
+        "capAdd",
+        "forwardPorts",
+        "remoteUser",
     ]
     for prop in unsupported:
         if prop in data:

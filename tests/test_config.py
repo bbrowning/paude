@@ -127,7 +127,9 @@ class TestParseConfig:
         """parse_config handles paude.json with setup command."""
         config_file = tmp_path / "paude.json"
         config_file.write_text(
-            json.dumps({"base": "python:3.11", "setup": "pip install -r requirements.txt"})
+            json.dumps(
+                {"base": "python:3.11", "setup": "pip install -r requirements.txt"}
+            )
         )
 
         config = parse_config(config_file)
@@ -189,7 +191,9 @@ class TestParseConfig:
         with pytest.raises(ConfigError, match="list items must be strings"):
             parse_config(config_file)
 
-    def test_pip_install_deprecated_warning(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    def test_pip_install_deprecated_warning(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ):
         """parse_config warns about deprecated pip_install."""
         config_file = tmp_path / "paude.json"
         config_file.write_text(json.dumps({"pip_install": True}))
@@ -199,7 +203,9 @@ class TestParseConfig:
         assert "pip_install" in captured.err
         assert "deprecated" in captured.err
 
-    def test_warns_unsupported_properties(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    def test_warns_unsupported_properties(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ):
         """parse_config logs warnings for unsupported properties."""
         config_file = tmp_path / ".devcontainer.json"
         config_file.write_text(
@@ -221,7 +227,9 @@ class TestParseConfig:
         """parse_config handles postCreateCommand as array."""
         config_file = tmp_path / ".devcontainer.json"
         config_file.write_text(
-            json.dumps({"image": "python:3.11", "postCreateCommand": ["npm", "install"]})
+            json.dumps(
+                {"image": "python:3.11", "postCreateCommand": ["npm", "install"]}
+            )
         )
 
         config = parse_config(config_file)
@@ -285,7 +293,9 @@ class TestGeneratePipInstallDockerfile:
     def test_include_claude_install(self):
         """generate_pip_install_dockerfile includes Claude when requested."""
         config = PaudeConfig()
-        dockerfile = generate_pip_install_dockerfile(config, include_claude_install=True)
+        dockerfile = generate_pip_install_dockerfile(
+            config, include_claude_install=True
+        )
 
         assert "curl -fsSL https://claude.ai/install.sh | bash" in dockerfile
         assert "DISABLE_AUTOUPDATER=1" in dockerfile
@@ -295,7 +305,9 @@ class TestGeneratePipInstallDockerfile:
     def test_ends_with_user_paude_when_claude_only(self):
         """Dockerfile with only Claude install ends with USER paude, not root."""
         config = PaudeConfig()
-        dockerfile = generate_pip_install_dockerfile(config, include_claude_install=True)
+        dockerfile = generate_pip_install_dockerfile(
+            config, include_claude_install=True
+        )
 
         lines = dockerfile.strip().split("\n")
         # Find the last USER directive
@@ -305,7 +317,9 @@ class TestGeneratePipInstallDockerfile:
                 last_user_line = line.strip()
                 break
 
-        assert last_user_line == "USER paude", f"Expected 'USER paude', got '{last_user_line}'"
+        assert last_user_line == "USER paude", (
+            f"Expected 'USER paude', got '{last_user_line}'"
+        )
 
     def test_starts_with_user_root_for_feature_injection(self):
         """Dockerfile with include_claude_install has USER root before USER paude.
@@ -314,18 +328,27 @@ class TestGeneratePipInstallDockerfile:
         even when the base image ends with a non-root user.
         """
         config = PaudeConfig()
-        dockerfile = generate_pip_install_dockerfile(config, include_claude_install=True)
+        dockerfile = generate_pip_install_dockerfile(
+            config, include_claude_install=True
+        )
 
         # Find positions of USER directives
         lines = dockerfile.split("\n")
-        user_lines = [(i, line.strip()) for i, line in enumerate(lines)
-                      if line.strip().startswith("USER")]
+        user_lines = [
+            (i, line.strip())
+            for i, line in enumerate(lines)
+            if line.strip().startswith("USER")
+        ]
 
         assert len(user_lines) >= 2, "Expected at least 2 USER lines"
         # First USER should be root
-        assert user_lines[0][1] == "USER root", f"First USER should be 'USER root', got '{user_lines[0][1]}'"
+        assert user_lines[0][1] == "USER root", (
+            f"First USER should be 'USER root', got '{user_lines[0][1]}'"
+        )
         # Second USER should be paude
-        assert user_lines[1][1] == "USER paude", f"Second USER should be 'USER paude', got '{user_lines[1][1]}'"
+        assert user_lines[1][1] == "USER paude", (
+            f"Second USER should be 'USER paude', got '{user_lines[1][1]}'"
+        )
 
     def test_minimal_dockerfile_has_user_paude_for_features(self):
         """Minimal Dockerfile (no claude) still has USER paude for features.
@@ -334,17 +357,26 @@ class TestGeneratePipInstallDockerfile:
         Features are injected before the first USER paude line.
         """
         config = PaudeConfig()
-        dockerfile = generate_pip_install_dockerfile(config, include_claude_install=False)
+        dockerfile = generate_pip_install_dockerfile(
+            config, include_claude_install=False
+        )
 
         # Should have USER paude even with minimal config
-        assert "USER paude" in dockerfile, "Minimal Dockerfile should have USER paude for feature injection"
+        assert "USER paude" in dockerfile, (
+            "Minimal Dockerfile should have USER paude for feature injection"
+        )
         # Should have USER root before USER paude for features to run as root
         lines = dockerfile.split("\n")
-        user_lines = [(i, line.strip()) for i, line in enumerate(lines)
-                      if line.strip().startswith("USER")]
+        user_lines = [
+            (i, line.strip())
+            for i, line in enumerate(lines)
+            if line.strip().startswith("USER")
+        ]
 
         assert len(user_lines) >= 2, "Expected at least 2 USER lines"
-        assert user_lines[0][1] == "USER root", "First USER should be root for feature injection"
+        assert user_lines[0][1] == "USER root", (
+            "First USER should be root for feature injection"
+        )
         assert user_lines[1][1] == "USER paude", "Second USER should be paude"
 
 

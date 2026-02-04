@@ -80,7 +80,9 @@ def test_dry_run_works():
     assert "Dry-run mode" in result.stdout
 
 
-def test_dry_run_shows_no_config(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch):
+def test_dry_run_shows_no_config(
+    tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+):
     """--dry-run shows 'none' when no config file exists."""
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["create", "--dry-run"])
@@ -90,7 +92,9 @@ def test_dry_run_shows_no_config(tmp_path: pytest.TempPathFactory, monkeypatch: 
 
 def test_dry_run_shows_flag_states():
     """--dry-run shows flag states."""
-    result = runner.invoke(app, ["create", "--yolo", "--allowed-domains", "all", "--dry-run"])
+    result = runner.invoke(
+        app, ["create", "--yolo", "--allowed-domains", "all", "--dry-run"]
+    )
     assert result.exit_code == 0
     assert "--yolo: True" in result.stdout
     assert "--allowed-domains: unrestricted" in result.stdout
@@ -121,19 +125,26 @@ def test_allowed_domains_all_value():
 
 def test_allowed_domains_custom_domain():
     """--allowed-domains with custom domain."""
-    result = runner.invoke(app, ["create", "--allowed-domains", ".example.com", "--dry-run"])
+    result = runner.invoke(
+        app, ["create", "--allowed-domains", ".example.com", "--dry-run"]
+    )
     assert result.exit_code == 0
     assert ".example.com" in result.stdout
 
 
 def test_allowed_domains_multiple_values():
     """--allowed-domains can be repeated."""
-    result = runner.invoke(app, [
-        "create",
-        "--allowed-domains", "vertexai",
-        "--allowed-domains", ".example.com",
-        "--dry-run",
-    ])
+    result = runner.invoke(
+        app,
+        [
+            "create",
+            "--allowed-domains",
+            "vertexai",
+            "--allowed-domains",
+            ".example.com",
+            "--dry-run",
+        ],
+    )
     assert result.exit_code == 0
     # Should show both
     assert "vertexai" in result.stdout or ".example.com" in result.stdout
@@ -168,7 +179,9 @@ def test_args_option():
 
 def test_multiple_flags_work_together():
     """Multiple flags work together (verified via dry-run)."""
-    result = runner.invoke(app, ["create", "--yolo", "--allowed-domains", "all", "--rebuild", "--dry-run"])
+    result = runner.invoke(
+        app, ["create", "--yolo", "--allowed-domains", "all", "--rebuild", "--dry-run"]
+    )
     assert result.exit_code == 0
     assert "--yolo: True" in result.stdout
     assert "--allowed-domains: unrestricted" in result.stdout
@@ -867,9 +880,7 @@ class TestStartMultiBackend:
         mock_podman_class: MagicMock,
     ):
         """Start prefers workspace-matching session."""
-        workspace_session = _make_session(
-            "workspace-session", backend_type="openshift"
-        )
+        workspace_session = _make_session("workspace-session", backend_type="openshift")
         mock_podman = MagicMock()
         mock_podman.find_session_for_workspace.return_value = None
         mock_podman_class.return_value = mock_podman
@@ -1016,9 +1027,7 @@ class TestStopMultiBackend:
         mock_podman_class: MagicMock,
     ):
         """Stop prefers workspace-matching running session."""
-        workspace_session = _make_session(
-            "workspace-session", backend_type="openshift"
-        )
+        workspace_session = _make_session("workspace-session", backend_type="openshift")
         mock_podman = MagicMock()
         mock_podman.find_session_for_workspace.return_value = None
         mock_podman_class.return_value = mock_podman

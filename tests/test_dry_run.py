@@ -26,7 +26,10 @@ class TestShowDryRun:
         assert "/test/workspace" in captured.out
 
     def test_shows_none_when_no_config(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
     ):
         """Shows 'none' when no config."""
         monkeypatch.chdir(tmp_path)
@@ -36,7 +39,10 @@ class TestShowDryRun:
         assert "Configuration: none" in captured.out
 
     def test_shows_config_file_when_present(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
     ):
         """Shows config file when present."""
         monkeypatch.chdir(tmp_path)
@@ -49,12 +55,17 @@ class TestShowDryRun:
         assert "paude.json" in captured.out
 
     def test_shows_packages_when_present(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
     ):
         """Shows packages when present."""
         monkeypatch.chdir(tmp_path)
         config = tmp_path / "paude.json"
-        config.write_text(json.dumps({"base": "python:3.11", "packages": ["git", "vim"]}))
+        config.write_text(
+            json.dumps({"base": "python:3.11", "packages": ["git", "vim"]})
+        )
 
         show_dry_run({})
 
@@ -63,7 +74,10 @@ class TestShowDryRun:
         assert "vim" in captured.out
 
     def test_shows_generated_dockerfile_for_custom_config(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
     ):
         """Shows generated Dockerfile for custom config."""
         monkeypatch.chdir(tmp_path)

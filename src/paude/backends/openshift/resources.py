@@ -11,19 +11,19 @@ from typing import Any
 
 CLAUDE_EXCLUDES = [
     # Session-specific files (not useful on remote)
-    "/debug",          # Debug logs - session specific
-    "/file-history",   # File history - session specific
+    "/debug",  # Debug logs - session specific
+    "/file-history",  # File history - session specific
     "/history.jsonl",  # Command history - session specific
-    "/paste-cache",    # Paste cache - session specific
-    "/session-env",    # Session environment - session specific
+    "/paste-cache",  # Paste cache - session specific
+    "/session-env",  # Session environment - session specific
     "/shell-snapshots",  # Shell snapshots - session specific
     "/stats-cache.json",  # Stats cache - session specific
-    "/tasks",          # Task state - session specific
-    "/todos",          # Todo state - session specific
-    "/projects",       # Project state - may contain session data
+    "/tasks",  # Task state - session specific
+    "/todos",  # Todo state - session specific
+    "/projects",  # Project state - may contain session data
     # Leading / anchors to root - only matches top-level, not nested dirs
-    "/cache",          # General cache (NOT plugins/cache with plugin files)
-    "/.git",           # Git metadata (if user has versioned ~/.claude)
+    "/cache",  # General cache (NOT plugins/cache with plugin files)
+    "/.git",  # Git metadata (if user has versioned ~/.claude)
 ]
 
 

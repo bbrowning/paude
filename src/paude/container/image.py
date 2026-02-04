@@ -127,9 +127,7 @@ def prepare_build_context(
             )
 
             combined_dockerfile = (
-                f"{stage1}\n\n"
-                f"# === Stage 2: Add paude requirements ===\n"
-                f"{stage2}"
+                f"{stage1}\n\n# === Stage 2: Add paude requirements ===\n{stage2}"
             )
             (tmpdir / "Dockerfile").write_text(combined_dockerfile)
 
@@ -145,7 +143,7 @@ def prepare_build_context(
                 entrypoint_dest.write_text(content, newline="\n")
             else:
                 entrypoint_dest.write_text(
-                    "#!/bin/bash\nexec claude \"$@\"\n", newline="\n"
+                    '#!/bin/bash\nexec claude "$@"\n', newline="\n"
                 )
             entrypoint_dest.chmod(0o755)
 
@@ -259,9 +257,7 @@ def prepare_build_context(
             content = entrypoint.read_text().replace("\r\n", "\n")
             entrypoint_dest.write_text(content, newline="\n")
         else:
-            entrypoint_dest.write_text(
-                "#!/bin/bash\nexec claude \"$@\"\n", newline="\n"
-            )
+            entrypoint_dest.write_text('#!/bin/bash\nexec claude "$@"\n', newline="\n")
         entrypoint_dest.chmod(0o755)
 
         entrypoint_session = entrypoint.parent / "entrypoint-session.sh"
@@ -408,9 +404,7 @@ class ImageManager:
 
             build_args = {"BASE_IMAGE": base_image}
             try:
-                self.build_image(
-                    dockerfile_path, runtime_tag, Path(tmpdir), build_args
-                )
+                self.build_image(dockerfile_path, runtime_tag, Path(tmpdir), build_args)
             except Exception:
                 print(
                     "\nClaude Code installation failed. This usually means:\n"
@@ -476,9 +470,7 @@ class ImageManager:
         if config.dockerfile:
             # Verify Dockerfile exists (matches bash behavior)
             if not config.dockerfile.exists():
-                raise FileNotFoundError(
-                    f"Dockerfile not found: {config.dockerfile}"
-                )
+                raise FileNotFoundError(f"Dockerfile not found: {config.dockerfile}")
 
             # Build user's Dockerfile first to create intermediate image
             user_image = f"paude-user-base:{config_hash}"
@@ -544,7 +536,7 @@ class ImageManager:
                 else:
                     # Minimal fallback
                     entrypoint_dest.write_text(
-                        "#!/bin/bash\nexec claude \"$@\"\n", newline="\n"
+                        '#!/bin/bash\nexec claude "$@"\n', newline="\n"
                     )
                 entrypoint_dest.chmod(0o755)
 

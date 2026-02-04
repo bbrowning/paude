@@ -61,8 +61,11 @@ class BuildOrchestrator:
         bc_name = f"{name_prefix}-{config_hash}"
 
         result = self._oc.run(
-            "get", "buildconfig", bc_name,
-            "-n", self._namespace,
+            "get",
+            "buildconfig",
+            bc_name,
+            "-n",
+            self._namespace,
             check=False,
         )
         if result.returncode == 0:
@@ -145,9 +148,11 @@ class BuildOrchestrator:
         )
 
         result = self._oc.run(
-            "start-build", bc_name,
+            "start-build",
+            bc_name,
             f"--from-dir={context_dir}",
-            "-n", self._namespace,
+            "-n",
+            self._namespace,
             timeout=120,
         )
 
@@ -162,9 +167,12 @@ class BuildOrchestrator:
 
         if session_name:
             self._oc.run(
-                "label", "build", build_name,
+                "label",
+                "build",
+                build_name,
                 f"paude.io/session-name={session_name}",
-                "-n", self._namespace,
+                "-n",
+                self._namespace,
                 check=False,
             )
 
@@ -194,9 +202,13 @@ class BuildOrchestrator:
         start_time = time.time()
         while time.time() - start_time < timeout:
             result = self._oc.run(
-                "get", "build", build_name,
-                "-n", self._namespace,
-                "-o", "jsonpath={.status.phase}",
+                "get",
+                "build",
+                build_name,
+                "-n",
+                self._namespace,
+                "-o",
+                "jsonpath={.status.phase}",
                 check=False,
             )
             if result.returncode != 0:
@@ -216,9 +228,13 @@ class BuildOrchestrator:
                 print("--- End Build Logs ---", file=sys.stderr)
 
                 reason_result = self._oc.run(
-                    "get", "build", build_name,
-                    "-n", self._namespace,
-                    "-o", "jsonpath={.status.message}",
+                    "get",
+                    "build",
+                    build_name,
+                    "-n",
+                    self._namespace,
+                    "-o",
+                    "jsonpath={.status.message}",
                     check=False,
                 )
                 reason = (
@@ -228,8 +244,10 @@ class BuildOrchestrator:
                 )
 
                 logs_result = self._oc.run(
-                    "logs", f"build/{build_name}",
-                    "-n", self._namespace,
+                    "logs",
+                    f"build/{build_name}",
+                    "-n",
+                    self._namespace,
                     "--tail=50",
                     check=False,
                 )
@@ -261,9 +279,13 @@ class BuildOrchestrator:
         is_name = f"{name_prefix}-{config_hash}"
 
         result = self._oc.run(
-            "get", "imagestream", is_name,
-            "-n", self._namespace,
-            "-o", "jsonpath={.status.dockerImageRepository}",
+            "get",
+            "imagestream",
+            is_name,
+            "-n",
+            self._namespace,
+            "-o",
+            "jsonpath={.status.dockerImageRepository}",
         )
         repo = result.stdout.strip()
         if not repo:
@@ -298,6 +320,7 @@ class BuildOrchestrator:
 
         if config is None:
             from paude.config.models import PaudeConfig
+
             config = PaudeConfig(config_file=None)
 
         build_ctx = prepare_build_context(
@@ -314,9 +337,11 @@ class BuildOrchestrator:
 
             if not force_rebuild:
                 result = self._oc.run(
-                    "get", "imagestreamtag",
+                    "get",
+                    "imagestreamtag",
                     f"{is_name}:latest",
-                    "-n", self._namespace,
+                    "-n",
+                    self._namespace,
                     check=False,
                 )
                 if result.returncode == 0:
@@ -361,15 +386,11 @@ class BuildOrchestrator:
 
         proxy_dir = script_dir / "containers" / "proxy"
         if not proxy_dir.is_dir():
-            raise OpenShiftError(
-                f"Proxy container directory not found: {proxy_dir}"
-            )
+            raise OpenShiftError(f"Proxy container directory not found: {proxy_dir}")
 
         dockerfile_path = proxy_dir / "Dockerfile"
         if not dockerfile_path.exists():
-            raise OpenShiftError(
-                f"Proxy Dockerfile not found: {dockerfile_path}"
-            )
+            raise OpenShiftError(f"Proxy Dockerfile not found: {dockerfile_path}")
 
         proxy_files = ["Dockerfile", "squid.conf", "entrypoint.sh"]
         hash_content = ""
@@ -382,9 +403,11 @@ class BuildOrchestrator:
 
         if not force_rebuild:
             result = self._oc.run(
-                "get", "imagestreamtag",
+                "get",
+                "imagestreamtag",
                 f"{is_name}:latest",
-                "-n", self._namespace,
+                "-n",
+                self._namespace,
                 check=False,
             )
             if result.returncode == 0:
@@ -424,8 +447,11 @@ class BuildOrchestrator:
             session_name: Session name to identify builds to delete.
         """
         self._oc.run(
-            "delete", "build",
-            "-n", self._namespace,
-            "-l", f"paude.io/session-name={session_name}",
+            "delete",
+            "build",
+            "-n",
+            self._namespace,
+            "-l",
+            f"paude.io/session-name={session_name}",
             check=False,
         )

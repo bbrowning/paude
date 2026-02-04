@@ -216,6 +216,7 @@ class TestListSessions:
 
         assert sessions == []
 
+
 # =============================================================================
 # Session Management Tests (New Backend Protocol)
 # =============================================================================
@@ -245,10 +246,9 @@ class TestOpenShiftCreateSession:
     """Tests for OpenShiftBackend.create_session."""
 
     @patch("subprocess.run")
-    def test_create_session_creates_statefulset(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_create_session_creates_statefulset(self, mock_run: MagicMock) -> None:
         """Create session creates a StatefulSet."""
+
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
             # Return "Running" for pod status check
@@ -281,21 +281,22 @@ class TestOpenShiftCreateSession:
         assert len(apply_calls) > 0
 
     @patch("subprocess.run")
-    def test_create_session_raises_if_exists(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_create_session_raises_if_exists(self, mock_run: MagicMock) -> None:
         """Create session raises SessionExistsError if session exists."""
+
         # First call to get statefulset returns existing
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
             if "get" in cmd and "statefulset" in cmd:
                 return MagicMock(
                     returncode=0,
-                    stdout=json.dumps({
-                        "apiVersion": "apps/v1",
-                        "kind": "StatefulSet",
-                        "metadata": {"name": "paude-existing"},
-                    }),
+                    stdout=json.dumps(
+                        {
+                            "apiVersion": "apps/v1",
+                            "kind": "StatefulSet",
+                            "metadata": {"name": "paude-existing"},
+                        }
+                    ),
                     stderr="",
                 )
             return MagicMock(returncode=0, stdout="", stderr="")
@@ -345,16 +346,12 @@ class TestOpenShiftCreateSession:
 
         # Verify pod status check was called (waiting for pod ready)
         pod_status_calls = [
-            c for c in calls_log
-            if "get" in c and "pod" in c and "jsonpath" in str(c)
+            c for c in calls_log if "get" in c and "pod" in c and "jsonpath" in str(c)
         ]
         assert len(pod_status_calls) >= 1, "Should check pod status"
 
         # Verify sync was called (exec mkdir for config directory)
-        sync_calls = [
-            c for c in calls_log
-            if "exec" in c and "mkdir" in str(c)
-        ]
+        sync_calls = [c for c in calls_log if "exec" in c and "mkdir" in str(c)]
         assert len(sync_calls) >= 1, "Should sync config to pod"
 
         # Verify session is returned as running
@@ -365,9 +362,7 @@ class TestOpenShiftDeleteSession:
     """Tests for OpenShiftBackend.delete_session."""
 
     @patch("subprocess.run")
-    def test_delete_session_requires_confirmation(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_delete_session_requires_confirmation(self, mock_run: MagicMock) -> None:
         """Delete session requires confirm=True."""
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
 
@@ -375,9 +370,7 @@ class TestOpenShiftDeleteSession:
             backend.delete_session("my-session", confirm=False)
 
     @patch("subprocess.run")
-    def test_delete_session_raises_if_not_found(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_delete_session_raises_if_not_found(self, mock_run: MagicMock) -> None:
         """Delete session raises SessionNotFoundError if not found."""
 
         def run_side_effect(*args, **kwargs):
@@ -397,9 +390,7 @@ class TestOpenShiftDeleteSession:
             backend.delete_session("nonexistent", confirm=True)
 
     @patch("subprocess.run")
-    def test_delete_session_deletes_resources(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_delete_session_deletes_resources(self, mock_run: MagicMock) -> None:
         """Delete session deletes StatefulSet, PVC, and credentials."""
 
         def run_side_effect(*args, **kwargs):
@@ -407,11 +398,13 @@ class TestOpenShiftDeleteSession:
             if "get" in cmd and "statefulset" in cmd:
                 return MagicMock(
                     returncode=0,
-                    stdout=json.dumps({
-                        "apiVersion": "apps/v1",
-                        "kind": "StatefulSet",
-                        "metadata": {"name": "paude-test"},
-                    }),
+                    stdout=json.dumps(
+                        {
+                            "apiVersion": "apps/v1",
+                            "kind": "StatefulSet",
+                            "metadata": {"name": "paude-test"},
+                        }
+                    ),
                     stderr="",
                 )
             return MagicMock(returncode=0, stdout="", stderr="")
@@ -431,9 +424,7 @@ class TestOpenShiftStartSession:
     """Tests for OpenShiftBackend.start_session."""
 
     @patch("subprocess.run")
-    def test_start_session_raises_if_not_found(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_start_session_raises_if_not_found(self, mock_run: MagicMock) -> None:
         """Start session raises SessionNotFoundError if not found."""
 
         def run_side_effect(*args, **kwargs):
@@ -453,9 +444,7 @@ class TestOpenShiftStartSession:
             backend.start_session("nonexistent")
 
     @patch("subprocess.run")
-    def test_start_session_scales_statefulset(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_start_session_scales_statefulset(self, mock_run: MagicMock) -> None:
         """Start session scales StatefulSet to 1."""
 
         def run_side_effect(*args, **kwargs):
@@ -464,17 +453,19 @@ class TestOpenShiftStartSession:
             if "get" in cmd and "statefulset" in cmd:
                 return MagicMock(
                     returncode=0,
-                    stdout=json.dumps({
-                        "apiVersion": "apps/v1",
-                        "kind": "StatefulSet",
-                        "metadata": {
-                            "name": "paude-test",
-                            "annotations": {
-                                "paude.io/workspace": "",
+                    stdout=json.dumps(
+                        {
+                            "apiVersion": "apps/v1",
+                            "kind": "StatefulSet",
+                            "metadata": {
+                                "name": "paude-test",
+                                "annotations": {
+                                    "paude.io/workspace": "",
+                                },
                             },
-                        },
-                        "spec": {"replicas": 0},
-                    }),
+                            "spec": {"replicas": 0},
+                        }
+                    ),
                     stderr="",
                 )
             # Proxy deployment doesn't exist (no proxy for this test)
@@ -501,17 +492,14 @@ class TestOpenShiftStartSession:
 
         # Verify NO proxy scale command was issued (proxy doesn't exist)
         proxy_scale_calls = [
-            c for c in calls
-            if "scale" in str(c)
-            and "deployment" in str(c)
-            and "paude-proxy" in str(c)
+            c
+            for c in calls
+            if "scale" in str(c) and "deployment" in str(c) and "paude-proxy" in str(c)
         ]
         assert len(proxy_scale_calls) == 0
 
     @patch("subprocess.run")
-    def test_start_session_scales_proxy_to_one(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_start_session_scales_proxy_to_one(self, mock_run: MagicMock) -> None:
         """Start session scales proxy Deployment to 1 when it exists."""
 
         def run_side_effect(*args, **kwargs):
@@ -520,17 +508,19 @@ class TestOpenShiftStartSession:
             if "get" in cmd and "statefulset" in cmd:
                 return MagicMock(
                     returncode=0,
-                    stdout=json.dumps({
-                        "apiVersion": "apps/v1",
-                        "kind": "StatefulSet",
-                        "metadata": {
-                            "name": "paude-test",
-                            "annotations": {
-                                "paude.io/workspace": "",
+                    stdout=json.dumps(
+                        {
+                            "apiVersion": "apps/v1",
+                            "kind": "StatefulSet",
+                            "metadata": {
+                                "name": "paude-test",
+                                "annotations": {
+                                    "paude.io/workspace": "",
+                                },
                             },
-                        },
-                        "spec": {"replicas": 0},
-                    }),
+                            "spec": {"replicas": 0},
+                        }
+                    ),
                     stderr="",
                 )
             # Proxy deployment exists
@@ -553,7 +543,8 @@ class TestOpenShiftStartSession:
         # Verify proxy scale command was called with replicas=1
         calls = mock_run.call_args_list
         proxy_scale_calls = [
-            c for c in calls
+            c
+            for c in calls
             if "scale" in str(c)
             and "deployment" in str(c)
             and "paude-proxy" in str(c)
@@ -566,9 +557,7 @@ class TestOpenShiftStopSession:
     """Tests for OpenShiftBackend.stop_session."""
 
     @patch("subprocess.run")
-    def test_stop_session_scales_to_zero(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_stop_session_scales_to_zero(self, mock_run: MagicMock) -> None:
         """Stop session scales StatefulSet to 0."""
 
         def run_side_effect(*args, **kwargs):
@@ -576,12 +565,14 @@ class TestOpenShiftStopSession:
             if "get" in cmd and "statefulset" in cmd:
                 return MagicMock(
                     returncode=0,
-                    stdout=json.dumps({
-                        "apiVersion": "apps/v1",
-                        "kind": "StatefulSet",
-                        "metadata": {"name": "paude-test"},
-                        "spec": {"replicas": 1},
-                    }),
+                    stdout=json.dumps(
+                        {
+                            "apiVersion": "apps/v1",
+                            "kind": "StatefulSet",
+                            "metadata": {"name": "paude-test"},
+                            "spec": {"replicas": 1},
+                        }
+                    ),
                     stderr="",
                 )
             return MagicMock(returncode=0, stdout="", stderr="")
@@ -597,9 +588,7 @@ class TestOpenShiftStopSession:
         assert len(scale_calls) >= 1
 
     @patch("subprocess.run")
-    def test_stop_session_raises_if_not_found(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_stop_session_raises_if_not_found(self, mock_run: MagicMock) -> None:
         """Stop session raises SessionNotFoundError if not found."""
 
         def run_side_effect(*args, **kwargs):
@@ -619,9 +608,7 @@ class TestOpenShiftStopSession:
             backend.stop_session("nonexistent")
 
     @patch("subprocess.run")
-    def test_stop_session_scales_proxy_to_zero(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_stop_session_scales_proxy_to_zero(self, mock_run: MagicMock) -> None:
         """Stop session scales proxy Deployment to 0 when it exists."""
 
         def run_side_effect(*args, **kwargs):
@@ -630,12 +617,14 @@ class TestOpenShiftStopSession:
             if "get" in cmd and "statefulset" in cmd:
                 return MagicMock(
                     returncode=0,
-                    stdout=json.dumps({
-                        "apiVersion": "apps/v1",
-                        "kind": "StatefulSet",
-                        "metadata": {"name": "paude-test"},
-                        "spec": {"replicas": 1},
-                    }),
+                    stdout=json.dumps(
+                        {
+                            "apiVersion": "apps/v1",
+                            "kind": "StatefulSet",
+                            "metadata": {"name": "paude-test"},
+                            "spec": {"replicas": 1},
+                        }
+                    ),
                     stderr="",
                 )
             # Proxy deployment exists
@@ -651,7 +640,8 @@ class TestOpenShiftStopSession:
         # Verify proxy scale to 0 was called
         calls = mock_run.call_args_list
         proxy_scale_calls = [
-            c for c in calls
+            c
+            for c in calls
             if "scale" in str(c)
             and "deployment" in str(c)
             and "paude-proxy" in str(c)
@@ -671,12 +661,14 @@ class TestOpenShiftStopSession:
             if "get" in cmd and "statefulset" in cmd:
                 return MagicMock(
                     returncode=0,
-                    stdout=json.dumps({
-                        "apiVersion": "apps/v1",
-                        "kind": "StatefulSet",
-                        "metadata": {"name": "paude-test"},
-                        "spec": {"replicas": 1},
-                    }),
+                    stdout=json.dumps(
+                        {
+                            "apiVersion": "apps/v1",
+                            "kind": "StatefulSet",
+                            "metadata": {"name": "paude-test"},
+                            "spec": {"replicas": 1},
+                        }
+                    ),
                     stderr="",
                 )
             # Proxy deployment doesn't exist
@@ -684,7 +676,7 @@ class TestOpenShiftStopSession:
                 return MagicMock(
                     returncode=1,
                     stdout="",
-                    stderr="Error: deployments.apps \"paude-proxy-test\" not found",
+                    stderr='Error: deployments.apps "paude-proxy-test" not found',
                 )
             return MagicMock(returncode=0, stdout="", stderr="")
 
@@ -698,19 +690,17 @@ class TestOpenShiftStopSession:
         # Verify StatefulSet was still scaled to 0
         calls = mock_run.call_args_list
         sts_scale_calls = [
-            c for c in calls
-            if "scale" in str(c)
-            and "statefulset" in str(c)
-            and "replicas=0" in str(c)
+            c
+            for c in calls
+            if "scale" in str(c) and "statefulset" in str(c) and "replicas=0" in str(c)
         ]
         assert len(sts_scale_calls) == 1
 
         # Verify NO proxy scale was attempted (proxy doesn't exist)
         proxy_scale_calls = [
-            c for c in calls
-            if "scale" in str(c)
-            and "deployment" in str(c)
-            and "paude-proxy" in str(c)
+            c
+            for c in calls
+            if "scale" in str(c) and "deployment" in str(c) and "paude-proxy" in str(c)
         ]
         assert len(proxy_scale_calls) == 0
 
@@ -719,9 +709,7 @@ class TestOpenShiftListSessions:
     """Tests for OpenShiftBackend.list_sessions (new protocol)."""
 
     @patch("subprocess.run")
-    def test_list_sessions_returns_statefulsets(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_list_sessions_returns_statefulsets(self, mock_run: MagicMock) -> None:
         """List sessions returns StatefulSets as sessions."""
         from paude.backends.openshift import _encode_path
 
@@ -730,27 +718,29 @@ class TestOpenShiftListSessions:
             if "get" in cmd and "statefulsets" in cmd and "-l" in cmd:
                 return MagicMock(
                     returncode=0,
-                    stdout=json.dumps({
-                        "items": [
-                            {
-                                "metadata": {
-                                    "name": "paude-test-session",
-                                    "labels": {
-                                        "app": "paude",
-                                        "paude.io/session-name": "test-session",
+                    stdout=json.dumps(
+                        {
+                            "items": [
+                                {
+                                    "metadata": {
+                                        "name": "paude-test-session",
+                                        "labels": {
+                                            "app": "paude",
+                                            "paude.io/session-name": "test-session",
+                                        },
+                                        "annotations": {
+                                            "paude.io/workspace": _encode_path(
+                                                Path("/home/user/project")
+                                            ),
+                                            "paude.io/created-at": "2024-01-15T10:00:00Z",
+                                        },
                                     },
-                                    "annotations": {
-                                        "paude.io/workspace": _encode_path(
-                                            Path("/home/user/project")
-                                        ),
-                                        "paude.io/created-at": "2024-01-15T10:00:00Z",
-                                    },
-                                },
-                                "spec": {"replicas": 1},
-                                "status": {"readyReplicas": 1},
-                            }
-                        ]
-                    }),
+                                    "spec": {"replicas": 1},
+                                    "status": {"readyReplicas": 1},
+                                }
+                            ]
+                        }
+                    ),
                     stderr="",
                 )
             return MagicMock(returncode=0, stdout="", stderr="")
@@ -766,9 +756,7 @@ class TestOpenShiftListSessions:
         assert sessions[0].backend_type == "openshift"
 
     @patch("subprocess.run")
-    def test_list_sessions_returns_empty_on_error(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_list_sessions_returns_empty_on_error(self, mock_run: MagicMock) -> None:
         """List sessions returns empty list on error."""
 
         def run_side_effect(*args, **kwargs):
@@ -786,9 +774,7 @@ class TestOpenShiftGetSession:
     """Tests for OpenShiftBackend.get_session."""
 
     @patch("subprocess.run")
-    def test_get_session_returns_session_if_found(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_get_session_returns_session_if_found(self, mock_run: MagicMock) -> None:
         """Get session returns session if StatefulSet found."""
         from paude.backends.openshift import _encode_path
 
@@ -797,19 +783,21 @@ class TestOpenShiftGetSession:
             if "get" in cmd and "statefulset" in cmd:
                 return MagicMock(
                     returncode=0,
-                    stdout=json.dumps({
-                        "metadata": {
-                            "name": "paude-my-session",
-                            "annotations": {
-                                "paude.io/workspace": _encode_path(
-                                    Path("/home/user/project")
-                                ),
-                                "paude.io/created-at": "2024-01-15T10:00:00Z",
+                    stdout=json.dumps(
+                        {
+                            "metadata": {
+                                "name": "paude-my-session",
+                                "annotations": {
+                                    "paude.io/workspace": _encode_path(
+                                        Path("/home/user/project")
+                                    ),
+                                    "paude.io/created-at": "2024-01-15T10:00:00Z",
+                                },
                             },
-                        },
-                        "spec": {"replicas": 0},
-                        "status": {},
-                    }),
+                            "spec": {"replicas": 0},
+                            "status": {},
+                        }
+                    ),
                     stderr="",
                 )
             return MagicMock(returncode=0, stdout="", stderr="")
@@ -824,9 +812,7 @@ class TestOpenShiftGetSession:
         assert session.status == "stopped"
 
     @patch("subprocess.run")
-    def test_get_session_returns_none_if_not_found(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_get_session_returns_none_if_not_found(self, mock_run: MagicMock) -> None:
         """Get session returns None if StatefulSet not found."""
 
         def run_side_effect(*args, **kwargs):
@@ -945,9 +931,7 @@ class TestOpenShiftStatefulSetSpec:
 
         # Check volumes include credentials tmpfs
         volumes = spec["spec"]["template"]["spec"]["volumes"]
-        creds_volume = next(
-            (v for v in volumes if v["name"] == "credentials"), None
-        )
+        creds_volume = next((v for v in volumes if v["name"] == "credentials"), None)
         assert creds_volume is not None, "Should have credentials volume"
         assert "emptyDir" in creds_volume, "Should be emptyDir volume"
         assert creds_volume["emptyDir"]["medium"] == "Memory", "Should be tmpfs"
@@ -1048,9 +1032,7 @@ class TestCreateBuildConfig:
     """Tests for _create_build_config method."""
 
     @patch("subprocess.run")
-    def test_creates_buildconfig_and_imagestream(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_creates_buildconfig_and_imagestream(self, mock_run: MagicMock) -> None:
         """_create_build_config creates BuildConfig and ImageStream."""
 
         def run_side_effect(*args, **kwargs):
@@ -1071,9 +1053,7 @@ class TestCreateBuildConfig:
         assert len(calls) >= 2
 
     @patch("subprocess.run")
-    def test_skips_if_buildconfig_exists(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_skips_if_buildconfig_exists(self, mock_run: MagicMock) -> None:
         """_create_build_config skips if BuildConfig already exists."""
         mock_run.return_value = MagicMock(returncode=0, stdout="{}", stderr="")
 
@@ -1127,9 +1107,9 @@ class TestStartBinaryBuild:
         # Verify label command was called (look for "label" as a command, not substring)
         calls = mock_run.call_args_list
         label_calls = [
-            c for c in calls
-            if len(c[0]) > 0 and "label" in c[0][0]
-            and "start-build" not in str(c)
+            c
+            for c in calls
+            if len(c[0]) > 0 and "label" in c[0][0] and "start-build" not in str(c)
         ]
         assert len(label_calls) >= 1
 
@@ -1154,9 +1134,9 @@ class TestStartBinaryBuild:
         # Verify no label command was called (look for "label" as a command, not substring)
         calls = mock_run.call_args_list
         label_calls = [
-            c for c in calls
-            if len(c[0]) > 0 and "label" in c[0][0]
-            and "start-build" not in str(c)
+            c
+            for c in calls
+            if len(c[0]) > 0 and "label" in c[0][0] and "start-build" not in str(c)
         ]
         assert len(label_calls) == 0
 
@@ -1165,9 +1145,7 @@ class TestDeleteSessionBuilds:
     """Tests for _delete_session_builds method."""
 
     @patch("subprocess.run")
-    def test_deletes_builds_with_session_label(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_deletes_builds_with_session_label(self, mock_run: MagicMock) -> None:
         """_delete_session_builds deletes builds with session label."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
@@ -1176,10 +1154,7 @@ class TestDeleteSessionBuilds:
 
         # Verify delete build command was called with correct label
         calls = mock_run.call_args_list
-        delete_calls = [
-            c for c in calls
-            if "delete" in str(c) and "build" in str(c)
-        ]
+        delete_calls = [c for c in calls if "delete" in str(c) and "build" in str(c)]
         assert len(delete_calls) >= 1
 
         cmd = delete_calls[0][0][0]
@@ -1203,11 +1178,13 @@ class TestDeleteSessionCallsDeleteBuilds:
             if "get" in cmd and "statefulset" in cmd:
                 return MagicMock(
                     returncode=0,
-                    stdout=json.dumps({
-                        "apiVersion": "apps/v1",
-                        "kind": "StatefulSet",
-                        "metadata": {"name": "paude-test"},
-                    }),
+                    stdout=json.dumps(
+                        {
+                            "apiVersion": "apps/v1",
+                            "kind": "StatefulSet",
+                            "metadata": {"name": "paude-test"},
+                        }
+                    ),
                     stderr="",
                 )
             return MagicMock(returncode=0, stdout="", stderr="")
@@ -1240,9 +1217,7 @@ class TestEnsureImageViaBuildPassesSessionName:
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
 
         # Patch the builder's methods directly
-        with patch.object(
-            backend._builder, "start_binary_build"
-        ) as mock_start_build:
+        with patch.object(backend._builder, "start_binary_build") as mock_start_build:
             with patch.object(backend._builder, "wait_for_build"):
                 with patch.object(
                     backend._builder, "get_imagestream_reference"
@@ -1276,9 +1251,7 @@ class TestEnsureImageViaBuildPassesSessionName:
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
 
         # Patch the builder's methods directly
-        with patch.object(
-            backend._builder, "start_binary_build"
-        ) as mock_start_build:
+        with patch.object(backend._builder, "start_binary_build") as mock_start_build:
             with patch.object(backend._builder, "wait_for_build"):
                 with patch.object(
                     backend._builder, "get_imagestream_reference"
@@ -1340,9 +1313,7 @@ class TestGetImagestreamReference:
     """Tests for _get_imagestream_reference method."""
 
     @patch("subprocess.run")
-    def test_returns_internal_reference(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_returns_internal_reference(self, mock_run: MagicMock) -> None:
         """_get_imagestream_reference returns internal image URL."""
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -1358,9 +1329,7 @@ class TestGetImagestreamReference:
         assert ":latest" in ref
 
     @patch("subprocess.run")
-    def test_falls_back_to_default_registry(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_falls_back_to_default_registry(self, mock_run: MagicMock) -> None:
         """_get_imagestream_reference uses default when no dockerImageRepository."""
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -1385,9 +1354,7 @@ class TestCreateProxyDeployment:
     """Tests for _create_proxy_deployment method."""
 
     @patch("subprocess.run")
-    def test_creates_deployment_with_correct_spec(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_creates_deployment_with_correct_spec(self, mock_run: MagicMock) -> None:
         """_create_proxy_deployment creates Deployment with correct spec."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
@@ -1418,9 +1385,7 @@ class TestCreateProxyService:
     """Tests for _create_proxy_service method."""
 
     @patch("subprocess.run")
-    def test_creates_service_with_correct_spec(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_creates_service_with_correct_spec(self, mock_run: MagicMock) -> None:
         """_create_proxy_service creates Service with correct spec."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
@@ -1482,9 +1447,7 @@ class TestNetworkPolicyWithProxySelector:
     """Tests for NetworkPolicy using pod selector instead of CIDRs."""
 
     @patch("subprocess.run")
-    def test_network_policy_uses_pod_selector(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_network_policy_uses_pod_selector(self, mock_run: MagicMock) -> None:
         """_ensure_network_policy uses pod selector for proxy access."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
@@ -1520,9 +1483,7 @@ class TestNetworkPolicyWithProxySelector:
         assert proxy_rule["ports"][0]["port"] == 3128
 
     @patch("subprocess.run")
-    def test_network_policy_no_cidr_blocks(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_network_policy_no_cidr_blocks(self, mock_run: MagicMock) -> None:
         """_ensure_network_policy does not use CIDR blocks anymore."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
@@ -1540,9 +1501,7 @@ class TestNetworkPolicyWithProxySelector:
                     assert "ipBlock" not in dest, "Should not use CIDR blocks"
 
     @patch("subprocess.run")
-    def test_dns_rule_has_namespace_and_pod_selector(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_dns_rule_has_namespace_and_pod_selector(self, mock_run: MagicMock) -> None:
         """DNS rule uses both namespaceSelector AND podSelector for cross-namespace access.
 
         OpenShift DNS pods run in openshift-dns namespace. The NetworkPolicy must
@@ -1581,10 +1540,9 @@ class TestCreateSessionWithProxy:
     """Tests for create_session with proxy deployment."""
 
     @patch("subprocess.run")
-    def test_creates_proxy_when_allowed_domains_set(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_creates_proxy_when_allowed_domains_set(self, mock_run: MagicMock) -> None:
         """create_session creates proxy when allowed_domains is set."""
+
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
             # Return "Running" for pod status check
@@ -1616,16 +1574,14 @@ class TestCreateSessionWithProxy:
         # Check that proxy image was derived correctly
         apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
         deployment_calls = [
-            c for c in apply_calls
-            if "Deployment" in str(c[1].get("input", ""))
+            c for c in apply_calls if "Deployment" in str(c[1].get("input", ""))
         ]
         assert len(deployment_calls) >= 1
 
     @patch("subprocess.run")
-    def test_proxy_gets_allowed_domains_env_var(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_proxy_gets_allowed_domains_env_var(self, mock_run: MagicMock) -> None:
         """create_session passes ALLOWED_DOMAINS to proxy deployment."""
+
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
             # Return "Running" for pod status check
@@ -1653,7 +1609,8 @@ class TestCreateSessionWithProxy:
         # Find the proxy Deployment creation
         apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
         deployment_calls = [
-            c for c in apply_calls
+            c
+            for c in apply_calls
             if '"kind": "Deployment"' in str(c[1].get("input", ""))
         ]
         assert len(deployment_calls) >= 1
@@ -1671,6 +1628,7 @@ class TestCreateSessionWithProxy:
         self, mock_run: MagicMock
     ) -> None:
         """create_session sets HTTP_PROXY env vars when allowed_domains is set."""
+
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
             # Return "Running" for pod status check
@@ -1698,8 +1656,7 @@ class TestCreateSessionWithProxy:
         # Find StatefulSet creation
         apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
         sts_calls = [
-            c for c in apply_calls
-            if "StatefulSet" in str(c[1].get("input", ""))
+            c for c in apply_calls if "StatefulSet" in str(c[1].get("input", ""))
         ]
         assert len(sts_calls) >= 1
 
@@ -1714,10 +1671,9 @@ class TestCreateSessionWithProxy:
         assert env_dict.get("https_proxy") == expected_proxy
 
     @patch("subprocess.run")
-    def test_no_proxy_when_allowed_domains_none(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_no_proxy_when_allowed_domains_none(self, mock_run: MagicMock) -> None:
         """create_session does not create proxy when allowed_domains=None."""
+
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
             if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
@@ -1741,15 +1697,15 @@ class TestCreateSessionWithProxy:
         # Verify no proxy deployment was created
         apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
         deployment_calls = [
-            c for c in apply_calls
+            c
+            for c in apply_calls
             if '"kind": "Deployment"' in str(c[1].get("input", ""))
         ]
         assert len(deployment_calls) == 0
 
         # Verify no proxy env vars in StatefulSet
         sts_calls = [
-            c for c in apply_calls
-            if "StatefulSet" in str(c[1].get("input", ""))
+            c for c in apply_calls if "StatefulSet" in str(c[1].get("input", ""))
         ]
         if sts_calls:
             sts_spec = json.loads(sts_calls[0][1]["input"])
@@ -1763,9 +1719,7 @@ class TestDeleteSessionWithProxy:
     """Tests for delete_session cleaning up proxy resources."""
 
     @patch("subprocess.run")
-    def test_deletes_proxy_resources(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_deletes_proxy_resources(self, mock_run: MagicMock) -> None:
         """delete_session deletes proxy Deployment and Service."""
 
         def run_side_effect(*args, **kwargs):
@@ -1773,11 +1727,13 @@ class TestDeleteSessionWithProxy:
             if "get" in cmd and "statefulset" in cmd:
                 return MagicMock(
                     returncode=0,
-                    stdout=json.dumps({
-                        "apiVersion": "apps/v1",
-                        "kind": "StatefulSet",
-                        "metadata": {"name": "paude-test"},
-                    }),
+                    stdout=json.dumps(
+                        {
+                            "apiVersion": "apps/v1",
+                            "kind": "StatefulSet",
+                            "metadata": {"name": "paude-test"},
+                        }
+                    ),
                     stderr="",
                 )
             return MagicMock(returncode=0, stdout="", stderr="")
@@ -1798,9 +1754,7 @@ class TestDeleteProxyResources:
     """Tests for _delete_proxy_resources method."""
 
     @patch("subprocess.run")
-    def test_deletes_deployment_and_service(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_deletes_deployment_and_service(self, mock_run: MagicMock) -> None:
         """_delete_proxy_resources deletes both Deployment and Service."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
@@ -1831,9 +1785,7 @@ class TestEnsureProxyNetworkPolicy:
     """Tests for _ensure_proxy_network_policy method."""
 
     @patch("subprocess.run")
-    def test_creates_permissive_egress_policy(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_creates_permissive_egress_policy(self, mock_run: MagicMock) -> None:
         """_ensure_proxy_network_policy creates policy allowing all egress."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
@@ -1865,10 +1817,9 @@ class TestProxyImageDerivation:
     """Tests for proxy image derivation logic."""
 
     @patch("subprocess.run")
-    def test_derives_proxy_image_from_main_image(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_derives_proxy_image_from_main_image(self, mock_run: MagicMock) -> None:
         """Proxy image is derived by replacing image name pattern."""
+
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
             # Return "Running" for pod status check
@@ -1896,7 +1847,8 @@ class TestProxyImageDerivation:
         # Find the Deployment apply call
         apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
         deployment_calls = [
-            c for c in apply_calls
+            c
+            for c in apply_calls
             if '"kind": "Deployment"' in str(c[1].get("input", ""))
         ]
         assert len(deployment_calls) >= 1
@@ -1912,6 +1864,7 @@ class TestProxyImageDerivation:
         self, mock_run: MagicMock
     ) -> None:
         """Falls back to default proxy image when pattern doesn't match."""
+
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
             # Return "Running" for pod status check
@@ -1938,7 +1891,8 @@ class TestProxyImageDerivation:
 
         apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
         deployment_calls = [
-            c for c in apply_calls
+            c
+            for c in apply_calls
             if '"kind": "Deployment"' in str(c[1].get("input", ""))
         ]
         assert len(deployment_calls) >= 1
@@ -1954,9 +1908,7 @@ class TestStartSessionWaitsForProxy:
     """Tests for start_session waiting for proxy."""
 
     @patch("subprocess.run")
-    def test_waits_for_proxy_when_exists(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_waits_for_proxy_when_exists(self, mock_run: MagicMock) -> None:
         """start_session waits for proxy deployment when it exists."""
         call_order = []
 
@@ -1968,13 +1920,15 @@ class TestStartSessionWaitsForProxy:
                 call_order.append("get_statefulset")
                 return MagicMock(
                     returncode=0,
-                    stdout=json.dumps({
-                        "metadata": {
-                            "name": "paude-test",
-                            "annotations": {"paude.io/workspace": ""},
-                        },
-                        "spec": {"replicas": 0},
-                    }),
+                    stdout=json.dumps(
+                        {
+                            "metadata": {
+                                "name": "paude-test",
+                                "annotations": {"paude.io/workspace": ""},
+                            },
+                            "spec": {"replicas": 0},
+                        }
+                    ),
                     stderr="",
                 )
             if "get" in cmd and "deployment" in cmd and "paude-proxy" in cmd_str:
@@ -2002,9 +1956,7 @@ class TestStartSessionWaitsForProxy:
         assert "check_proxy_ready" in call_order
 
     @patch("subprocess.run")
-    def test_skips_proxy_wait_when_not_exists(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_skips_proxy_wait_when_not_exists(self, mock_run: MagicMock) -> None:
         """start_session skips proxy wait when no proxy deployment."""
         call_order = []
 
@@ -2015,13 +1967,15 @@ class TestStartSessionWaitsForProxy:
             if "get" in cmd and "statefulset" in cmd:
                 return MagicMock(
                     returncode=0,
-                    stdout=json.dumps({
-                        "metadata": {
-                            "name": "paude-test",
-                            "annotations": {"paude.io/workspace": ""},
-                        },
-                        "spec": {"replicas": 0},
-                    }),
+                    stdout=json.dumps(
+                        {
+                            "metadata": {
+                                "name": "paude-test",
+                                "annotations": {"paude.io/workspace": ""},
+                            },
+                            "spec": {"replicas": 0},
+                        }
+                    ),
                     stderr="",
                 )
             if "get" in cmd and "deployment" in cmd and "paude-proxy" in cmd_str:
@@ -2058,6 +2012,7 @@ class TestConnectSessionRefreshesCredentials:
         When .ready doesn't exist (first connect after start), full config
         sync is performed including gcloud, claude config, and gitconfig.
         """
+
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
 
@@ -2090,6 +2045,7 @@ class TestConnectSessionRefreshesCredentials:
         When .ready exists (reconnect), only gcloud credentials are refreshed
         for faster reconnection.
         """
+
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
 
@@ -2118,9 +2074,7 @@ class TestConnectSessionRefreshesCredentials:
         self, mock_run: MagicMock
     ) -> None:
         """connect_session does not sync if pod is not running."""
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="Pending", stderr=""
-        )
+        mock_run.return_value = MagicMock(returncode=0, stdout="Pending", stderr="")
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
 
@@ -2253,7 +2207,8 @@ class TestSyncCredentialsToPod:
 
         # Verify touch .ready was called
         touch_calls = [
-            c for c in mock_run.call_args_list
+            c
+            for c in mock_run.call_args_list
             if "touch" in str(c) and ".ready" in str(c)
         ]
         assert len(touch_calls) >= 1
@@ -2291,10 +2246,9 @@ class TestCreateSessionWithProxyNetworkPolicy:
     """Tests for create_session creating proxy NetworkPolicy."""
 
     @patch("subprocess.run")
-    def test_creates_proxy_network_policy(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_creates_proxy_network_policy(self, mock_run: MagicMock) -> None:
         """create_session creates NetworkPolicy for proxy."""
+
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
             # Return "Running" for pod status check
@@ -2322,7 +2276,8 @@ class TestCreateSessionWithProxyNetworkPolicy:
         # Find proxy NetworkPolicy
         apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
         proxy_policy_calls = [
-            c for c in apply_calls
+            c
+            for c in apply_calls
             if "paude-proxy-egress-test-session" in str(c[1].get("input", ""))
         ]
         assert len(proxy_policy_calls) >= 1
@@ -2345,7 +2300,8 @@ class TestSyncConfigToPod:
 
         # Find the exec call that creates the directory structure
         exec_calls = [
-            c for c in mock_run.call_args_list
+            c
+            for c in mock_run.call_args_list
             if "exec" in str(c) and "mkdir -p" in str(c)
         ]
         assert len(exec_calls) >= 1
@@ -2416,9 +2372,7 @@ class TestSyncConfigToPod:
         assert ".claude.json" in cp_calls_str
 
     @patch("subprocess.run")
-    def test_syncs_gitconfig(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_syncs_gitconfig(self, mock_run: MagicMock, tmp_path: Path) -> None:
         """_sync_config_to_pod syncs gitconfig."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
@@ -2438,9 +2392,7 @@ class TestSyncConfigToPod:
         assert "/credentials/gitconfig" in cp_calls_str
 
     @patch("subprocess.run")
-    def test_syncs_global_gitignore(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_syncs_global_gitignore(self, mock_run: MagicMock, tmp_path: Path) -> None:
         """_sync_config_to_pod syncs global gitignore from ~/.config/git/ignore."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
@@ -2500,9 +2452,7 @@ class TestSyncConfigToPod:
         assert "global gitignore" in captured.err
 
     @patch("subprocess.run")
-    def test_creates_ready_marker(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_creates_ready_marker(self, mock_run: MagicMock, tmp_path: Path) -> None:
         """_sync_config_to_pod creates .ready marker file."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
@@ -2513,7 +2463,8 @@ class TestSyncConfigToPod:
 
         # Find the exec call that creates the .ready marker
         exec_calls = [
-            c for c in mock_run.call_args_list
+            c
+            for c in mock_run.call_args_list
             if "exec" in str(c) and ".ready" in str(c)
         ]
         # Should have at least 2 calls: one to create .ready, one to verify
@@ -2536,6 +2487,7 @@ class TestSyncConfigToPod:
         self, mock_run: MagicMock, tmp_path: Path, capsys: Any
     ) -> None:
         """_sync_config_to_pod warns if .ready marker creation fails."""
+
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
             cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
@@ -2577,9 +2529,7 @@ class TestSyncConfigToPod:
         assert ".ready" in calls_str
 
     @patch("subprocess.run")
-    def test_raises_on_mkdir_failure(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_raises_on_mkdir_failure(self, mock_run: MagicMock, tmp_path: Path) -> None:
         """_sync_config_to_pod raises OpenShiftError when mkdir fails."""
         from paude.backends.openshift import OpenShiftError
 
@@ -2618,14 +2568,15 @@ class TestSyncConfigToPod:
 
         # Find all exec calls (mkdir/chmod operations)
         exec_calls = [
-            c for c in mock_run.call_args_list
-            if len(c[0]) > 0 and "exec" in c[0][0]
+            c for c in mock_run.call_args_list if len(c[0]) > 0 and "exec" in c[0][0]
         ]
 
         # There should be at least 2 exec calls:
         # 1. mkdir + chmod for config directory prep
         # 2. chmod + touch for .ready marker
-        assert len(exec_calls) >= 2, f"Expected at least 2 exec calls, got {len(exec_calls)}"
+        assert len(exec_calls) >= 2, (
+            f"Expected at least 2 exec calls, got {len(exec_calls)}"
+        )
 
         # All exec calls should use the extended timeout
         for call in exec_calls:
@@ -2661,7 +2612,8 @@ class TestSyncConfigWithPlugins:
 
         # Find rsync calls
         rsync_calls = [
-            c for c in mock_run.call_args_list
+            c
+            for c in mock_run.call_args_list
             if c[0] and len(c[0]) > 0 and "rsync" in c[0][0]
         ]
 
@@ -2691,9 +2643,7 @@ class TestSyncConfigWithPlugins:
 
         with patch("pathlib.Path.home", return_value=tmp_path):
             # Patch the syncer's method since sync is now delegated to ConfigSyncer
-            with patch.object(
-                backend._syncer, "_rewrite_plugin_paths"
-            ) as mock_rewrite:
+            with patch.object(backend._syncer, "_rewrite_plugin_paths") as mock_rewrite:
                 backend._sync_config_to_pod("test-pod-0")
                 mock_rewrite.assert_called_once_with("test-pod-0", "/credentials")
 
@@ -2717,7 +2667,8 @@ class TestSyncConfigWithPlugins:
 
         # Should not have rsync calls for claude directory
         rsync_calls = [
-            c for c in mock_run.call_args_list
+            c
+            for c in mock_run.call_args_list
             if c[0] and len(c[0]) > 0 and "rsync" in c[0][0] and ".claude" in str(c)
         ]
         assert len(rsync_calls) == 0
@@ -2791,6 +2742,7 @@ class TestRewritePluginPaths:
     @patch("subprocess.run")
     def test_rewrite_plugin_paths_uses_jq(self, mock_run: MagicMock) -> None:
         """_rewrite_plugin_paths uses jq to rewrite installed_plugins.json."""
+
         def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
             return MagicMock(returncode=0, stdout="", stderr="")
 
@@ -2801,7 +2753,8 @@ class TestRewritePluginPaths:
 
         # Find exec calls with jq
         jq_calls = [
-            c for c in mock_run.call_args_list
+            c
+            for c in mock_run.call_args_list
             if c[0] and len(c[0]) > 0 and "exec" in c[0][0] and "jq" in str(c)
         ]
 
@@ -2813,6 +2766,7 @@ class TestRewritePluginPaths:
         self, mock_run: MagicMock
     ) -> None:
         """_rewrite_plugin_paths rewrites both plugin metadata files."""
+
         def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
             return MagicMock(returncode=0, stdout="", stderr="")
 
@@ -2823,15 +2777,13 @@ class TestRewritePluginPaths:
 
         # Check for installed_plugins.json rewrite
         installed_plugins_calls = [
-            c for c in mock_run.call_args_list
-            if "installed_plugins.json" in str(c)
+            c for c in mock_run.call_args_list if "installed_plugins.json" in str(c)
         ]
         assert len(installed_plugins_calls) >= 1
 
         # Check for known_marketplaces.json rewrite
         known_marketplaces_calls = [
-            c for c in mock_run.call_args_list
-            if "known_marketplaces.json" in str(c)
+            c for c in mock_run.call_args_list if "known_marketplaces.json" in str(c)
         ]
         assert len(known_marketplaces_calls) >= 1
 
@@ -2840,6 +2792,7 @@ class TestRewritePluginPaths:
         self, mock_run: MagicMock
     ) -> None:
         """_rewrite_plugin_paths rewrites to /home/paude/.claude/plugins/."""
+
         def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
             return MagicMock(returncode=0, stdout="", stderr="")
 
@@ -2857,6 +2810,7 @@ class TestRewritePluginPaths:
         self, mock_run: MagicMock
     ) -> None:
         """_rewrite_plugin_paths jq expression handles null/missing installPath."""
+
         def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
             return MagicMock(returncode=0, stdout="", stderr="")
 
@@ -2875,6 +2829,7 @@ class TestRewritePluginPaths:
         self, mock_run: MagicMock
     ) -> None:
         """_rewrite_plugin_paths jq handles null/missing installLocation."""
+
         def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
             return MagicMock(returncode=0, stdout="", stderr="")
 
@@ -3189,9 +3144,7 @@ class TestBuildConfigNamePrefix:
     """Tests for name_prefix parameter in build helper methods."""
 
     @patch("subprocess.run")
-    def test_create_build_config_uses_name_prefix(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_create_build_config_uses_name_prefix(self, mock_run: MagicMock) -> None:
         """_create_build_config uses name_prefix in resource names."""
 
         def run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
@@ -3257,7 +3210,8 @@ class TestBuildConfigNamePrefix:
 
         # Verify get imagestream was called with correct name
         get_calls = [
-            c for c in mock_run.call_args_list
+            c
+            for c in mock_run.call_args_list
             if "get" in str(c) and "imagestream" in str(c)
         ]
         assert len(get_calls) >= 1

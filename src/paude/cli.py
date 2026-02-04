@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -19,7 +19,8 @@ app = typer.Typer(
     context_settings={"allow_interspersed_args": False},
 )
 
-class BackendType(str, Enum):
+
+class BackendType(StrEnum):
     """Container backend types."""
 
     podman = "podman"
@@ -347,10 +348,7 @@ def session_create(
 
         # Ensure image
         try:
-            has_custom = (
-                config
-                and (config.base_image or config.dockerfile)
-            )
+            has_custom = config and (config.base_image or config.dockerfile)
             if has_custom and config is not None:
                 image = image_manager.ensure_custom_image(
                     config, force_rebuild=rebuild, workspace=workspace
@@ -1026,8 +1024,7 @@ def session_stop(
             else:
                 # Find running sessions
                 sessions = [
-                    s for s in backend_instance.list_sessions()
-                    if s.status == "running"
+                    s for s in backend_instance.list_sessions() if s.status == "running"
                 ]
                 if not sessions:
                     typer.echo("No running sessions to stop.", err=True)
@@ -1073,8 +1070,7 @@ def session_stop(
             else:
                 # Find running sessions
                 sessions = [
-                    s for s in os_backend.list_sessions()
-                    if s.status == "running"
+                    s for s in os_backend.list_sessions() if s.status == "running"
                 ]
                 if not sessions:
                     typer.echo("No running sessions to stop.", err=True)
@@ -1261,8 +1257,7 @@ def session_connect(
             else:
                 # Find running sessions
                 sessions = [
-                    s for s in backend_instance.list_sessions()
-                    if s.status == "running"
+                    s for s in backend_instance.list_sessions() if s.status == "running"
                 ]
                 if not sessions:
                     typer.echo("No running sessions to connect to.", err=True)
@@ -1301,8 +1296,7 @@ def session_connect(
             else:
                 # Find running sessions
                 sessions = [
-                    s for s in os_backend.list_sessions()
-                    if s.status == "running"
+                    s for s in os_backend.list_sessions() if s.status == "running"
                 ]
                 if not sessions:
                     typer.echo("No running sessions to connect to.", err=True)

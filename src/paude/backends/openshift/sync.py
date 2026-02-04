@@ -107,8 +107,14 @@ class ConfigSyncer:
         """
         config_path = "/credentials"
         result = self._oc.run(
-            "exec", pod_name, "-n", self._namespace, "--",
-            "test", "-f", f"{config_path}/.ready",
+            "exec",
+            pod_name,
+            "-n",
+            self._namespace,
+            "--",
+            "test",
+            "-f",
+            f"{config_path}/.ready",
             check=False,
             timeout=OC_EXEC_TIMEOUT,
         )
@@ -141,15 +147,24 @@ class ConfigSyncer:
             if filepath.exists():
                 try:
                     self._oc.run(
-                        "cp", str(filepath), f"{gcloud_dest}/{filename}",
-                        "-n", self._namespace, check=False,
+                        "cp",
+                        str(filepath),
+                        f"{gcloud_dest}/{filename}",
+                        "-n",
+                        self._namespace,
+                        check=False,
                     )
                 except Exception:  # noqa: S110
                     pass
 
         self._oc.run(
-            "exec", pod_name, "-n", self._namespace, "--",
-            "touch", f"{config_path}/.ready",
+            "exec",
+            pod_name,
+            "-n",
+            self._namespace,
+            "--",
+            "touch",
+            f"{config_path}/.ready",
             check=False,
             timeout=OC_EXEC_TIMEOUT,
         )
@@ -162,8 +177,13 @@ class ConfigSyncer:
         """Prepare the config directory on the pod."""
         config_path = "/credentials"
         prep_result = self._oc.run(
-            "exec", pod_name, "-n", self._namespace, "--",
-            "bash", "-c",
+            "exec",
+            pod_name,
+            "-n",
+            self._namespace,
+            "--",
+            "bash",
+            "-c",
             f"mkdir -p {config_path}/gcloud {config_path}/claude && "
             f"(chmod -R g+rwX {config_path} 2>/dev/null || true)",
             check=False,
@@ -190,8 +210,12 @@ class ConfigSyncer:
             if filepath.exists():
                 try:
                     self._oc.run(
-                        "cp", str(filepath), f"{gcloud_dest}/{filename}",
-                        "-n", self._namespace, check=False,
+                        "cp",
+                        str(filepath),
+                        f"{gcloud_dest}/{filename}",
+                        "-n",
+                        self._namespace,
+                        check=False,
                     )
                 except Exception:  # noqa: S110
                     pass
@@ -237,7 +261,12 @@ class ConfigSyncer:
             try:
                 dest = f"{pod_name}:{config_path}/claude/claude.json"
                 self._oc.run(
-                    "cp", str(claude_json), dest, "-n", self._namespace, check=False,
+                    "cp",
+                    str(claude_json),
+                    dest,
+                    "-n",
+                    self._namespace,
+                    check=False,
                 )
             except Exception:  # noqa: S110
                 pass
@@ -252,8 +281,12 @@ class ConfigSyncer:
         if gitconfig.exists():
             try:
                 self._oc.run(
-                    "cp", str(gitconfig), f"{pod_name}:{config_path}/gitconfig",
-                    "-n", self._namespace, check=False,
+                    "cp",
+                    str(gitconfig),
+                    f"{pod_name}:{config_path}/gitconfig",
+                    "-n",
+                    self._namespace,
+                    check=False,
                 )
                 if verbose:
                     print("  Synced ~/.gitconfig", file=sys.stderr)
@@ -268,13 +301,18 @@ class ConfigSyncer:
         if global_gitignore.exists():
             try:
                 self._oc.run(
-                    "cp", str(global_gitignore),
+                    "cp",
+                    str(global_gitignore),
                     f"{pod_name}:{config_path}/gitignore-global",
-                    "-n", self._namespace, check=False,
+                    "-n",
+                    self._namespace,
+                    check=False,
                 )
                 if verbose:
-                    print("  Synced ~/.config/git/ignore (global gitignore)",
-                          file=sys.stderr)
+                    print(
+                        "  Synced ~/.config/git/ignore (global gitignore)",
+                        file=sys.stderr,
+                    )
             except Exception:  # noqa: S110
                 pass
 
@@ -282,8 +320,13 @@ class ConfigSyncer:
         """Finalize sync by setting permissions and creating .ready marker."""
         config_path = "/credentials"
         self._oc.run(
-            "exec", pod_name, "-n", self._namespace, "--",
-            "bash", "-c",
+            "exec",
+            pod_name,
+            "-n",
+            self._namespace,
+            "--",
+            "bash",
+            "-c",
             f"(chmod -R g+rX {config_path} 2>/dev/null || true) && "
             f"touch {config_path}/.ready && "
             f"chmod g+r {config_path}/.ready",
@@ -292,8 +335,14 @@ class ConfigSyncer:
         )
 
         verify_result = self._oc.run(
-            "exec", pod_name, "-n", self._namespace, "--",
-            "test", "-f", f"{config_path}/.ready",
+            "exec",
+            pod_name,
+            "-n",
+            self._namespace,
+            "--",
+            "test",
+            "-f",
+            f"{config_path}/.ready",
             check=False,
             timeout=OC_EXEC_TIMEOUT,
         )
@@ -334,17 +383,22 @@ class ConfigSyncer:
 
         installed_plugins = f"{config_path}/claude/plugins/installed_plugins.json"
         jq_expr = (
-            '.plugins |= with_entries(.value |= map('
-            'if .installPath then '
+            ".plugins |= with_entries(.value |= map("
+            "if .installPath then "
             '.installPath = ($prefix + "/" + '
             '(.installPath | split("/") | .[-3:] | join("/"))) '
-            'else . end))'
+            "else . end))"
         )
         self._oc.run(
-            "exec", pod_name, "-n", self._namespace, "--",
-            "bash", "-c",
+            "exec",
+            pod_name,
+            "-n",
+            self._namespace,
+            "--",
+            "bash",
+            "-c",
             f'if [ -f "{installed_plugins}" ]; then '
-            f'jq --arg prefix "{container_plugins_path}/cache" \'{jq_expr}\' '
+            f"jq --arg prefix \"{container_plugins_path}/cache\" '{jq_expr}' "
             f'"{installed_plugins}" > "{installed_plugins}.tmp" && '
             f'mv "{installed_plugins}.tmp" "{installed_plugins}"; fi',
             check=False,
@@ -353,15 +407,20 @@ class ConfigSyncer:
 
         known_marketplaces = f"{config_path}/claude/plugins/known_marketplaces.json"
         jq_expr2 = (
-            'with_entries(if .value.installLocation then '
+            "with_entries(if .value.installLocation then "
             '.value.installLocation = ($prefix + "/marketplaces/" + .key) '
-            'else . end)'
+            "else . end)"
         )
         self._oc.run(
-            "exec", pod_name, "-n", self._namespace, "--",
-            "bash", "-c",
+            "exec",
+            pod_name,
+            "-n",
+            self._namespace,
+            "--",
+            "bash",
+            "-c",
             f'if [ -f "{known_marketplaces}" ]; then '
-            f'jq --arg prefix "{container_plugins_path}" \'{jq_expr2}\' '
+            f"jq --arg prefix \"{container_plugins_path}\" '{jq_expr2}' "
             f'"{known_marketplaces}" > "{known_marketplaces}.tmp" && '
             f'mv "{known_marketplaces}.tmp" "{known_marketplaces}"; fi',
             check=False,
