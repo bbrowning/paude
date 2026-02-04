@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "paude"
-version = "0.6.0"
+version = "0.7.0"
 description = "Podman wrapper for running Claude Code in isolated containers"
 readme = "README.md"
 license = "MIT"
