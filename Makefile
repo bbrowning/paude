@@ -21,7 +21,7 @@ LATEST_PROXY_IMAGE = $(REGISTRY)/$(PROXY_IMAGE_NAME):latest
 # Architectures for multi-arch builds
 PLATFORMS = linux/amd64,linux/arm64
 
-.PHONY: build run publish release clean login help test test-unit test-integration test-podman test-kubernetes install lint format typecheck pypi-build pypi-publish
+.PHONY: build run publish release clean login help test test-all test-integration test-podman test-kubernetes install lint format typecheck pypi-build pypi-publish
 
 help:
 	@echo "Paude build targets:"
@@ -36,8 +36,8 @@ help:
 	@echo "  make pypi-publish   - Upload Python package to PyPI"
 	@echo ""
 	@echo "Testing targets:"
-	@echo "  make test           - Run all tests (unit + integration)"
-	@echo "  make test-unit      - Run unit tests only (no infrastructure required)"
+	@echo "  make test           - Run unit tests only (default, fast)"
+	@echo "  make test-all       - Run all tests (unit + integration)"
 	@echo "  make test-integration - Run all integration tests"
 	@echo "  make test-podman    - Run Podman integration tests (requires podman)"
 	@echo "  make test-kubernetes - Run Kubernetes integration tests (requires cluster)"
@@ -64,17 +64,17 @@ build:
 run:
 	PAUDE_DEV=1 paude
 
-# Run all tests (unit + integration)
+# Run unit tests (default, fast - integration tests excluded via pyproject.toml)
 test:
 	pytest --cov=paude --cov-report=term-missing
 
-# Run unit tests only (fast, no infrastructure required)
-test-unit:
-	pytest tests/ --ignore=tests/integration/ -v
-
-# Run all integration tests
+# Run all integration tests (requires infrastructure)
 test-integration:
 	pytest tests/integration/ -v -m integration
+
+# Run all tests (unit + integration, for CI)
+test-all:
+	pytest -o "addopts=-v" --cov=paude --cov-report=term-missing
 
 # Run Podman integration tests
 test-podman:

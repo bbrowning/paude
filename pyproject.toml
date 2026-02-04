@@ -85,7 +85,7 @@ warn_unused_configs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v"
+addopts = "-v --ignore=tests/integration"
 markers = [
     "integration: integration tests requiring real infrastructure",
     "podman: tests requiring real podman installation",
