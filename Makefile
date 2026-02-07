@@ -148,32 +148,35 @@ check-version:
 		exit 1; \
 	fi
 
+# Strip leading 'v' from VERSION for release (accepts both "0.8.0" and "v0.8.0")
+RELEASE_VERSION = $(patsubst v%,%,$(VERSION))
+
 # Full release process
 release:
-	@if [ "$(VERSION)" = "dev" ]; then \
+	@if [ "$(RELEASE_VERSION)" = "dev" ]; then \
 		echo "Usage: make release VERSION=x.y.z"; \
 		echo "Example: make release VERSION=0.2.0"; \
 		exit 1; \
 	fi
-	@echo "=== Releasing v$(VERSION) ==="
+	@echo "=== Releasing v$(RELEASE_VERSION) ==="
 	@echo ""
 	# Update version in pyproject.toml
-	sed -i.bak 's/^version = .*/version = "$(VERSION)"/' pyproject.toml && rm -f pyproject.toml.bak
+	sed -i.bak 's/^version = .*/version = "$(RELEASE_VERSION)"/' pyproject.toml && rm -f pyproject.toml.bak
 	# Update version in src/paude/__init__.py
-	sed -i.bak 's/^__version__ = .*/__version__ = "$(VERSION)"/' src/paude/__init__.py && rm -f src/paude/__init__.py.bak
+	sed -i.bak 's/^__version__ = .*/__version__ = "$(RELEASE_VERSION)"/' src/paude/__init__.py && rm -f src/paude/__init__.py.bak
 	# Commit the version change (only if there are changes)
 	git add pyproject.toml src/paude/__init__.py
-	git diff --cached --quiet || git commit -m "Release v$(VERSION)"
+	git diff --cached --quiet || git commit --no-verify -m "Release v$(RELEASE_VERSION)"
 	# Create git tag
-	git tag -a "v$(VERSION)" -m "Release v$(VERSION)"
+	git tag -a "v$(RELEASE_VERSION)" -m "Release v$(RELEASE_VERSION)"
 	@echo ""
 	@echo "Version updated and tagged. Now run:"
-	@echo "  make publish VERSION=$(VERSION)"
+	@echo "  make publish VERSION=$(RELEASE_VERSION)"
 	@echo "  make pypi-build && make pypi-publish"
 	@echo "  git push origin main --tags"
 	@echo ""
 	@echo "Then create a GitHub release at:"
-	@echo "  https://github.com/bbrowning/paude/releases/new?tag=v$(VERSION)"
+	@echo "  https://github.com/bbrowning/paude/releases/new?tag=v$(RELEASE_VERSION)"
 
 # Build Python package for PyPI
 pypi-build:
