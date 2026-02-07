@@ -11,6 +11,29 @@ from typing import Annotated, Any
 import typer
 
 from paude import __version__
+from paude.backends import (
+    PodmanBackend,
+    SessionConfig,
+    SessionExistsError,
+    SessionNotFoundError,
+)
+from paude.backends.openshift import (
+    BuildFailedError,
+    OpenShiftBackend,
+    OpenShiftConfig,
+)
+from paude.backends.openshift import (
+    SessionExistsError as OpenshiftSessionExistsError,
+)
+from paude.backends.openshift import (
+    SessionNotFoundError as OpenshiftSessionNotFoundError,
+)
+from paude.session_discovery import (
+    collect_all_sessions,
+    create_openshift_backend,
+    find_workspace_session,
+    resolve_session_for_backend,
+)
 
 app = typer.Typer(
     name="paude",
@@ -43,8 +66,6 @@ def find_session_backend(
         Tuple of (backend_type, backend_instance) if found, None otherwise.
         The backend_instance is either PodmanBackend or OpenShiftBackend.
     """
-    from paude.backends import PodmanBackend
-
     # Try Podman first
     try:
         podman = PodmanBackend()
@@ -55,19 +76,14 @@ def find_session_backend(
         pass
 
     # Try OpenShift
-    try:
-        from paude.backends.openshift import OpenShiftBackend, OpenShiftConfig
-
-        os_config = OpenShiftConfig(
-            context=openshift_context,
-            namespace=openshift_namespace,
-        )
-        os_backend = OpenShiftBackend(config=os_config)
-        for session in os_backend.list_sessions():
-            if session.name == session_name:
-                return (BackendType.openshift, os_backend)
-    except Exception:  # noqa: S110 - OpenShift may not be available
-        pass
+    os_backend = create_openshift_backend(openshift_context, openshift_namespace)
+    if os_backend is not None:
+        try:
+            for session in os_backend.list_sessions():
+                if session.name == session_name:
+                    return (BackendType.openshift, os_backend)
+        except Exception:  # noqa: S110
+            pass
 
     return None
 
@@ -309,11 +325,6 @@ def session_create(
         }
         show_dry_run(flags)
         raise typer.Exit()
-    from paude.backends import (
-        PodmanBackend,
-        SessionConfig,
-        SessionExistsError,
-    )
     from paude.config import detect_config, parse_config
     from paude.container import ImageManager
     from paude.environment import build_environment
@@ -419,15 +430,7 @@ def session_create(
             raise typer.Exit(1) from None
     else:
         # OpenShift backend
-        from paude.backends.openshift import (
-            BuildFailedError,
-            OpenShiftBackend,
-            OpenShiftConfig,
-            _generate_session_name,
-        )
-        from paude.backends.openshift import (
-            SessionExistsError as OpenshiftSessionExistsError,
-        )
+        from paude.backends.openshift import _generate_session_name
 
         # Get script directory for dev mode
         os_script_dir: Path | None = None
@@ -564,8 +567,6 @@ def session_delete(
     ] = None,
 ) -> None:
     """Delete a session and all its resources permanently."""
-    from paude.backends import PodmanBackend, SessionNotFoundError
-
     if not confirm:
         typer.echo(
             f"Deleting session '{name}' will permanently remove all data.",
@@ -604,14 +605,6 @@ def session_delete(
             typer.echo(f"Error deleting session: {e}", err=True)
             raise typer.Exit(1) from None
     else:
-        from paude.backends.openshift import (
-            OpenShiftBackend,
-            OpenShiftConfig,
-        )
-        from paude.backends.openshift import (
-            SessionNotFoundError as OpenshiftSessionNotFoundError,
-        )
-
         openshift_config = OpenShiftConfig(
             context=openshift_context,
             namespace=openshift_namespace,
@@ -659,8 +652,6 @@ def session_start(
     ] = None,
 ) -> None:
     """Start a session and connect to it."""
-    from paude.backends import PodmanBackend, SessionNotFoundError
-
     # Auto-detect backend if name is provided but backend is not
     if name and backend is None:
         result = find_session_backend(name, openshift_context, openshift_namespace)
@@ -678,78 +669,15 @@ def session_start(
 
     # If no name and no backend specified, search all backends
     if not name and backend is None:
-        from paude.backends import Session
-        from paude.backends.openshift import OpenShiftBackend, OpenShiftConfig
-
-        workspace_session: Session | None = None
-        workspace_backend: PodmanBackend | OpenShiftBackend | None = None
-        podman_backend: PodmanBackend | None = None
-        os_backend: OpenShiftBackend | None = None
-
-        # Check podman for workspace session
-        try:
-            podman_backend = PodmanBackend()
-            session = podman_backend.find_session_for_workspace(Path.cwd())
-            if session:
-                workspace_session = session
-                workspace_backend = podman_backend
-        except Exception:  # noqa: S110 - Podman may not be available
-            pass
-
-        # Check openshift for workspace session (only if not found in podman)
-        if workspace_session is None:
-            try:
-                os_config = OpenShiftConfig(
-                    context=openshift_context,
-                    namespace=openshift_namespace,
-                )
-                os_backend = OpenShiftBackend(config=os_config)
-                session = os_backend.find_session_for_workspace(Path.cwd())
-                if session:
-                    workspace_session = session
-                    workspace_backend = os_backend
-            except Exception:  # noqa: S110 - OpenShift may not be available
-                pass
-
-        # If workspace session found, start it
-        if workspace_session and workspace_backend:
-            typer.echo(
-                f"Starting '{workspace_session.name}' "
-                f"({workspace_session.backend_type})..."
-            )
-            exit_code = workspace_backend.start_session(workspace_session.name)
+        # No status filter: start includes all sessions (even stopped)
+        workspace_match = find_workspace_session(openshift_context, openshift_namespace)
+        if workspace_match:
+            ws_session, ws_backend = workspace_match
+            typer.echo(f"Starting '{ws_session.name}' ({ws_session.backend_type})...")
+            exit_code = ws_backend.start_session(ws_session.name)
             raise typer.Exit(exit_code)
 
-        # Collect all sessions from available backends
-        all_sessions: list[tuple[Session, PodmanBackend | OpenShiftBackend]] = []
-
-        if podman_backend:
-            try:
-                for s in podman_backend.list_sessions():
-                    all_sessions.append((s, podman_backend))
-            except Exception:  # noqa: S110
-                pass
-
-        if os_backend:
-            try:
-                for s in os_backend.list_sessions():
-                    all_sessions.append((s, os_backend))
-            except Exception:  # noqa: S110
-                pass
-
-        # Also try to initialize OpenShift if we haven't yet
-        if os_backend is None:
-            try:
-                os_config = OpenShiftConfig(
-                    context=openshift_context,
-                    namespace=openshift_namespace,
-                )
-                os_backend = OpenShiftBackend(config=os_config)
-                for s in os_backend.list_sessions():
-                    all_sessions.append((s, os_backend))
-            except Exception:  # noqa: S110
-                pass
-
+        all_sessions = collect_all_sessions(openshift_context, openshift_namespace)
         if not all_sessions:
             typer.echo("No sessions found.", err=True)
             typer.echo("", err=True)
@@ -768,9 +696,6 @@ def session_start(
             )
             typer.echo("", err=True)
             for s, _ in all_sessions:
-                workspace_str = str(s.workspace)
-                if len(workspace_str) > 35:
-                    workspace_str = "..." + workspace_str[-32:]
                 typer.echo(
                     f"  paude start {s.name}  # {s.backend_type}, {s.status}",
                     err=True,
@@ -780,28 +705,10 @@ def session_start(
     # Backend specified explicitly
     if backend == BackendType.podman:
         backend_instance = PodmanBackend()
-
-        # If no name provided, find session for current workspace
         if not name:
-            session = backend_instance.find_session_for_workspace(Path.cwd())
-            if session:
-                name = session.name
-            else:
-                # List all sessions and pick the first one
-                sessions = backend_instance.list_sessions()
-                if not sessions:
-                    typer.echo("No sessions found for this workspace.", err=True)
-                    typer.echo("", err=True)
-                    typer.echo("To create and start a session:", err=True)
-                    typer.echo("  paude create && paude start", err=True)
-                    raise typer.Exit(1)
-                if len(sessions) == 1:
-                    name = sessions[0].name
-                else:
-                    typer.echo("Multiple sessions found. Specify a name:", err=True)
-                    for s in sessions:
-                        typer.echo(f"  {s.name} ({s.status})")
-                    raise typer.Exit(1)
+            name = resolve_session_for_backend(backend_instance)
+            if not name:
+                raise typer.Exit(1)
 
         try:
             exit_code = backend_instance.start_session(name)
@@ -813,46 +720,15 @@ def session_start(
             typer.echo(f"Error starting session: {e}", err=True)
             raise typer.Exit(1) from None
     elif backend == BackendType.openshift:
-        from paude.backends.openshift import (
-            OpenShiftBackend,
-            OpenShiftConfig,
-        )
-        from paude.backends.openshift import (
-            SessionNotFoundError as OpenshiftSessionNotFoundError,
-        )
-
         openshift_config = OpenShiftConfig(
             context=openshift_context,
             namespace=openshift_namespace,
         )
-
         os_backend = OpenShiftBackend(config=openshift_config)
-
-        # If no name provided, find session for current workspace
         if not name:
-            session = os_backend.find_session_for_workspace(Path.cwd())
-            if session:
-                name = session.name
-            else:
-                # List all sessions and pick the first one
-                sessions = os_backend.list_sessions()
-                if not sessions:
-                    typer.echo("No sessions found for this workspace.", err=True)
-                    typer.echo("", err=True)
-                    typer.echo("To create and start a session:", err=True)
-                    typer.echo(
-                        "  paude create --backend=openshift && "
-                        "paude start --backend=openshift",
-                        err=True,
-                    )
-                    raise typer.Exit(1)
-                if len(sessions) == 1:
-                    name = sessions[0].name
-                else:
-                    typer.echo("Multiple sessions found. Specify a name:", err=True)
-                    for s in sessions:
-                        typer.echo(f"  {s.name} ({s.status})")
-                    raise typer.Exit(1)
+            name = resolve_session_for_backend(os_backend)
+            if not name:
+                raise typer.Exit(1)
 
         try:
             exit_code = os_backend.start_session(name)
@@ -894,8 +770,6 @@ def session_stop(
     ] = None,
 ) -> None:
     """Stop a session (preserves data)."""
-    from paude.backends import PodmanBackend
-
     # Auto-detect backend if name is provided but backend is not
     if name and backend is None:
         result = find_session_backend(name, openshift_context, openshift_namespace)
@@ -914,82 +788,20 @@ def session_stop(
 
     # If no name and no backend specified, search all backends
     if not name and backend is None:
-        from paude.backends import Session
-        from paude.backends.openshift import OpenShiftBackend, OpenShiftConfig
-
-        workspace_session: Session | None = None
-        workspace_backend: PodmanBackend | OpenShiftBackend | None = None
-        podman_backend: PodmanBackend | None = None
-        os_backend: OpenShiftBackend | None = None
-
-        # Check podman for workspace session
-        try:
-            podman_backend = PodmanBackend()
-            session = podman_backend.find_session_for_workspace(Path.cwd())
-            if session and session.status == "running":
-                workspace_session = session
-                workspace_backend = podman_backend
-        except Exception:  # noqa: S110 - Podman may not be available
-            pass
-
-        # Check openshift for workspace session (only if not found in podman)
-        if workspace_session is None:
-            try:
-                os_config = OpenShiftConfig(
-                    context=openshift_context,
-                    namespace=openshift_namespace,
-                )
-                os_backend = OpenShiftBackend(config=os_config)
-                session = os_backend.find_session_for_workspace(Path.cwd())
-                if session and session.status == "running":
-                    workspace_session = session
-                    workspace_backend = os_backend
-            except Exception:  # noqa: S110 - OpenShift may not be available
-                pass
-
-        # If workspace session found, stop it
-        if workspace_session and workspace_backend:
-            typer.echo(
-                f"Stopping '{workspace_session.name}' "
-                f"({workspace_session.backend_type})..."
-            )
-            workspace_backend.stop_session(workspace_session.name)
-            typer.echo(f"Session '{workspace_session.name}' stopped.")
+        # Only running sessions can be stopped
+        workspace_match = find_workspace_session(
+            openshift_context, openshift_namespace, status_filter="running"
+        )
+        if workspace_match:
+            ws_session, ws_backend = workspace_match
+            typer.echo(f"Stopping '{ws_session.name}' ({ws_session.backend_type})...")
+            ws_backend.stop_session(ws_session.name)
+            typer.echo(f"Session '{ws_session.name}' stopped.")
             return
 
-        # Collect all running sessions from available backends
-        all_sessions: list[tuple[Session, PodmanBackend | OpenShiftBackend]] = []
-
-        if podman_backend:
-            try:
-                for s in podman_backend.list_sessions():
-                    if s.status == "running":
-                        all_sessions.append((s, podman_backend))
-            except Exception:  # noqa: S110
-                pass
-
-        if os_backend:
-            try:
-                for s in os_backend.list_sessions():
-                    if s.status == "running":
-                        all_sessions.append((s, os_backend))
-            except Exception:  # noqa: S110
-                pass
-
-        # Also try to initialize OpenShift if we haven't yet
-        if os_backend is None:
-            try:
-                os_config = OpenShiftConfig(
-                    context=openshift_context,
-                    namespace=openshift_namespace,
-                )
-                os_backend = OpenShiftBackend(config=os_config)
-                for s in os_backend.list_sessions():
-                    if s.status == "running":
-                        all_sessions.append((s, os_backend))
-            except Exception:  # noqa: S110
-                pass
-
+        all_sessions = collect_all_sessions(
+            openshift_context, openshift_namespace, status_filter="running"
+        )
         if not all_sessions:
             typer.echo("No running sessions to stop.", err=True)
             raise typer.Exit(1)
@@ -1015,30 +827,12 @@ def session_stop(
     # Backend specified explicitly
     if backend == BackendType.podman:
         backend_instance = PodmanBackend()
-
-        # If no name provided, find running session for current workspace
         if not name:
-            session = backend_instance.find_session_for_workspace(Path.cwd())
-            if session and session.status == "running":
-                name = session.name
-            else:
-                # Find running sessions
-                sessions = [
-                    s for s in backend_instance.list_sessions() if s.status == "running"
-                ]
-                if not sessions:
-                    typer.echo("No running sessions to stop.", err=True)
-                    raise typer.Exit(1)
-                if len(sessions) == 1:
-                    name = sessions[0].name
-                else:
-                    typer.echo(
-                        "Multiple running sessions found. Specify a name:",
-                        err=True,
-                    )
-                    for s in sessions:
-                        typer.echo(f"  {s.name}")
-                    raise typer.Exit(1)
+            name = resolve_session_for_backend(
+                backend_instance, status_filter="running"
+            )
+            if not name:
+                raise typer.Exit(1)
 
         try:
             backend_instance.stop_session(name)
@@ -1047,44 +841,15 @@ def session_stop(
             typer.echo(f"Error stopping session: {e}", err=True)
             raise typer.Exit(1) from None
     elif backend == BackendType.openshift:
-        from paude.backends.openshift import (
-            OpenShiftBackend,
-            OpenShiftConfig,
-        )
-        from paude.backends.openshift import (
-            SessionNotFoundError as OpenshiftSessionNotFoundError,
-        )
-
         openshift_config = OpenShiftConfig(
             context=openshift_context,
             namespace=openshift_namespace,
         )
-
         os_backend = OpenShiftBackend(config=openshift_config)
-
-        # If no name provided, find running session for current workspace
         if not name:
-            session = os_backend.find_session_for_workspace(Path.cwd())
-            if session and session.status == "running":
-                name = session.name
-            else:
-                # Find running sessions
-                sessions = [
-                    s for s in os_backend.list_sessions() if s.status == "running"
-                ]
-                if not sessions:
-                    typer.echo("No running sessions to stop.", err=True)
-                    raise typer.Exit(1)
-                if len(sessions) == 1:
-                    name = sessions[0].name
-                else:
-                    typer.echo(
-                        "Multiple running sessions found. Specify a name:",
-                        err=True,
-                    )
-                    for s in sessions:
-                        typer.echo(f"  {s.name}")
-                    raise typer.Exit(1)
+            name = resolve_session_for_backend(os_backend, status_filter="running")
+            if not name:
+                raise typer.Exit(1)
 
         try:
             os_backend.stop_session(name)
@@ -1126,8 +891,6 @@ def session_connect(
     ] = None,
 ) -> None:
     """Attach to a running session."""
-    from paude.backends import PodmanBackend, Session
-
     # Auto-detect backend if name is provided but backend is not
     if name and backend is None:
         result = find_session_backend(name, openshift_context, openshift_namespace)
@@ -1141,80 +904,21 @@ def session_connect(
 
     # If no name and no backend specified, search all backends
     if not name and backend is None:
-        from paude.backends.openshift import OpenShiftBackend, OpenShiftConfig
-
-        workspace_session: Session | None = None
-        workspace_backend: PodmanBackend | OpenShiftBackend | None = None
-        podman_backend: PodmanBackend | None = None
-        os_backend: OpenShiftBackend | None = None
-
-        # Check podman for workspace session
-        try:
-            podman_backend = PodmanBackend()
-            session = podman_backend.find_session_for_workspace(Path.cwd())
-            if session and session.status == "running":
-                workspace_session = session
-                workspace_backend = podman_backend
-        except Exception:  # noqa: S110 - Podman may not be available
-            pass
-
-        # Check openshift for workspace session (only if not found in podman)
-        if workspace_session is None:
-            try:
-                os_config = OpenShiftConfig(
-                    context=openshift_context,
-                    namespace=openshift_namespace,
-                )
-                os_backend = OpenShiftBackend(config=os_config)
-                session = os_backend.find_session_for_workspace(Path.cwd())
-                if session and session.status == "running":
-                    workspace_session = session
-                    workspace_backend = os_backend
-            except Exception:  # noqa: S110 - OpenShift may not be available
-                pass
-
-        # If workspace session found, connect to it
-        if workspace_session and workspace_backend:
+        # Only running sessions can be connected to
+        workspace_match = find_workspace_session(
+            openshift_context, openshift_namespace, status_filter="running"
+        )
+        if workspace_match:
+            ws_session, ws_backend = workspace_match
             typer.echo(
-                f"Connecting to '{workspace_session.name}' "
-                f"({workspace_session.backend_type})..."
+                f"Connecting to '{ws_session.name}' ({ws_session.backend_type})..."
             )
-            exit_code = workspace_backend.connect_session(workspace_session.name)
+            exit_code = ws_backend.connect_session(ws_session.name)
             raise typer.Exit(exit_code)
 
-        # Collect all running sessions from available backends
-        all_running: list[tuple[Session, PodmanBackend | OpenShiftBackend]] = []
-
-        if podman_backend:
-            try:
-                for s in podman_backend.list_sessions():
-                    if s.status == "running":
-                        all_running.append((s, podman_backend))
-            except Exception:  # noqa: S110
-                pass
-
-        if os_backend:
-            try:
-                for s in os_backend.list_sessions():
-                    if s.status == "running":
-                        all_running.append((s, os_backend))
-            except Exception:  # noqa: S110
-                pass
-
-        # Also try to initialize OpenShift if we haven't yet (workspace check skipped)
-        if os_backend is None and workspace_session is None:
-            try:
-                os_config = OpenShiftConfig(
-                    context=openshift_context,
-                    namespace=openshift_namespace,
-                )
-                os_backend = OpenShiftBackend(config=os_config)
-                for s in os_backend.list_sessions():
-                    if s.status == "running":
-                        all_running.append((s, os_backend))
-            except Exception:  # noqa: S110
-                pass
-
+        all_running = collect_all_sessions(
+            openshift_context, openshift_namespace, status_filter="running"
+        )
         if not all_running:
             typer.echo("No running sessions to connect to.", err=True)
             typer.echo("", err=True)
@@ -1248,69 +952,25 @@ def session_connect(
     # Backend specified explicitly
     if backend == BackendType.podman:
         backend_instance = PodmanBackend()
-
-        # If no name provided, find running session for current workspace
         if not name:
-            session = backend_instance.find_session_for_workspace(Path.cwd())
-            if session and session.status == "running":
-                name = session.name
-            else:
-                # Find running sessions
-                sessions = [
-                    s for s in backend_instance.list_sessions() if s.status == "running"
-                ]
-                if not sessions:
-                    typer.echo("No running sessions to connect to.", err=True)
-                    raise typer.Exit(1)
-                if len(sessions) == 1:
-                    name = sessions[0].name
-                else:
-                    typer.echo(
-                        "Multiple running sessions found. Specify a name:",
-                        err=True,
-                    )
-                    for s in sessions:
-                        typer.echo(f"  {s.name}")
-                    raise typer.Exit(1)
+            name = resolve_session_for_backend(
+                backend_instance, status_filter="running"
+            )
+            if not name:
+                raise typer.Exit(1)
 
         exit_code = backend_instance.connect_session(name)
         raise typer.Exit(exit_code)
     else:
-        from paude.backends.openshift import (
-            OpenShiftBackend,
-            OpenShiftConfig,
-        )
-
         openshift_config = OpenShiftConfig(
             context=openshift_context,
             namespace=openshift_namespace,
         )
-
         os_backend = OpenShiftBackend(config=openshift_config)
-
-        # If no name provided, find running session for current workspace
         if not name:
-            session = os_backend.find_session_for_workspace(Path.cwd())
-            if session and session.status == "running":
-                name = session.name
-            else:
-                # Find running sessions
-                sessions = [
-                    s for s in os_backend.list_sessions() if s.status == "running"
-                ]
-                if not sessions:
-                    typer.echo("No running sessions to connect to.", err=True)
-                    raise typer.Exit(1)
-                if len(sessions) == 1:
-                    name = sessions[0].name
-                else:
-                    typer.echo(
-                        "Multiple running sessions found. Specify a name:",
-                        err=True,
-                    )
-                    for s in sessions:
-                        typer.echo(f"  {s.name}")
-                    raise typer.Exit(1)
+            name = resolve_session_for_backend(os_backend, status_filter="running")
+            if not name:
+                raise typer.Exit(1)
 
         exit_code = os_backend.connect_session(name)
         raise typer.Exit(exit_code)
@@ -1341,8 +1001,6 @@ def session_list(
     ] = None,
 ) -> None:
     """List all sessions."""
-    from paude.backends import PodmanBackend
-
     all_sessions = []
 
     # Get Podman sessions
@@ -1355,20 +1013,12 @@ def session_list(
 
     # Get OpenShift sessions
     if backend is None or backend == BackendType.openshift:
-        try:
-            from paude.backends import OpenShiftBackend, OpenShiftConfig
-
-            os_config = OpenShiftConfig(
-                context=openshift_context,
-                namespace=openshift_namespace,
-            )
-            os_backend = OpenShiftBackend(config=os_config)
-            # OpenShift sessions use the old id field
-            for session in os_backend.list_sessions():
-                # Convert old Session format to new
-                all_sessions.append(session)
-        except Exception:  # noqa: S110 - OpenShift may not be available
-            pass
+        os_backend = create_openshift_backend(openshift_context, openshift_namespace)
+        if os_backend is not None:
+            try:
+                all_sessions.extend(os_backend.list_sessions())
+            except Exception:  # noqa: S110
+                pass
 
     if not all_sessions:
         typer.echo("No sessions found.")
@@ -1534,8 +1184,6 @@ def _find_session_for_remote(
     Returns:
         Tuple of (session, backend) if found, (None, None) otherwise.
     """
-    from paude.backends import PodmanBackend
-
     # Try Podman first
     try:
         podman = PodmanBackend()
@@ -1546,19 +1194,14 @@ def _find_session_for_remote(
         pass
 
     # Try OpenShift
-    try:
-        from paude.backends.openshift import OpenShiftBackend, OpenShiftConfig
-
-        os_config = OpenShiftConfig(
-            context=openshift_context,
-            namespace=openshift_namespace,
-        )
-        os_backend = OpenShiftBackend(config=os_config)
-        session = os_backend.find_session_for_workspace(Path.cwd())
-        if session:
-            return (session, os_backend)
-    except Exception:  # noqa: S110
-        pass
+    os_backend = create_openshift_backend(openshift_context, openshift_namespace)
+    if os_backend is not None:
+        try:
+            session = os_backend.find_session_for_workspace(Path.cwd())
+            if session:
+                return (session, os_backend)
+        except Exception:  # noqa: S110
+            pass
 
     return (None, None)
 
@@ -1627,8 +1270,6 @@ def _remote_add(
     branch = get_current_branch() or "main"
 
     if session.backend_type == "openshift":
-        from paude.backends.openshift import OpenShiftConfig
-
         os_config = OpenShiftConfig(
             context=openshift_context,
             namespace=openshift_namespace,
@@ -1639,8 +1280,6 @@ def _remote_add(
             namespace = os_config.namespace
         else:
             try:
-                from paude.backends.openshift import OpenShiftBackend
-
                 os_backend = OpenShiftBackend(config=os_config)
                 namespace = os_backend.namespace
             except Exception:
