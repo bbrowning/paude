@@ -22,6 +22,7 @@ from paude.backends.openshift.exceptions import (
 from paude.backends.openshift.oc import (
     OC_DEFAULT_TIMEOUT,
     OC_EXEC_TIMEOUT,
+    RSYNC_TIMEOUT,
     OcClient,
 )
 from paude.backends.openshift.proxy import ProxyManager
@@ -1033,6 +1034,68 @@ class OpenShiftBackend:
                 return session
 
         return None
+
+    def copy_to_session(self, name: str, local_path: str, remote_path: str) -> None:
+        """Copy a file or directory from local to a running session.
+
+        Args:
+            name: Session name.
+            local_path: Local file or directory path.
+            remote_path: Destination path inside the container.
+
+        Raises:
+            SessionNotFoundError: If session not found.
+            ValueError: If session is not running.
+        """
+        if self._get_statefulset(name) is None:
+            raise SessionNotFoundError(f"Session '{name}' not found")
+
+        pod_name = self._get_pod_for_session(name)
+        if pod_name is None:
+            raise ValueError(
+                f"Session '{name}' is not running. "
+                f"Use 'paude start {name}' to start it."
+            )
+
+        self._oc.run(
+            "cp",
+            local_path,
+            f"{pod_name}:{remote_path}",
+            "-n",
+            self.namespace,
+            timeout=RSYNC_TIMEOUT,
+        )
+
+    def copy_from_session(self, name: str, remote_path: str, local_path: str) -> None:
+        """Copy a file or directory from a running session to local.
+
+        Args:
+            name: Session name.
+            remote_path: Source path inside the container.
+            local_path: Local destination path.
+
+        Raises:
+            SessionNotFoundError: If session not found.
+            ValueError: If session is not running.
+        """
+        if self._get_statefulset(name) is None:
+            raise SessionNotFoundError(f"Session '{name}' not found")
+
+        pod_name = self._get_pod_for_session(name)
+        if pod_name is None:
+            raise ValueError(
+                f"Session '{name}' is not running. "
+                f"Use 'paude start {name}' to start it."
+            )
+
+        self._oc.run(
+            "cp",
+            f"{pod_name}:{remote_path}",
+            local_path,
+            "-n",
+            self.namespace,
+            timeout=RSYNC_TIMEOUT,
+        )
 
     def list_sessions(self) -> list[Session]:
         """List all sessions (StatefulSets).

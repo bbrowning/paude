@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import secrets
+import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -478,6 +479,62 @@ class PodmanBackend:
                 return session
 
         return None
+
+    def copy_to_session(self, name: str, local_path: str, remote_path: str) -> None:
+        """Copy a file or directory from local to a running session.
+
+        Args:
+            name: Session name.
+            local_path: Local file or directory path.
+            remote_path: Destination path inside the container.
+
+        Raises:
+            SessionNotFoundError: If session not found.
+            ValueError: If session is not running.
+        """
+        container_name = self._container_name(name)
+
+        if not self._runner.container_exists(container_name):
+            raise SessionNotFoundError(f"Session '{name}' not found")
+
+        if not self._runner.container_running(container_name):
+            raise ValueError(
+                f"Session '{name}' is not running. "
+                f"Use 'paude start {name}' to start it."
+            )
+
+        subprocess.run(
+            ["podman", "cp", local_path, f"{container_name}:{remote_path}"],
+            check=True,
+        )
+
+    def copy_from_session(self, name: str, remote_path: str, local_path: str) -> None:
+        """Copy a file or directory from a running session to local.
+
+        Args:
+            name: Session name.
+            remote_path: Source path inside the container.
+            local_path: Local destination path.
+
+        Raises:
+            SessionNotFoundError: If session not found.
+            ValueError: If session is not running.
+        """
+        container_name = self._container_name(name)
+
+        if not self._runner.container_exists(container_name):
+            raise SessionNotFoundError(f"Session '{name}' not found")
+
+        if not self._runner.container_running(container_name):
+            raise ValueError(
+                f"Session '{name}' is not running. "
+                f"Use 'paude start {name}' to start it."
+            )
+
+        subprocess.run(
+            ["podman", "cp", f"{container_name}:{remote_path}", local_path],
+            check=True,
+        )
 
     def run_proxy(
         self,

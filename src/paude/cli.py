@@ -115,6 +115,7 @@ COMMANDS:
     stop [NAME]         Stop a session (preserves data)
     connect [NAME]      Attach to a running session
     list                List all sessions
+    cp SRC DEST         Copy files between local and session
     remote <ACTION>     Manage git remotes for code sync
     delete NAME         Delete a session and all its resources
 
@@ -161,6 +162,12 @@ SYNCING CODE (via git):
     paude remote remove [NAME]      Remove git remote for session
     git push paude-<name> main      Push code to container
     git pull paude-<name> main      Pull changes from container
+
+COPYING FILES (without git):
+    paude cp ./file.txt my-session:file.txt     Copy local file to session
+    paude cp my-session:output.log ./           Copy file from session to local
+    paude cp ./src :src                         Auto-detect session, copy dir
+    paude cp :results ./results                 Auto-detect session, copy from
 
 EXAMPLES:
     paude create --yolo --allowed-domains all
@@ -1046,6 +1053,156 @@ def session_list(
             f"{session.status:<12} {workspace_str:<40}"
         )
         typer.echo(line)
+
+
+def _parse_copy_path(path_arg: str) -> tuple[str | None, str]:
+    """Parse a copy path argument into (session_name, path).
+
+    Returns:
+        Tuple of (session_name, path) where session_name is:
+        - None for local paths
+        - "" for auto-detect (`:path` syntax)
+        - session name for explicit (`session:path` syntax)
+    """
+    # Paths starting with / or . are always local
+    if path_arg.startswith("/") or path_arg.startswith("."):
+        return (None, path_arg)
+
+    # Contains colon -> remote path
+    if ":" in path_arg:
+        session_part, path_part = path_arg.split(":", 1)
+        return (session_part, path_part)
+
+    # No colon, no / or . prefix -> local path
+    return (None, path_arg)
+
+
+@app.command("cp")
+def session_cp(
+    src: Annotated[
+        str,
+        typer.Argument(help="Source path (local or session:path)"),
+    ],
+    dest: Annotated[
+        str,
+        typer.Argument(help="Destination path (local or session:path)"),
+    ],
+    backend: Annotated[
+        BackendType | None,
+        typer.Option(
+            "--backend",
+            help="Container backend (auto-detected from session if not specified).",
+        ),
+    ] = None,
+    openshift_context: Annotated[
+        str | None,
+        typer.Option(
+            "--openshift-context",
+            help="Kubeconfig context for OpenShift.",
+        ),
+    ] = None,
+    openshift_namespace: Annotated[
+        str | None,
+        typer.Option(
+            "--openshift-namespace",
+            help="OpenShift namespace (default: current context namespace).",
+        ),
+    ] = None,
+) -> None:
+    """Copy files between local and a session."""
+    src_session, src_path = _parse_copy_path(src)
+    dest_session, dest_path = _parse_copy_path(dest)
+
+    # Validate exactly one side is remote
+    if src_session is None and dest_session is None:
+        typer.echo(
+            "Error: One of SRC or DEST must be a remote path (session:path).", err=True
+        )
+        typer.echo("", err=True)
+        typer.echo("Examples:", err=True)
+        typer.echo("  paude cp ./file.txt my-session:file.txt", err=True)
+        typer.echo("  paude cp my-session:output.log ./", err=True)
+        raise typer.Exit(1)
+
+    if src_session is not None and dest_session is not None:
+        typer.echo(
+            "Error: Only one of SRC or DEST can be a remote path, not both.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    # Determine direction and session name
+    if dest_session is not None:
+        # Local -> Remote
+        session_name = dest_session
+        remote_path = dest_path
+        copy_direction = "to"
+    else:
+        # Remote -> Local (src_session is guaranteed non-None here)
+        session_name = src_session  # type: ignore[assignment]
+        remote_path = src_path
+        copy_direction = "from"
+
+    # Resolve session
+    backend_obj: Any = None
+    if session_name:
+        # Explicit session name
+        result = find_session_backend(
+            session_name, openshift_context, openshift_namespace
+        )
+        if result is None:
+            typer.echo(f"Session '{session_name}' not found.", err=True)
+            raise typer.Exit(1)
+        _, backend_obj = result
+    else:
+        # Auto-detect session (empty string from `:path` syntax)
+        workspace_match = find_workspace_session(
+            openshift_context, openshift_namespace, status_filter="running"
+        )
+        if workspace_match:
+            ws_session, backend_obj = workspace_match
+            session_name = ws_session.name
+        else:
+            all_running = collect_all_sessions(
+                openshift_context, openshift_namespace, status_filter="running"
+            )
+            if not all_running:
+                typer.echo("No running sessions found.", err=True)
+                raise typer.Exit(1)
+            if len(all_running) == 1:
+                session_obj, backend_obj = all_running[0]
+                session_name = session_obj.name
+            else:
+                typer.echo(
+                    "Multiple running sessions found. Specify one:",
+                    err=True,
+                )
+                typer.echo("", err=True)
+                for s, _ in all_running:
+                    typer.echo(f"  paude cp ... {s.name}:path", err=True)
+                raise typer.Exit(1)
+
+    # Resolve relative remote paths to /pvc/workspace/
+    if not remote_path.startswith("/"):
+        remote_path = f"/pvc/workspace/{remote_path}"
+
+    # Execute copy
+    try:
+        if copy_direction == "to":
+            backend_obj.copy_to_session(session_name, src_path, remote_path)
+            typer.echo(f"Copied '{src_path}' -> '{session_name}:{remote_path}'")
+        else:
+            backend_obj.copy_from_session(session_name, remote_path, dest_path)
+            typer.echo(f"Copied '{session_name}:{remote_path}' -> '{dest_path}'")
+    except (SessionNotFoundError, OpenshiftSessionNotFoundError) as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+    except Exception as e:
+        typer.echo(f"Error copying: {e}", err=True)
+        raise typer.Exit(1) from None
 
 
 @app.command("remote")

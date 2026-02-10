@@ -160,3 +160,31 @@ class Backend(Protocol):
             Session object or None if not found.
         """
         ...
+
+    def copy_to_session(self, name: str, local_path: str, remote_path: str) -> None:
+        """Copy a file or directory from local to a session.
+
+        Args:
+            name: Session name.
+            local_path: Local file or directory path.
+            remote_path: Destination path inside the container.
+
+        Raises:
+            SessionNotFoundError: If session not found.
+            ValueError: If session is not running.
+        """
+        ...
+
+    def copy_from_session(self, name: str, remote_path: str, local_path: str) -> None:
+        """Copy a file or directory from a session to local.
+
+        Args:
+            name: Session name.
+            remote_path: Source path inside the container.
+            local_path: Local destination path.
+
+        Raises:
+            SessionNotFoundError: If session not found.
+            ValueError: If session is not running.
+        """
+        ...

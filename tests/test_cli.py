@@ -9,7 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from paude.backends import Session
-from paude.cli import app
+from paude.cli import _parse_copy_path, app
 
 runner = CliRunner()
 
@@ -1259,3 +1259,160 @@ class TestDeleteGitRemoteCleanup:
         assert result.exit_code == 0
         assert "Session 'os-session' deleted." in result.output
         mock_cleanup.assert_called_once_with("os-session")
+
+
+class TestParseCopyPath:
+    """Tests for _parse_copy_path helper."""
+
+    def test_absolute_local_path(self):
+        """Absolute paths are local."""
+        assert _parse_copy_path("/absolute/path") == (None, "/absolute/path")
+
+    def test_relative_local_path(self):
+        """Relative paths starting with . are local."""
+        assert _parse_copy_path("./relative/path") == (None, "./relative/path")
+
+    def test_bare_filename_is_local(self):
+        """Bare filenames without colon are local."""
+        assert _parse_copy_path("file.txt") == (None, "file.txt")
+
+    def test_session_with_path(self):
+        """session:path syntax returns session name and path."""
+        assert _parse_copy_path("my-session:file.txt") == ("my-session", "file.txt")
+
+    def test_session_with_absolute_path(self):
+        """session:/abs/path syntax returns session and absolute path."""
+        assert _parse_copy_path("my-session:/abs/path") == ("my-session", "/abs/path")
+
+    def test_auto_detect_session(self):
+        """:path syntax returns empty string for auto-detect."""
+        assert _parse_copy_path(":file.txt") == ("", "file.txt")
+
+    def test_parent_relative_path(self):
+        """Paths starting with .. are local."""
+        assert _parse_copy_path("../parent/file.txt") == (None, "../parent/file.txt")
+
+
+class TestCpCommand:
+    """Tests for paude cp command."""
+
+    def test_cp_no_remote_path_errors(self):
+        """Both paths local should error."""
+        result = runner.invoke(app, ["cp", "./file.txt", "./dest.txt"])
+
+        assert result.exit_code == 1
+        output = result.stdout + (result.stderr or "")
+        assert "One of SRC or DEST must be a remote path" in output
+
+    def test_cp_both_remote_errors(self):
+        """Both paths remote should error."""
+        result = runner.invoke(app, ["cp", "sess1:file.txt", "sess2:file.txt"])
+
+        assert result.exit_code == 1
+        output = result.stdout + (result.stderr or "")
+        assert "Only one of SRC or DEST can be a remote path" in output
+
+    @patch("paude.cli.find_session_backend")
+    def test_cp_to_session_calls_copy_to(self, mock_find):
+        """cp local -> session calls copy_to_session."""
+        mock_backend = MagicMock()
+        mock_find.return_value = ("podman", mock_backend)
+
+        result = runner.invoke(app, ["cp", "./file.txt", "my-session:file.txt"])
+
+        assert result.exit_code == 0
+        mock_backend.copy_to_session.assert_called_once_with(
+            "my-session", "./file.txt", "/pvc/workspace/file.txt"
+        )
+
+    @patch("paude.cli.find_session_backend")
+    def test_cp_from_session_calls_copy_from(self, mock_find):
+        """cp session -> local calls copy_from_session."""
+        mock_backend = MagicMock()
+        mock_find.return_value = ("podman", mock_backend)
+
+        result = runner.invoke(app, ["cp", "my-session:output.log", "./"])
+
+        assert result.exit_code == 0
+        mock_backend.copy_from_session.assert_called_once_with(
+            "my-session", "/pvc/workspace/output.log", "./"
+        )
+
+    @patch("paude.cli.find_session_backend")
+    def test_cp_relative_remote_path_resolved(self, mock_find):
+        """Relative remote paths get /pvc/workspace/ prefix."""
+        mock_backend = MagicMock()
+        mock_find.return_value = ("podman", mock_backend)
+
+        result = runner.invoke(app, ["cp", "./local", "my-session:subdir/file"])
+
+        assert result.exit_code == 0
+        mock_backend.copy_to_session.assert_called_once_with(
+            "my-session", "./local", "/pvc/workspace/subdir/file"
+        )
+
+    @patch("paude.cli.find_session_backend")
+    def test_cp_absolute_remote_path_preserved(self, mock_find):
+        """Absolute remote paths are used as-is."""
+        mock_backend = MagicMock()
+        mock_find.return_value = ("podman", mock_backend)
+
+        result = runner.invoke(app, ["cp", "./local", "my-session:/tmp/file"])
+
+        assert result.exit_code == 0
+        mock_backend.copy_to_session.assert_called_once_with(
+            "my-session", "./local", "/tmp/file"
+        )
+
+    @patch("paude.cli.find_session_backend")
+    def test_cp_session_not_found(self, mock_find):
+        """Error when session doesn't exist."""
+        mock_find.return_value = None
+
+        result = runner.invoke(app, ["cp", "./file.txt", "nonexistent:file.txt"])
+
+        assert result.exit_code == 1
+        output = result.stdout + (result.stderr or "")
+        assert "not found" in output
+
+    @patch("paude.cli.find_session_backend")
+    def test_cp_copy_failure_shows_error(self, mock_find):
+        """Backend raises, CLI shows error."""
+        mock_backend = MagicMock()
+        mock_backend.copy_to_session.side_effect = Exception("copy failed")
+        mock_find.return_value = ("podman", mock_backend)
+
+        result = runner.invoke(app, ["cp", "./file.txt", "my-session:file.txt"])
+
+        assert result.exit_code == 1
+        output = result.stdout + (result.stderr or "")
+        assert "copy failed" in output
+
+    @patch("paude.cli.find_session_backend")
+    def test_cp_session_not_running_shows_error(self, mock_find):
+        """ValueError from backend shows error."""
+        mock_backend = MagicMock()
+        mock_backend.copy_to_session.side_effect = ValueError(
+            "Session 'my-session' is not running."
+        )
+        mock_find.return_value = ("podman", mock_backend)
+
+        result = runner.invoke(app, ["cp", "./file.txt", "my-session:file.txt"])
+
+        assert result.exit_code == 1
+        output = result.stdout + (result.stderr or "")
+        assert "not running" in output
+
+    def test_cp_help(self):
+        """'cp --help' shows subcommand help."""
+        result = runner.invoke(app, ["cp", "--help"])
+
+        assert result.exit_code == 0
+        assert "Copy files between local and a session" in result.stdout
+
+    def test_help_shows_cp_command(self):
+        """Main help shows cp command."""
+        result = runner.invoke(app, ["--help"])
+
+        assert result.exit_code == 0
+        assert "cp" in result.stdout

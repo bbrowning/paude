@@ -151,3 +151,5 @@ class TestBackendProtocol:
         assert callable(backend.connect_session)
         assert callable(backend.list_sessions)
         assert callable(backend.get_session)
+        assert callable(backend.copy_to_session)
+        assert callable(backend.copy_from_session)
