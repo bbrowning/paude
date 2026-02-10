@@ -11,17 +11,19 @@ def compute_config_hash(
     dockerfile: Path | None,
     base_image: str | None,
     entrypoint: Path,
+    version: str,
 ) -> str:
     """Compute a deterministic hash of the configuration.
 
-    This must match the bash compute_config_hash() function exactly.
-    The bash version concatenates file contents and uses sha256sum.
+    Includes the paude version so that upgrading paude triggers a rebuild
+    even when no other inputs have changed.
 
     Args:
         config_file: Path to config file (devcontainer.json or paude.json).
         dockerfile: Path to Dockerfile if specified in config.
         base_image: Base image name if specified.
         entrypoint: Path to entrypoint.sh.
+        version: The paude package version string.
 
     Returns:
         12-character hash string.
@@ -44,9 +46,9 @@ def compute_config_hash(
     if entrypoint.exists():
         hash_input += entrypoint.read_text()
 
-    # Generate hash - match bash behavior exactly
-    # bash: echo "$hash_input" | sha256sum | cut -c1-12
-    # The echo adds a trailing newline
+    # Include version to trigger rebuilds on upgrade
+    hash_input += version
+
     hash_bytes = (hash_input + "\n").encode("utf-8")
     hash_hex = hashlib.sha256(hash_bytes).hexdigest()[:12]
 

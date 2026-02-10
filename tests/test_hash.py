@@ -15,7 +15,7 @@ class TestComputeConfigHash:
         entrypoint = tmp_path / "entrypoint.sh"
         entrypoint.write_text("#!/bin/bash\nexec claude")
 
-        result = compute_config_hash(None, None, None, entrypoint)
+        result = compute_config_hash(None, None, None, entrypoint, "0.7.0")
         assert len(result) == 12
 
     def test_same_inputs_same_hash(self, tmp_path: Path):
@@ -25,8 +25,8 @@ class TestComputeConfigHash:
         entrypoint = tmp_path / "entrypoint.sh"
         entrypoint.write_text("#!/bin/bash\nexec claude")
 
-        hash1 = compute_config_hash(config, None, "python:3.11", entrypoint)
-        hash2 = compute_config_hash(config, None, "python:3.11", entrypoint)
+        hash1 = compute_config_hash(config, None, "python:3.11", entrypoint, "0.7.0")
+        hash2 = compute_config_hash(config, None, "python:3.11", entrypoint, "0.7.0")
         assert hash1 == hash2
 
     def test_different_inputs_different_hash(self, tmp_path: Path):
@@ -38,8 +38,8 @@ class TestComputeConfigHash:
         entrypoint = tmp_path / "entrypoint.sh"
         entrypoint.write_text("#!/bin/bash\nexec claude")
 
-        hash1 = compute_config_hash(config1, None, "python:3.11", entrypoint)
-        hash2 = compute_config_hash(config2, None, "python:3.12", entrypoint)
+        hash1 = compute_config_hash(config1, None, "python:3.11", entrypoint, "0.7.0")
+        hash2 = compute_config_hash(config2, None, "python:3.12", entrypoint, "0.7.0")
         assert hash1 != hash2
 
     def test_handles_missing_config_file(self, tmp_path: Path):
@@ -48,7 +48,7 @@ class TestComputeConfigHash:
         entrypoint.write_text("#!/bin/bash\nexec claude")
 
         # Should not raise
-        result = compute_config_hash(None, None, None, entrypoint)
+        result = compute_config_hash(None, None, None, entrypoint, "0.7.0")
         assert len(result) == 12
 
     def test_handles_missing_dockerfile(self, tmp_path: Path):
@@ -59,7 +59,7 @@ class TestComputeConfigHash:
         entrypoint.write_text("#!/bin/bash\nexec claude")
 
         # Should not raise
-        result = compute_config_hash(config, None, "python:3.11", entrypoint)
+        result = compute_config_hash(config, None, "python:3.11", entrypoint, "0.7.0")
         assert len(result) == 12
 
     def test_includes_entrypoint_content(self, tmp_path: Path):
@@ -69,28 +69,42 @@ class TestComputeConfigHash:
         entrypoint2 = tmp_path / "entrypoint2.sh"
         entrypoint2.write_text("#!/bin/bash\nexec claude --version")
 
-        hash1 = compute_config_hash(None, None, "python:3.11", entrypoint1)
-        hash2 = compute_config_hash(None, None, "python:3.11", entrypoint2)
+        hash1 = compute_config_hash(None, None, "python:3.11", entrypoint1, "0.7.0")
+        hash2 = compute_config_hash(None, None, "python:3.11", entrypoint2, "0.7.0")
         assert hash1 != hash2
 
     def test_hash_matches_known_value(self, tmp_path: Path):
-        """Verify hash matches expected value for known inputs.
-
-        This test ensures Python produces the same hash as bash would.
-        The expected hash was computed using:
-            echo '{"base": "python:3.11"}python:3.11#!/bin/bash
-            exec claude' | sha256sum | cut -c1-12
-        """
+        """Verify hash has expected properties for known inputs."""
         config = tmp_path / "paude.json"
         config.write_text('{"base": "python:3.11"}')
         entrypoint = tmp_path / "entrypoint.sh"
         entrypoint.write_text("#!/bin/bash\nexec claude")
 
-        result = compute_config_hash(config, None, "python:3.11", entrypoint)
-        # This is the expected hash from the bash implementation
-        # To generate: use the inputs above and run through sha256sum
+        result = compute_config_hash(config, None, "python:3.11", entrypoint, "0.7.0")
         assert len(result) == 12
         assert result.isalnum()
+
+    def test_different_versions_different_hash(self, tmp_path: Path):
+        """Different paude versions produce different hashes."""
+        config = tmp_path / "paude.json"
+        config.write_text('{"base": "python:3.11"}')
+        entrypoint = tmp_path / "entrypoint.sh"
+        entrypoint.write_text("#!/bin/bash\nexec claude")
+
+        hash1 = compute_config_hash(config, None, "python:3.11", entrypoint, "0.7.0")
+        hash2 = compute_config_hash(config, None, "python:3.11", entrypoint, "0.7.1")
+        assert hash1 != hash2
+
+    def test_same_version_same_hash(self, tmp_path: Path):
+        """Same paude version produces same hash."""
+        config = tmp_path / "paude.json"
+        config.write_text('{"base": "python:3.11"}')
+        entrypoint = tmp_path / "entrypoint.sh"
+        entrypoint.write_text("#!/bin/bash\nexec claude")
+
+        hash1 = compute_config_hash(config, None, "python:3.11", entrypoint, "0.7.1")
+        hash2 = compute_config_hash(config, None, "python:3.11", entrypoint, "0.7.1")
+        assert hash1 == hash2
 
 
 class TestComputeContentHash:

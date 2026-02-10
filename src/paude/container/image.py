@@ -72,6 +72,7 @@ def prepare_build_context(
         config.dockerfile,
         config.base_image,
         entrypoint,
+        __version__,
     )
 
     tmpdir = Path(tempfile.mkdtemp(prefix="paude-build-"))
@@ -449,6 +450,7 @@ class ImageManager:
             config.dockerfile,
             config.base_image,
             entrypoint,
+            self.version,
         )
         # Use platform-specific tag to avoid arch conflicts
         if self.platform:
