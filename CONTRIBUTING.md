@@ -27,7 +27,7 @@ source .venv/bin/activate
 
 # Install in development mode with all dev dependencies
 make install
-# or: pip install -e ".[dev]"
+# or: uv pip install -e ".[dev]"
 ```
 
 ### Dev Mode
@@ -144,7 +144,7 @@ Releases are published to:
 
 3. **Build Tools**: Install Python build and upload tools:
    ```bash
-   pip install build twine
+   uv tool install build twine
    ```
 
 ### Release Process
@@ -203,11 +203,11 @@ After publishing, test the installed experience in a fresh environment:
 
 ```bash
 # Create a fresh test environment
-python -m venv /tmp/test-paude
+uv venv /tmp/test-paude
 source /tmp/test-paude/bin/activate
 
 # Install from PyPI
-pip install paude
+uv pip install paude
 
 # Test basic commands
 paude --version
