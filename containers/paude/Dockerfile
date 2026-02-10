@@ -18,6 +18,21 @@ RUN dnf install -y epel-release && \
         python3.11-pip \
         procps-ng \
         tmux \
+        which \
+        coreutils \
+        findutils \
+        grep \
+        sed \
+        gawk \
+        diffutils \
+        less \
+        file \
+        tar \
+        gzip \
+        xz \
+        unzip \
+        zip \
+        tree \
     && dnf clean all && \
     alternatives --install /usr/bin/python python /usr/bin/python3.11 1 && \
     alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1

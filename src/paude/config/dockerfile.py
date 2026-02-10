@@ -109,16 +109,27 @@ def generate_workspace_dockerfile(config: PaudeConfig) -> str:
     lines.append("""# Install required system packages
 RUN if command -v apt-get >/dev/null 2>&1; then \\
         apt-get update && \\
-        apt-get install -y --no-install-recommends git curl ca-certificates bash tmux locales && \\
+        apt-get install -y --no-install-recommends \\
+            git curl ca-certificates bash tmux locales \\
+            coreutils findutils grep sed gawk diffutils less file \\
+            tar gzip xz-utils unzip zip && \\
         rm -rf /var/lib/apt/lists/* && \\
         localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8; \\
     elif command -v apk >/dev/null 2>&1; then \\
-        apk add --no-cache git curl ca-certificates bash tmux; \\
+        apk add --no-cache git curl ca-certificates bash tmux \\
+            coreutils findutils grep sed gawk diffutils less file \\
+            tar gzip xz unzip zip; \\
     elif command -v dnf >/dev/null 2>&1; then \\
-        dnf install -y git curl ca-certificates bash tmux glibc-langpack-en && \\
+        dnf install -y --allowerasing \\
+            git curl ca-certificates bash tmux glibc-langpack-en \\
+            which coreutils findutils grep sed gawk diffutils less file \\
+            tar gzip xz unzip zip && \\
         dnf clean all; \\
     elif command -v yum >/dev/null 2>&1; then \\
-        yum install -y git curl ca-certificates bash tmux glibc-langpack-en && \\
+        yum install -y --allowerasing \\
+            git curl ca-certificates bash tmux glibc-langpack-en \\
+            which coreutils findutils grep sed gawk diffutils less file \\
+            tar gzip xz unzip zip && \\
         yum clean all; \\
     else \\
         echo "Warning: Unknown package manager, git may not be available" >&2; \\

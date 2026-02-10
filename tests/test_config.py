@@ -276,6 +276,31 @@ class TestGenerateWorkspaceDockerfile:
         assert "/opt/workspace-src" not in dockerfile
         assert "/opt/venv" not in dockerfile
 
+    def test_includes_essential_utilities(self):
+        """generate_workspace_dockerfile includes essential CLI utilities."""
+        config = PaudeConfig()
+        dockerfile = generate_workspace_dockerfile(config)
+
+        for pkg in [
+            "findutils",
+            "grep",
+            "sed",
+            "gawk",
+            "diffutils",
+            "less",
+            "file",
+            "unzip",
+            "zip",
+        ]:
+            assert pkg in dockerfile, f"Expected package '{pkg}' in Dockerfile"
+
+    def test_dnf_uses_allowerasing(self):
+        """generate_workspace_dockerfile uses --allowerasing for dnf to replace coreutils-single."""
+        config = PaudeConfig()
+        dockerfile = generate_workspace_dockerfile(config)
+
+        assert "--allowerasing" in dockerfile
+
 
 class TestGeneratePipInstallDockerfile:
     """Tests for feature layer Dockerfile generation."""
