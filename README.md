@@ -35,7 +35,7 @@ _Video walkthrough coming soon. Follow the Quick Start below to try it yourself.
 ### Install
 
 ```bash
-pip install paude
+uv tool install paude
 ```
 
 > **First run**: Paude pulls container images on first use. This takes a few minutes; subsequent runs start immediately.
@@ -117,15 +117,7 @@ Your Machine                    Container
 - **`--yolo` is safe** because network filtering blocks Claude from sending data to arbitrary URLs
 - Claude can only reach Vertex AI (for the API) and PyPI (for packages) by default
 
-## Installation
-
-### Using pip
-
-```bash
-pip install paude
-```
-
-### From source
+## Install from source
 
 ```bash
 git clone https://github.com/bbrowning/paude
