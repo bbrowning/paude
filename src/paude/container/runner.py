@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 
@@ -39,6 +40,53 @@ class ContainerRunner:
 
     _proxy_counter = 0
 
+    def create_secret(self, name: str, source_file: Path) -> None:
+        """(Re)Create a Podman secret from a file.
+
+        Args:
+            name: Secret name.
+            source_file: Path to the source file.
+
+        Raises:
+            subprocess.CalledProcessError: If secret creation fails.
+        """
+        cmd = [
+            "podman", "secret", "create", "--replace=true",
+            name, str(source_file),
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise subprocess.CalledProcessError(
+                result.returncode, cmd, result.stdout, result.stderr
+            )
+
+    def remove_secret(self, name: str) -> None:
+        """Remove a Podman secret, ignoring errors.
+
+        Args:
+            name: Secret name.
+        """
+        subprocess.run(
+            ["podman", "secret", "rm", name],
+            capture_output=True,
+        )
+
+    def secret_exists(self, name: str) -> bool:
+        """Check if a Podman secret exists.
+
+        Args:
+            name: Secret name.
+
+        Returns:
+            True if secret exists.
+        """
+        result = subprocess.run(
+            ["podman", "secret", "inspect", name],
+            capture_output=True,
+        )
+        return result.returncode == 0
+
     def create_container(
         self,
         name: str,
@@ -50,6 +98,7 @@ class ContainerRunner:
         labels: dict[str, str] | None = None,
         entrypoint: str | None = None,
         command: list[str] | None = None,
+        secrets: list[str] | None = None,
     ) -> str:
         """Create a container without starting it.
 
@@ -63,6 +112,8 @@ class ContainerRunner:
             labels: Labels to attach to the container.
             entrypoint: Optional entrypoint override.
             command: Optional command to run (after image in podman create).
+            secrets: Optional list of secret specs (e.g.,
+                ["name,target=/path"]).
 
         Returns:
             Container ID.
@@ -84,6 +135,10 @@ class ContainerRunner:
 
         if network:
             cmd.extend(["--network", network])
+
+        if secrets:
+            for secret in secrets:
+                cmd.extend(["--secret", secret])
 
         cmd.extend(mounts)
 
