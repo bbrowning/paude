@@ -717,3 +717,165 @@ class TestPodmanBackendFindSessionForWorkspace:
         session = backend.find_session_for_workspace(Path("/home/user/my-project"))
 
         assert session is None
+
+
+class TestPodmanBackendGcpAdcSecret:
+    """Tests for GCP ADC secret handling."""
+
+    @patch("paude.backends.podman.Path")
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_create_session_creates_secret_when_adc_exists(
+        self, mock_runner_class: MagicMock, mock_path_class: MagicMock
+    ) -> None:
+        """create_session creates a Podman secret when ADC file exists."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = False
+        mock_runner_class.return_value = mock_runner
+
+        # Mock Path.home() to return a path where ADC exists
+        mock_home = MagicMock()
+        mock_adc = MagicMock()
+        mock_adc.is_file.return_value = True
+        mock_home.__truediv__ = lambda self, key: (
+            MagicMock(__truediv__=lambda self, k: MagicMock(__truediv__=lambda self, k2: mock_adc))
+        )
+        mock_path_class.home.return_value = mock_home
+
+        backend = PodmanBackend()
+        backend._runner = mock_runner
+
+        config = SessionConfig(
+            name="test-session",
+            workspace=Path("/home/user/project"),
+            image="paude:latest",
+        )
+        backend.create_session(config)
+
+        mock_runner.create_secret.assert_called_once()
+        assert mock_runner.create_secret.call_args[0][0] == "paude-gcp-adc"
+
+    @patch("paude.backends.podman.Path")
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_create_session_passes_secret_to_create_container(
+        self, mock_runner_class: MagicMock, mock_path_class: MagicMock
+    ) -> None:
+        """create_session passes the secret spec to create_container."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = False
+        mock_runner_class.return_value = mock_runner
+
+        mock_home = MagicMock()
+        mock_adc = MagicMock()
+        mock_adc.is_file.return_value = True
+        mock_home.__truediv__ = lambda self, key: (
+            MagicMock(__truediv__=lambda self, k: MagicMock(__truediv__=lambda self, k2: mock_adc))
+        )
+        mock_path_class.home.return_value = mock_home
+
+        backend = PodmanBackend()
+        backend._runner = mock_runner
+
+        config = SessionConfig(
+            name="test-session",
+            workspace=Path("/home/user/project"),
+            image="paude:latest",
+        )
+        backend.create_session(config)
+
+        call_kwargs = mock_runner.create_container.call_args[1]
+        expected_target = "/home/paude/.config/gcloud/application_default_credentials.json"
+        assert call_kwargs["secrets"] == [f"paude-gcp-adc,target={expected_target}"]
+
+    @patch("paude.backends.podman.Path")
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_create_session_skips_secret_when_adc_missing(
+        self, mock_runner_class: MagicMock, mock_path_class: MagicMock
+    ) -> None:
+        """create_session skips secret when ADC file does not exist."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = False
+        mock_runner_class.return_value = mock_runner
+
+        mock_home = MagicMock()
+        mock_adc = MagicMock()
+        mock_adc.is_file.return_value = False
+        mock_home.__truediv__ = lambda self, key: (
+            MagicMock(__truediv__=lambda self, k: MagicMock(__truediv__=lambda self, k2: mock_adc))
+        )
+        mock_path_class.home.return_value = mock_home
+
+        backend = PodmanBackend()
+        backend._runner = mock_runner
+
+        config = SessionConfig(
+            name="test-session",
+            workspace=Path("/home/user/project"),
+            image="paude:latest",
+        )
+        backend.create_session(config)
+
+        mock_runner.create_secret.assert_not_called()
+        call_kwargs = mock_runner.create_container.call_args[1]
+        assert call_kwargs["secrets"] is None
+
+    @patch("paude.backends.podman.Path")
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_create_session_cleans_up_secret_on_failure(
+        self, mock_runner_class: MagicMock, mock_path_class: MagicMock
+    ) -> None:
+        """create_session cleans up the secret when container creation fails."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = False
+        mock_runner.create_container.side_effect = RuntimeError("Container failed")
+        mock_runner_class.return_value = mock_runner
+
+        mock_home = MagicMock()
+        mock_adc = MagicMock()
+        mock_adc.is_file.return_value = True
+        mock_home.__truediv__ = lambda self, key: (
+            MagicMock(__truediv__=lambda self, k: MagicMock(__truediv__=lambda self, k2: mock_adc))
+        )
+        mock_path_class.home.return_value = mock_home
+
+        backend = PodmanBackend()
+        backend._runner = mock_runner
+
+        config = SessionConfig(
+            name="test-session",
+            workspace=Path("/home/user/project"),
+            image="paude:latest",
+        )
+
+        with pytest.raises(RuntimeError):
+            backend.create_session(config)
+
+        # Secret should be cleaned up on failure
+        mock_runner.remove_secret.assert_called_once_with("paude-gcp-adc")
+
+    @patch("paude.backends.podman.Path")
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_start_session_recreates_secret(
+        self, mock_runner_class: MagicMock, mock_path_class: MagicMock
+    ) -> None:
+        """start_session recreates the secret before starting."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = True
+        mock_runner.get_container_state.return_value = "exited"
+        mock_runner.attach_container.return_value = 0
+        mock_runner_class.return_value = mock_runner
+
+        mock_home = MagicMock()
+        mock_adc = MagicMock()
+        mock_adc.is_file.return_value = True
+        mock_home.__truediv__ = lambda self, key: (
+            MagicMock(__truediv__=lambda self, k: MagicMock(__truediv__=lambda self, k2: mock_adc))
+        )
+        mock_path_class.home.return_value = mock_home
+
+        backend = PodmanBackend()
+        backend._runner = mock_runner
+
+        backend.start_session("my-session")
+
+        mock_runner.create_secret.assert_called_once()
+        assert mock_runner.create_secret.call_args[0][0] == "paude-gcp-adc"

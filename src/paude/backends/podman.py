@@ -138,6 +138,24 @@ class PodmanBackend:
         """Get volume name for a session."""
         return f"paude-{session_name}-workspace"
 
+    def _ensure_gcp_adc_secret(self) -> str | None:
+        """Create or replace the GCP ADC Podman secret.
+
+        Returns:
+            Secret spec string for --secret, or None if ADC file missing.
+        """
+        adc_file = "application_default_credentials.json"
+        adc_path = Path.home() / ".config" / "gcloud" / adc_file
+        if not adc_path.is_file():
+            return None
+
+        secret_name = "paude-gcp-adc"  # noqa: S105
+        target = "/home/paude/.config/gcloud/application_default_credentials.json"
+
+        self._runner.create_secret(secret_name, adc_path)
+
+        return f"{secret_name},target={target}"
+
     def create_session(self, config: SessionConfig) -> Session:
         """Create a new session (does not start it).
 
@@ -196,6 +214,10 @@ class PodmanBackend:
         if claude_args:
             env["PAUDE_CLAUDE_ARGS"] = " ".join(claude_args)
 
+        # Create GCP ADC secret (if credentials exist)
+        secret_spec = self._ensure_gcp_adc_secret()
+        secrets = [secret_spec] if secret_spec else None
+
         # Create container (stopped)
         # Use sleep infinity as entrypoint to keep container alive
         # The actual session setup happens when attaching via exec
@@ -213,10 +235,12 @@ class PodmanBackend:
                 labels=labels,
                 entrypoint="sleep",
                 command=["infinity"],
+                secrets=secrets,
             )
         except Exception:
-            # Cleanup volume on failure
+            # Cleanup volume and secret on failure
             self._runner.remove_volume(volume_name, force=True)
+            self._runner.remove_secret("paude-gcp-adc")
             raise
 
         print(f"Session '{session_name}' created (stopped).", file=sys.stderr)
@@ -273,9 +297,10 @@ class PodmanBackend:
         print(f"Removing container {container_name}...", file=sys.stderr)
         self._runner.remove_container(container_name, force=True)
 
-        # Remove volume
+        # Remove volume and secret
         print(f"Removing volume {volume_name}...", file=sys.stderr)
         self._runner.remove_volume(volume_name, force=True)
+        self._runner.remove_secret("paude-gcp-adc")
 
         print(f"Session '{name}' deleted.", file=sys.stderr)
 
@@ -308,6 +333,9 @@ class PodmanBackend:
             return self.connect_session(name)
 
         print(f"Starting session '{name}'...", file=sys.stderr)
+
+        # Recreate GCP ADC secret with latest credentials
+        self._ensure_gcp_adc_secret()
 
         # Start the container
         self._runner.start_container(container_name)
