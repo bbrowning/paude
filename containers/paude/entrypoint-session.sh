@@ -183,18 +183,22 @@ fi
 if [[ -d /tmp/claude.seed ]] && [[ ! -d /credentials ]]; then
     mkdir -p "$HOME/.claude"
     chmod g+rwX "$HOME/.claude" 2>/dev/null || true
-    for f in /tmp/claude.seed/*; do
-        if [[ -f "$f" || -L "$f" ]]; then
-            filename=$(basename "$f")
-            if [[ "$filename" == "claude.json" ]]; then
-                cp -L "$f" "$HOME/.claude.json" 2>/dev/null || true
-                chmod g+rw "$HOME/.claude.json" 2>/dev/null || true
-            else
-                cp -L "$f" "$HOME/.claude/" 2>/dev/null || true
-            fi
-        fi
-    done
-    chmod -R g+rw "$HOME/.claude" 2>/dev/null || true
+
+    # Copy entire seed directory structure (includes commands/, plugins/, etc.)
+    cp -a /tmp/claude.seed/. "$HOME/.claude/" 2>/dev/null || true
+
+    # Handle claude.json specially - goes to ~/.claude.json
+    if [[ -f "$HOME/.claude/claude.json" ]]; then
+        mv "$HOME/.claude/claude.json" "$HOME/.claude.json" 2>/dev/null || true
+        chmod g+rw "$HOME/.claude.json" 2>/dev/null || true
+    fi
+
+    # Ensure plugins directory is writable (Claude may update metadata)
+    if [[ -d "$HOME/.claude/plugins" ]]; then
+        chmod -R g+rwX "$HOME/.claude/plugins" 2>/dev/null || true
+    fi
+
+    chmod -R g+rwX "$HOME/.claude" 2>/dev/null || true
 fi
 
 # Also check for separate claude.json.seed mount (Podman backend)
