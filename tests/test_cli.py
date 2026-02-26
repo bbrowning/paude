@@ -203,6 +203,84 @@ def test_backend_openshift_shows_openshift_options():
     assert "--openshift-namespace:" in result.stdout
 
 
+def test_github_domains_in_default_dry_run():
+    """GitHub domains appear in dry-run output by default (github is in DEFAULT_ALIASES)."""
+    result = runner.invoke(app, ["create", "--dry-run"])
+    assert result.exit_code == 0
+    assert "github" in result.stdout
+
+
+@patch("paude.cli.find_session_backend")
+def test_start_accepts_github_token_flag(mock_find_session_backend: MagicMock):
+    """paude start accepts --github-token flag (session not found is expected)."""
+    mock_find_session_backend.return_value = None  # Session not found
+    result = runner.invoke(app, ["start", "test-session", "--github-token", "ghp_test123"])
+    assert "No such option" not in result.output
+    assert result.exit_code == 1  # Session not found is expected
+
+
+@patch("paude.cli.find_session_backend")
+def test_connect_accepts_github_token_flag(mock_find_session_backend: MagicMock):
+    """paude connect accepts --github-token flag (session not found is expected)."""
+    mock_find_session_backend.return_value = None  # Session not found
+    result = runner.invoke(app, ["connect", "test-session", "--github-token", "ghp_test123"])
+    assert "No such option" not in result.output
+    assert result.exit_code == 1  # Session not found is expected
+
+
+@patch("paude.cli.find_session_backend")
+def test_start_passes_github_token_to_backend(mock_find_session_backend: MagicMock):
+    """paude start passes the resolved github_token to backend.start_session()."""
+    mock_backend = MagicMock()
+    mock_backend.start_session.return_value = 0
+    mock_find_session_backend.return_value = (MagicMock(), mock_backend)
+
+    runner.invoke(app, ["start", "test-session", "--github-token", "ghp_test123"])
+
+    mock_backend.start_session.assert_called_once_with(
+        "test-session", github_token="ghp_test123"  # noqa: S106
+    )
+
+
+@patch("paude.cli.find_session_backend")
+def test_connect_passes_github_token_to_backend(mock_find_session_backend: MagicMock):
+    """paude connect passes the resolved github_token to backend.connect_session()."""
+    mock_backend = MagicMock()
+    mock_backend.connect_session.return_value = 0
+    mock_find_session_backend.return_value = (MagicMock(), mock_backend)
+
+    runner.invoke(app, ["connect", "test-session", "--github-token", "ghp_test456"])
+
+    mock_backend.connect_session.assert_called_once_with(
+        "test-session", github_token="ghp_test456"  # noqa: S106
+    )
+
+
+@patch("paude.cli.find_session_backend")
+def test_start_reads_paude_github_token_env(
+    mock_find_session_backend: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """paude start reads PAUDE_GITHUB_TOKEN env var when --github-token not provided."""
+    monkeypatch.setenv("PAUDE_GITHUB_TOKEN", "ghp_from_env")
+    mock_backend = MagicMock()
+    mock_backend.start_session.return_value = 0
+    mock_find_session_backend.return_value = (MagicMock(), mock_backend)
+
+    runner.invoke(app, ["start", "test-session"])
+
+    mock_backend.start_session.assert_called_once_with(
+        "test-session", github_token="ghp_from_env"  # noqa: S106
+    )
+
+
+def test_create_does_not_accept_github_token():
+    """paude create does NOT accept --github-token (token belongs on start/connect)."""
+    result = runner.invoke(app, ["create", "--dry-run", "--github-token", "ghp_test"])
+    assert result.exit_code != 0
+    assert "No such option" in result.output or "Error" in result.output
+
+
 def test_bare_paude_shows_list():
     """Bare 'paude' command shows session list with helpful hints."""
     result = runner.invoke(app, [])
@@ -548,7 +626,7 @@ class TestConnectMultiBackend:
 
         assert result.exit_code == 0
         assert "Connecting to 'os-session' (openshift)..." in result.output
-        mock_os_backend.connect_session.assert_called_once_with("os-session")
+        mock_os_backend.connect_session.assert_called_once_with("os-session", github_token=None)
 
     @patch("paude.session_discovery.PodmanBackend")
     @patch("paude.session_discovery.OpenShiftBackend")
@@ -576,7 +654,7 @@ class TestConnectMultiBackend:
 
         assert result.exit_code == 0
         assert "Connecting to 'podman-session' (podman)..." in result.output
-        mock_podman.connect_session.assert_called_once_with("podman-session")
+        mock_podman.connect_session.assert_called_once_with("podman-session", github_token=None)
 
     @patch("paude.session_discovery.PodmanBackend")
     @patch("paude.session_discovery.OpenShiftBackend")
@@ -667,7 +745,7 @@ class TestConnectMultiBackend:
 
         assert result.exit_code == 0
         assert "Connecting to 'workspace-session' (podman)..." in result.output
-        mock_podman.connect_session.assert_called_once_with("workspace-session")
+        mock_podman.connect_session.assert_called_once_with("workspace-session", github_token=None)
         # OpenShift should not be checked since podman had workspace match
         mock_os_backend.find_session_for_workspace.assert_not_called()
 
@@ -700,7 +778,7 @@ class TestConnectMultiBackend:
 
         assert result.exit_code == 0
         assert "Connecting to 'os-workspace-session' (openshift)..." in result.output
-        mock_os_backend.connect_session.assert_called_once_with("os-workspace-session")
+        mock_os_backend.connect_session.assert_called_once_with("os-workspace-session", github_token=None)
 
     @patch("paude.session_discovery.PodmanBackend")
     @patch("paude.session_discovery.OpenShiftBackend")
@@ -724,7 +802,7 @@ class TestConnectMultiBackend:
         result = runner.invoke(app, ["connect"])
 
         assert result.exit_code == 0
-        mock_os_backend.connect_session.assert_called_once_with("os-session")
+        mock_os_backend.connect_session.assert_called_once_with("os-session", github_token=None)
 
     @patch("paude.session_discovery.PodmanBackend")
     @patch("paude.session_discovery.OpenShiftBackend")
@@ -748,7 +826,7 @@ class TestConnectMultiBackend:
         result = runner.invoke(app, ["connect"])
 
         assert result.exit_code == 0
-        mock_podman.connect_session.assert_called_once_with("podman-session")
+        mock_podman.connect_session.assert_called_once_with("podman-session", github_token=None)
 
     @patch("paude.session_discovery.PodmanBackend")
     @patch("paude.session_discovery.OpenShiftBackend")
@@ -779,7 +857,7 @@ class TestConnectMultiBackend:
         result = runner.invoke(app, ["connect"])
 
         assert result.exit_code == 0
-        mock_os_backend.connect_session.assert_called_once_with("running-session")
+        mock_os_backend.connect_session.assert_called_once_with("running-session", github_token=None)
 
 
 class TestStartMultiBackend:

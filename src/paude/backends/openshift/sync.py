@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 from paude.backends.openshift.exceptions import OcTimeoutError, OpenShiftError
@@ -120,15 +122,53 @@ class ConfigSyncer:
         )
         return result.returncode == 0
 
-    def sync_credentials(self, pod_name: str, verbose: bool = False) -> None:
+    def _sync_github_token(self, pod_name: str, github_token: str | None) -> None:
+        """Sync GitHub token to the pod's credentials directory.
+
+        Writes the token to a temporary file and copies it to the pod's
+        /credentials/github_token path in the tmpfs. The tempfile is deleted
+        after the copy. The token is never written as a permanent host file.
+
+        Args:
+            pod_name: Name of the pod to sync to.
+            github_token: Token value, or None to read from PAUDE_GITHUB_TOKEN env.
+        """
+        config_path = "/credentials"
+        token = github_token or os.environ.get("PAUDE_GITHUB_TOKEN")
+        if not token:
+            return
+
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".token") as tmp:
+                tmp.write(token)
+                tmp.flush()
+                self._oc.run(
+                    "cp",
+                    tmp.name,
+                    f"{pod_name}:{config_path}/github_token",
+                    "-n",
+                    self._namespace,
+                    check=False,
+                )
+        except Exception:  # noqa: S110
+            pass
+
+    def sync_credentials(
+        self,
+        pod_name: str,
+        verbose: bool = False,
+        github_token: str | None = None,
+    ) -> None:
         """Refresh gcloud credentials on the pod (fast, every connect).
 
         Only syncs gcloud credential files. Used on reconnects when full
-        config is already present.
+        config is already present. Also syncs GitHub token if available.
 
         Args:
             pod_name: Name of the pod to sync to.
             verbose: Whether to show sync progress.
+            github_token: Optional GitHub token to inject into pod tmpfs.
+                Falls back to PAUDE_GITHUB_TOKEN env var if not provided.
         """
         home = Path.home()
         config_path = "/credentials"
@@ -156,6 +196,8 @@ class ConfigSyncer:
                     )
                 except Exception:  # noqa: S110
                     pass
+
+        self._sync_github_token(pod_name, github_token)
 
         self._oc.run(
             "exec",
@@ -352,15 +394,22 @@ class ConfigSyncer:
                 file=sys.stderr,
             )
 
-    def sync_full_config(self, pod_name: str, verbose: bool = False) -> None:
+    def sync_full_config(
+        self,
+        pod_name: str,
+        verbose: bool = False,
+        github_token: str | None = None,
+    ) -> None:
         """Sync all configuration to pod /credentials/ directory.
 
         Full sync including gcloud credentials, claude config, gitconfig,
-        and global gitignore.
+        global gitignore, and optional GitHub token.
 
         Args:
             pod_name: Name of the pod to sync to.
             verbose: Whether to show sync progress.
+            github_token: Optional GitHub token to inject into pod tmpfs.
+                Falls back to PAUDE_GITHUB_TOKEN env var if not provided.
         """
         print("Syncing configuration to pod...", file=sys.stderr)
 
@@ -369,6 +418,7 @@ class ConfigSyncer:
         self._sync_claude_config(pod_name, verbose=verbose)
         self._sync_gitconfig(pod_name, verbose=verbose)
         self._sync_global_gitignore(pod_name, verbose=verbose)
+        self._sync_github_token(pod_name, github_token)
         self._finalize_sync(pod_name)
 
         print("Configuration synced.", file=sys.stderr)

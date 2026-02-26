@@ -37,6 +37,15 @@ class TestExpandDomains:
         for domain in DOMAIN_ALIASES["pypi"]:
             assert domain in result
 
+    def test_expand_default_includes_github(self):
+        """'default' expands to include github domains."""
+        result = expand_domains(["default"])
+        assert result is not None
+
+        # Should include all github domains
+        for domain in DOMAIN_ALIASES["github"]:
+            assert domain in result
+
     def test_expand_vertexai_alias(self):
         """'vertexai' expands to vertexai domains."""
         result = expand_domains(["vertexai"])
@@ -201,3 +210,45 @@ class TestIsUnrestricted:
     def test_domain_list_is_restricted(self):
         """A list of domains is NOT unrestricted."""
         assert is_unrestricted([".googleapis.com", ".pypi.org"]) is False
+
+
+class TestGithubAlias:
+    """Tests for the 'github' domain alias."""
+
+    def test_github_alias_expands_to_correct_domains(self):
+        """'github' expands to github.com, api.github.com, raw.githubusercontent.com."""
+        result = expand_domains(["github"])
+        assert result is not None
+        assert "github.com" in result
+        assert "api.github.com" in result
+        assert "raw.githubusercontent.com" in result
+
+    def test_github_alias_combined_with_default(self):
+        """'default' + 'github' includes vertexai, pypi, and github domains."""
+        result = expand_domains(["default", "github"])
+        assert result is not None
+
+        # Should include all vertexai domains
+        for domain in DOMAIN_ALIASES["vertexai"]:
+            assert domain in result
+
+        # Should include all pypi domains
+        for domain in DOMAIN_ALIASES["pypi"]:
+            assert domain in result
+
+        # Should include all github domains
+        for domain in DOMAIN_ALIASES["github"]:
+            assert domain in result
+
+    def test_github_alias_in_format_display(self):
+        """format_domains_for_display recognizes github alias and shows alias name."""
+        domains = expand_domains(["github"])
+        assert domains is not None
+        result = format_domains_for_display(domains)
+        assert "github" in result
+
+    def test_github_domains_no_duplicates(self):
+        """expand_domains(['github', 'github']) has no duplicates."""
+        result = expand_domains(["github", "github"])
+        assert result is not None
+        assert len(result) == len(set(result))

@@ -43,6 +43,16 @@ class TestBuildEnvironment:
         assert "CLAUDE_CODE_USE_VERTEX" not in env
         assert "ANTHROPIC_VERTEX_PROJECT_ID" not in env
 
+    def test_gh_token_not_auto_propagated(self, monkeypatch: pytest.MonkeyPatch):
+        """GH_TOKEN from host environment is NOT passed into the container.
+
+        Security test: GH_TOKEN must only be injected explicitly via --github-token,
+        never automatically from the host environment.
+        """
+        monkeypatch.setenv("GH_TOKEN", "secret123")
+        env = build_environment()
+        assert "GH_TOKEN" not in env
+
 
 class TestBuildProxyEnvironment:
     """Tests for build_proxy_environment."""

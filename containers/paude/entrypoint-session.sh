@@ -161,6 +161,19 @@ install_claude_code() {
 # Also keep home .local/bin for tools installed during image build
 export PATH="/pvc/.local/bin:$HOME/.local/bin:$PATH"
 
+# Set up GitHub token from credentials file if available (OpenShift path)
+if [[ -f /credentials/github_token ]]; then
+    GH_TOKEN=$(cat /credentials/github_token)
+    export GH_TOKEN
+    export GH_CONFIG_DIR="/tmp/gh-config"
+    mkdir -p "$GH_CONFIG_DIR" 2>/dev/null || true
+fi
+# For Podman: GH_TOKEN may be set via podman exec -e; just ensure GH_CONFIG_DIR is set
+if [[ -n "${GH_TOKEN:-}" ]] && [[ -z "${GH_CONFIG_DIR:-}" ]]; then
+    export GH_CONFIG_DIR="/tmp/gh-config"
+    mkdir -p "$GH_CONFIG_DIR" 2>/dev/null || true
+fi
+
 # Install Claude Code if needed (skip if PAUDE_SKIP_CLAUDE_INSTALL is set, useful for CI)
 if [[ -z "${PAUDE_SKIP_CLAUDE_INSTALL:-}" ]]; then
     install_claude_code

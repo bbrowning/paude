@@ -291,7 +291,42 @@ The default allowlist includes:
 - **vertexai**: Vertex AI and Google OAuth domains (`.googleapis.com`, `.google.com`)
 - **pypi**: Python package repositories (`.pypi.org`, `.pythonhosted.org`)
 
-**Special values**: `all` (unrestricted), `default` (vertexai + pypi), `vertexai`, `pypi`. Specifying domains without `default` replaces the allowlist entirely.
+**Special values**: `all` (unrestricted), `default` (vertexai + pypi), `vertexai`, `pypi`, `github`. Specifying domains without `default` replaces the allowlist entirely.
+
+### GitHub CLI Access
+
+Paude installs the `gh` CLI in the container and includes GitHub domains in the default network allowlist. To use `gh` for read-only operations (e.g., fetching issues, PRs, or code), set a fine-grained personal access token before connecting:
+
+```bash
+# Set once in your shell profile, or export before running paude:
+export PAUDE_GITHUB_TOKEN=ghp_yourtoken
+
+paude start my-project
+# Inside the container, gh is authenticated automatically
+```
+
+Or pass it explicitly for a single session:
+
+```bash
+paude start --github-token ghp_yourtoken my-project
+paude connect --github-token ghp_yourtoken my-project
+```
+
+The token is injected at connect time only:
+- **Podman**: passed as `-e GH_TOKEN=...` to `podman exec` (not stored in the container definition)
+- **OpenShift**: written to `/credentials/github_token` in the pod's tmpfs, wiped by the credential watchdog on inactivity
+- `GH_CONFIG_DIR=/tmp/gh-config` ensures no cached host credentials are ever consulted
+
+**Security notes**:
+- The host's `GH_TOKEN` environment variable is **never** auto-propagated to the container
+- Use a **fine-grained PAT** scoped to read-only permissions on specific repositories
+- Do not use tokens with write access; they could allow Claude to push code to GitHub
+- The token is never written to host disk as a paude-managed file
+
+Create a fine-grained read-only PAT at:
+https://github.com/settings/tokens?type=beta
+
+Select only the repositories Claude should access, and grant only **Contents: Read-only** (plus **Metadata: Read-only** which is always required).
 
 ### Workflow Modes
 
@@ -404,7 +439,8 @@ The container intentionally restricts certain operations:
 | `~/.gitconfig` | read-only | Git identity |
 | `~/.config/git/ignore` | read-only | Global gitignore patterns |
 | SSH keys | not mounted | Prevents git push via SSH |
-| GitHub CLI config | not mounted | Prevents gh operations |
+| GitHub CLI config | not mounted (uses /tmp/gh-config) | Prevents cached host credentials |
+| `GH_TOKEN` (host) | never propagated | Use `PAUDE_GITHUB_TOKEN` or `--github-token` on start/connect |
 | Git credentials | not mounted | Prevents HTTPS git push |
 
 ### Verified Attack Vectors
@@ -416,7 +452,7 @@ These exfiltration paths have been tested and confirmed blocked:
 | HTTP/HTTPS exfiltration | Blocked | Internal network has no external DNS; proxy allowlists only Google domains |
 | Git push via SSH | Blocked | No `~/.ssh` mounted; DNS resolution fails anyway |
 | Git push via HTTPS | Blocked | No credential helpers; no stored credentials; DNS blocked |
-| GitHub CLI operations | Blocked | `gh` command not installed in container |
+| GitHub CLI write ops | Relies on token scope — use a read-only fine-grained PAT | Use read-only PAT via `PAUDE_GITHUB_TOKEN`; host `GH_TOKEN` never propagated |
 | Modify cloud credentials | Blocked | gcloud directory mounted read-only |
 | Escape container | Blocked | Non-root user; standard Podman isolation |
 

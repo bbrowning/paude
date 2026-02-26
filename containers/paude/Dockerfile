@@ -44,6 +44,11 @@ ENV LC_ALL=en_US.UTF-8
 # Install uv package manager system-wide (available to root for pip_install builds)
 RUN curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh
 
+# Install GitHub CLI (gh)
+RUN curl -fsSL https://cli.github.com/packages/rpm/gh-cli.repo -o /etc/yum.repos.d/gh-cli.repo && \
+    dnf install -y gh && \
+    dnf clean all
+
 # Create non-root user with GID 0 for OpenShift compatibility
 RUN useradd -m -s /bin/bash -g 0 paude && \
     chmod -R g+rwX /home/paude && \

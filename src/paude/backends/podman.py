@@ -279,13 +279,15 @@ class PodmanBackend:
 
         print(f"Session '{name}' deleted.", file=sys.stderr)
 
-    def start_session(self, name: str) -> int:
+    def start_session(self, name: str, github_token: str | None = None) -> int:
         """Start a session and connect to it.
 
         Starts the container and attaches to it via tmux.
 
         Args:
             name: Session name.
+            github_token: Optional GitHub token to inject via podman exec env.
+                Not stored in the container definition.
 
         Returns:
             Exit code from the connected session.
@@ -305,7 +307,7 @@ class PodmanBackend:
                 f"Session '{name}' is already running, connecting...",
                 file=sys.stderr,
             )
-            return self.connect_session(name)
+            return self.connect_session(name, github_token=github_token)
 
         print(f"Starting session '{name}'...", file=sys.stderr)
 
@@ -313,9 +315,11 @@ class PodmanBackend:
         self._runner.start_container(container_name)
 
         # Attach to the container via tmux entrypoint
+        extra_env = {"GH_TOKEN": github_token} if github_token else None
         return self._runner.attach_container(
             container_name,
             entrypoint="/usr/local/bin/entrypoint.sh",
+            extra_env=extra_env,
         )
 
     def stop_session(self, name: str) -> None:
@@ -340,11 +344,13 @@ class PodmanBackend:
         self._runner.stop_container_graceful(container_name)
         print(f"Session '{name}' stopped.", file=sys.stderr)
 
-    def connect_session(self, name: str) -> int:
+    def connect_session(self, name: str, github_token: str | None = None) -> int:
         """Attach to a running session.
 
         Args:
             name: Session name.
+            github_token: Optional GitHub token to inject via podman exec env.
+                Not stored in the container definition.
 
         Returns:
             Exit code from the attached session.
@@ -377,9 +383,11 @@ class PodmanBackend:
             print("", file=sys.stderr)
 
         print(f"Connecting to session '{name}'...", file=sys.stderr)
+        extra_env = {"GH_TOKEN": github_token} if github_token else None
         return self._runner.attach_container(
             container_name,
             entrypoint="/usr/local/bin/entrypoint.sh",
+            extra_env=extra_env,
         )
 
     def list_sessions(self) -> list[Session]:

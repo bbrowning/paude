@@ -778,29 +778,37 @@ class OpenShiftBackend:
         self,
         pod_name: str,
         verbose: bool = False,
+        github_token: str | None = None,
     ) -> None:
         """Refresh gcloud credentials on the pod (delegates to ConfigSyncer)."""
-        self._syncer.sync_credentials(pod_name, verbose=verbose)
+        self._syncer.sync_credentials(
+            pod_name, verbose=verbose, github_token=github_token
+        )
 
     def _sync_config_to_pod(
         self,
         pod_name: str,
         verbose: bool = False,
+        github_token: str | None = None,
     ) -> None:
         """Sync all configuration to pod (delegates to ConfigSyncer)."""
-        self._syncer.sync_full_config(pod_name, verbose=verbose)
+        self._syncer.sync_full_config(
+            pod_name, verbose=verbose, github_token=github_token
+        )
 
     def _rewrite_plugin_paths(self, pod_name: str, config_path: str) -> None:
         """Rewrite plugin paths (delegates to ConfigSyncer)."""
         self._syncer._rewrite_plugin_paths(pod_name, config_path)
 
-    def start_session(self, name: str) -> int:
+    def start_session(self, name: str, github_token: str | None = None) -> int:
         """Start a session and connect to it.
 
         Scales StatefulSet to 1 and connects.
 
         Args:
             name: Session name.
+            github_token: Optional GitHub token to inject into pod credentials tmpfs.
+                Falls back to PAUDE_GITHUB_TOKEN env var if not provided.
 
         Returns:
             Exit code from the connected session.
@@ -844,7 +852,7 @@ class OpenShiftBackend:
         # This ensures credentials are refreshed on every connect, not just start.
 
         # Connect to session
-        return self.connect_session(name)
+        return self.connect_session(name, github_token=github_token)
 
     def stop_session(self, name: str) -> None:
         """Stop a session (preserves volume).
@@ -879,7 +887,7 @@ class OpenShiftBackend:
 
         print(f"Session '{name}' stopped.", file=sys.stderr)
 
-    def connect_session(self, name: str) -> int:
+    def connect_session(self, name: str, github_token: str | None = None) -> int:
         """Attach to a running session.
 
         On first connect: syncs full configuration (gcloud, claude, git).
@@ -887,6 +895,8 @@ class OpenShiftBackend:
 
         Args:
             name: Session name.
+            github_token: Optional GitHub token to inject into pod credentials tmpfs.
+                Falls back to PAUDE_GITHUB_TOKEN env var if not provided.
 
         Returns:
             Exit code from the attached session.
@@ -917,10 +927,14 @@ class OpenShiftBackend:
         # Check if this is first connect or reconnect
         if self._is_config_synced(pod_name):
             # Reconnect: only refresh gcloud credentials (fast)
-            self._sync_credentials_to_pod(pod_name, verbose=False)
+            self._sync_credentials_to_pod(
+                pod_name, verbose=False, github_token=github_token
+            )
         else:
             # First connect: full config sync (gcloud + claude + git)
-            self._sync_config_to_pod(pod_name, verbose=False)
+            self._sync_config_to_pod(
+                pod_name, verbose=False, github_token=github_token
+            )
 
         # Check if workspace is empty (no .git directory)
         check_result = self._run_oc(

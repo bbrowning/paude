@@ -16,10 +16,16 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
         ".pypi.org",
         ".pythonhosted.org",
     ],
+    "github": [
+        "github.com",
+        "api.github.com",
+        "raw.githubusercontent.com",
+        "codeload.github.com",
+    ],
 }
 
 # Default aliases when --allowed-domains is not specified
-DEFAULT_ALIASES = ["vertexai", "pypi"]
+DEFAULT_ALIASES = ["vertexai", "pypi", "github"]
 
 
 def expand_domains(domains: list[str]) -> list[str] | None:

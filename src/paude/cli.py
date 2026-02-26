@@ -122,8 +122,8 @@ COMMANDS:
 OPTIONS (for 'create' command):
     --yolo              Enable YOLO mode (skip all permission prompts)
     --allowed-domains   Domains to allow network access (repeatable).
-                        Special: 'all' (unrestricted), 'default' (vertexai+pypi)
-                        Aliases: 'vertexai', 'pypi'
+                        Special: 'all' (unrestricted), 'default' (vertexai+pypi+github)
+                        Aliases: 'vertexai', 'pypi', 'github'
                         Custom domains REPLACE defaults; use with 'default' to add.
     --rebuild           Force rebuild of workspace container image
     --dry-run           Show configuration without creating session
@@ -133,6 +133,12 @@ OPTIONS (for 'create' command):
     --openshift-context Kubeconfig context for OpenShift
     --openshift-namespace
                         OpenShift namespace (default: current context)
+
+OPTIONS (for 'start' and 'connect' commands):
+    --github-token      GitHub personal access token for gh CLI.
+                        Use a fine-grained read-only PAT.
+                        Also reads PAUDE_GITHUB_TOKEN env var (flag takes priority).
+                        Token is injected at connect time only, never stored.
 
 OPTIONS (global):
     -h, --help          Show this help message and exit
@@ -182,9 +188,10 @@ EXAMPLES:
                                     Create session on OpenShift cluster
 
 SECURITY:
-    By default, paude runs with network restricted to Vertex AI and PyPI only.
+    By default, paude runs with network restricted to Vertex AI, PyPI, and GitHub.
     Use --allowed-domains all to permit all network access (enables data exfil).
-    Combining --yolo with --allowed-domains all is maximum risk mode."""
+    Combining --yolo with --allowed-domains all is maximum risk mode.
+    PAUDE_GITHUB_TOKEN is explicit only; host GH_TOKEN is never auto-propagated."""
     typer.echo(help_text)
 
 
@@ -657,15 +664,30 @@ def session_start(
             help="OpenShift namespace (default: current context namespace).",
         ),
     ] = None,
+    github_token: Annotated[
+        str | None,
+        typer.Option(
+            "--github-token",
+            help=(
+                "GitHub personal access token for gh CLI. "
+                "Use a fine-grained read-only PAT. "
+                "Also reads PAUDE_GITHUB_TOKEN env var (this flag takes priority). "
+                "Token is injected at connect time only, never stored."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Start a session and connect to it."""
+    # Resolve token: explicit flag takes priority over env var
+    resolved_token = github_token or os.environ.get("PAUDE_GITHUB_TOKEN")
+
     # Auto-detect backend if name is provided but backend is not
     if name and backend is None:
         result = find_session_backend(name, openshift_context, openshift_namespace)
         if result:
             backend, backend_obj = result
             try:
-                exit_code = backend_obj.start_session(name)  # type: ignore[attr-defined]
+                exit_code = backend_obj.start_session(name, github_token=resolved_token)  # type: ignore[attr-defined]
                 raise typer.Exit(exit_code)
             except Exception as e:
                 typer.echo(f"Error starting session: {e}", err=True)
@@ -681,7 +703,9 @@ def session_start(
         if workspace_match:
             ws_session, ws_backend = workspace_match
             typer.echo(f"Starting '{ws_session.name}' ({ws_session.backend_type})...")
-            exit_code = ws_backend.start_session(ws_session.name)
+            exit_code = ws_backend.start_session(
+                ws_session.name, github_token=resolved_token
+            )
             raise typer.Exit(exit_code)
 
         all_sessions = collect_all_sessions(openshift_context, openshift_namespace)
@@ -694,7 +718,9 @@ def session_start(
         if len(all_sessions) == 1:
             session, backend_obj = all_sessions[0]
             typer.echo(f"Starting '{session.name}' ({session.backend_type})...")
-            exit_code = backend_obj.start_session(session.name)
+            exit_code = backend_obj.start_session(
+                session.name, github_token=resolved_token
+            )
             raise typer.Exit(exit_code)
         else:
             typer.echo(
@@ -718,7 +744,9 @@ def session_start(
                 raise typer.Exit(1)
 
         try:
-            exit_code = backend_instance.start_session(name)
+            exit_code = backend_instance.start_session(
+                name, github_token=resolved_token
+            )
             raise typer.Exit(exit_code)
         except SessionNotFoundError as e:
             typer.echo(f"Error: {e}", err=True)
@@ -738,7 +766,7 @@ def session_start(
                 raise typer.Exit(1)
 
         try:
-            exit_code = os_backend.start_session(name)
+            exit_code = os_backend.start_session(name, github_token=resolved_token)
             raise typer.Exit(exit_code)
         except OpenshiftSessionNotFoundError as e:
             typer.echo(f"Error: {e}", err=True)
@@ -896,14 +924,29 @@ def session_connect(
             help="OpenShift namespace (default: current context namespace).",
         ),
     ] = None,
+    github_token: Annotated[
+        str | None,
+        typer.Option(
+            "--github-token",
+            help=(
+                "GitHub personal access token for gh CLI. "
+                "Use a fine-grained read-only PAT. "
+                "Also reads PAUDE_GITHUB_TOKEN env var (this flag takes priority). "
+                "Token is injected at connect time only, never stored."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Attach to a running session."""
+    # Resolve token: explicit flag takes priority over env var
+    resolved_token = github_token or os.environ.get("PAUDE_GITHUB_TOKEN")
+
     # Auto-detect backend if name is provided but backend is not
     if name and backend is None:
         result = find_session_backend(name, openshift_context, openshift_namespace)
         if result:
             backend, backend_obj = result
-            exit_code = backend_obj.connect_session(name)  # type: ignore[attr-defined]
+            exit_code = backend_obj.connect_session(name, github_token=resolved_token)  # type: ignore[attr-defined]
             raise typer.Exit(exit_code)
         else:
             typer.echo(f"Session '{name}' not found.", err=True)
@@ -920,7 +963,9 @@ def session_connect(
             typer.echo(
                 f"Connecting to '{ws_session.name}' ({ws_session.backend_type})..."
             )
-            exit_code = ws_backend.connect_session(ws_session.name)
+            exit_code = ws_backend.connect_session(
+                ws_session.name, github_token=resolved_token
+            )
             raise typer.Exit(exit_code)
 
         all_running = collect_all_sessions(
@@ -938,7 +983,9 @@ def session_connect(
         if len(all_running) == 1:
             session, backend_obj = all_running[0]
             typer.echo(f"Connecting to '{session.name}' ({session.backend_type})...")
-            exit_code = backend_obj.connect_session(session.name)
+            exit_code = backend_obj.connect_session(
+                session.name, github_token=resolved_token
+            )
             raise typer.Exit(exit_code)
         else:
             typer.echo(
@@ -966,7 +1013,7 @@ def session_connect(
             if not name:
                 raise typer.Exit(1)
 
-        exit_code = backend_instance.connect_session(name)
+        exit_code = backend_instance.connect_session(name, github_token=resolved_token)
         raise typer.Exit(exit_code)
     else:
         openshift_config = OpenShiftConfig(
@@ -979,7 +1026,7 @@ def session_connect(
             if not name:
                 raise typer.Exit(1)
 
-        exit_code = os_backend.connect_session(name)
+        exit_code = os_backend.connect_session(name, github_token=resolved_token)
         raise typer.Exit(exit_code)
 
 

@@ -26,3 +26,6 @@ wheels/
 htmlcov/
 .venv/
 venv/
+
+# Claude Code internal directories
+.claude/worktrees/

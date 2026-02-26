@@ -179,18 +179,26 @@ class ContainerRunner:
         self,
         name: str,
         entrypoint: str | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> int:
         """Attach to a running container.
 
         Args:
             name: Container name.
             entrypoint: Optional command to exec into.
+            extra_env: Optional extra environment variables to pass to exec.
+                Only applies when entrypoint is provided (podman exec mode).
+                These env vars are NOT stored in the container definition.
 
         Returns:
             Exit code from the attached session.
         """
         if entrypoint:
-            cmd = ["podman", "exec", "-it", name, entrypoint]
+            cmd = ["podman", "exec", "-it"]
+            if extra_env:
+                for key, value in extra_env.items():
+                    cmd.extend(["-e", f"{key}={value}"])
+            cmd.extend([name, entrypoint])
         else:
             cmd = ["podman", "attach", name]
 
