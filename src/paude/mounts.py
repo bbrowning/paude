@@ -31,12 +31,13 @@ def build_mounts(workspace: Path, home: Path) -> list[str]:
     Note: Workspace is NOT mounted here - it uses a named volume at /pvc/workspace.
     Users sync code via git remote (paude remote add + git push/pull).
 
+    Note: gcloud ADC credentials are injected via Podman secrets, not bind mounts.
+
     Mounts (in order):
-    1. gcloud config (ro, if exists)
-    2. Claude seed directory (ro, if exists)
-    3. Plugins at original host path (ro, if exists)
-    4. gitconfig (ro, if exists)
-    5. claude.json seed (ro, if exists)
+    1. Claude seed directory (ro, if exists)
+    2. Plugins at original host path (ro, if exists)
+    3. gitconfig (ro, if exists)
+    4. claude.json seed (ro, if exists)
 
     Args:
         workspace: Path to the workspace directory (for reference, not mounted).
@@ -46,12 +47,6 @@ def build_mounts(workspace: Path, home: Path) -> list[str]:
         List of mount argument strings (e.g., ["-v", "/path:/path:rw", ...]).
     """
     mounts: list[str] = []
-
-    # gcloud config (ro)
-    gcloud_dir = home / ".config" / "gcloud"
-    resolved_gcloud = resolve_path(gcloud_dir)
-    if resolved_gcloud and resolved_gcloud.is_dir():
-        mounts.extend(["-v", f"{resolved_gcloud}:/home/paude/.config/gcloud:ro"])
 
     # Claude seed directory (ro)
     claude_dir = home / ".claude"
