@@ -144,7 +144,8 @@ Releases are published to:
 
 3. **Build Tools**: Install Python build and upload tools:
    ```bash
-   uv tool install build twine
+   uv tool install build
+   uv tool install twine
    ```
 
 ### Release Process
