@@ -72,11 +72,11 @@ def _decode_path(encoded: str) -> Path:
     return Path(base64.b64decode(encoded.encode()).decode())
 
 
-class StatefulSetBuilder:
-    """Builder for Kubernetes StatefulSet specifications.
+class SandboxBuilder:
+    """Builder for agent-sandbox Sandbox CRD specifications.
 
-    Constructs StatefulSet specs for paude session pods with proper
-    volume configuration and security settings.
+    Constructs Sandbox specs (agents.x-k8s.io/v1alpha1) for paude session
+    pods with proper volume configuration and security settings.
     """
 
     def __init__(
@@ -86,7 +86,7 @@ class StatefulSetBuilder:
         image: str,
         resources: dict[str, dict[str, str]],
     ) -> None:
-        """Initialize the StatefulSet builder.
+        """Initialize the Sandbox builder.
 
         Args:
             session_name: Session name.
@@ -103,7 +103,7 @@ class StatefulSetBuilder:
         self._pvc_size = "10Gi"
         self._storage_class: str | None = None
 
-    def with_env(self, env: dict[str, str]) -> StatefulSetBuilder:
+    def with_env(self, env: dict[str, str]) -> SandboxBuilder:
         """Set environment variables for the container.
 
         Args:
@@ -115,7 +115,7 @@ class StatefulSetBuilder:
         self._env = env
         return self
 
-    def with_workspace(self, workspace: Path) -> StatefulSetBuilder:
+    def with_workspace(self, workspace: Path) -> SandboxBuilder:
         """Set the workspace path (for annotation).
 
         Args:
@@ -131,7 +131,7 @@ class StatefulSetBuilder:
         self,
         size: str = "10Gi",
         storage_class: str | None = None,
-    ) -> StatefulSetBuilder:
+    ) -> SandboxBuilder:
         """Configure the PVC for workspace storage.
 
         Args:
@@ -146,7 +146,7 @@ class StatefulSetBuilder:
         return self
 
     def _build_metadata(self, created_at: str) -> dict[str, Any]:
-        """Build the metadata section of the StatefulSet spec."""
+        """Build the metadata section of the Sandbox spec."""
         sts_name = f"paude-{self._session_name}"
         metadata: dict[str, Any] = {
             "name": sts_name,
@@ -224,28 +224,23 @@ class StatefulSetBuilder:
         return pvc_spec
 
     def build(self) -> dict[str, Any]:
-        """Build the complete StatefulSet specification.
+        """Build the complete Sandbox specification.
 
         Returns:
-            StatefulSet spec as a dictionary.
+            Sandbox spec as a dictionary (agents.x-k8s.io/v1alpha1).
         """
-        sts_name = f"paude-{self._session_name}"
         created_at = datetime.now(UTC).isoformat()
 
         return {
-            "apiVersion": "apps/v1",
-            "kind": "StatefulSet",
+            "apiVersion": "agents.x-k8s.io/v1alpha1",
+            "kind": "Sandbox",
             "metadata": self._build_metadata(created_at),
             "spec": {
                 "replicas": 1,
-                "serviceName": sts_name,
-                "selector": {
-                    "matchLabels": {
-                        "app": "paude",
-                        "paude.io/session-name": self._session_name,
-                    },
+                "lifecycle": {
+                    "shutdownPolicy": "Retain",
                 },
-                "template": {
+                "podTemplate": {
                     "metadata": {
                         "labels": {
                             "app": "paude",
@@ -268,3 +263,7 @@ class StatefulSetBuilder:
                 ],
             },
         }
+
+
+# Backward-compatible alias
+StatefulSetBuilder = SandboxBuilder

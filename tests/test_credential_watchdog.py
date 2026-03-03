@@ -70,24 +70,26 @@ class TestOpenShiftBackendCredentialTimeout:
         )
 
         # Mock methods that would be called
-        with patch.object(backend, "_get_statefulset", return_value=None):
-            with patch.object(backend, "_ensure_network_policy_permissive"):
-                with patch.object(backend, "_generate_statefulset_spec") as mock_spec:
-                    with patch.object(backend, "_wait_for_pod_ready"):
-                        with patch.object(backend, "_sync_config_to_pod"):
-                            mock_spec.return_value = {"kind": "StatefulSet"}
+        with patch.object(backend, "_verify_sandbox_crd"):
+            with patch.object(backend, "_get_sandbox", return_value=None):
+                with patch.object(backend, "_ensure_network_policy_permissive"):
+                    with patch.object(backend, "_generate_sandbox_spec") as mock_spec:
+                        with patch.object(backend, "_wait_for_pod_to_appear", return_value="paude-test-session-0"):
+                            with patch.object(backend, "_wait_for_pod_ready"):
+                                with patch.object(backend, "_sync_config_to_pod"):
+                                    mock_spec.return_value = {"kind": "Sandbox"}
 
-                            backend.create_session(config)
+                                    backend.create_session(config)
 
-                            # Check that _generate_statefulset_spec was called with env
-                            # containing credential timeout variables
-                            call_kwargs = mock_spec.call_args
-                            env_arg = call_kwargs.kwargs.get("env", {})
+                                    # Check that _generate_sandbox_spec was called with env
+                                    # containing credential timeout variables
+                                    call_kwargs = mock_spec.call_args
+                                    env_arg = call_kwargs.kwargs.get("env", {})
 
-                            assert "PAUDE_CREDENTIAL_TIMEOUT" in env_arg
-                            assert env_arg["PAUDE_CREDENTIAL_TIMEOUT"] == "45"
-                            assert "PAUDE_CREDENTIAL_WATCHDOG" in env_arg
-                            assert env_arg["PAUDE_CREDENTIAL_WATCHDOG"] == "1"
+                                    assert "PAUDE_CREDENTIAL_TIMEOUT" in env_arg
+                                    assert env_arg["PAUDE_CREDENTIAL_TIMEOUT"] == "45"
+                                    assert "PAUDE_CREDENTIAL_WATCHDOG" in env_arg
+                                    assert env_arg["PAUDE_CREDENTIAL_WATCHDOG"] == "1"
 
     @patch("paude.backends.openshift.backend.OcClient")
     def test_zero_timeout_disables_watchdog_env(
@@ -113,20 +115,22 @@ class TestOpenShiftBackendCredentialTimeout:
             credential_timeout=0,
         )
 
-        with patch.object(backend, "_get_statefulset", return_value=None):
-            with patch.object(backend, "_ensure_network_policy_permissive"):
-                with patch.object(backend, "_generate_statefulset_spec") as mock_spec:
-                    with patch.object(backend, "_wait_for_pod_ready"):
-                        with patch.object(backend, "_sync_config_to_pod"):
-                            mock_spec.return_value = {"kind": "StatefulSet"}
+        with patch.object(backend, "_verify_sandbox_crd"):
+            with patch.object(backend, "_get_sandbox", return_value=None):
+                with patch.object(backend, "_ensure_network_policy_permissive"):
+                    with patch.object(backend, "_generate_sandbox_spec") as mock_spec:
+                        with patch.object(backend, "_wait_for_pod_to_appear", return_value="paude-test-session-0"):
+                            with patch.object(backend, "_wait_for_pod_ready"):
+                                with patch.object(backend, "_sync_config_to_pod"):
+                                    mock_spec.return_value = {"kind": "Sandbox"}
 
-                            backend.create_session(config)
+                                    backend.create_session(config)
 
-                            call_kwargs = mock_spec.call_args
-                            env_arg = call_kwargs.kwargs.get("env", {})
+                                    call_kwargs = mock_spec.call_args
+                                    env_arg = call_kwargs.kwargs.get("env", {})
 
-                            assert env_arg["PAUDE_CREDENTIAL_TIMEOUT"] == "0"
-                            assert env_arg["PAUDE_CREDENTIAL_WATCHDOG"] == "0"
+                                    assert env_arg["PAUDE_CREDENTIAL_TIMEOUT"] == "0"
+                                    assert env_arg["PAUDE_CREDENTIAL_WATCHDOG"] == "0"
 
 
 class TestCLICredentialTimeout:

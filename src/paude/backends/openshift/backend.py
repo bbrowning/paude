@@ -15,6 +15,7 @@ from paude.backends.base import Session, SessionConfig
 from paude.backends.openshift.build import BuildOrchestrator
 from paude.backends.openshift.config import OpenShiftConfig
 from paude.backends.openshift.exceptions import (
+    OpenShiftError,
     PodNotReadyError,
     SessionExistsError,
     SessionNotFoundError,
@@ -27,7 +28,7 @@ from paude.backends.openshift.oc import (
 )
 from paude.backends.openshift.proxy import ProxyManager
 from paude.backends.openshift.resources import (
-    StatefulSetBuilder,
+    SandboxBuilder,
     _decode_path,
     _generate_session_name,
 )
@@ -422,7 +423,59 @@ class OpenShiftBackend:
         print(f"\n{debug_info}", file=sys.stderr)
         raise PodNotReadyError(f"Pod {pod_name} not ready within {timeout} seconds")
 
-    def _generate_statefulset_spec(
+    def _verify_sandbox_crd(self) -> None:
+        """Verify that the agent-sandbox Sandbox CRD is installed.
+
+        Raises:
+            OpenShiftError: If the Sandbox CRD is not found.
+        """
+        result = self._run_oc(
+            "api-resources",
+            "--api-group=agents.x-k8s.io",
+            check=False,
+        )
+
+        if result.returncode != 0 or "Sandbox" not in result.stdout:
+            raise OpenShiftError(
+                "The agent-sandbox Sandbox CRD (agents.x-k8s.io) is not installed.\n"
+                "Install it from: https://github.com/kubernetes-sigs/agent-sandbox\n"
+                "  kubectl apply -f https://github.com/kubernetes-sigs/"
+                "agent-sandbox/releases/download/v0.1.1/manifest.yaml"
+            )
+
+    def _wait_for_pod_to_appear(
+        self,
+        session_name: str,
+        timeout: int = 60,
+    ) -> str:
+        """Wait for a pod to appear for the given session.
+
+        The Sandbox controller creates pods asynchronously, so we poll
+        using label selectors until a pod appears.
+
+        Args:
+            session_name: Session name.
+            timeout: Timeout in seconds.
+
+        Returns:
+            Pod name.
+
+        Raises:
+            PodNotReadyError: If no pod appears within timeout.
+        """
+        start_time = time.time()
+
+        while time.time() - start_time < timeout:
+            pod_name = self._get_pod_for_session(session_name)
+            if pod_name is not None:
+                return pod_name
+            time.sleep(2)
+
+        raise PodNotReadyError(
+            f"No pod appeared for session '{session_name}' within {timeout} seconds"
+        )
+
+    def _generate_sandbox_spec(
         self,
         session_name: str,
         image: str,
@@ -431,9 +484,9 @@ class OpenShiftBackend:
         pvc_size: str = "10Gi",
         storage_class: str | None = None,
     ) -> dict[str, Any]:
-        """Generate a Kubernetes StatefulSet specification for persistent sessions.
+        """Generate a Sandbox CRD specification for persistent sessions.
 
-        Delegates to StatefulSetBuilder for actual spec generation.
+        Delegates to SandboxBuilder for actual spec generation.
 
         Args:
             session_name: Session name.
@@ -444,10 +497,10 @@ class OpenShiftBackend:
             storage_class: Storage class name (None for default).
 
         Returns:
-            StatefulSet spec as a dictionary.
+            Sandbox spec as a dictionary.
         """
         return (
-            StatefulSetBuilder(
+            SandboxBuilder(
                 session_name=session_name,
                 namespace=self.namespace,
                 image=image,
@@ -459,22 +512,22 @@ class OpenShiftBackend:
             .build()
         )
 
-    def _get_statefulset(self, session_name: str) -> dict[str, Any] | None:
-        """Get StatefulSet for a session.
+    def _get_sandbox(self, session_name: str) -> dict[str, Any] | None:
+        """Get Sandbox for a session.
 
         Args:
             session_name: Session name.
 
         Returns:
-            StatefulSet data or None if not found.
+            Sandbox data or None if not found.
         """
-        sts_name = f"paude-{session_name}"
+        sandbox_name = f"paude-{session_name}"
         ns = self.namespace
 
         result = self._run_oc(
             "get",
-            "statefulset",
-            sts_name,
+            "sandbox.agents.x-k8s.io",
+            sandbox_name,
             "-n",
             ns,
             "-o",
@@ -494,7 +547,7 @@ class OpenShiftBackend:
     def _get_pod_for_session(self, session_name: str) -> str | None:
         """Get the pod name for a session.
 
-        For StatefulSets, the pod name is predictable: {sts-name}-0.
+        Uses label selectors to find the pod created by the Sandbox controller.
 
         Args:
             session_name: Session name.
@@ -502,42 +555,44 @@ class OpenShiftBackend:
         Returns:
             Pod name or None if not found/not running.
         """
-        pod_name = f"paude-{session_name}-0"
         ns = self.namespace
 
         result = self._run_oc(
             "get",
-            "pod",
-            pod_name,
+            "pods",
             "-n",
             ns,
+            "-l",
+            f"app=paude,paude.io/session-name={session_name}",
             "-o",
-            "jsonpath={.status.phase}",
+            "jsonpath={.items[0].metadata.name}",
             check=False,
         )
 
-        if result.returncode != 0:
+        if result.returncode != 0 or not result.stdout.strip():
             return None
 
-        return pod_name
+        return result.stdout.strip()
 
-    def _scale_statefulset(self, session_name: str, replicas: int) -> None:
-        """Scale a StatefulSet to the specified number of replicas.
+    def _scale_sandbox(self, session_name: str, replicas: int) -> None:
+        """Scale a Sandbox to the specified number of replicas.
 
         Args:
             session_name: Session name.
             replicas: Number of replicas (0 or 1).
         """
-        sts_name = f"paude-{session_name}"
+        sandbox_name = f"paude-{session_name}"
         ns = self.namespace
 
         self._run_oc(
-            "scale",
-            "statefulset",
-            sts_name,
+            "patch",
+            "sandbox.agents.x-k8s.io",
+            sandbox_name,
             "-n",
             ns,
-            f"--replicas={replicas}",
+            "--type=merge",
+            "-p",
+            json.dumps({"spec": {"replicas": replicas}}),
         )
 
     def _scale_deployment(self, deployment_name: str, replicas: int) -> None:
@@ -565,7 +620,7 @@ class OpenShiftBackend:
     def create_session(self, config: SessionConfig) -> Session:
         """Create a new persistent session (does not start it).
 
-        Creates StatefulSet + credentials + NetworkPolicy with replicas=0.
+        Creates Sandbox + credentials + NetworkPolicy with replicas=1.
 
         Args:
             config: Session configuration.
@@ -579,11 +634,14 @@ class OpenShiftBackend:
         # Verify namespace exists
         self._verify_namespace()
 
+        # Verify Sandbox CRD is installed
+        self._verify_sandbox_crd()
+
         # Generate or use provided session name
         session_name = config.name or _generate_session_name(config.workspace)
 
         # Check if session already exists
-        if self._get_statefulset(session_name) is not None:
+        if self._get_sandbox(session_name) is not None:
             raise SessionExistsError(f"Session '{session_name}' already exists")
 
         ns = self.namespace
@@ -642,9 +700,9 @@ class OpenShiftBackend:
             "1" if config.credential_timeout > 0 else "0"
         )
 
-        # Generate and apply StatefulSet spec
+        # Generate and apply Sandbox spec
         # Credentials are synced to /credentials (tmpfs) when session starts
-        sts_spec = self._generate_statefulset_spec(
+        sandbox_spec = self._generate_sandbox_spec(
             session_name=session_name,
             image=config.image,
             env=session_env,
@@ -654,22 +712,26 @@ class OpenShiftBackend:
         )
 
         print(
-            f"Creating StatefulSet/paude-{session_name} in namespace {ns}...",
+            f"Creating Sandbox/paude-{session_name} in namespace {ns}...",
             file=sys.stderr,
         )
         self._run_oc(
             "apply",
             "-f",
             "-",
-            input_data=json.dumps(sts_spec),
+            input_data=json.dumps(sandbox_spec),
         )
 
         # Wait for proxy to be ready first (if using proxy)
         if config.allowed_domains is not None:
             self._wait_for_proxy_ready(session_name)
 
-        # Wait for pod to be ready
-        pod_name = f"paude-{session_name}-0"
+        # Wait for pod to appear (Sandbox controller creates pods asynchronously)
+        print(
+            f"Waiting for pod to appear for session '{session_name}'...",
+            file=sys.stderr,
+        )
+        pod_name = self._wait_for_pod_to_appear(session_name)
         print(f"Waiting for pod {pod_name} to be ready...", file=sys.stderr)
         self._wait_for_pod_ready(pod_name)
 
@@ -684,7 +746,7 @@ class OpenShiftBackend:
             workspace=config.workspace,
             created_at=created_at,
             backend_type="openshift",
-            container_id=f"paude-{session_name}-0",
+            container_id=pod_name,
             volume_name=f"workspace-paude-{session_name}-0",
         )
 
@@ -703,49 +765,51 @@ class OpenShiftBackend:
             raise ValueError("Deletion requires confirmation. Use --confirm flag.")
 
         # Check if session exists
-        sts = self._get_statefulset(name)
-        if sts is None:
+        sandbox = self._get_sandbox(name)
+        if sandbox is None:
             raise SessionNotFoundError(f"Session '{name}' not found")
 
         ns = self.namespace
-        sts_name = f"paude-{name}"
-        pvc_name = f"workspace-{sts_name}-0"
+        sandbox_name = f"paude-{name}"
 
         print(f"Deleting session '{name}'...", file=sys.stderr)
 
         # Scale to 0 first to gracefully stop pod
-        print(f"Scaling StatefulSet/{sts_name} to 0...", file=sys.stderr)
+        print(f"Scaling Sandbox/{sandbox_name} to 0...", file=sys.stderr)
         self._run_oc(
-            "scale",
-            "statefulset",
-            sts_name,
+            "patch",
+            "sandbox.agents.x-k8s.io",
+            sandbox_name,
             "-n",
             ns,
-            "--replicas=0",
+            "--type=merge",
+            "-p",
+            json.dumps({"spec": {"replicas": 0}}),
             check=False,
         )
 
-        # Delete StatefulSet
-        print(f"Deleting StatefulSet/{sts_name}...", file=sys.stderr)
+        # Delete Sandbox
+        print(f"Deleting Sandbox/{sandbox_name}...", file=sys.stderr)
         self._run_oc(
             "delete",
-            "statefulset",
-            sts_name,
+            "sandbox.agents.x-k8s.io",
+            sandbox_name,
             "-n",
             ns,
             "--grace-period=0",
             check=False,
         )
 
-        # Delete PVC (volumeClaimTemplates don't delete PVCs automatically)
+        # Delete PVCs with session label
         # Use longer timeout since PVC deletion waits for pod termination
-        print(f"Deleting PVC/{pvc_name}...", file=sys.stderr)
+        print("Deleting PVCs for session...", file=sys.stderr)
         self._run_oc(
             "delete",
             "pvc",
-            pvc_name,
             "-n",
             ns,
+            "-l",
+            f"paude.io/session-name={name}",
             check=False,
             timeout=90,
         )
@@ -803,7 +867,7 @@ class OpenShiftBackend:
     def start_session(self, name: str, github_token: str | None = None) -> int:
         """Start a session and connect to it.
 
-        Scales StatefulSet to 1 and connects.
+        Scales Sandbox to 1 and connects.
 
         Args:
             name: Session name.
@@ -814,15 +878,13 @@ class OpenShiftBackend:
             Exit code from the connected session.
         """
         # Check if session exists
-        sts = self._get_statefulset(name)
-        if sts is None:
+        sandbox = self._get_sandbox(name)
+        if sandbox is None:
             raise SessionNotFoundError(f"Session '{name}' not found")
-
-        pod_name = f"paude-{name}-0"
 
         # Scale to 1
         print(f"Starting session '{name}'...", file=sys.stderr)
-        self._scale_statefulset(name, 1)
+        self._scale_sandbox(name, 1)
 
         # Wait for proxy to be ready (if it exists)
         # Check if proxy deployment exists for this session
@@ -840,9 +902,10 @@ class OpenShiftBackend:
             self._scale_deployment(proxy_deployment, 1)
             self._wait_for_proxy_ready(name)
 
-        # Wait for pod to be ready
-        print(f"Waiting for Pod/{pod_name} to be ready...", file=sys.stderr)
+        # Wait for pod to appear and be ready
         try:
+            pod_name = self._wait_for_pod_to_appear(name)
+            print(f"Waiting for Pod/{pod_name} to be ready...", file=sys.stderr)
             self._wait_for_pod_ready(pod_name)
         except PodNotReadyError as e:
             print(f"Pod failed to start: {e}", file=sys.stderr)
@@ -857,19 +920,19 @@ class OpenShiftBackend:
     def stop_session(self, name: str) -> None:
         """Stop a session (preserves volume).
 
-        Scales StatefulSet to 0 but keeps PVC intact.
+        Scales Sandbox to 0 but keeps PVC intact.
 
         Args:
             name: Session name.
         """
         # Check if session exists
-        sts = self._get_statefulset(name)
-        if sts is None:
+        sandbox = self._get_sandbox(name)
+        if sandbox is None:
             raise SessionNotFoundError(f"Session '{name}' not found")
 
         # Scale to 0
         print(f"Stopping session '{name}'...", file=sys.stderr)
-        self._scale_statefulset(name, 0)
+        self._scale_sandbox(name, 0)
 
         # Scale proxy to 0 if it exists
         proxy_deployment = f"paude-proxy-{name}"
@@ -991,17 +1054,17 @@ class OpenShiftBackend:
         Returns:
             Session object or None if not found.
         """
-        sts = self._get_statefulset(name)
-        if sts is None:
+        sandbox = self._get_sandbox(name)
+        if sandbox is None:
             return None
 
-        metadata = sts.get("metadata", {})
+        metadata = sandbox.get("metadata", {})
         annotations = metadata.get("annotations", {})
-        spec = sts.get("spec", {})
+        spec = sandbox.get("spec", {})
 
         # Determine status from replicas
         replicas = spec.get("replicas", 0)
-        status_replicas = sts.get("status", {}).get("readyReplicas", 0)
+        status_replicas = sandbox.get("status", {}).get("readyReplicas", 0)
 
         if replicas == 0:
             status = "stopped"
@@ -1021,13 +1084,17 @@ class OpenShiftBackend:
         except Exception:
             workspace = Path("/workspace")
 
+        # Look up actual pod name via labels
+        pod_name = self._get_pod_for_session(name)
+        container_id = pod_name if pod_name else f"paude-{name}-0"
+
         return Session(
             name=name,
             status=status,
             workspace=workspace,
             created_at=annotations.get("paude.io/created-at", ""),
             backend_type="openshift",
-            container_id=f"paude-{name}-0",
+            container_id=container_id,
             volume_name=f"workspace-paude-{name}-0",
         )
 
@@ -1061,7 +1128,7 @@ class OpenShiftBackend:
             SessionNotFoundError: If session not found.
             ValueError: If session is not running.
         """
-        if self._get_statefulset(name) is None:
+        if self._get_sandbox(name) is None:
             raise SessionNotFoundError(f"Session '{name}' not found")
 
         pod_name = self._get_pod_for_session(name)
@@ -1092,7 +1159,7 @@ class OpenShiftBackend:
             SessionNotFoundError: If session not found.
             ValueError: If session is not running.
         """
-        if self._get_statefulset(name) is None:
+        if self._get_sandbox(name) is None:
             raise SessionNotFoundError(f"Session '{name}' not found")
 
         pod_name = self._get_pod_for_session(name)
@@ -1112,7 +1179,7 @@ class OpenShiftBackend:
         )
 
     def list_sessions(self) -> list[Session]:
-        """List all sessions (StatefulSets).
+        """List all sessions (Sandboxes).
 
         Returns:
             List of Session objects.
@@ -1122,7 +1189,7 @@ class OpenShiftBackend:
 
         result = self._run_oc(
             "get",
-            "statefulsets",
+            "sandbox.agents.x-k8s.io",
             "-n",
             ns,
             "-l",
@@ -1140,13 +1207,13 @@ class OpenShiftBackend:
                     labels = metadata.get("labels", {})
                     annotations = metadata.get("annotations", {})
                     spec = item.get("spec", {})
-                    sts_status = item.get("status", {})
+                    sandbox_status = item.get("status", {})
 
                     session_name = labels.get("paude.io/session-name", "unknown")
 
                     # Determine status from replicas
                     replicas = spec.get("replicas", 0)
-                    ready_replicas = sts_status.get("readyReplicas", 0)
+                    ready_replicas = sandbox_status.get("readyReplicas", 0)
 
                     if replicas == 0:
                         status = "stopped"
