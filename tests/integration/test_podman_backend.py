@@ -523,7 +523,7 @@ def _start_proxy_session(
     main_image: str,
     proxy_image: str,
     allowed_domains: list[str],
-) -> None:
+) -> str:
     """Create and start a session with proxy egress filtering.
 
     Uses PodmanBackend.create_session() which creates:
@@ -532,6 +532,8 @@ def _start_proxy_session(
     - Main container on internal network only with HTTP_PROXY set
 
     Then starts both proxy and main containers.
+
+    Returns the proxy container's IP address on the internal network.
     """
     config = SessionConfig(
         name=session_name,
@@ -559,6 +561,20 @@ def _start_proxy_session(
         capture_output=True,
         check=True,
     )
+
+    # Get proxy IP on the internal network (avoids DNS resolution issues in CI)
+    network_name = f"paude-net-{session_name}"
+    result = subprocess.run(
+        [
+            "podman", "inspect", "--format",
+            f"{{{{.NetworkSettings.Networks.{network_name}.IPAddress}}}}",
+            proxy_name,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip()
 
 
 class TestPodmanProxyEgressFiltering:
@@ -635,7 +651,7 @@ class TestPodmanProxyEgressFiltering:
         container_name = f"paude-{unique_session_name}"
 
         try:
-            _start_proxy_session(
+            proxy_ip = _start_proxy_session(
                 backend=backend,
                 session_name=unique_session_name,
                 workspace=temp_workspace,
@@ -644,7 +660,9 @@ class TestPodmanProxyEgressFiltering:
                 allowed_domains=[".googleapis.com"],
             )
 
-            # Curl an allowed domain through the proxy.
+            # Curl an allowed domain through the proxy using explicit IP.
+            # Uses -x to specify proxy directly, bypassing DNS resolution
+            # (aardvark-dns may not work on --internal networks in CI).
             # Don't use -f: the endpoint may return 404 but the proxy still
             # allowed the CONNECT — we care that it's not 403 (blocked).
             result = subprocess.run(
@@ -652,6 +670,7 @@ class TestPodmanProxyEgressFiltering:
                     "podman", "exec", container_name,
                     "curl", "-s", "-o", "/dev/null",
                     "-w", "%{http_code}",
+                    "-x", f"http://{proxy_ip}:3128",
                     "--connect-timeout", "10",
                     "-m", "15",
                     "https://oauth2.googleapis.com/",
@@ -688,7 +707,7 @@ class TestPodmanProxyEgressFiltering:
         container_name = f"paude-{unique_session_name}"
 
         try:
-            _start_proxy_session(
+            proxy_ip = _start_proxy_session(
                 backend=backend,
                 session_name=unique_session_name,
                 workspace=temp_workspace,
@@ -697,12 +716,14 @@ class TestPodmanProxyEgressFiltering:
                 allowed_domains=[".googleapis.com"],
             )
 
-            # Curl a blocked domain through the proxy
+            # Curl a blocked domain through the proxy using explicit IP
+            # (bypasses DNS resolution issues in CI)
             result = subprocess.run(
                 [
                     "podman", "exec", container_name,
                     "curl", "-s", "-o", "/dev/null",
                     "-w", "%{http_code}",
+                    "-x", f"http://{proxy_ip}:3128",
                     "--connect-timeout", "10",
                     "-m", "15",
                     "https://example.com/",
