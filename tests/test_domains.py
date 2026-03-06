@@ -86,11 +86,11 @@ class TestExpandDomains:
 
     def test_deduplication(self):
         """Duplicate domains are removed."""
-        result = expand_domains(["vertexai", "vertexai", ".googleapis.com"])
+        result = expand_domains(["vertexai", "vertexai", "oauth2.googleapis.com"])
         assert result is not None
 
-        # Count occurrences of .googleapis.com (should be 1)
-        count = result.count(".googleapis.com")
+        # Count occurrences of oauth2.googleapis.com (should be 1)
+        count = result.count("oauth2.googleapis.com")
         assert count == 1
 
     def test_order_preserved(self):
@@ -197,8 +197,21 @@ class TestDomainAliases:
             assert alias in DOMAIN_ALIASES
 
     def test_vertexai_has_googleapis(self):
-        """vertexai alias includes googleapis.com."""
-        assert any(".googleapis.com" in d for d in DOMAIN_ALIASES["vertexai"])
+        """vertexai alias includes specific googleapis.com subdomains."""
+        assert any("googleapis.com" in d for d in DOMAIN_ALIASES["vertexai"])
+
+    def test_vertexai_no_broad_wildcards(self):
+        """vertexai alias must NOT contain broad wildcards."""
+        vertexai = DOMAIN_ALIASES["vertexai"]
+        assert ".googleapis.com" not in vertexai, "broad .googleapis.com wildcard not allowed"
+        assert ".google.com" not in vertexai, "broad .google.com wildcard not allowed"
+        assert ".gstatic.com" not in vertexai, ".gstatic.com not needed for API auth"
+
+    def test_vertexai_has_required_auth_domains(self):
+        """vertexai alias includes required Google auth domains."""
+        vertexai = DOMAIN_ALIASES["vertexai"]
+        assert "accounts.google.com" in vertexai
+        assert "oauth2.googleapis.com" in vertexai
 
     def test_pypi_has_pypi_org(self):
         """pypi alias includes pypi.org."""

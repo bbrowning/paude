@@ -5,12 +5,19 @@ from __future__ import annotations
 # Domain aliases for common use cases
 DOMAIN_ALIASES: dict[str, list[str]] = {
     "vertexai": [
-        ".googleapis.com",
-        ".google.com",
+        # Google OAuth / authentication
         "accounts.google.com",
         "oauth2.googleapis.com",
-        ".gstatic.com",
-        ".cloudresourcemanager.googleapis.com",
+        "www.googleapis.com",
+        # Vertex AI API (regional endpoints: REGION-aiplatform.googleapis.com)
+        ".aiplatform.googleapis.com",
+        # Google Cloud resource and project management
+        "cloudresourcemanager.googleapis.com",
+        # Service account impersonation and workload identity
+        "iamcredentials.googleapis.com",
+        "sts.googleapis.com",
+        # Cloud Storage (model artifacts)
+        "storage.googleapis.com",
     ],
     "claude": [
         ".claude.ai",
