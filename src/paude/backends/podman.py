@@ -516,6 +516,30 @@ class PodmanBackend:
 
         return None
 
+    def get_allowed_domains(self, name: str) -> list[str] | None:
+        """Get current allowed domains for a session.
+
+        Not supported for Podman backend.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError(
+            "Domain management is not supported for Podman sessions."
+        )
+
+    def update_allowed_domains(self, name: str, domains: list[str]) -> None:
+        """Update allowed domains for a session.
+
+        Not supported for Podman backend.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError(
+            "Domain management is not supported for Podman sessions."
+        )
+
     def copy_to_session(self, name: str, local_path: str, remote_path: str) -> None:
         """Copy a file or directory from local to a running session.
 

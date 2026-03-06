@@ -117,6 +117,8 @@ COMMANDS:
     list                List all sessions
     cp SRC DEST         Copy files between local and session
     remote <ACTION>     Manage git remotes for code sync
+    allowed-domains NAME
+                        Manage allowed egress domains for a session
     delete NAME         Delete a session and all its resources
 
 OPTIONS (for 'create' command):
@@ -174,6 +176,13 @@ COPYING FILES (without git):
     paude cp my-session:output.log ./           Copy file from session to local
     paude cp ./src :src                         Auto-detect session, copy dir
     paude cp :results ./results                 Auto-detect session, copy from
+
+EGRESS FILTERING:
+    paude allowed-domains my-session                      Show current domains
+    paude allowed-domains my-session --add .example.com   Add domain to list
+    paude allowed-domains my-session --remove .pypi.org   Remove domain
+    paude allowed-domains my-session --replace default .example.com
+                                                          Replace entire list
 
 EXAMPLES:
     paude create --yolo --allowed-domains all
@@ -1553,6 +1562,254 @@ def _remote_add(
             typer.echo(f"  git fetch {remote_name}          # Fetch without merging")
     else:
         raise typer.Exit(1)
+
+
+def _resolve_backend_for_domains(
+    name: str,
+    backend: BackendType | None,
+    openshift_context: str | None,
+    openshift_namespace: str | None,
+) -> object:
+    """Resolve the backend instance for allowed-domains command.
+
+    Args:
+        name: Session name.
+        backend: Explicit backend type, or None for auto-detect.
+        openshift_context: Optional OpenShift context.
+        openshift_namespace: Optional OpenShift namespace.
+
+    Returns:
+        Backend instance.
+
+    Raises:
+        typer.Exit: If session not found or backend not supported.
+    """
+    if backend is None:
+        result = find_session_backend(name, openshift_context, openshift_namespace)
+        if result is None:
+            typer.echo(f"Session '{name}' not found.", err=True)
+            raise typer.Exit(1)
+        _, backend_obj = result
+        return backend_obj
+
+    if backend == BackendType.podman:
+        typer.echo(
+            "Error: Domain management is not supported for Podman sessions.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    openshift_config = OpenShiftConfig(
+        context=openshift_context,
+        namespace=openshift_namespace,
+    )
+    return OpenShiftBackend(config=openshift_config)
+
+
+def _check_domains_mutual_exclusivity(
+    add: list[str] | None,
+    remove: list[str] | None,
+    replace: list[str] | None,
+) -> None:
+    """Check that at most one of --add, --remove, --replace is specified.
+
+    Raises:
+        typer.Exit: If more than one is specified.
+    """
+    specified = sum(1 for opt in (add, remove, replace) if opt)
+    if specified > 1:
+        typer.echo(
+            "Error: Only one of --add, --remove, --replace can be specified.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+
+def _expand_domains_or_exit(domains: list[str]) -> list[str]:
+    """Expand domains and exit if 'all' is used.
+
+    Args:
+        domains: Raw domain input list.
+
+    Returns:
+        Expanded domain list.
+
+    Raises:
+        typer.Exit: If 'all' is specified.
+    """
+    from paude.domains import expand_domains
+
+    expanded = expand_domains(domains)
+    if expanded is None:
+        typer.echo(
+            "Error: 'all' cannot be used with --add, --remove, or --replace.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    return expanded
+
+
+def _list_domains(backend_obj: object, name: str) -> None:
+    """List current allowed domains for a session.
+
+    Args:
+        backend_obj: Backend instance.
+        name: Session name.
+    """
+    from paude.domains import format_domains_for_display
+
+    domains = backend_obj.get_allowed_domains(name)  # type: ignore[attr-defined]
+    summary = format_domains_for_display(domains)
+    typer.echo(f"Network: {summary}")
+    if domains is not None:
+        typer.echo("")
+        for domain in domains:
+            typer.echo(f"  {domain}")
+
+
+def _add_domains(backend_obj: object, name: str, add: list[str]) -> None:
+    """Add domains to the current allowed list.
+
+    Args:
+        backend_obj: Backend instance.
+        name: Session name.
+        add: Domains to add.
+    """
+    expanded = _expand_domains_or_exit(add)
+    current = backend_obj.get_allowed_domains(name)  # type: ignore[attr-defined]
+    if current is None:
+        typer.echo(
+            "Error: Session has unrestricted network (no proxy). "
+            "Cannot add domains.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    # Merge with dedup, preserving order
+    seen = set(current)
+    merged = list(current)
+    for d in expanded:
+        if d not in seen:
+            merged.append(d)
+            seen.add(d)
+
+    backend_obj.update_allowed_domains(name, merged)  # type: ignore[attr-defined]
+    added_count = len(merged) - len(current)
+    typer.echo(f"Added {added_count} domain(s) to session '{name}'.")
+
+
+def _remove_domains(backend_obj: object, name: str, remove: list[str]) -> None:
+    """Remove domains from the current allowed list.
+
+    Args:
+        backend_obj: Backend instance.
+        name: Session name.
+        remove: Domains to remove.
+    """
+    expanded = _expand_domains_or_exit(remove)
+    current = backend_obj.get_allowed_domains(name)  # type: ignore[attr-defined]
+    if current is None:
+        typer.echo(
+            "Error: Session has unrestricted network (no proxy). "
+            "Cannot remove domains.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    remove_set = set(expanded)
+    remaining = [d for d in current if d not in remove_set]
+
+    if not remaining:
+        typer.echo(
+            "Error: Cannot remove all domains. "
+            "At least one domain must remain.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    backend_obj.update_allowed_domains(name, remaining)  # type: ignore[attr-defined]
+    removed_count = len(current) - len(remaining)
+    typer.echo(f"Removed {removed_count} domain(s) from session '{name}'.")
+
+
+def _replace_domains(backend_obj: object, name: str, replace: list[str]) -> None:
+    """Replace all domains for a session.
+
+    Args:
+        backend_obj: Backend instance.
+        name: Session name.
+        replace: New domain list.
+    """
+    expanded = _expand_domains_or_exit(replace)
+    backend_obj.update_allowed_domains(name, expanded)  # type: ignore[attr-defined]
+    typer.echo(f"Replaced domains for session '{name}' ({len(expanded)} domain(s)).")
+
+
+@app.command("allowed-domains")
+def allowed_domains_cmd(
+    name: Annotated[str, typer.Argument(help="Session name.")],
+    add: Annotated[
+        list[str] | None,
+        typer.Option("--add", help="Add domains to current list."),
+    ] = None,
+    remove: Annotated[
+        list[str] | None,
+        typer.Option("--remove", help="Remove domains from current list."),
+    ] = None,
+    replace: Annotated[
+        list[str] | None,
+        typer.Option("--replace", help="Replace entire domain list."),
+    ] = None,
+    backend: Annotated[
+        BackendType | None,
+        typer.Option(
+            "--backend",
+            help="Container backend (auto-detected from session if not specified).",
+        ),
+    ] = None,
+    openshift_context: Annotated[
+        str | None,
+        typer.Option(
+            "--openshift-context",
+            help="Kubeconfig context for OpenShift.",
+        ),
+    ] = None,
+    openshift_namespace: Annotated[
+        str | None,
+        typer.Option(
+            "--openshift-namespace",
+            help="OpenShift namespace (default: current context namespace).",
+        ),
+    ] = None,
+) -> None:
+    """Manage allowed egress domains for a session."""
+    _check_domains_mutual_exclusivity(add, remove, replace)
+
+    backend_obj = _resolve_backend_for_domains(
+        name, backend, openshift_context, openshift_namespace
+    )
+
+    try:
+        if add:
+            _add_domains(backend_obj, name, add)
+        elif remove:
+            _remove_domains(backend_obj, name, remove)
+        elif replace:
+            _replace_domains(backend_obj, name, replace)
+        else:
+            _list_domains(backend_obj, name)
+    except NotImplementedError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+    except (OpenshiftSessionNotFoundError, SessionNotFoundError) as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+    except Exception as e:
+        typer.echo(f"Error managing domains: {e}", err=True)
+        raise typer.Exit(1) from None
 
 
 @app.callback(invoke_without_command=True)
