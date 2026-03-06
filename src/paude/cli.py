@@ -6,7 +6,7 @@ import os
 import subprocess
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 import typer
 
@@ -17,6 +17,7 @@ from paude.backends import (
     SessionExistsError,
     SessionNotFoundError,
 )
+from paude.backends.base import Backend, Session
 from paude.backends.openshift import (
     BuildFailedError,
     OpenShiftBackend,
@@ -54,7 +55,7 @@ def find_session_backend(
     session_name: str,
     openshift_context: str | None = None,
     openshift_namespace: str | None = None,
-) -> tuple[BackendType, object] | None:
+) -> tuple[BackendType, Backend] | None:
     """Find which backend contains the given session.
 
     Args:
@@ -604,7 +605,7 @@ def session_delete(
         if result:
             backend, backend_obj = result
             try:
-                backend_obj.delete_session(name, confirm=True)  # type: ignore[attr-defined]
+                backend_obj.delete_session(name, confirm=True)
                 typer.echo(f"Session '{name}' deleted.")
                 _cleanup_session_git_remote(name)
                 return
@@ -696,7 +697,7 @@ def session_start(
         if result:
             backend, backend_obj = result
             try:
-                exit_code = backend_obj.start_session(name, github_token=resolved_token)  # type: ignore[attr-defined]
+                exit_code = backend_obj.start_session(name, github_token=resolved_token)
                 raise typer.Exit(exit_code)
             except Exception as e:
                 typer.echo(f"Error starting session: {e}", err=True)
@@ -820,7 +821,7 @@ def session_stop(
         if result:
             backend, backend_obj = result
             try:
-                backend_obj.stop_session(name)  # type: ignore[attr-defined]
+                backend_obj.stop_session(name)
                 typer.echo(f"Session '{name}' stopped.")
                 return
             except Exception as e:
@@ -955,7 +956,7 @@ def session_connect(
         result = find_session_backend(name, openshift_context, openshift_namespace)
         if result:
             backend, backend_obj = result
-            exit_code = backend_obj.connect_session(name, github_token=resolved_token)  # type: ignore[attr-defined]
+            exit_code = backend_obj.connect_session(name, github_token=resolved_token)
             raise typer.Exit(exit_code)
         else:
             typer.echo(f"Session '{name}' not found.", err=True)
@@ -1200,7 +1201,7 @@ def session_cp(
         copy_direction = "from"
 
     # Resolve session
-    backend_obj: Any = None
+    backend_obj: Backend | None = None
     if session_name:
         # Explicit session name
         result = find_session_backend(
@@ -1391,7 +1392,7 @@ def _cleanup_session_git_remote(session_name: str) -> None:
 def _find_session_for_remote(
     openshift_context: str | None,
     openshift_namespace: str | None,
-) -> tuple[Any, Any]:
+) -> tuple[Session | None, Backend | None]:
     """Find a session for the current workspace.
 
     Returns:
@@ -1460,7 +1461,7 @@ def _remote_add(
         result = find_session_backend(name, openshift_context, openshift_namespace)
         if result:
             _, backend_obj = result
-            session = backend_obj.get_session(name)  # type: ignore[attr-defined]
+            session = backend_obj.get_session(name)
     else:
         # Auto-detect from workspace
         session, backend_obj = _find_session_for_remote(
@@ -1569,7 +1570,7 @@ def _resolve_backend_for_domains(
     backend: BackendType | None,
     openshift_context: str | None,
     openshift_namespace: str | None,
-) -> object:
+) -> Backend:
     """Resolve the backend instance for allowed-domains command.
 
     Args:
@@ -1649,7 +1650,7 @@ def _expand_domains_or_exit(domains: list[str]) -> list[str]:
     return expanded
 
 
-def _list_domains(backend_obj: object, name: str) -> None:
+def _list_domains(backend_obj: Backend, name: str) -> None:
     """List current allowed domains for a session.
 
     Args:
@@ -1658,7 +1659,7 @@ def _list_domains(backend_obj: object, name: str) -> None:
     """
     from paude.domains import format_domains_for_display
 
-    domains = backend_obj.get_allowed_domains(name)  # type: ignore[attr-defined]
+    domains = backend_obj.get_allowed_domains(name)
     summary = format_domains_for_display(domains)
     typer.echo(f"Network: {summary}")
     if domains is not None:
@@ -1667,7 +1668,7 @@ def _list_domains(backend_obj: object, name: str) -> None:
             typer.echo(f"  {domain}")
 
 
-def _add_domains(backend_obj: object, name: str, add: list[str]) -> None:
+def _add_domains(backend_obj: Backend, name: str, add: list[str]) -> None:
     """Add domains to the current allowed list.
 
     Args:
@@ -1676,7 +1677,7 @@ def _add_domains(backend_obj: object, name: str, add: list[str]) -> None:
         add: Domains to add.
     """
     expanded = _expand_domains_or_exit(add)
-    current = backend_obj.get_allowed_domains(name)  # type: ignore[attr-defined]
+    current = backend_obj.get_allowed_domains(name)
     if current is None:
         typer.echo(
             "Error: Session has unrestricted network (no proxy). "
@@ -1693,12 +1694,12 @@ def _add_domains(backend_obj: object, name: str, add: list[str]) -> None:
             merged.append(d)
             seen.add(d)
 
-    backend_obj.update_allowed_domains(name, merged)  # type: ignore[attr-defined]
+    backend_obj.update_allowed_domains(name, merged)
     added_count = len(merged) - len(current)
     typer.echo(f"Added {added_count} domain(s) to session '{name}'.")
 
 
-def _remove_domains(backend_obj: object, name: str, remove: list[str]) -> None:
+def _remove_domains(backend_obj: Backend, name: str, remove: list[str]) -> None:
     """Remove domains from the current allowed list.
 
     Args:
@@ -1707,7 +1708,7 @@ def _remove_domains(backend_obj: object, name: str, remove: list[str]) -> None:
         remove: Domains to remove.
     """
     expanded = _expand_domains_or_exit(remove)
-    current = backend_obj.get_allowed_domains(name)  # type: ignore[attr-defined]
+    current = backend_obj.get_allowed_domains(name)
     if current is None:
         typer.echo(
             "Error: Session has unrestricted network (no proxy). "
@@ -1727,12 +1728,12 @@ def _remove_domains(backend_obj: object, name: str, remove: list[str]) -> None:
         )
         raise typer.Exit(1)
 
-    backend_obj.update_allowed_domains(name, remaining)  # type: ignore[attr-defined]
+    backend_obj.update_allowed_domains(name, remaining)
     removed_count = len(current) - len(remaining)
     typer.echo(f"Removed {removed_count} domain(s) from session '{name}'.")
 
 
-def _replace_domains(backend_obj: object, name: str, replace: list[str]) -> None:
+def _replace_domains(backend_obj: Backend, name: str, replace: list[str]) -> None:
     """Replace all domains for a session.
 
     Args:
@@ -1741,7 +1742,7 @@ def _replace_domains(backend_obj: object, name: str, replace: list[str]) -> None
         replace: New domain list.
     """
     expanded = _expand_domains_or_exit(replace)
-    backend_obj.update_allowed_domains(name, expanded)  # type: ignore[attr-defined]
+    backend_obj.update_allowed_domains(name, expanded)
     typer.echo(f"Replaced domains for session '{name}' ({len(expanded)} domain(s)).")
 
 

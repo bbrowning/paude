@@ -7,9 +7,8 @@ from pathlib import Path
 import typer
 
 from paude.backends import PodmanBackend, Session
+from paude.backends.base import Backend
 from paude.backends.openshift import OpenShiftBackend, OpenShiftConfig
-
-Backend = PodmanBackend | OpenShiftBackend
 
 
 def create_openshift_backend(

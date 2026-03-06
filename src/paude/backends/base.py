@@ -108,13 +108,14 @@ class Backend(Protocol):
         """
         ...
 
-    def start_session(self, name: str) -> int:
+    def start_session(self, name: str, github_token: str | None = None) -> int:
         """Start a session and connect to it.
 
         Starts the container/scales to 1 and connects.
 
         Args:
             name: Session name.
+            github_token: Optional GitHub token to inject into the session.
 
         Returns:
             Exit code from the connected session.
@@ -131,11 +132,12 @@ class Backend(Protocol):
         """
         ...
 
-    def connect_session(self, name: str) -> int:
+    def connect_session(self, name: str, github_token: str | None = None) -> int:
         """Attach to a running session.
 
         Args:
             name: Session name.
+            github_token: Optional GitHub token to inject into the session.
 
         Returns:
             Exit code from the attached session.
@@ -158,6 +160,17 @@ class Backend(Protocol):
 
         Returns:
             Session object or None if not found.
+        """
+        ...
+
+    def find_session_for_workspace(self, workspace: Path) -> Session | None:
+        """Find a session associated with the given workspace path.
+
+        Args:
+            workspace: Local workspace path.
+
+        Returns:
+            Session object or None if no session matches the workspace.
         """
         ...
 
