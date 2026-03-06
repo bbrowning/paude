@@ -7,8 +7,32 @@ on:
     branches: [main]
 
 jobs:
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-22.04
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      containers: ${{ steps.filter.outputs.containers }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'src/**'
+              - 'tests/**'
+              - 'pyproject.toml'
+              - 'Makefile'
+              - '.github/workflows/**'
+            containers:
+              - 'containers/**'
+
   lint:
     name: Lint & Type Check
+    needs: detect-changes
+    if: needs.detect-changes.outputs.code == 'true'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +53,8 @@ jobs:
 
   unit-tests:
     name: Unit Tests
-    needs: lint
+    needs: [detect-changes, lint]
+    if: needs.detect-changes.outputs.code == 'true'
     runs-on: ubuntu-22.04
     strategy:
       matrix:
@@ -50,7 +75,8 @@ jobs:
 
   podman-integration:
     name: Podman Integration Tests
-    needs: [lint, unit-tests]
+    needs: [detect-changes, lint, unit-tests]
+    if: needs.detect-changes.outputs.code == 'true' || needs.detect-changes.outputs.containers == 'true'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -76,7 +102,8 @@ jobs:
 
   kubernetes-integration:
     name: Kubernetes Integration Tests
-    needs: [lint, unit-tests]
+    needs: [detect-changes, lint, unit-tests]
+    if: needs.detect-changes.outputs.code == 'true' || needs.detect-changes.outputs.containers == 'true'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
