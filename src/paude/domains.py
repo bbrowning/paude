@@ -33,6 +33,7 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
         "raw.githubusercontent.com",
         "codeload.github.com",
         "release-assets.githubusercontent.com",
+        "results-receiver.actions.githubusercontent.com",
     ],
 }
 
