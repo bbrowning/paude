@@ -494,6 +494,16 @@ class TestProxyDeployment:
                     diag_lines.append(
                         f"\n=== Stderr for {pod_name} ===\n{pod_logs.stderr.strip()}"
                     )
+                # Read squid log files from the container
+                for log_file in ["/tmp/squid-cache.log", "/tmp/squid-blocked.log"]:
+                    squid_log = run_oc(
+                        "exec", pod_name, "-n", test_namespace,
+                        "--", "cat", log_file, check=False,
+                    )
+                    if squid_log.stdout.strip():
+                        diag_lines.append(
+                            f"\n=== {log_file} from {pod_name} ===\n{squid_log.stdout.strip()}"
+                        )
                 pod_describe = run_oc(
                     "describe", "pod", pod_name, "-n", test_namespace,
                     check=False,
