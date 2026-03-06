@@ -12,6 +12,10 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
         ".gstatic.com",
         ".cloudresourcemanager.googleapis.com",
     ],
+    "claude": [
+        ".claude.ai",
+        ".anthropic.com",
+    ],
     "pypi": [
         ".pypi.org",
         ".pythonhosted.org",
@@ -26,7 +30,7 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
 }
 
 # Default aliases when --allowed-domains is not specified
-DEFAULT_ALIASES = ["vertexai", "pypi", "github"]
+DEFAULT_ALIASES = ["claude", "vertexai", "pypi", "github"]
 
 
 def expand_domains(domains: list[str]) -> list[str] | None:
@@ -35,8 +39,8 @@ def expand_domains(domains: list[str]) -> list[str] | None:
     Args:
         domains: List of domains or aliases. Special values:
             - "all": Returns None (unrestricted network)
-            - "default": Expands to vertexai + pypi
-            - "vertexai", "pypi": Expand to their respective domain lists
+            - "default": Expands to all DEFAULT_ALIASES (claude, vertexai, pypi, github)
+            - "claude", "vertexai", "pypi", "github": Expand to their respective domain lists
             - Raw domains (e.g., ".example.com"): Pass through unchanged
 
     Returns:

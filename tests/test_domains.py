@@ -46,6 +46,15 @@ class TestExpandDomains:
         for domain in DOMAIN_ALIASES["github"]:
             assert domain in result
 
+    def test_expand_default_includes_claude(self):
+        """'default' expands to include claude domains."""
+        result = expand_domains(["default"])
+        assert result is not None
+
+        # Should include all claude domains
+        for domain in DOMAIN_ALIASES["claude"]:
+            assert domain in result
+
     def test_expand_vertexai_alias(self):
         """'vertexai' expands to vertexai domains."""
         result = expand_domains(["vertexai"])
@@ -195,6 +204,10 @@ class TestDomainAliases:
         """pypi alias includes pypi.org."""
         assert any("pypi.org" in d for d in DOMAIN_ALIASES["pypi"])
 
+    def test_claude_has_claude_ai(self):
+        """claude alias includes .claude.ai."""
+        assert any(".claude.ai" in d for d in DOMAIN_ALIASES["claude"])
+
 
 class TestIsUnrestricted:
     """Tests for is_unrestricted helper function."""
@@ -210,6 +223,51 @@ class TestIsUnrestricted:
     def test_domain_list_is_restricted(self):
         """A list of domains is NOT unrestricted."""
         assert is_unrestricted([".googleapis.com", ".pypi.org"]) is False
+
+
+class TestClaudeAlias:
+    """Tests for the 'claude' domain alias."""
+
+    def test_claude_alias_expands_to_correct_domains(self):
+        """'claude' expands to .claude.ai and .anthropic.com."""
+        result = expand_domains(["claude"])
+        assert result is not None
+        assert ".claude.ai" in result
+        assert ".anthropic.com" in result
+
+    def test_claude_alias_combined_with_default(self):
+        """'default' + 'claude' includes vertexai, pypi, github, and claude domains."""
+        result = expand_domains(["default", "claude"])
+        assert result is not None
+
+        # Should include all vertexai domains
+        for domain in DOMAIN_ALIASES["vertexai"]:
+            assert domain in result
+
+        # Should include all pypi domains
+        for domain in DOMAIN_ALIASES["pypi"]:
+            assert domain in result
+
+        # Should include all github domains
+        for domain in DOMAIN_ALIASES["github"]:
+            assert domain in result
+
+        # Should include all claude domains
+        for domain in DOMAIN_ALIASES["claude"]:
+            assert domain in result
+
+    def test_claude_alias_in_format_display(self):
+        """format_domains_for_display recognizes claude alias and shows alias name."""
+        domains = expand_domains(["claude"])
+        assert domains is not None
+        result = format_domains_for_display(domains)
+        assert "claude" in result
+
+    def test_claude_domains_no_duplicates(self):
+        """expand_domains(['claude', 'claude']) has no duplicates."""
+        result = expand_domains(["claude", "claude"])
+        assert result is not None
+        assert len(result) == len(set(result))
 
 
 class TestGithubAlias:
