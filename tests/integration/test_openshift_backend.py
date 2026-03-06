@@ -433,7 +433,7 @@ class TestProxyDeployment:
         import time
 
         ready_replicas = 0
-        for _ in range(30):
+        for _ in range(5):
             result = run_oc(
                 "get",
                 "deployment",
