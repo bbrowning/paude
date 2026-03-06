@@ -113,6 +113,11 @@ class TestExpandDomains:
         result = expand_domains(["unknown-alias"])
         assert result == ["unknown-alias"]
 
+    def test_regex_domain_passthrough(self):
+        """Regex domains (~ prefix) pass through unchanged."""
+        result = expand_domains(["~aiplatform\\.googleapis\\.com$"])
+        assert result == ["~aiplatform\\.googleapis\\.com$"]
+
     def test_default_plus_custom_domain(self):
         """'default' + custom domain includes both."""
         result = expand_domains(["default", ".example.com"])
@@ -212,6 +217,17 @@ class TestDomainAliases:
         vertexai = DOMAIN_ALIASES["vertexai"]
         assert "accounts.google.com" in vertexai
         assert "oauth2.googleapis.com" in vertexai
+
+    def test_vertexai_aiplatform_uses_regex(self):
+        """vertexai alias uses regex for aiplatform to match regional endpoints."""
+        vertexai = DOMAIN_ALIASES["vertexai"]
+        # Must NOT use .aiplatform.googleapis.com (subdomain match fails for
+        # REGION-aiplatform.googleapis.com since hyphens create sibling domains)
+        assert ".aiplatform.googleapis.com" not in vertexai
+        # Must use regex pattern that matches both aiplatform.googleapis.com
+        # and regional endpoints like us-east5-aiplatform.googleapis.com
+        regex_entries = [d for d in vertexai if d.startswith("~")]
+        assert any("aiplatform" in d for d in regex_entries)
 
     def test_pypi_has_pypi_org(self):
         """pypi alias includes pypi.org."""
