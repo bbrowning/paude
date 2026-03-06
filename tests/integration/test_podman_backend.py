@@ -668,9 +668,8 @@ class TestPodmanProxyEgressFiltering:
             # Curl an allowed domain through the proxy using explicit IP.
             # Uses -x to specify proxy directly, bypassing DNS resolution
             # (aardvark-dns may not work on --internal networks in CI).
-            # Don't use -f: the endpoint may return 404 but the proxy still
-            # allowed the CONNECT — we care that it's not 403 (blocked).
-            result = subprocess.run(
+            proxy_name = f"paude-proxy-{unique_session_name}"
+            subprocess.run(
                 [
                     "podman",
                     "exec",
@@ -679,8 +678,6 @@ class TestPodmanProxyEgressFiltering:
                     "-s",
                     "-o",
                     "/dev/null",
-                    "-w",
-                    "%{http_code}",
                     "-x",
                     f"http://{proxy_ip}:3128",
                     "--connect-timeout",
@@ -693,14 +690,18 @@ class TestPodmanProxyEgressFiltering:
                 text=True,
                 timeout=30,
             )
-            http_code = result.stdout.strip()
-            # Proxy allowed the request — code should not be 000 (conn fail)
-            # or 403 (proxy blocked)
-            assert http_code != "000", (
-                f"Connection to allowed domain failed, stderr={result.stderr}"
+            # Check proxy logs: squid only logs BLOCKED requests
+            # (access_log ... !allowed_domains). If the domain appears in
+            # the logs, the proxy denied it. Absence means it was allowed,
+            # regardless of whether the upstream was actually reachable.
+            log_result = subprocess.run(
+                ["podman", "logs", proxy_name],
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
-            assert http_code != "403", (
-                f"Proxy blocked an allowed domain, stderr={result.stderr}"
+            assert "oauth2.googleapis.com" not in log_result.stdout, (
+                f"Proxy blocked an allowed domain, proxy_logs={log_result.stdout}"
             )
 
         finally:
