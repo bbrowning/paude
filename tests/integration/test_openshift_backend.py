@@ -429,21 +429,83 @@ class TestProxyDeployment:
 
         proxy_name = f"paude-proxy-{unique_session_name}"
 
-        # Verify proxy Deployment exists and has ready replicas
-        result = run_oc(
-            "get",
-            "deployment",
-            proxy_name,
-            "-n",
-            test_namespace,
-            "-o",
-            "jsonpath={.status.readyReplicas}",
-        )
-        ready_replicas = int(result.stdout.strip() or "0")
-        assert ready_replicas > 0, (
-            f"Proxy deployment {proxy_name} has no ready replicas "
-            "(squid may have crashed on startup)"
-        )
+        # Poll for proxy readiness (create_session waits too, but give extra time)
+        import time
+
+        ready_replicas = 0
+        for _ in range(30):
+            result = run_oc(
+                "get",
+                "deployment",
+                proxy_name,
+                "-n",
+                test_namespace,
+                "-o",
+                "jsonpath={.status.readyReplicas}",
+                check=False,
+            )
+            ready_replicas = int(result.stdout.strip() or "0")
+            if ready_replicas > 0:
+                break
+            time.sleep(2)
+
+        if ready_replicas == 0:
+            # Collect diagnostics before failing
+            diag_lines = [
+                f"Proxy deployment {proxy_name} has no ready replicas."
+            ]
+
+            # Pod events
+            events = run_oc(
+                "get", "events", "-n", test_namespace,
+                "--field-selector", f"involvedObject.name={proxy_name}",
+                "--sort-by=.lastTimestamp", check=False,
+            )
+            if events.stdout.strip():
+                diag_lines.append(f"\n=== Deployment Events ===\n{events.stdout.strip()}")
+
+            # Find proxy pod(s) and get their events/logs
+            pods = run_oc(
+                "get", "pods", "-n", test_namespace,
+                "-l", f"app=paude-proxy,paude.io/session-name={unique_session_name}",
+                "-o", "jsonpath={.items[*].metadata.name}", check=False,
+            )
+            for pod_name in pods.stdout.strip().split():
+                if not pod_name:
+                    continue
+                pod_events = run_oc(
+                    "get", "events", "-n", test_namespace,
+                    "--field-selector", f"involvedObject.name={pod_name}",
+                    "--sort-by=.lastTimestamp", check=False,
+                )
+                if pod_events.stdout.strip():
+                    diag_lines.append(
+                        f"\n=== Events for {pod_name} ===\n{pod_events.stdout.strip()}"
+                    )
+                pod_logs = run_oc(
+                    "logs", pod_name, "-n", test_namespace,
+                    "--tail=50", check=False,
+                )
+                if pod_logs.stdout.strip():
+                    diag_lines.append(
+                        f"\n=== Logs for {pod_name} ===\n{pod_logs.stdout.strip()}"
+                    )
+                if pod_logs.stderr.strip():
+                    diag_lines.append(
+                        f"\n=== Stderr for {pod_name} ===\n{pod_logs.stderr.strip()}"
+                    )
+                pod_describe = run_oc(
+                    "describe", "pod", pod_name, "-n", test_namespace,
+                    check=False,
+                )
+                if pod_describe.stdout.strip():
+                    desc_lines = pod_describe.stdout.strip().split("\n")
+                    truncated = "\n".join(desc_lines[:60])
+                    diag_lines.append(
+                        f"\n=== Describe {pod_name} (truncated) ===\n{truncated}"
+                    )
+
+            pytest.fail("\n".join(diag_lines))
 
         # Verify ALLOWED_DOMAINS env var on the Deployment
         result = run_oc(
