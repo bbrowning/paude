@@ -162,6 +162,42 @@ def kubernetes_test_image() -> str:
     return os.environ.get("PAUDE_K8S_TEST_IMAGE", DEFAULT_K8S_IMAGE)
 
 
+DEFAULT_PROXY_IMAGE = "paude-proxy-centos9:latest"
+
+
+@pytest.fixture(scope="session")
+def proxy_image_available(podman_available: bool) -> bool:
+    """Check if the proxy image is available locally."""
+    if not podman_available:
+        return False
+
+    try:
+        result = subprocess.run(
+            ["podman", "image", "exists", DEFAULT_PROXY_IMAGE],
+            capture_output=True,
+            timeout=10,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+@pytest.fixture
+def require_proxy_image(proxy_image_available: bool) -> None:
+    """Skip test if proxy image is not built."""
+    if not proxy_image_available:
+        pytest.skip("proxy image not available (run 'make build' first)")
+
+
+@pytest.fixture(scope="session")
+def podman_proxy_image() -> str:
+    """Get the Podman proxy image name.
+
+    Can be overridden with PAUDE_PROXY_IMAGE environment variable.
+    """
+    return os.environ.get("PAUDE_PROXY_IMAGE", DEFAULT_PROXY_IMAGE)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def shorter_pod_timeout() -> None:
     """Set a shorter pod ready timeout for integration tests.
