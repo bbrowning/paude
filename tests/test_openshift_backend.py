@@ -246,14 +246,20 @@ class TestOpenShiftCreateSession:
     """Tests for OpenShiftBackend.create_session."""
 
     @patch("subprocess.run")
-    def test_create_session_creates_statefulset(self, mock_run: MagicMock) -> None:
-        """Create session creates a StatefulSet."""
+    def test_create_session_creates_sandbox(self, mock_run: MagicMock) -> None:
+        """Create session creates a Sandbox."""
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
+            # Return Sandbox CRD exists for api-resources check
+            if "api-resources" in cmd:
+                return MagicMock(returncode=0, stdout="Sandbox", stderr="")
             # Return "Running" for pod status check
             if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
                 return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return pod name for label-based pod lookup
+            if "get" in cmd and "pods" in cmd and "-l" in cmd:
+                return MagicMock(returncode=0, stdout="paude-test-session-0", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         mock_run.side_effect = run_side_effect
@@ -275,7 +281,7 @@ class TestOpenShiftCreateSession:
         assert session.container_id == "paude-test-session-0"
         assert session.volume_name == "workspace-paude-test-session-0"
 
-        # Verify oc apply was called for StatefulSet
+        # Verify oc apply was called for Sandbox
         calls = mock_run.call_args_list
         apply_calls = [c for c in calls if "apply" in str(c)]
         assert len(apply_calls) > 0
@@ -284,16 +290,19 @@ class TestOpenShiftCreateSession:
     def test_create_session_raises_if_exists(self, mock_run: MagicMock) -> None:
         """Create session raises SessionExistsError if session exists."""
 
-        # First call to get statefulset returns existing
+        # First call to get sandbox returns existing
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
-            if "get" in cmd and "statefulset" in cmd:
+            # Return Sandbox CRD exists for api-resources check
+            if "api-resources" in cmd:
+                return MagicMock(returncode=0, stdout="Sandbox", stderr="")
+            if "get" in cmd and "sandbox.agents.x-k8s.io" in cmd:
                 return MagicMock(
                     returncode=0,
                     stdout=json.dumps(
                         {
-                            "apiVersion": "apps/v1",
-                            "kind": "StatefulSet",
+                            "apiVersion": "agents.x-k8s.io/v1alpha1",
+                            "kind": "Sandbox",
                             "metadata": {"name": "paude-existing"},
                         }
                     ),
@@ -326,9 +335,15 @@ class TestOpenShiftCreateSession:
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
             calls_log.append(cmd)
+            # Return Sandbox CRD exists for api-resources check
+            if "api-resources" in cmd:
+                return MagicMock(returncode=0, stdout="Sandbox", stderr="")
             # Return "Running" for pod status check
             if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
                 return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return pod name for label-based pod lookup
+            if "get" in cmd and "pods" in cmd and "-l" in cmd:
+                return MagicMock(returncode=0, stdout="paude-test-session-0", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         mock_run.side_effect = run_side_effect
@@ -375,7 +390,7 @@ class TestOpenShiftDeleteSession:
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
-            if "get" in cmd and "statefulset" in cmd:
+            if "get" in cmd and "sandbox.agents.x-k8s.io" in cmd:
                 # Not found - return non-zero exit code with empty stdout
                 return MagicMock(returncode=1, stdout="", stderr="not found")
             return MagicMock(returncode=0, stdout="", stderr="")
@@ -391,17 +406,17 @@ class TestOpenShiftDeleteSession:
 
     @patch("subprocess.run")
     def test_delete_session_deletes_resources(self, mock_run: MagicMock) -> None:
-        """Delete session deletes StatefulSet, PVC, and credentials."""
+        """Delete session deletes Sandbox, PVC, and credentials."""
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
-            if "get" in cmd and "statefulset" in cmd:
+            if "get" in cmd and "sandbox.agents.x-k8s.io" in cmd:
                 return MagicMock(
                     returncode=0,
                     stdout=json.dumps(
                         {
-                            "apiVersion": "apps/v1",
-                            "kind": "StatefulSet",
+                            "apiVersion": "agents.x-k8s.io/v1alpha1",
+                            "kind": "Sandbox",
                             "metadata": {"name": "paude-test"},
                         }
                     ),
@@ -417,7 +432,7 @@ class TestOpenShiftDeleteSession:
         # Verify delete commands were called
         calls = mock_run.call_args_list
         delete_calls = [c for c in calls if "delete" in str(c)]
-        assert len(delete_calls) >= 2  # StatefulSet, PVC, and credentials
+        assert len(delete_calls) >= 2  # Sandbox, PVC, and credentials
 
 
 class TestOpenShiftStartSession:
@@ -429,7 +444,7 @@ class TestOpenShiftStartSession:
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
-            if "get" in cmd and "statefulset" in cmd:
+            if "get" in cmd and "sandbox.agents.x-k8s.io" in cmd:
                 # Not found - return non-zero exit code
                 return MagicMock(returncode=1, stdout="", stderr="not found")
             return MagicMock(returncode=0, stdout="", stderr="")
@@ -444,19 +459,19 @@ class TestOpenShiftStartSession:
             backend.start_session("nonexistent")
 
     @patch("subprocess.run")
-    def test_start_session_scales_statefulset(self, mock_run: MagicMock) -> None:
-        """Start session scales StatefulSet to 1."""
+    def test_start_session_scales_sandbox(self, mock_run: MagicMock) -> None:
+        """Start session scales Sandbox to 1."""
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
             cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
-            if "get" in cmd and "statefulset" in cmd:
+            if "get" in cmd and "sandbox.agents.x-k8s.io" in cmd:
                 return MagicMock(
                     returncode=0,
                     stdout=json.dumps(
                         {
-                            "apiVersion": "apps/v1",
-                            "kind": "StatefulSet",
+                            "apiVersion": "agents.x-k8s.io/v1alpha1",
+                            "kind": "Sandbox",
                             "metadata": {
                                 "name": "paude-test",
                                 "annotations": {
@@ -471,24 +486,25 @@ class TestOpenShiftStartSession:
             # Proxy deployment doesn't exist (no proxy for this test)
             if "get" in cmd and "deployment" in cmd and "paude-proxy" in cmd_str:
                 return MagicMock(returncode=1, stdout="", stderr="not found")
-            # For scale and other commands
+            # For patch and other commands
             return MagicMock(returncode=0, stdout="", stderr="")
 
         mock_run.side_effect = run_side_effect
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
 
-        # Mock wait_for_pod_ready and connect_session to avoid actual waits
+        # Mock wait_for_pod_ready, _wait_for_pod_to_appear, and connect_session
         with patch.object(backend, "_wait_for_pod_ready"):
-            with patch.object(backend, "connect_session", return_value=0):
-                exit_code = backend.start_session("test")
+            with patch.object(backend, "_wait_for_pod_to_appear", return_value="paude-test-0"):
+                with patch.object(backend, "connect_session", return_value=0):
+                    exit_code = backend.start_session("test")
 
         assert exit_code == 0
 
-        # Verify scale command was called
+        # Verify patch command was called to scale Sandbox
         calls = mock_run.call_args_list
-        scale_calls = [c for c in calls if "scale" in str(c)]
-        assert len(scale_calls) >= 1
+        patch_calls = [c for c in calls if "patch" in str(c) and "sandbox.agents.x-k8s.io" in str(c)]
+        assert len(patch_calls) >= 1
 
         # Verify NO proxy scale command was issued (proxy doesn't exist)
         proxy_scale_calls = [
@@ -505,13 +521,13 @@ class TestOpenShiftStartSession:
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
             cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
-            if "get" in cmd and "statefulset" in cmd:
+            if "get" in cmd and "sandbox.agents.x-k8s.io" in cmd:
                 return MagicMock(
                     returncode=0,
                     stdout=json.dumps(
                         {
-                            "apiVersion": "apps/v1",
-                            "kind": "StatefulSet",
+                            "apiVersion": "agents.x-k8s.io/v1alpha1",
+                            "kind": "Sandbox",
                             "metadata": {
                                 "name": "paude-test",
                                 "annotations": {
@@ -526,7 +542,7 @@ class TestOpenShiftStartSession:
             # Proxy deployment exists
             if "get" in cmd and "deployment" in cmd and "paude-proxy" in cmd_str:
                 return MagicMock(returncode=0, stdout="", stderr="")
-            # For scale and other commands
+            # For patch and other commands
             return MagicMock(returncode=0, stdout="", stderr="")
 
         mock_run.side_effect = run_side_effect
@@ -534,9 +550,10 @@ class TestOpenShiftStartSession:
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
 
         with patch.object(backend, "_wait_for_pod_ready"):
-            with patch.object(backend, "_wait_for_proxy_ready"):
-                with patch.object(backend, "connect_session", return_value=0):
-                    exit_code = backend.start_session("test")
+            with patch.object(backend, "_wait_for_pod_to_appear", return_value="paude-test-0"):
+                with patch.object(backend, "_wait_for_proxy_ready"):
+                    with patch.object(backend, "connect_session", return_value=0):
+                        exit_code = backend.start_session("test")
 
         assert exit_code == 0
 
@@ -558,17 +575,17 @@ class TestOpenShiftStopSession:
 
     @patch("subprocess.run")
     def test_stop_session_scales_to_zero(self, mock_run: MagicMock) -> None:
-        """Stop session scales StatefulSet to 0."""
+        """Stop session scales Sandbox to 0."""
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
-            if "get" in cmd and "statefulset" in cmd:
+            if "get" in cmd and "sandbox.agents.x-k8s.io" in cmd:
                 return MagicMock(
                     returncode=0,
                     stdout=json.dumps(
                         {
-                            "apiVersion": "apps/v1",
-                            "kind": "StatefulSet",
+                            "apiVersion": "agents.x-k8s.io/v1alpha1",
+                            "kind": "Sandbox",
                             "metadata": {"name": "paude-test"},
                             "spec": {"replicas": 1},
                         }
@@ -582,10 +599,10 @@ class TestOpenShiftStopSession:
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
         backend.stop_session("test")
 
-        # Verify scale to 0 was called
+        # Verify patch to scale to 0 was called
         calls = mock_run.call_args_list
-        scale_calls = [c for c in calls if "scale" in str(c) and "replicas=0" in str(c)]
-        assert len(scale_calls) >= 1
+        patch_calls = [c for c in calls if "patch" in str(c) and "sandbox.agents.x-k8s.io" in str(c) and "replicas" in str(c)]
+        assert len(patch_calls) >= 1
 
     @patch("subprocess.run")
     def test_stop_session_raises_if_not_found(self, mock_run: MagicMock) -> None:
@@ -593,7 +610,7 @@ class TestOpenShiftStopSession:
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
-            if "get" in cmd and "statefulset" in cmd:
+            if "get" in cmd and "sandbox.agents.x-k8s.io" in cmd:
                 # Not found - return non-zero exit code
                 return MagicMock(returncode=1, stdout="", stderr="not found")
             return MagicMock(returncode=0, stdout="", stderr="")
@@ -614,13 +631,13 @@ class TestOpenShiftStopSession:
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
             cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
-            if "get" in cmd and "statefulset" in cmd:
+            if "get" in cmd and "sandbox.agents.x-k8s.io" in cmd:
                 return MagicMock(
                     returncode=0,
                     stdout=json.dumps(
                         {
-                            "apiVersion": "apps/v1",
-                            "kind": "StatefulSet",
+                            "apiVersion": "agents.x-k8s.io/v1alpha1",
+                            "kind": "Sandbox",
                             "metadata": {"name": "paude-test"},
                             "spec": {"replicas": 1},
                         }
@@ -658,13 +675,13 @@ class TestOpenShiftStopSession:
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
             cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
-            if "get" in cmd and "statefulset" in cmd:
+            if "get" in cmd and "sandbox.agents.x-k8s.io" in cmd:
                 return MagicMock(
                     returncode=0,
                     stdout=json.dumps(
                         {
-                            "apiVersion": "apps/v1",
-                            "kind": "StatefulSet",
+                            "apiVersion": "agents.x-k8s.io/v1alpha1",
+                            "kind": "Sandbox",
                             "metadata": {"name": "paude-test"},
                             "spec": {"replicas": 1},
                         }
@@ -687,14 +704,14 @@ class TestOpenShiftStopSession:
         # Should not raise - proxy doesn't exist so we skip scaling it
         backend.stop_session("test")
 
-        # Verify StatefulSet was still scaled to 0
+        # Verify Sandbox was still scaled to 0 via patch
         calls = mock_run.call_args_list
-        sts_scale_calls = [
+        sandbox_patch_calls = [
             c
             for c in calls
-            if "scale" in str(c) and "statefulset" in str(c) and "replicas=0" in str(c)
+            if "patch" in str(c) and "sandbox.agents.x-k8s.io" in str(c) and "replicas" in str(c)
         ]
-        assert len(sts_scale_calls) == 1
+        assert len(sandbox_patch_calls) == 1
 
         # Verify NO proxy scale was attempted (proxy doesn't exist)
         proxy_scale_calls = [
@@ -709,13 +726,13 @@ class TestOpenShiftListSessions:
     """Tests for OpenShiftBackend.list_sessions (new protocol)."""
 
     @patch("subprocess.run")
-    def test_list_sessions_returns_statefulsets(self, mock_run: MagicMock) -> None:
-        """List sessions returns StatefulSets as sessions."""
+    def test_list_sessions_returns_sandboxes(self, mock_run: MagicMock) -> None:
+        """List sessions returns Sandboxes as sessions."""
         from paude.backends.openshift import _encode_path
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
-            if "get" in cmd and "statefulsets" in cmd and "-l" in cmd:
+            if "get" in cmd and "sandbox.agents.x-k8s.io" in cmd and "-l" in cmd:
                 return MagicMock(
                     returncode=0,
                     stdout=json.dumps(
@@ -775,12 +792,12 @@ class TestOpenShiftGetSession:
 
     @patch("subprocess.run")
     def test_get_session_returns_session_if_found(self, mock_run: MagicMock) -> None:
-        """Get session returns session if StatefulSet found."""
+        """Get session returns session if Sandbox found."""
         from paude.backends.openshift import _encode_path
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
-            if "get" in cmd and "statefulset" in cmd:
+            if "get" in cmd and "sandbox.agents.x-k8s.io" in cmd:
                 return MagicMock(
                     returncode=0,
                     stdout=json.dumps(
@@ -813,11 +830,11 @@ class TestOpenShiftGetSession:
 
     @patch("subprocess.run")
     def test_get_session_returns_none_if_not_found(self, mock_run: MagicMock) -> None:
-        """Get session returns None if StatefulSet not found."""
+        """Get session returns None if Sandbox not found."""
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
-            if "get" in cmd and "statefulset" in cmd:
+            if "get" in cmd and "sandbox.agents.x-k8s.io" in cmd:
                 # Not found - return non-zero exit code
                 return MagicMock(returncode=1, stdout="", stderr="not found")
             return MagicMock(returncode=0, stdout="", stderr="")
@@ -830,32 +847,32 @@ class TestOpenShiftGetSession:
         assert session is None
 
 
-class TestOpenShiftStatefulSetSpec:
-    """Tests for _generate_statefulset_spec."""
+class TestOpenShiftSandboxSpec:
+    """Tests for _generate_sandbox_spec."""
 
-    def test_generates_statefulset_with_volume_claim_templates(self) -> None:
-        """StatefulSet spec includes volumeClaimTemplates."""
+    def test_generates_sandbox_with_volume_claim_templates(self) -> None:
+        """Sandbox spec includes volumeClaimTemplates."""
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        spec = backend._generate_statefulset_spec(
+        spec = backend._generate_sandbox_spec(
             session_name="test-session",
             image="paude:latest",
             env={},
             workspace=Path("/home/user/project"),
         )
 
-        assert spec["kind"] == "StatefulSet"
+        assert spec["kind"] == "Sandbox"
         assert spec["metadata"]["name"] == "paude-test-session"
         assert spec["spec"]["replicas"] == 1  # Created running
         assert "volumeClaimTemplates" in spec["spec"]
         assert len(spec["spec"]["volumeClaimTemplates"]) > 0
 
-    def test_statefulset_includes_workspace_annotation(self) -> None:
-        """StatefulSet includes workspace path in annotations."""
+    def test_sandbox_includes_workspace_annotation(self) -> None:
+        """Sandbox includes workspace path in annotations."""
         from paude.backends.openshift import _encode_path
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
         workspace = Path("/home/user/my-project")
-        spec = backend._generate_statefulset_spec(
+        spec = backend._generate_sandbox_spec(
             session_name="test",
             image="paude:latest",
             env={},
@@ -865,10 +882,10 @@ class TestOpenShiftStatefulSetSpec:
         annotations = spec["metadata"]["annotations"]
         assert annotations["paude.io/workspace"] == _encode_path(workspace)
 
-    def test_statefulset_uses_custom_pvc_size(self) -> None:
-        """StatefulSet uses custom PVC size when specified."""
+    def test_sandbox_uses_custom_pvc_size(self) -> None:
+        """Sandbox uses custom PVC size when specified."""
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        spec = backend._generate_statefulset_spec(
+        spec = backend._generate_sandbox_spec(
             session_name="test",
             image="paude:latest",
             env={},
@@ -879,10 +896,10 @@ class TestOpenShiftStatefulSetSpec:
         vct = spec["spec"]["volumeClaimTemplates"][0]
         assert vct["spec"]["resources"]["requests"]["storage"] == "50Gi"
 
-    def test_statefulset_uses_custom_storage_class(self) -> None:
-        """StatefulSet uses custom storage class when specified."""
+    def test_sandbox_uses_custom_storage_class(self) -> None:
+        """Sandbox uses custom storage class when specified."""
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        spec = backend._generate_statefulset_spec(
+        spec = backend._generate_sandbox_spec(
             session_name="test",
             image="paude:latest",
             env={},
@@ -893,8 +910,8 @@ class TestOpenShiftStatefulSetSpec:
         vct = spec["spec"]["volumeClaimTemplates"][0]
         assert vct["spec"]["storageClassName"] == "fast-ssd"
 
-    def test_statefulset_does_not_include_working_dir(self) -> None:
-        """StatefulSet container spec must NOT include workingDir.
+    def test_sandbox_does_not_include_working_dir(self) -> None:
+        """Sandbox container spec must NOT include workingDir.
 
         If workingDir is set, kubelet creates the directory as root before
         the container starts, which causes permission errors for the random
@@ -902,27 +919,27 @@ class TestOpenShiftStatefulSetSpec:
         workspace directory with correct ownership instead.
         """
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        spec = backend._generate_statefulset_spec(
+        spec = backend._generate_sandbox_spec(
             session_name="test",
             image="paude:latest",
             env={},
             workspace=Path("/project"),
         )
 
-        container = spec["spec"]["template"]["spec"]["containers"][0]
+        container = spec["spec"]["podTemplate"]["spec"]["containers"][0]
         assert "workingDir" not in container, (
             "workingDir must not be set - kubelet creates it as root"
         )
 
-    def test_statefulset_includes_tmpfs_credentials_volume(self) -> None:
-        """StatefulSet includes tmpfs emptyDir volume for credentials.
+    def test_sandbox_includes_tmpfs_credentials_volume(self) -> None:
+        """Sandbox includes tmpfs emptyDir volume for credentials.
 
         Credentials are stored in RAM-only tmpfs to prevent persistence
         to disk. This ensures credentials are automatically cleared when
         the pod stops/restarts.
         """
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        spec = backend._generate_statefulset_spec(
+        spec = backend._generate_sandbox_spec(
             session_name="test",
             image="paude:latest",
             env={},
@@ -930,7 +947,7 @@ class TestOpenShiftStatefulSetSpec:
         )
 
         # Check volumes include credentials tmpfs
-        volumes = spec["spec"]["template"]["spec"]["volumes"]
+        volumes = spec["spec"]["podTemplate"]["spec"]["volumes"]
         creds_volume = next((v for v in volumes if v["name"] == "credentials"), None)
         assert creds_volume is not None, "Should have credentials volume"
         assert "emptyDir" in creds_volume, "Should be emptyDir volume"
@@ -938,7 +955,7 @@ class TestOpenShiftStatefulSetSpec:
         assert creds_volume["emptyDir"]["sizeLimit"] == "100Mi"
 
         # Check volume mounts include /credentials
-        container = spec["spec"]["template"]["spec"]["containers"][0]
+        container = spec["spec"]["podTemplate"]["spec"]["containers"][0]
         volume_mounts = container["volumeMounts"]
         creds_mount = next(
             (m for m in volume_mounts if m["name"] == "credentials"), None
@@ -946,21 +963,21 @@ class TestOpenShiftStatefulSetSpec:
         assert creds_mount is not None, "Should have credentials mount"
         assert creds_mount["mountPath"] == "/credentials"
 
-    def test_statefulset_image_pull_policy_defaults_to_always(self) -> None:
-        """StatefulSet defaults imagePullPolicy to Always."""
+    def test_sandbox_image_pull_policy_defaults_to_always(self) -> None:
+        """Sandbox defaults imagePullPolicy to Always."""
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        spec = backend._generate_statefulset_spec(
+        spec = backend._generate_sandbox_spec(
             session_name="test",
             image="paude:latest",
             env={},
             workspace=Path("/project"),
         )
 
-        container = spec["spec"]["template"]["spec"]["containers"][0]
+        container = spec["spec"]["podTemplate"]["spec"]["containers"][0]
         assert container["imagePullPolicy"] == "Always"
 
-    def test_statefulset_image_pull_policy_from_env(self) -> None:
-        """StatefulSet uses imagePullPolicy from PAUDE_IMAGE_PULL_POLICY env var."""
+    def test_sandbox_image_pull_policy_from_env(self) -> None:
+        """Sandbox uses imagePullPolicy from PAUDE_IMAGE_PULL_POLICY env var."""
         import os
 
         original = os.environ.get("PAUDE_IMAGE_PULL_POLICY")
@@ -968,14 +985,14 @@ class TestOpenShiftStatefulSetSpec:
             os.environ["PAUDE_IMAGE_PULL_POLICY"] = "IfNotPresent"
 
             backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-            spec = backend._generate_statefulset_spec(
+            spec = backend._generate_sandbox_spec(
                 session_name="test",
                 image="paude:latest",
                 env={},
                 workspace=Path("/project"),
             )
 
-            container = spec["spec"]["template"]["spec"]["containers"][0]
+            container = spec["spec"]["podTemplate"]["spec"]["containers"][0]
             assert container["imagePullPolicy"] == "IfNotPresent"
         finally:
             if original is None:
@@ -983,8 +1000,8 @@ class TestOpenShiftStatefulSetSpec:
             else:
                 os.environ["PAUDE_IMAGE_PULL_POLICY"] = original
 
-    def test_statefulset_image_pull_policy_never(self) -> None:
-        """StatefulSet can use Never imagePullPolicy for local images."""
+    def test_sandbox_image_pull_policy_never(self) -> None:
+        """Sandbox can use Never imagePullPolicy for local images."""
         import os
 
         original = os.environ.get("PAUDE_IMAGE_PULL_POLICY")
@@ -992,14 +1009,14 @@ class TestOpenShiftStatefulSetSpec:
             os.environ["PAUDE_IMAGE_PULL_POLICY"] = "Never"
 
             backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-            spec = backend._generate_statefulset_spec(
+            spec = backend._generate_sandbox_spec(
                 session_name="test",
                 image="my-local-image:latest",
                 env={},
                 workspace=Path("/project"),
             )
 
-            container = spec["spec"]["template"]["spec"]["containers"][0]
+            container = spec["spec"]["podTemplate"]["spec"]["containers"][0]
             assert container["imagePullPolicy"] == "Never"
         finally:
             if original is None:
@@ -1175,13 +1192,13 @@ class TestDeleteSessionCallsDeleteBuilds:
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
-            if "get" in cmd and "statefulset" in cmd:
+            if "get" in cmd and "sandbox.agents.x-k8s.io" in cmd:
                 return MagicMock(
                     returncode=0,
                     stdout=json.dumps(
                         {
-                            "apiVersion": "apps/v1",
-                            "kind": "StatefulSet",
+                            "apiVersion": "agents.x-k8s.io/v1alpha1",
+                            "kind": "Sandbox",
                             "metadata": {"name": "paude-test"},
                         }
                     ),
@@ -1545,9 +1562,15 @@ class TestCreateSessionWithProxy:
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
+            # Return Sandbox CRD exists for api-resources check
+            if "api-resources" in cmd:
+                return MagicMock(returncode=0, stdout="Sandbox", stderr="")
             # Return "Running" for pod status check
             if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
                 return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return pod name for label-based pod lookup
+            if "get" in cmd and "pods" in cmd and "-l" in cmd:
+                return MagicMock(returncode=0, stdout="paude-test-session-0", stderr="")
             # Return "1" for deployment readiness check (proxy)
             if "get" in cmd and "deployment" in cmd and "readyReplicas" in str(cmd):
                 return MagicMock(returncode=0, stdout="1", stderr="")
@@ -1584,9 +1607,15 @@ class TestCreateSessionWithProxy:
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
+            # Return Sandbox CRD exists for api-resources check
+            if "api-resources" in cmd:
+                return MagicMock(returncode=0, stdout="Sandbox", stderr="")
             # Return "Running" for pod status check
             if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
                 return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return pod name for label-based pod lookup
+            if "get" in cmd and "pods" in cmd and "-l" in cmd:
+                return MagicMock(returncode=0, stdout="paude-test-session-0", stderr="")
             # Return "1" for deployment readiness check (proxy)
             if "get" in cmd and "deployment" in cmd and "readyReplicas" in str(cmd):
                 return MagicMock(returncode=0, stdout="1", stderr="")
@@ -1631,9 +1660,15 @@ class TestCreateSessionWithProxy:
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
+            # Return Sandbox CRD exists for api-resources check
+            if "api-resources" in cmd:
+                return MagicMock(returncode=0, stdout="Sandbox", stderr="")
             # Return "Running" for pod status check
             if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
                 return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return pod name for label-based pod lookup
+            if "get" in cmd and "pods" in cmd and "-l" in cmd:
+                return MagicMock(returncode=0, stdout="paude-test-session-0", stderr="")
             # Return "1" for deployment readiness check (proxy)
             if "get" in cmd and "deployment" in cmd and "readyReplicas" in str(cmd):
                 return MagicMock(returncode=0, stdout="1", stderr="")
@@ -1653,15 +1688,16 @@ class TestCreateSessionWithProxy:
 
         backend.create_session(config)
 
-        # Find StatefulSet creation
+        # Find Sandbox creation
         apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
-        sts_calls = [
-            c for c in apply_calls if "StatefulSet" in str(c[1].get("input", ""))
+        sandbox_calls = [
+            c for c in apply_calls if "Sandbox" in str(c[1].get("input", ""))
+            and "Deployment" not in str(c[1].get("input", ""))
         ]
-        assert len(sts_calls) >= 1
+        assert len(sandbox_calls) >= 1
 
-        sts_spec = json.loads(sts_calls[0][1]["input"])
-        container = sts_spec["spec"]["template"]["spec"]["containers"][0]
+        sandbox_spec = json.loads(sandbox_calls[0][1]["input"])
+        container = sandbox_spec["spec"]["podTemplate"]["spec"]["containers"][0]
         env_dict = {e["name"]: e["value"] for e in container["env"]}
 
         expected_proxy = "http://paude-proxy-test-session:3128"
@@ -1676,8 +1712,14 @@ class TestCreateSessionWithProxy:
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
+            # Return Sandbox CRD exists for api-resources check
+            if "api-resources" in cmd:
+                return MagicMock(returncode=0, stdout="Sandbox", stderr="")
             if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
                 return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return pod name for label-based pod lookup
+            if "get" in cmd and "pods" in cmd and "-l" in cmd:
+                return MagicMock(returncode=0, stdout="paude-test-session-0", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         mock_run.side_effect = run_side_effect
@@ -1703,13 +1745,14 @@ class TestCreateSessionWithProxy:
         ]
         assert len(deployment_calls) == 0
 
-        # Verify no proxy env vars in StatefulSet
-        sts_calls = [
-            c for c in apply_calls if "StatefulSet" in str(c[1].get("input", ""))
+        # Verify no proxy env vars in Sandbox
+        sandbox_calls = [
+            c for c in apply_calls if "Sandbox" in str(c[1].get("input", ""))
+            and "Deployment" not in str(c[1].get("input", ""))
         ]
-        if sts_calls:
-            sts_spec = json.loads(sts_calls[0][1]["input"])
-            container = sts_spec["spec"]["template"]["spec"]["containers"][0]
+        if sandbox_calls:
+            sandbox_spec = json.loads(sandbox_calls[0][1]["input"])
+            container = sandbox_spec["spec"]["podTemplate"]["spec"]["containers"][0]
             env_dict = {e["name"]: e["value"] for e in container["env"]}
             assert "HTTP_PROXY" not in env_dict
             assert "HTTPS_PROXY" not in env_dict
@@ -1724,13 +1767,13 @@ class TestDeleteSessionWithProxy:
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
-            if "get" in cmd and "statefulset" in cmd:
+            if "get" in cmd and "sandbox.agents.x-k8s.io" in cmd:
                 return MagicMock(
                     returncode=0,
                     stdout=json.dumps(
                         {
-                            "apiVersion": "apps/v1",
-                            "kind": "StatefulSet",
+                            "apiVersion": "agents.x-k8s.io/v1alpha1",
+                            "kind": "Sandbox",
                             "metadata": {"name": "paude-test"},
                         }
                     ),
@@ -1822,9 +1865,15 @@ class TestProxyImageDerivation:
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
+            # Return Sandbox CRD exists for api-resources check
+            if "api-resources" in cmd:
+                return MagicMock(returncode=0, stdout="Sandbox", stderr="")
             # Return "Running" for pod status check
             if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
                 return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return pod name for label-based pod lookup
+            if "get" in cmd and "pods" in cmd and "-l" in cmd:
+                return MagicMock(returncode=0, stdout="paude-test-0", stderr="")
             # Return "1" for deployment readiness check (proxy)
             if "get" in cmd and "deployment" in cmd and "readyReplicas" in str(cmd):
                 return MagicMock(returncode=0, stdout="1", stderr="")
@@ -1867,9 +1916,15 @@ class TestProxyImageDerivation:
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
+            # Return Sandbox CRD exists for api-resources check
+            if "api-resources" in cmd:
+                return MagicMock(returncode=0, stdout="Sandbox", stderr="")
             # Return "Running" for pod status check
             if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
                 return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return pod name for label-based pod lookup
+            if "get" in cmd and "pods" in cmd and "-l" in cmd:
+                return MagicMock(returncode=0, stdout="paude-test-0", stderr="")
             # Return "1" for deployment readiness check (proxy)
             if "get" in cmd and "deployment" in cmd and "readyReplicas" in str(cmd):
                 return MagicMock(returncode=0, stdout="1", stderr="")
@@ -1916,8 +1971,8 @@ class TestStartSessionWaitsForProxy:
             cmd = args[0] if args else kwargs.get("args", [])
             cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
 
-            if "get" in cmd and "statefulset" in cmd:
-                call_order.append("get_statefulset")
+            if "get" in cmd and "sandbox.agents.x-k8s.io" in cmd:
+                call_order.append("get_sandbox")
                 return MagicMock(
                     returncode=0,
                     stdout=json.dumps(
@@ -1938,6 +1993,9 @@ class TestStartSessionWaitsForProxy:
             if "jsonpath" in cmd_str and "readyReplicas" in cmd_str:
                 call_order.append("check_proxy_ready")
                 return MagicMock(returncode=0, stdout="1", stderr="")
+            if "patch" in cmd and "sandbox.agents.x-k8s.io" in cmd:
+                call_order.append("patch_sandbox")
+                return MagicMock(returncode=0, stdout="", stderr="")
             if "scale" in cmd:
                 call_order.append("scale")
                 return MagicMock(returncode=0, stdout="", stderr="")
@@ -1948,8 +2006,9 @@ class TestStartSessionWaitsForProxy:
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
 
         with patch.object(backend, "_wait_for_pod_ready"):
-            with patch.object(backend, "connect_session", return_value=0):
-                backend.start_session("test")
+            with patch.object(backend, "_wait_for_pod_to_appear", return_value="paude-test-0"):
+                with patch.object(backend, "connect_session", return_value=0):
+                    backend.start_session("test")
 
         # Verify proxy check happened
         assert "get_proxy_deployment" in call_order
@@ -1964,7 +2023,7 @@ class TestStartSessionWaitsForProxy:
             cmd = args[0] if args else kwargs.get("args", [])
             cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
 
-            if "get" in cmd and "statefulset" in cmd:
+            if "get" in cmd and "sandbox.agents.x-k8s.io" in cmd:
                 return MagicMock(
                     returncode=0,
                     stdout=json.dumps(
@@ -1992,8 +2051,9 @@ class TestStartSessionWaitsForProxy:
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
 
         with patch.object(backend, "_wait_for_pod_ready"):
-            with patch.object(backend, "connect_session", return_value=0):
-                backend.start_session("test")
+            with patch.object(backend, "_wait_for_pod_to_appear", return_value="paude-test-0"):
+                with patch.object(backend, "connect_session", return_value=0):
+                    backend.start_session("test")
 
         # Verify proxy was checked but not waited for
         assert "get_proxy_deployment" in call_order
@@ -2024,17 +2084,19 @@ class TestConnectSessionRefreshesCredentials:
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
 
-        # Mock _is_config_synced to return False (first connect)
-        with patch.object(backend, "_is_config_synced", return_value=False):
-            with patch.object(backend, "_sync_config_to_pod") as mock_full_sync:
-                with patch.object(backend, "_sync_credentials_to_pod") as mock_creds:
-                    with patch("subprocess.run", mock_run):
-                        backend.connect_session("test")
+        # Mock _get_pod_for_session for label-based pod lookup
+        with patch.object(backend, "_get_pod_for_session", return_value="paude-test-0"):
+            # Mock _is_config_synced to return False (first connect)
+            with patch.object(backend, "_is_config_synced", return_value=False):
+                with patch.object(backend, "_sync_config_to_pod") as mock_full_sync:
+                    with patch.object(backend, "_sync_credentials_to_pod") as mock_creds:
+                        with patch("subprocess.run", mock_run):
+                            backend.connect_session("test")
 
-                # First connect: full config sync
-                mock_full_sync.assert_called_once()
-                mock_creds.assert_not_called()
-                assert "paude-test-0" in str(mock_full_sync.call_args)
+                    # First connect: full config sync
+                    mock_full_sync.assert_called_once()
+                    mock_creds.assert_not_called()
+                    assert "paude-test-0" in str(mock_full_sync.call_args)
 
     @patch("subprocess.run")
     def test_connect_session_credentials_only_on_reconnect(
@@ -2057,17 +2119,19 @@ class TestConnectSessionRefreshesCredentials:
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
 
-        # Mock _is_config_synced to return True (reconnect)
-        with patch.object(backend, "_is_config_synced", return_value=True):
-            with patch.object(backend, "_sync_config_to_pod") as mock_full_sync:
-                with patch.object(backend, "_sync_credentials_to_pod") as mock_creds:
-                    with patch("subprocess.run", mock_run):
-                        backend.connect_session("test")
+        # Mock _get_pod_for_session for label-based pod lookup
+        with patch.object(backend, "_get_pod_for_session", return_value="paude-test-0"):
+            # Mock _is_config_synced to return True (reconnect)
+            with patch.object(backend, "_is_config_synced", return_value=True):
+                with patch.object(backend, "_sync_config_to_pod") as mock_full_sync:
+                    with patch.object(backend, "_sync_credentials_to_pod") as mock_creds:
+                        with patch("subprocess.run", mock_run):
+                            backend.connect_session("test")
 
-                # Reconnect: credentials only
-                mock_creds.assert_called_once()
-                mock_full_sync.assert_not_called()
-                assert "paude-test-0" in str(mock_creds.call_args)
+                    # Reconnect: credentials only
+                    mock_creds.assert_called_once()
+                    mock_full_sync.assert_not_called()
+                    assert "paude-test-0" in str(mock_creds.call_args)
 
     @patch("subprocess.run")
     def test_connect_session_does_not_sync_when_pod_not_running(
@@ -2078,35 +2142,33 @@ class TestConnectSessionRefreshesCredentials:
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
 
-        with patch.object(backend, "_sync_config_to_pod") as mock_full_sync:
-            with patch.object(backend, "_sync_credentials_to_pod") as mock_creds:
-                result = backend.connect_session("test")
+        with patch.object(backend, "_get_pod_for_session", return_value="paude-test-0"):
+            with patch.object(backend, "_sync_config_to_pod") as mock_full_sync:
+                with patch.object(backend, "_sync_credentials_to_pod") as mock_creds:
+                    result = backend.connect_session("test")
 
-                # Should return 1 (error) without syncing
-                assert result == 1
-                mock_full_sync.assert_not_called()
-                mock_creds.assert_not_called()
+                    # Should return 1 (error) without syncing
+                    assert result == 1
+                    mock_full_sync.assert_not_called()
+                    mock_creds.assert_not_called()
 
     @patch("subprocess.run")
     def test_connect_session_does_not_sync_when_pod_not_found(
         self, mock_run: MagicMock
     ) -> None:
         """connect_session does not sync if pod doesn't exist."""
-        # Simulate pod not found - returncode != 0
-        mock_run.return_value = MagicMock(
-            returncode=1, stdout="", stderr="pod not found"
-        )
-
+        # Simulate pod not found via label-based lookup
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
 
-        with patch.object(backend, "_sync_config_to_pod") as mock_full_sync:
-            with patch.object(backend, "_sync_credentials_to_pod") as mock_creds:
-                result = backend.connect_session("test")
+        with patch.object(backend, "_get_pod_for_session", return_value=None):
+            with patch.object(backend, "_sync_config_to_pod") as mock_full_sync:
+                with patch.object(backend, "_sync_credentials_to_pod") as mock_creds:
+                    result = backend.connect_session("test")
 
-                # Should return 1 (error) without syncing
-                assert result == 1
-                mock_full_sync.assert_not_called()
-                mock_creds.assert_not_called()
+                    # Should return 1 (error) without syncing
+                    assert result == 1
+                    mock_full_sync.assert_not_called()
+                    mock_creds.assert_not_called()
 
     @patch("subprocess.run")
     def test_connect_session_shows_empty_workspace_message(
@@ -2131,9 +2193,10 @@ class TestConnectSessionRefreshesCredentials:
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
 
-        with patch.object(backend, "_is_config_synced", return_value=True):
-            with patch.object(backend, "_sync_credentials_to_pod"):
-                backend.connect_session("test")
+        with patch.object(backend, "_get_pod_for_session", return_value="paude-test-0"):
+            with patch.object(backend, "_is_config_synced", return_value=True):
+                with patch.object(backend, "_sync_credentials_to_pod"):
+                    backend.connect_session("test")
 
         captured = capsys.readouterr()
         assert "Workspace is empty" in captured.err
@@ -2251,9 +2314,15 @@ class TestCreateSessionWithProxyNetworkPolicy:
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
+            # Return Sandbox CRD exists for api-resources check
+            if "api-resources" in cmd:
+                return MagicMock(returncode=0, stdout="Sandbox", stderr="")
             # Return "Running" for pod status check
             if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
                 return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return pod name for label-based pod lookup
+            if "get" in cmd and "pods" in cmd and "-l" in cmd:
+                return MagicMock(returncode=0, stdout="paude-test-session-0", stderr="")
             # Return "1" for deployment readiness check (proxy)
             if "get" in cmd and "deployment" in cmd and "readyReplicas" in str(cmd):
                 return MagicMock(returncode=0, stdout="1", stderr="")
@@ -3102,9 +3171,15 @@ class TestSessionConfigProxyImage:
             # Capture proxy image from deployment spec
             if "apply" in cmd and input_data and "paude-proxy" in input_data:
                 proxy_image_used.append(input_data)
+            # Return Sandbox CRD exists for api-resources check
+            if "api-resources" in cmd:
+                return MagicMock(returncode=0, stdout="Sandbox", stderr="")
             # Return "Running" for pod status check
             if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
                 return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return pod name for label-based pod lookup
+            if "get" in cmd and "pods" in cmd and "-l" in cmd:
+                return MagicMock(returncode=0, stdout="paude-test-session-0", stderr="")
             # Return ready for proxy deployment
             if (
                 "get" in cmd

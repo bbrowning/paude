@@ -72,7 +72,7 @@ class Backend(Protocol):
     The CLI delegates to the appropriate backend based on configuration.
 
     Session Lifecycle:
-        create_session -> Creates container/StatefulSet + volume/PVC (stopped)
+        create_session -> Creates container/Sandbox + volume/PVC (stopped)
         start_session  -> Starts container/scales to 1, connects
         stop_session   -> Stops container/scales to 0 (preserves volume)
         delete_session -> Removes all resources including volume
@@ -84,7 +84,7 @@ class Backend(Protocol):
     def create_session(self, config: SessionConfig) -> Session:
         """Create a new session (does not start it).
 
-        Creates the container/StatefulSet and volume/PVC but leaves it stopped.
+        Creates the container/Sandbox and volume/PVC but leaves it stopped.
 
         Args:
             config: Session configuration.
@@ -97,7 +97,7 @@ class Backend(Protocol):
     def delete_session(self, name: str, confirm: bool = False) -> None:
         """Delete a session and all its resources.
 
-        Removes the container/StatefulSet and volume/PVC permanently.
+        Removes the container/Sandbox and volume/PVC permanently.
 
         Args:
             name: Session name.

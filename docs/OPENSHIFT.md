@@ -6,8 +6,12 @@ Run Claude Code in OpenShift/Kubernetes pods with persistent sessions, credentia
 
 1. **oc CLI** - OpenShift command-line tools installed and in PATH
 2. **Cluster Access** - Logged in to an OpenShift cluster (`oc login`)
-3. **Podman** - For building and pushing images locally
-4. **gcloud credentials** - Vertex AI authentication at `~/.config/gcloud`
+3. **agent-sandbox CRD** - The [agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox) Sandbox CRD must be installed on the cluster:
+   ```bash
+   kubectl apply -f https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v0.1.1/manifest.yaml
+   ```
+4. **Podman** - For building and pushing images locally
+5. **gcloud credentials** - Vertex AI authentication at `~/.config/gcloud`
 
 ## Quick Start
 
@@ -36,7 +40,7 @@ paude start
 
 ## Session Management
 
-Paude uses a unified session model across all backends. Sessions are persistent by default, surviving pod restarts via StatefulSets and PersistentVolumeClaims.
+Paude uses a unified session model across all backends. Sessions are persistent by default, surviving pod restarts via the [agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox) Sandbox CRD and PersistentVolumeClaims.
 
 ### Persistent Sessions
 
@@ -44,7 +48,7 @@ Paude uses a unified session model across all backends. Sessions are persistent 
 # Create a named session (without starting)
 paude create my-project --backend=openshift
 
-# Start the session (scales StatefulSet, connects)
+# Start the session (scales Sandbox to 1, connects)
 paude start my-project --backend=openshift
 
 # Set up git remote for code sync
@@ -68,15 +72,15 @@ paude start my-project --backend=openshift
 # List all sessions
 paude list --backend=openshift
 
-# Delete session completely (removes StatefulSet + PVC)
+# Delete session completely (removes Sandbox + PVC)
 paude delete my-project --confirm --backend=openshift
 ```
 
 ### Session Lifecycle
 
-| State | StatefulSet Replicas | Pod | PVC | Files |
-|-------|---------------------|-----|-----|-------|
-| Created | 0 | None | Created | Empty |
+| State | Sandbox Replicas | Pod | PVC | Files |
+|-------|-----------------|-----|-----|-------|
+| Created | 1 | Running | Created | Empty |
 | Started | 1 | Running | Bound | Push via git |
 | Stopped | 0 | None | Retained | Preserved |
 | Deleted | Deleted | Deleted | Deleted | Gone |
