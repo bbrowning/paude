@@ -566,7 +566,9 @@ def _start_proxy_session(
     network_name = f"paude-net-{session_name}"
     result = subprocess.run(
         [
-            "podman", "inspect", "--format",
+            "podman",
+            "inspect",
+            "--format",
             f'{{{{(index .NetworkSettings.Networks "{network_name}").IPAddress}}}}',
             proxy_name,
         ],
@@ -623,8 +625,11 @@ class TestPodmanProxyEgressFiltering:
             # Verify main container has HTTP_PROXY env var set
             result = subprocess.run(
                 [
-                    "podman", "inspect", container_name,
-                    "--format", '{{range .Config.Env}}{{println .}}{{end}}',
+                    "podman",
+                    "inspect",
+                    container_name,
+                    "--format",
+                    "{{range .Config.Env}}{{println .}}{{end}}",
                 ],
                 capture_output=True,
                 text=True,
@@ -667,12 +672,21 @@ class TestPodmanProxyEgressFiltering:
             # allowed the CONNECT — we care that it's not 403 (blocked).
             result = subprocess.run(
                 [
-                    "podman", "exec", container_name,
-                    "curl", "-s", "-o", "/dev/null",
-                    "-w", "%{http_code}",
-                    "-x", f"http://{proxy_ip}:3128",
-                    "--connect-timeout", "10",
-                    "-m", "15",
+                    "podman",
+                    "exec",
+                    container_name,
+                    "curl",
+                    "-s",
+                    "-o",
+                    "/dev/null",
+                    "-w",
+                    "%{http_code}",
+                    "-x",
+                    f"http://{proxy_ip}:3128",
+                    "--connect-timeout",
+                    "10",
+                    "-m",
+                    "15",
                     "https://oauth2.googleapis.com/",
                 ],
                 capture_output=True,
@@ -720,22 +734,37 @@ class TestPodmanProxyEgressFiltering:
             # (bypasses DNS resolution issues in CI)
             result = subprocess.run(
                 [
-                    "podman", "exec", container_name,
-                    "curl", "-s", "-o", "/dev/null",
-                    "-w", "%{http_code}",
-                    "-x", f"http://{proxy_ip}:3128",
-                    "--connect-timeout", "10",
-                    "-m", "15",
+                    "podman",
+                    "exec",
+                    container_name,
+                    "curl",
+                    "-s",
+                    "-o",
+                    "/dev/null",
+                    "-w",
+                    "%{http_code}",
+                    "-x",
+                    f"http://{proxy_ip}:3128",
+                    "--connect-timeout",
+                    "10",
+                    "-m",
+                    "15",
                     "https://example.com/",
                 ],
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
-            # Squid returns 403 for blocked HTTPS CONNECT requests
-            assert "403" in result.stdout, (
-                f"curl to blocked domain should get 403, "
-                f"got stdout={result.stdout}, stderr={result.stderr}"
+            # Squid may return 403 (explicit denial) or reset the connection
+            # (curl exit code != 0, http_code 000) depending on version.
+            # Both mean the request was blocked.
+            http_code = result.stdout.strip()
+            assert http_code == "403" or (
+                http_code == "000" and result.returncode != 0
+            ), (
+                f"curl to blocked domain should be denied (403 or connection reset), "
+                f"got http_code={http_code}, returncode={result.returncode}, "
+                f"stderr={result.stderr}"
             )
 
         finally:
@@ -768,10 +797,17 @@ class TestPodmanProxyEgressFiltering:
             # Try to reach the internet directly, bypassing proxy
             result = subprocess.run(
                 [
-                    "podman", "exec", container_name,
-                    "curl", "--noproxy", "*",
-                    "-sf", "--connect-timeout", "5",
-                    "-m", "10",
+                    "podman",
+                    "exec",
+                    container_name,
+                    "curl",
+                    "--noproxy",
+                    "*",
+                    "-sf",
+                    "--connect-timeout",
+                    "5",
+                    "-m",
+                    "10",
                     "https://example.com/",
                 ],
                 capture_output=True,
