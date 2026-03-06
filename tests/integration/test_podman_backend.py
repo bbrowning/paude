@@ -567,7 +567,7 @@ def _start_proxy_session(
     result = subprocess.run(
         [
             "podman", "inspect", "--format",
-            f"{{{{.NetworkSettings.Networks.{network_name}.IPAddress}}}}",
+            f'{{{{(index .NetworkSettings.Networks "{network_name}").IPAddress}}}}',
             proxy_name,
         ],
         capture_output=True,
