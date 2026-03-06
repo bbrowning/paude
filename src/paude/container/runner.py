@@ -618,6 +618,140 @@ class ContainerRunner:
 
         return container_name
 
+    def create_session_proxy(
+        self,
+        name: str,
+        image: str,
+        network: str,
+        dns: str | None = None,
+        allowed_domains: list[str] | None = None,
+    ) -> str:
+        """Create a proxy container for a session (does not start it).
+
+        Unlike run_proxy() which uses --rm, this creates a persistent proxy
+        container that can be started/stopped with the session.
+
+        Args:
+            name: Deterministic container name (e.g., "paude-proxy-my-session").
+            image: Proxy image to run.
+            network: Internal network name. Proxy joins both this and "podman".
+            dns: Optional DNS IP for squid (passed as SQUID_DNS env var).
+            allowed_domains: Domains to allow (passed as ALLOWED_DOMAINS env var).
+
+        Returns:
+            Container name.
+        """
+        cmd = [
+            "podman",
+            "create",
+            "--name",
+            name,
+            "--network",
+            f"{network},podman",
+        ]
+
+        if dns:
+            cmd.extend(["-e", f"SQUID_DNS={dns}"])
+
+        if allowed_domains:
+            domains_str = ",".join(allowed_domains)
+            cmd.extend(["-e", f"ALLOWED_DOMAINS={domains_str}"])
+
+        cmd.append(image)
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise ProxyStartError(f"Failed to create proxy: {result.stderr}")
+
+        return name
+
+    def start_session_proxy(self, name: str) -> None:
+        """Start a session proxy container and wait for it to initialize.
+
+        Args:
+            name: Proxy container name.
+
+        Raises:
+            ProxyStartError: If the proxy fails to start.
+        """
+        result = subprocess.run(
+            ["podman", "start", name],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise ProxyStartError(f"Failed to start proxy: {result.stderr}")
+
+        # Give proxy time to initialize
+        time.sleep(1)
+
+    def recreate_session_proxy(
+        self,
+        name: str,
+        image: str,
+        network: str,
+        dns: str | None = None,
+        allowed_domains: list[str] | None = None,
+    ) -> str:
+        """Recreate a session proxy with new configuration.
+
+        Stops and removes the old proxy, then creates and starts a new one.
+
+        Args:
+            name: Proxy container name.
+            image: Proxy image.
+            network: Internal network name.
+            dns: Optional DNS IP.
+            allowed_domains: New list of allowed domains.
+
+        Returns:
+            Container name.
+        """
+        # Stop and remove old proxy
+        self.stop_container(name)
+        self.remove_container(name, force=True)
+
+        # Create and start new proxy
+        self.create_session_proxy(
+            name=name,
+            image=image,
+            network=network,
+            dns=dns,
+            allowed_domains=allowed_domains,
+        )
+        self.start_session_proxy(name)
+
+        return name
+
+    def get_container_env(self, name: str, var_name: str) -> str | None:
+        """Get an environment variable from a container's config.
+
+        Args:
+            name: Container name.
+            var_name: Environment variable name.
+
+        Returns:
+            Value of the variable, or None if not found.
+        """
+        result = subprocess.run(
+            ["podman", "inspect", "-f", "{{json .Config.Env}}", name],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return None
+
+        try:
+            env_list = json.loads(result.stdout.strip())
+            prefix = f"{var_name}="
+            for entry in env_list:
+                if entry.startswith(prefix):
+                    return str(entry[len(prefix):])
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        return None
+
     def run_post_create(
         self,
         image: str,

@@ -9,6 +9,8 @@ import pytest
 
 from paude.backends.base import SessionConfig
 from paude.backends.podman import (
+    PAUDE_LABEL_DOMAINS,
+    PAUDE_LABEL_PROXY_IMAGE,
     PodmanBackend,
     SessionExistsError,
     SessionNotFoundError,
@@ -16,6 +18,19 @@ from paude.backends.podman import (
     _encode_path,
     _generate_session_name,
 )
+
+
+def _make_backend(
+    mock_runner: MagicMock | None = None,
+    mock_network_manager: MagicMock | None = None,
+) -> PodmanBackend:
+    """Create a PodmanBackend with mocked runner and network manager."""
+    backend = PodmanBackend()
+    if mock_runner is not None:
+        backend._runner = mock_runner
+    if mock_network_manager is not None:
+        backend._network_manager = mock_network_manager
+    return backend
 
 
 class TestHelperFunctions:
@@ -258,12 +273,14 @@ class TestPodmanBackendDeleteSession:
     ) -> None:
         """Delete session removes both container and volume."""
         mock_runner = MagicMock()
-        mock_runner.container_exists.return_value = True
+        # Main container exists, proxy does not
+        mock_runner.container_exists.side_effect = (
+            lambda name: name == "paude-my-session"
+        )
         mock_runner.container_running.return_value = False
         mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
+        backend = _make_backend(mock_runner, MagicMock())
 
         backend.delete_session("my-session", confirm=True)
 
@@ -280,12 +297,14 @@ class TestPodmanBackendDeleteSession:
     ) -> None:
         """Delete session stops container if running."""
         mock_runner = MagicMock()
-        mock_runner.container_exists.return_value = True
+        # Main container exists, proxy does not
+        mock_runner.container_exists.side_effect = (
+            lambda name: name == "paude-running-session"
+        )
         mock_runner.container_running.return_value = True
         mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
+        backend = _make_backend(mock_runner, MagicMock())
 
         backend.delete_session("running-session", confirm=True)
 
@@ -301,8 +320,7 @@ class TestPodmanBackendDeleteSession:
         mock_runner.volume_exists.return_value = False
         mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
+        backend = _make_backend(mock_runner, MagicMock())
 
         with pytest.raises(SessionNotFoundError) as excinfo:
             backend.delete_session("nonexistent", confirm=True)
@@ -318,8 +336,7 @@ class TestPodmanBackendDeleteSession:
         mock_runner.volume_exists.return_value = True
         mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
+        backend = _make_backend(mock_runner, MagicMock())
 
         backend.delete_session("orphaned", confirm=True)
 
@@ -336,13 +353,15 @@ class TestPodmanBackendStartSession:
     ) -> None:
         """Start session starts a stopped container."""
         mock_runner = MagicMock()
-        mock_runner.container_exists.return_value = True
+        # Main container exists, no proxy
+        mock_runner.container_exists.side_effect = (
+            lambda name: name == "paude-my-session"
+        )
         mock_runner.get_container_state.return_value = "exited"
         mock_runner.attach_container.return_value = 0
         mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
+        backend = _make_backend(mock_runner)
 
         exit_code = backend.start_session("my-session")
 
@@ -356,14 +375,18 @@ class TestPodmanBackendStartSession:
     ) -> None:
         """Start session connects if container already running."""
         mock_runner = MagicMock()
-        mock_runner.container_exists.return_value = True
+        # Main container exists, no proxy
+        mock_runner.container_exists.side_effect = (
+            lambda name: name == "paude-running-session"
+        )
         mock_runner.container_running.return_value = True
         mock_runner.get_container_state.return_value = "running"
         mock_runner.attach_container.return_value = 0
+        # Workspace has .git
+        mock_runner.exec_in_container.return_value = MagicMock(returncode=0)
         mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
+        backend = _make_backend(mock_runner)
 
         exit_code = backend.start_session("running-session")
 
@@ -398,12 +421,14 @@ class TestPodmanBackendStopSession:
     ) -> None:
         """Stop session stops a running container."""
         mock_runner = MagicMock()
-        mock_runner.container_exists.return_value = True
+        # Main container exists, no proxy
+        mock_runner.container_exists.side_effect = (
+            lambda name: name == "paude-my-session"
+        )
         mock_runner.container_running.return_value = True
         mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
+        backend = _make_backend(mock_runner)
 
         backend.stop_session("my-session")
 
@@ -415,12 +440,13 @@ class TestPodmanBackendStopSession:
     ) -> None:
         """Stop session is no-op if container already stopped."""
         mock_runner = MagicMock()
-        mock_runner.container_exists.return_value = True
+        mock_runner.container_exists.side_effect = (
+            lambda name: name == "paude-stopped-session"
+        )
         mock_runner.container_running.return_value = False
         mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
+        backend = _make_backend(mock_runner)
 
         backend.stop_session("stopped-session")
 
@@ -433,8 +459,7 @@ class TestPodmanBackendStopSession:
         mock_runner.container_exists.return_value = False
         mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
+        backend = _make_backend(mock_runner)
 
         # Should not raise, just print and return
         backend.stop_session("nonexistent")
@@ -879,3 +904,261 @@ class TestPodmanBackendGcpAdcSecret:
 
         mock_runner.create_secret.assert_called_once()
         assert mock_runner.create_secret.call_args[0][0] == "paude-gcp-adc"
+
+
+# ---------------------------------------------------------------------------
+# Proxy integration tests
+# ---------------------------------------------------------------------------
+
+
+class TestPodmanBackendCreateSessionWithProxy:
+    """Tests for create_session with domain filtering (proxy setup)."""
+
+    @patch("paude.backends.podman.get_podman_machine_dns")
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_create_session_creates_network_and_proxy(
+        self, mock_runner_class: MagicMock, mock_dns: MagicMock
+    ) -> None:
+        """create_session with allowed_domains creates network and proxy."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = False
+        mock_runner_class.return_value = mock_runner
+        mock_dns.return_value = None
+        mock_network = MagicMock()
+
+        backend = _make_backend(mock_runner, mock_network)
+
+        config = SessionConfig(
+            name="my-session",
+            workspace=Path("/home/user/project"),
+            image="paude:latest",
+            allowed_domains=[".googleapis.com", ".pypi.org"],
+            proxy_image="proxy:latest",
+        )
+        session = backend.create_session(config)
+
+        # Network should be created
+        mock_network.create_internal_network.assert_called_once_with(
+            "paude-net-my-session"
+        )
+
+        # Proxy container should be created
+        mock_runner.create_session_proxy.assert_called_once_with(
+            name="paude-proxy-my-session",
+            image="proxy:latest",
+            network="paude-net-my-session",
+            dns=None,
+            allowed_domains=[".googleapis.com", ".pypi.org"],
+        )
+
+        # Main container should be on the internal network
+        call_kwargs = mock_runner.create_container.call_args[1]
+        assert call_kwargs["network"] == "paude-net-my-session"
+
+        # Main container should have proxy env vars
+        env = call_kwargs["env"]
+        assert env["HTTP_PROXY"] == "http://paude-proxy-my-session:3128"
+        assert env["HTTPS_PROXY"] == "http://paude-proxy-my-session:3128"
+
+        assert session.status == "stopped"
+
+    @patch("paude.backends.podman.get_podman_machine_dns")
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_create_session_stores_domains_in_labels(
+        self, mock_runner_class: MagicMock, mock_dns: MagicMock
+    ) -> None:
+        """create_session stores allowed_domains in container labels."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = False
+        mock_runner_class.return_value = mock_runner
+        mock_dns.return_value = None
+
+        backend = _make_backend(mock_runner, MagicMock())
+
+        config = SessionConfig(
+            name="my-session",
+            workspace=Path("/home/user/project"),
+            image="paude:latest",
+            allowed_domains=[".googleapis.com", ".pypi.org"],
+            proxy_image="proxy:latest",
+        )
+        backend.create_session(config)
+
+        call_kwargs = mock_runner.create_container.call_args[1]
+        labels = call_kwargs["labels"]
+        assert PAUDE_LABEL_DOMAINS in labels
+        assert labels[PAUDE_LABEL_DOMAINS] == ".googleapis.com,.pypi.org"
+        assert labels[PAUDE_LABEL_PROXY_IMAGE] == "proxy:latest"
+
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_create_session_without_domains_skips_proxy(
+        self, mock_runner_class: MagicMock
+    ) -> None:
+        """create_session without allowed_domains does not create proxy."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = False
+        mock_runner_class.return_value = mock_runner
+        mock_network = MagicMock()
+
+        backend = _make_backend(mock_runner, mock_network)
+
+        config = SessionConfig(
+            name="my-session",
+            workspace=Path("/home/user/project"),
+            image="paude:latest",
+            allowed_domains=None,  # Unrestricted
+        )
+        backend.create_session(config)
+
+        # No network or proxy created
+        mock_network.create_internal_network.assert_not_called()
+        mock_runner.create_session_proxy.assert_not_called()
+
+        # Main container should NOT have proxy env vars
+        call_kwargs = mock_runner.create_container.call_args[1]
+        env = call_kwargs["env"]
+        assert "HTTP_PROXY" not in env
+        assert "HTTPS_PROXY" not in env
+        assert call_kwargs["network"] is None
+
+    @patch("paude.backends.podman.get_podman_machine_dns")
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_create_session_cleans_up_proxy_on_container_failure(
+        self, mock_runner_class: MagicMock, mock_dns: MagicMock
+    ) -> None:
+        """create_session cleans up proxy and network if container creation fails."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = False
+        mock_runner.create_container.side_effect = RuntimeError("Container failed")
+        mock_runner_class.return_value = mock_runner
+        mock_dns.return_value = None
+        mock_network = MagicMock()
+
+        backend = _make_backend(mock_runner, mock_network)
+
+        config = SessionConfig(
+            name="my-session",
+            workspace=Path("/home/user/project"),
+            image="paude:latest",
+            allowed_domains=[".googleapis.com"],
+            proxy_image="proxy:latest",
+        )
+
+        with pytest.raises(RuntimeError):
+            backend.create_session(config)
+
+        # Proxy container should be cleaned up
+        mock_runner.remove_container.assert_called_once_with(
+            "paude-proxy-my-session", force=True
+        )
+        mock_network.remove_network.assert_called_once_with(
+            "paude-net-my-session"
+        )
+        mock_runner.remove_volume.assert_called_once()
+
+
+class TestPodmanBackendStartSessionWithProxy:
+    """Tests for start_session proxy lifecycle."""
+
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_start_session_starts_proxy_before_main(
+        self, mock_runner_class: MagicMock
+    ) -> None:
+        """start_session starts proxy container before main container."""
+        mock_runner = MagicMock()
+        # Both main and proxy containers exist
+        mock_runner.container_exists.return_value = True
+        mock_runner.container_running.return_value = False
+        mock_runner.get_container_state.return_value = "exited"
+        mock_runner.attach_container.return_value = 0
+        mock_runner_class.return_value = mock_runner
+
+        backend = _make_backend(mock_runner)
+
+        backend.start_session("my-session")
+
+        # Proxy should be started before main container
+        mock_runner.start_session_proxy.assert_called_once_with(
+            "paude-proxy-my-session"
+        )
+        mock_runner.start_container.assert_called_once_with("paude-my-session")
+
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_start_session_skips_proxy_when_absent(
+        self, mock_runner_class: MagicMock
+    ) -> None:
+        """start_session skips proxy start when no proxy container exists."""
+        mock_runner = MagicMock()
+        # Only main container exists
+        mock_runner.container_exists.side_effect = (
+            lambda name: name == "paude-my-session"
+        )
+        mock_runner.get_container_state.return_value = "exited"
+        mock_runner.attach_container.return_value = 0
+        mock_runner_class.return_value = mock_runner
+
+        backend = _make_backend(mock_runner)
+
+        backend.start_session("my-session")
+
+        mock_runner.start_session_proxy.assert_not_called()
+        mock_runner.start_container.assert_called_once()
+
+
+class TestPodmanBackendStopSessionWithProxy:
+    """Tests for stop_session proxy lifecycle."""
+
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_stop_session_stops_proxy_after_main(
+        self, mock_runner_class: MagicMock
+    ) -> None:
+        """stop_session stops proxy after stopping main container."""
+        mock_runner = MagicMock()
+        # Both containers exist and running
+        mock_runner.container_exists.return_value = True
+        mock_runner.container_running.return_value = True
+        mock_runner_class.return_value = mock_runner
+
+        backend = _make_backend(mock_runner)
+
+        backend.stop_session("my-session")
+
+        mock_runner.stop_container_graceful.assert_called_once_with(
+            "paude-my-session"
+        )
+        mock_runner.stop_container.assert_called_once_with(
+            "paude-proxy-my-session"
+        )
+
+
+class TestPodmanBackendDeleteSessionWithProxy:
+    """Tests for delete_session proxy cleanup."""
+
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_delete_session_removes_proxy_and_network(
+        self, mock_runner_class: MagicMock
+    ) -> None:
+        """delete_session removes proxy container and network."""
+        mock_runner = MagicMock()
+        # Both containers exist
+        mock_runner.container_exists.return_value = True
+        mock_runner.container_running.return_value = False
+        mock_runner_class.return_value = mock_runner
+        mock_network = MagicMock()
+
+        backend = _make_backend(mock_runner, mock_network)
+
+        backend.delete_session("my-session", confirm=True)
+
+        # Should remove both containers
+        assert mock_runner.remove_container.call_count == 2
+        remove_calls = [
+            c[0][0] for c in mock_runner.remove_container.call_args_list
+        ]
+        assert "paude-proxy-my-session" in remove_calls
+        assert "paude-my-session" in remove_calls
+
+        # Should remove network
+        mock_network.remove_network.assert_called_once_with(
+            "paude-net-my-session"
+        )

@@ -421,6 +421,15 @@ def session_create(
             )
             typer.echo("", err=True)
 
+        # Ensure proxy image when domain filtering is active
+        podman_proxy_image: str | None = None
+        if not is_unrestricted(expanded_domains):
+            try:
+                podman_proxy_image = image_manager.ensure_proxy_image()
+            except Exception as e:
+                typer.echo(f"Error ensuring proxy image: {e}", err=True)
+                raise typer.Exit(1) from None
+
         # Create session config
         session_config = SessionConfig(
             name=name,
@@ -432,6 +441,7 @@ def session_create(
             workdir=str(workspace),
             allowed_domains=expanded_domains,
             yolo=yolo,
+            proxy_image=podman_proxy_image,
         )
 
         try:
@@ -1593,11 +1603,7 @@ def _resolve_backend_for_domains(
         return backend_obj
 
     if backend == BackendType.podman:
-        typer.echo(
-            "Error: Domain management is not supported for Podman sessions.",
-            err=True,
-        )
-        raise typer.Exit(1)
+        return PodmanBackend()
 
     openshift_config = OpenShiftConfig(
         context=openshift_context,

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from paude.backends.base import Session, SessionConfig
+from paude.container.network import NetworkManager
 from paude.container.runner import (
     PAUDE_LABEL_APP,
     PAUDE_LABEL_CREATED,
@@ -18,6 +19,11 @@ from paude.container.runner import (
     PAUDE_LABEL_WORKSPACE,
     ContainerRunner,
 )
+from paude.environment import build_proxy_environment
+from paude.platform import get_podman_machine_dns
+
+PAUDE_LABEL_DOMAINS = "paude.io/allowed-domains"
+PAUDE_LABEL_PROXY_IMAGE = "paude.io/proxy-image"
 
 
 class SessionExistsError(Exception):
@@ -128,6 +134,7 @@ class PodmanBackend:
     def __init__(self) -> None:
         """Initialize the Podman backend."""
         self._runner = ContainerRunner()
+        self._network_manager = NetworkManager()
         self._current_session: Session | None = None
 
     def _container_name(self, session_name: str) -> str:
@@ -137,6 +144,20 @@ class PodmanBackend:
     def _volume_name(self, session_name: str) -> str:
         """Get volume name for a session."""
         return f"paude-{session_name}-workspace"
+
+    def _proxy_container_name(self, session_name: str) -> str:
+        """Get proxy container name for a session."""
+        return f"paude-proxy-{session_name}"
+
+    def _network_name(self, session_name: str) -> str:
+        """Get internal network name for a session."""
+        return f"paude-net-{session_name}"
+
+    def _has_proxy(self, session_name: str) -> bool:
+        """Check if a session has a proxy container."""
+        return self._runner.container_exists(
+            self._proxy_container_name(session_name)
+        )
 
     def _ensure_gcp_adc_secret(self) -> str | None:
         """Create or replace the GCP ADC Podman secret.
@@ -159,7 +180,8 @@ class PodmanBackend:
     def create_session(self, config: SessionConfig) -> Session:
         """Create a new session (does not start it).
 
-        Creates the container and volume but leaves the container stopped.
+        Creates the container, volume, and (if domain filtering is active)
+        an internal network and proxy container. All resources are left stopped.
 
         Args:
             config: Session configuration.
@@ -175,6 +197,7 @@ class PodmanBackend:
 
         container_name = self._container_name(session_name)
         volume_name = self._volume_name(session_name)
+        use_proxy = config.allowed_domains is not None
 
         # Check if session already exists
         if self._runner.container_exists(container_name):
@@ -182,13 +205,17 @@ class PodmanBackend:
 
         created_at = datetime.now(UTC).isoformat()
 
-        # Create labels
-        labels = {
+        # Create labels — persist allowed_domains and proxy_image for lifecycle
+        labels: dict[str, str] = {
             "app": "paude",
             PAUDE_LABEL_SESSION: session_name,
             PAUDE_LABEL_WORKSPACE: _encode_path(config.workspace),
             PAUDE_LABEL_CREATED: created_at,
         }
+        if use_proxy:
+            labels[PAUDE_LABEL_DOMAINS] = ",".join(config.allowed_domains or [])
+            if config.proxy_image:
+                labels[PAUDE_LABEL_PROXY_IMAGE] = config.proxy_image
 
         print(f"Creating session '{session_name}'...", file=sys.stderr)
 
@@ -196,14 +223,46 @@ class PodmanBackend:
         print(f"Creating volume {volume_name}...", file=sys.stderr)
         self._runner.create_volume(volume_name, labels=labels)
 
+        # Set up proxy network and container if domain filtering is active
+        network_name: str | None = None
+        if use_proxy:
+            network_name = self._network_name(session_name)
+            self._network_manager.create_internal_network(network_name)
+
+            proxy_name = self._proxy_container_name(session_name)
+            proxy_image = config.proxy_image
+            if not proxy_image:
+                raise ValueError(
+                    "proxy_image is required when allowed_domains is set"
+                )
+
+            dns = get_podman_machine_dns()
+            print(f"Creating proxy {proxy_name}...", file=sys.stderr)
+            try:
+                self._runner.create_session_proxy(
+                    name=proxy_name,
+                    image=proxy_image,
+                    network=network_name,
+                    dns=dns,
+                    allowed_domains=config.allowed_domains,
+                )
+            except Exception:
+                self._network_manager.remove_network(network_name)
+                self._runner.remove_volume(volume_name, force=True)
+                raise
+
         # Build mounts with session volume
         mounts = list(config.mounts)
-        # Add the session volume for /pvc
         mounts.extend(["-v", f"{volume_name}:/pvc"])
 
         # Prepare environment
         env = dict(config.env)
         env["PAUDE_WORKSPACE"] = "/pvc/workspace"
+
+        # Add proxy environment variables
+        if use_proxy:
+            proxy_name = self._proxy_container_name(session_name)
+            env.update(build_proxy_environment(proxy_name))
 
         # Add YOLO flag to args if enabled
         claude_args = list(config.args)
@@ -219,13 +278,8 @@ class PodmanBackend:
         secrets = [secret_spec] if secret_spec else None
 
         # Create container (stopped)
-        # Use sleep infinity as entrypoint to keep container alive
-        # The actual session setup happens when attaching via exec
         print(f"Creating container {container_name}...", file=sys.stderr)
         try:
-            # Use /pvc as workdir - /pvc/workspace is created by entrypoint
-            # We can't use /pvc/workspace directly because it doesn't exist
-            # on first container start (volume is empty)
             self._runner.create_container(
                 name=container_name,
                 image=config.image,
@@ -236,9 +290,16 @@ class PodmanBackend:
                 entrypoint="sleep",
                 command=["infinity"],
                 secrets=secrets,
+                network=network_name,
             )
         except Exception:
-            # Cleanup volume and secret on failure
+            # Cleanup all resources on failure
+            if use_proxy:
+                proxy_name = self._proxy_container_name(session_name)
+                self._runner.remove_container(proxy_name, force=True)
+                self._network_manager.remove_network(
+                    self._network_name(session_name)
+                )
             self._runner.remove_volume(volume_name, force=True)
             self._runner.remove_secret("paude-gcp-adc")
             raise
@@ -258,7 +319,7 @@ class PodmanBackend:
     def delete_session(self, name: str, confirm: bool = False) -> None:
         """Delete a session and all its resources.
 
-        Removes the container and volume permanently.
+        Removes the container, proxy, network, and volume permanently.
 
         Args:
             name: Session name.
@@ -293,9 +354,20 @@ class PodmanBackend:
             print(f"Stopping container {container_name}...", file=sys.stderr)
             self._runner.stop_container_graceful(container_name)
 
-        # Remove container
+        # Stop and remove proxy container if it exists
+        proxy_name = self._proxy_container_name(name)
+        if self._runner.container_exists(proxy_name):
+            print(f"Removing proxy {proxy_name}...", file=sys.stderr)
+            self._runner.stop_container(proxy_name)
+            self._runner.remove_container(proxy_name, force=True)
+
+        # Remove main container
         print(f"Removing container {container_name}...", file=sys.stderr)
         self._runner.remove_container(container_name, force=True)
+
+        # Remove network
+        network_name = self._network_name(name)
+        self._network_manager.remove_network(network_name)
 
         # Remove volume and secret
         print(f"Removing volume {volume_name}...", file=sys.stderr)
@@ -304,10 +376,41 @@ class PodmanBackend:
 
         print(f"Session '{name}' deleted.", file=sys.stderr)
 
+    def _start_proxy_if_needed(self, name: str) -> None:
+        """Start the proxy container for a session if one exists.
+
+        Args:
+            name: Session name.
+        """
+        proxy_name = self._proxy_container_name(name)
+        if not self._runner.container_exists(proxy_name):
+            return
+
+        if self._runner.container_running(proxy_name):
+            return
+
+        print(f"Starting proxy {proxy_name}...", file=sys.stderr)
+        self._runner.start_session_proxy(proxy_name)
+
+    def _stop_proxy_if_needed(self, name: str) -> None:
+        """Stop the proxy container for a session if one exists.
+
+        Args:
+            name: Session name.
+        """
+        proxy_name = self._proxy_container_name(name)
+        if not self._runner.container_exists(proxy_name):
+            return
+
+        if not self._runner.container_running(proxy_name):
+            return
+
+        self._runner.stop_container(proxy_name)
+
     def start_session(self, name: str, github_token: str | None = None) -> int:
         """Start a session and connect to it.
 
-        Starts the container and attaches to it via tmux.
+        Starts the proxy (if present) and main container, then attaches.
 
         Args:
             name: Session name.
@@ -339,7 +442,10 @@ class PodmanBackend:
         # Recreate GCP ADC secret with latest credentials
         self._ensure_gcp_adc_secret()
 
-        # Start the container
+        # Start proxy before main container so it's ready for connections
+        self._start_proxy_if_needed(name)
+
+        # Start the main container
         self._runner.start_container(container_name)
 
         # Attach to the container via tmux entrypoint
@@ -353,7 +459,7 @@ class PodmanBackend:
     def stop_session(self, name: str) -> None:
         """Stop a session (preserves volume).
 
-        Stops the container but keeps the volume intact.
+        Stops the main container and proxy but keeps volumes intact.
 
         Args:
             name: Session name.
@@ -370,6 +476,10 @@ class PodmanBackend:
 
         print(f"Stopping session '{name}'...", file=sys.stderr)
         self._runner.stop_container_graceful(container_name)
+
+        # Stop proxy after main container
+        self._stop_proxy_if_needed(name)
+
         print(f"Session '{name}' stopped.", file=sys.stderr)
 
     def connect_session(self, name: str, github_token: str | None = None) -> int:
@@ -519,25 +629,78 @@ class PodmanBackend:
     def get_allowed_domains(self, name: str) -> list[str] | None:
         """Get current allowed domains for a session.
 
-        Not supported for Podman backend.
+        Reads the domains from the proxy container's ALLOWED_DOMAINS env var.
+        Returns None if the session has no proxy (unrestricted network).
+
+        Args:
+            name: Session name.
+
+        Returns:
+            List of domains, or None if session has no proxy.
 
         Raises:
-            NotImplementedError: Always.
+            SessionNotFoundError: If session not found.
         """
-        raise NotImplementedError(
-            "Domain management is not supported for Podman sessions."
+        container_name = self._container_name(name)
+        if not self._runner.container_exists(container_name):
+            raise SessionNotFoundError(f"Session '{name}' not found")
+
+        proxy_name = self._proxy_container_name(name)
+        if not self._runner.container_exists(proxy_name):
+            return None  # No proxy = unrestricted
+
+        domains_str = self._runner.get_container_env(
+            proxy_name, "ALLOWED_DOMAINS"
         )
+        if not domains_str:
+            return []
+
+        return [d for d in domains_str.split(",") if d]
 
     def update_allowed_domains(self, name: str, domains: list[str]) -> None:
         """Update allowed domains for a session.
 
-        Not supported for Podman backend.
+        Recreates the proxy container with the new domain list.
+
+        Args:
+            name: Session name.
+            domains: New list of allowed domains.
 
         Raises:
-            NotImplementedError: Always.
+            SessionNotFoundError: If session not found.
+            ValueError: If session has no proxy deployment.
         """
-        raise NotImplementedError(
-            "Domain management is not supported for Podman sessions."
+        container_name = self._container_name(name)
+        if not self._runner.container_exists(container_name):
+            raise SessionNotFoundError(f"Session '{name}' not found")
+
+        proxy_name = self._proxy_container_name(name)
+        if not self._runner.container_exists(proxy_name):
+            raise ValueError(
+                f"Session '{name}' has no proxy (unrestricted network). "
+                "Cannot update domains."
+            )
+
+        # Get proxy image from the proxy container
+        result = subprocess.run(
+            ["podman", "inspect", "-f", "{{.ImageName}}", proxy_name],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise ValueError(f"Cannot inspect proxy container: {result.stderr}")
+        proxy_image = result.stdout.strip()
+
+        network_name = self._network_name(name)
+        dns = get_podman_machine_dns()
+
+        print(f"Updating proxy domains for session '{name}'...", file=sys.stderr)
+        self._runner.recreate_session_proxy(
+            name=proxy_name,
+            image=proxy_image,
+            network=network_name,
+            dns=dns,
+            allowed_domains=domains,
         )
 
     def copy_to_session(self, name: str, local_path: str, remote_path: str) -> None:
