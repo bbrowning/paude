@@ -13,8 +13,10 @@ fi
 # If ALLOWED_DOMAINS is set, replace the default allowed_domains ACL
 # Format: comma-separated list of domains (e.g., ".googleapis.com,.google.com")
 if [[ -n "$ALLOWED_DOMAINS" ]]; then
-    # Remove existing allowed_domains ACL lines
-    sed -i '/^acl allowed_domains dstdomain/d' "$CONFIG_FILE"
+    # Remove existing allowed_domains ACL lines (both dstdomain and dstdom_regex)
+    sed -i '/^acl allowed_domains dst/d' "$CONFIG_FILE"
+    # Also remove comment lines immediately before regex ACLs
+    sed -i '/^# Regional endpoints/d' "$CONFIG_FILE"
 
     # Parse and deduplicate domains
     # Squid treats .domain as matching domain AND *.domain, so if both
@@ -25,7 +27,12 @@ if [[ -n "$ALLOWED_DOMAINS" ]]; then
         domain=$(echo "$domain" | xargs)
         [[ -z "$domain" ]] && continue
 
-        if [[ "$domain" == .* ]]; then
+        if [[ "$domain" == ~* ]]; then
+            # Regex domain - pass through as-is, no dedup logic
+            if ! echo ",$UNIQUE_DOMAINS," | grep -qF ",${domain},"; then
+                UNIQUE_DOMAINS="${UNIQUE_DOMAINS:+$UNIQUE_DOMAINS,}$domain"
+            fi
+        elif [[ "$domain" == .* ]]; then
             # Wildcard domain - add it, and remove exact match if present
             exact="${domain:1}"
             # Remove exact match from list if present
@@ -50,7 +57,14 @@ if [[ -n "$ALLOWED_DOMAINS" ]]; then
     NEW_ACLS=""
     IFS=',' read -ra FINAL_DOMAINS <<< "$UNIQUE_DOMAINS"
     for domain in "${FINAL_DOMAINS[@]}"; do
-        [[ -n "$domain" ]] && NEW_ACLS="${NEW_ACLS}acl allowed_domains dstdomain $domain\n"
+        [[ -z "$domain" ]] && continue
+        if [[ "$domain" == ~* ]]; then
+            # Regex domain: strip ~ prefix and use dstdom_regex
+            regex="${domain:1}"
+            NEW_ACLS="${NEW_ACLS}acl allowed_domains dstdom_regex $regex\n"
+        else
+            NEW_ACLS="${NEW_ACLS}acl allowed_domains dstdomain $domain\n"
+        fi
     done
 
     # Insert new ACLs before the SSL_ports ACL (must come before http_access rules)

@@ -10,7 +10,8 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
         "oauth2.googleapis.com",
         "www.googleapis.com",
         # Vertex AI API (regional endpoints: REGION-aiplatform.googleapis.com)
-        ".aiplatform.googleapis.com",
+        # Uses regex (~) because regional endpoints use hyphens, not subdomains
+        "~aiplatform\\.googleapis\\.com$",
         # Google Cloud resource and project management
         "cloudresourcemanager.googleapis.com",
         # Service account impersonation and workload identity
