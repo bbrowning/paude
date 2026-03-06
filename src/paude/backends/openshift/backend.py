@@ -1049,6 +1049,68 @@ class OpenShiftBackend:
 
         return None
 
+    def get_allowed_domains(self, name: str) -> list[str] | None:
+        """Get current allowed domains for a session.
+
+        Args:
+            name: Session name.
+
+        Returns:
+            List of domains, or None if session has no proxy (unrestricted).
+
+        Raises:
+            SessionNotFoundError: If session not found.
+        """
+        if self._get_statefulset(name) is None:
+            raise SessionNotFoundError(f"Session '{name}' not found")
+
+        # Check if proxy deployment exists
+        proxy_deployment = f"paude-proxy-{name}"
+        result = self._run_oc(
+            "get",
+            "deployment",
+            proxy_deployment,
+            "-n",
+            self.namespace,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None  # No proxy = unrestricted
+
+        return self._proxy.get_deployment_domains(name)
+
+    def update_allowed_domains(self, name: str, domains: list[str]) -> None:
+        """Update allowed domains for a session.
+
+        Args:
+            name: Session name.
+            domains: New list of allowed domains.
+
+        Raises:
+            SessionNotFoundError: If session not found.
+            ValueError: If session has no proxy deployment.
+        """
+        if self._get_statefulset(name) is None:
+            raise SessionNotFoundError(f"Session '{name}' not found")
+
+        # Check if proxy deployment exists
+        proxy_deployment = f"paude-proxy-{name}"
+        result = self._run_oc(
+            "get",
+            "deployment",
+            proxy_deployment,
+            "-n",
+            self.namespace,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise ValueError(
+                f"Session '{name}' has no proxy (unrestricted network). "
+                "Cannot update domains."
+            )
+
+        self._proxy.update_deployment_domains(name, domains)
+
     def copy_to_session(self, name: str, local_path: str, remote_path: str) -> None:
         """Copy a file or directory from local to a running session.
 

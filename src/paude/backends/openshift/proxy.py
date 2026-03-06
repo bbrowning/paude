@@ -381,6 +381,76 @@ class ProxyManager:
             file=sys.stderr,
         )
 
+    def get_deployment_domains(self, session_name: str) -> list[str]:
+        """Get the current ALLOWED_DOMAINS from the proxy Deployment.
+
+        Args:
+            session_name: Session name.
+
+        Returns:
+            List of currently allowed domains.
+        """
+        deployment_name = f"paude-proxy-{session_name}"
+
+        result = self._oc.run(
+            "get",
+            f"deployment/{deployment_name}",
+            "-n",
+            self._namespace,
+            "-o",
+            "jsonpath={.spec.template.spec.containers[0]"
+            '.env[?(@.name=="ALLOWED_DOMAINS")].value}',
+            check=False,
+        )
+
+        if result.returncode != 0 or not result.stdout.strip():
+            return []
+
+        return [d for d in result.stdout.strip().split(",") if d]
+
+    def update_deployment_domains(
+        self, session_name: str, domains: list[str]
+    ) -> None:
+        """Update the ALLOWED_DOMAINS env var on the proxy Deployment.
+
+        Args:
+            session_name: Session name.
+            domains: New list of allowed domains.
+        """
+        deployment_name = f"paude-proxy-{session_name}"
+        domains_str = ",".join(domains)
+
+        patch = json.dumps(
+            {
+                "spec": {
+                    "template": {
+                        "spec": {
+                            "containers": [
+                                {
+                                    "name": "proxy",
+                                    "env": [
+                                        {
+                                            "name": "ALLOWED_DOMAINS",
+                                            "value": domains_str,
+                                        }
+                                    ],
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        )
+
+        self._oc.run(
+            "patch",
+            f"deployment/{deployment_name}",
+            "-n",
+            self._namespace,
+            "--type=strategic",
+            f"-p={patch}",
+        )
+
     def delete_resources(self, session_name: str) -> None:
         """Delete proxy Deployment and Service for a session.
 

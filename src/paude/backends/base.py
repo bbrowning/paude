@@ -161,6 +161,26 @@ class Backend(Protocol):
         """
         ...
 
+    def get_allowed_domains(self, name: str) -> list[str] | None:
+        """Get current allowed domains for a session.
+
+        Args:
+            name: Session name.
+
+        Returns:
+            List of domains, or None if session has no proxy (unrestricted).
+        """
+        ...
+
+    def update_allowed_domains(self, name: str, domains: list[str]) -> None:
+        """Update allowed domains for a session.
+
+        Args:
+            name: Session name.
+            domains: New list of allowed domains.
+        """
+        ...
+
     def copy_to_session(self, name: str, local_path: str, remote_path: str) -> None:
         """Copy a file or directory from local to a session.
 
