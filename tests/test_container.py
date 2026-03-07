@@ -522,3 +522,36 @@ class TestNetworkManager:
         assert "create" in call_args
         assert "--internal" in call_args
         assert "paude-internal" in call_args
+
+
+class TestProxyDockerfileCopyFiles:
+    """Validate that all files referenced in proxy Dockerfile COPY exist."""
+
+    def test_all_copy_sources_exist(self):
+        """Every file referenced in a COPY instruction must exist in containers/proxy/."""
+        import re
+        from pathlib import Path
+
+        proxy_dir = Path(__file__).parent.parent / "containers" / "proxy"
+        dockerfile = proxy_dir / "Dockerfile"
+        assert dockerfile.exists(), f"Proxy Dockerfile not found: {dockerfile}"
+
+        content = dockerfile.read_text()
+        # Match COPY lines, skipping --chmod=... or --from=... flags
+        copy_pattern = re.compile(r"^COPY\s+(?:--\S+\s+)*(\S+)\s+\S+", re.MULTILINE)
+
+        sources = []
+        for match in copy_pattern.finditer(content):
+            src = match.group(1)
+            # Skip multi-stage references like --from=builder
+            if src.startswith("--"):
+                continue
+            sources.append(src)
+
+        assert sources, "No COPY sources found in proxy Dockerfile"
+
+        for src in sources:
+            assert (proxy_dir / src).exists(), (
+                f"File '{src}' referenced in proxy Dockerfile COPY "
+                f"does not exist in {proxy_dir}"
+            )

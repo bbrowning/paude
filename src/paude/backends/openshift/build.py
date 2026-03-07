@@ -392,12 +392,10 @@ class BuildOrchestrator:
         if not dockerfile_path.exists():
             raise OpenShiftError(f"Proxy Dockerfile not found: {dockerfile_path}")
 
-        proxy_files = ["Dockerfile", "squid.conf", "entrypoint.sh"]
+        proxy_files = sorted(f for f in proxy_dir.iterdir() if f.is_file())
         hash_content = ""
-        for filename in sorted(proxy_files):
-            filepath = proxy_dir / filename
-            if filepath.exists():
-                hash_content += filepath.read_text()
+        for filepath in proxy_files:
+            hash_content += filepath.read_text()
         config_hash = hashlib.sha256(hash_content.encode()).hexdigest()[:12]
         is_name = f"{name_prefix}-{config_hash}"
 
@@ -419,10 +417,8 @@ class BuildOrchestrator:
 
         context_dir = Path(tempfile.mkdtemp(prefix="paude-proxy-build-"))
         try:
-            for filename in proxy_files:
-                src = proxy_dir / filename
-                if src.exists():
-                    shutil.copy2(src, context_dir / filename)
+            for src in proxy_files:
+                shutil.copy2(src, context_dir / src.name)
 
             self.create_build_config(config_hash, name_prefix)
 
