@@ -33,30 +33,51 @@ touch "$HOME/.gitconfig" 2>/dev/null || true
 # Fix git "dubious ownership" error when running as arbitrary UID (OpenShift restricted SCC)
 git config --global --add safe.directory '*' 2>/dev/null || true
 
-# Wait for credentials to be synced by the host (via oc cp)
-# The host creates /credentials/.ready when sync is complete
-wait_for_credentials() {
-    local ready_file="/credentials/.ready"
-    local timeout=300
+# Wait for a path to appear, polling every 2 seconds.
+# Args: path, label, timeout_secs, on_timeout (exit|continue)
+wait_for_path() {
+    local path="$1"
+    local label="$2"
+    local timeout="$3"
+    local on_timeout="${4:-exit}"  # "exit" or "continue"
     local elapsed=0
 
-    # Only wait if /credentials exists (OpenShift with tmpfs-based credentials)
-    if [[ ! -d /credentials ]]; then
-        return 0
-    fi
-
-    while [[ ! -f "$ready_file" ]]; do
+    while [[ ! -e "$path" ]]; do
         if [[ $elapsed -ge $timeout ]]; then
-            echo "ERROR: Timed out waiting for credentials sync" >&2
-            exit 1
+            if [[ "$on_timeout" == "continue" ]]; then
+                echo "WARNING: Timed out waiting for $label, continuing anyway..." >&2
+                return 0
+            else
+                echo "ERROR: Timed out waiting for $label" >&2
+                exit 1
+            fi
         fi
         if [[ $((elapsed % 10)) -eq 0 ]]; then
-            echo "Waiting for credentials... ($elapsed/${timeout}s)" >&2
+            echo "Waiting for $label... ($elapsed/${timeout}s)" >&2
         fi
         sleep 2
         elapsed=$((elapsed + 2))
     done
-    echo "Credentials ready." >&2
+    echo "${label^} ready." >&2
+}
+
+# Wait for credentials to be synced by the host (via oc cp)
+wait_for_credentials() {
+    # Only wait if /credentials exists (OpenShift with tmpfs-based credentials)
+    if [[ ! -d /credentials ]]; then
+        return 0
+    fi
+    wait_for_path "/credentials/.ready" "credentials" 300 "exit"
+}
+
+# Wait for git repository to be pushed (when PAUDE_WAIT_FOR_GIT=1)
+# On OpenShift, git push happens after the pod starts. Claude Code captures
+# git metadata at conversation init, so we must wait for .git before launching.
+wait_for_git() {
+    if [[ "${PAUDE_WAIT_FOR_GIT:-}" != "1" ]]; then
+        return 0
+    fi
+    wait_for_path "/pvc/workspace/.git" "git repository" 120 "continue"
 }
 
 # Set up credentials from tmpfs-based storage (/credentials)
@@ -115,6 +136,7 @@ setup_credentials() {
 # Wait for and set up tmpfs-based credentials
 wait_for_credentials
 setup_credentials
+wait_for_git
 
 # Start credential watchdog in background (OpenShift only)
 # The watchdog removes credentials after inactivity when no tmux clients are attached

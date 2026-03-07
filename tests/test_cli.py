@@ -1494,3 +1494,53 @@ class TestCpCommand:
 
         assert result.exit_code == 0
         assert "cp" in result.stdout
+
+
+class TestCreateGitEnvVar:
+    """Tests for PAUDE_WAIT_FOR_GIT env var on OpenShift create --git."""
+
+    @pytest.mark.parametrize(
+        ("extra_flags", "expect_env_var"),
+        [
+            (["--git"], True),
+            ([], False),
+        ],
+        ids=["with-git", "without-git"],
+    )
+    @patch("paude.cli._setup_git_after_create")
+    @patch("paude.cli.OpenShiftBackend")
+    @patch("paude.cli.OpenShiftConfig")
+    @patch("paude.config.detect_config", return_value=None)
+    @patch("paude.environment.build_environment")
+    def test_openshift_create_git_wait_env(
+        self,
+        mock_build_env,
+        mock_detect_config,
+        mock_os_config_class,
+        mock_os_backend_class,
+        mock_git_setup,
+        extra_flags,
+        expect_env_var,
+    ):
+        """PAUDE_WAIT_FOR_GIT is set only when --git is used with OpenShift."""
+        mock_build_env.return_value = {}
+        mock_backend = MagicMock()
+        mock_backend.namespace = "test-ns"
+        mock_backend.ensure_image_via_build.return_value = "test-image:latest"
+        mock_backend.ensure_proxy_image_via_build.return_value = None
+        mock_session = MagicMock()
+        mock_session.name = "test-session"
+        mock_backend.create_session.return_value = mock_session
+        mock_os_backend_class.return_value = mock_backend
+
+        runner.invoke(
+            app,
+            ["create", "--backend", "openshift", *extra_flags, "test-session"],
+        )
+
+        mock_backend.create_session.assert_called_once()
+        session_config = mock_backend.create_session.call_args[0][0]
+        if expect_env_var:
+            assert session_config.env.get("PAUDE_WAIT_FOR_GIT") == "1"
+        else:
+            assert "PAUDE_WAIT_FOR_GIT" not in session_config.env

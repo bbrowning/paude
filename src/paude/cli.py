@@ -548,6 +548,10 @@ def session_create(
                 )
                 typer.echo("", err=True)
 
+            # Signal entrypoint to wait for git repo before launching Claude
+            if git:
+                env["PAUDE_WAIT_FOR_GIT"] = "1"
+
             # Create session config
             session_config = SessionConfig(
                 name=session_name,
