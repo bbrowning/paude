@@ -16,7 +16,6 @@ Exceptions:
     NamespaceNotFoundError: Namespace does not exist.
     SessionExistsError: Session with this name already exists.
     SessionNotFoundError: Session not found.
-    PodNotFoundError: Pod not found.
     PodNotReadyError: Pod is not ready.
 
 Utilities (for testing):
@@ -35,7 +34,6 @@ from paude.backends.openshift.exceptions import (
     OcNotLoggedInError,
     OcTimeoutError,
     OpenShiftError,
-    PodNotFoundError,
     PodNotReadyError,
     SessionExistsError,
     SessionNotFoundError,
@@ -60,7 +58,6 @@ __all__ = [
     "NamespaceNotFoundError",
     "SessionExistsError",
     "SessionNotFoundError",
-    "PodNotFoundError",
     "PodNotReadyError",
     # Utilities (for testing)
     "_generate_session_name",

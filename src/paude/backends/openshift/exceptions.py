@@ -27,12 +27,6 @@ class OcTimeoutError(OpenShiftError):
     pass
 
 
-class PodNotFoundError(OpenShiftError):
-    """Pod not found."""
-
-    pass
-
-
 class PodNotReadyError(OpenShiftError):
     """Pod is not ready."""
 

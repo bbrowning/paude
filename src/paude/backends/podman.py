@@ -768,26 +768,6 @@ class PodmanBackend:
             check=True,
         )
 
-    def run_proxy(
-        self,
-        image: str,
-        network: str,
-        dns: str | None = None,
-        allowed_domains: list[str] | None = None,
-    ) -> str:
-        """Start the proxy container.
-
-        Args:
-            image: Proxy image to run.
-            network: Network to attach to.
-            dns: Optional DNS IP for squid to use.
-            allowed_domains: List of domains to allow through the proxy.
-
-        Returns:
-            Container name.
-        """
-        return self._runner.run_proxy(image, network, dns, allowed_domains)
-
     def stop_container(self, name: str) -> None:
         """Stop a container by name.
 
@@ -796,33 +776,3 @@ class PodmanBackend:
         """
         self._runner.stop_container(name)
 
-    def run_post_create(
-        self,
-        image: str,
-        mounts: list[str],
-        env: dict[str, str],
-        command: str,
-        workdir: str,
-        network: str | None = None,
-    ) -> bool:
-        """Run the postCreateCommand.
-
-        Args:
-            image: Container image to use.
-            mounts: Volume mount arguments.
-            env: Environment variables.
-            command: Command to run.
-            workdir: Working directory for the command.
-            network: Optional network.
-
-        Returns:
-            True if successful.
-        """
-        return self._runner.run_post_create(
-            image=image,
-            mounts=mounts,
-            env=env,
-            command=command,
-            workdir=workdir,
-            network=network,
-        )

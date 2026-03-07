@@ -223,41 +223,35 @@ Added `PAUDE_WAIT_FOR_GIT` environment variable mechanism:
 - `src/paude/cli.py` (env var injection)
 - `containers/paude/entrypoint-session.sh` (`wait_for_git` function)
 
-## Dead Code Backlog
-
-Items identified during dead code scan (2026-03-07). Not removed because they have tests or are part of the public API.
+## Dead Code Backlog (Resolved)
 
 ### DEAD-001: utils.py functions unused in source code
 
-**Status**: Open
-**Priority**: Low
-**Discovered**: 2026-03-07 during dead code scan
+**Status**: Fixed
+**Fixed**: 2026-03-07
 
-`check_requirements()`, `check_git_safety()`, `RequirementError`, and `resolve_path()` in `src/paude/utils.py` are never imported from any source file in `src/paude/`. They are only referenced in `tests/test_utils.py`. Additionally, `resolve_path()` is duplicated in `src/paude/mounts.py` (which uses its own copy).
+Deleted `src/paude/utils.py` and `tests/test_utils.py`. All functions (`check_requirements()`, `check_git_safety()`, `RequirementError`, `resolve_path()`) were unused. `mounts.py` retains its own `resolve_path()`.
 
 ### DEAD-002: ContainerRunner.run_claude() unused in source code
 
-**Status**: Open
-**Priority**: Low
-**Discovered**: 2026-03-07 during dead code scan
+**Status**: Fixed
+**Fixed**: 2026-03-07
 
-`run_claude()` in `src/paude/container/runner.py` is never called from any source file. It appears to be a legacy method from before the session-based architecture. It has test coverage in `tests/test_container.py`.
+Removed `run_claude()` from `src/paude/container/runner.py` and its 4 tests from `tests/test_container.py`. Legacy method from pre-session architecture.
 
 ### DEAD-003: PodmanBackend.run_proxy() and run_post_create() unused in source code
 
-**Status**: Open
-**Priority**: Low
-**Discovered**: 2026-03-07 during dead code scan
+**Status**: Fixed
+**Fixed**: 2026-03-07
 
-`run_proxy()` and `run_post_create()` wrapper methods in `src/paude/backends/podman.py` are never called from `cli.py` or any other source file. They delegate to `ContainerRunner` methods and have test coverage in `tests/test_backends.py`.
+Removed wrapper methods from `src/paude/backends/podman.py` and their tests from `tests/test_backends.py`. `ContainerRunner` retains the actual implementations.
 
 ### DEAD-004: VolumeNotFoundError and PodNotFoundError never raised
 
-**Status**: Open
-**Priority**: Low
-**Discovered**: 2026-03-07 during dead code scan
+**Status**: Fixed
+**Fixed**: 2026-03-07
 
-`VolumeNotFoundError` (in `src/paude/container/volume.py`) and `PodNotFoundError` (in `src/paude/backends/openshift/exceptions.py`) are defined and re-exported via `__init__.py` / `__all__` but never raised anywhere in the codebase.
+Removed `VolumeNotFoundError` from `volume.py`/`container/__init__.py` and `PodNotFoundError` from `exceptions.py`/`openshift/__init__.py`.
 ## Refactoring Backlog
 
 Technical debt identified during codebase analysis. Address these before adding significant new functionality to affected files.

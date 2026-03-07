@@ -62,26 +62,6 @@ class TestPodmanBackend:
         assert sessions == []
 
     @patch("paude.backends.podman.ContainerRunner")
-    def test_run_proxy_delegates_to_runner(self, mock_runner_class: MagicMock) -> None:
-        """run_proxy calls runner.run_proxy."""
-        mock_runner = MagicMock()
-        mock_runner.run_proxy.return_value = "proxy-container-123"
-        mock_runner_class.return_value = mock_runner
-
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-
-        allowed_domains = [".googleapis.com", ".example.com"]
-        result = backend.run_proxy(
-            "proxy:latest", "network-name", "1.2.3.4", allowed_domains
-        )
-
-        mock_runner.run_proxy.assert_called_once_with(
-            "proxy:latest", "network-name", "1.2.3.4", allowed_domains
-        )
-        assert result == "proxy-container-123"
-
-    @patch("paude.backends.podman.ContainerRunner")
     def test_stop_container_delegates_to_runner(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -96,36 +76,6 @@ class TestPodmanBackend:
 
         mock_runner.stop_container.assert_called_once_with("container-name")
 
-    @patch("paude.backends.podman.ContainerRunner")
-    def test_run_post_create_delegates_to_runner(
-        self, mock_runner_class: MagicMock
-    ) -> None:
-        """run_post_create calls runner.run_post_create."""
-        mock_runner = MagicMock()
-        mock_runner.run_post_create.return_value = True
-        mock_runner_class.return_value = mock_runner
-
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-
-        result = backend.run_post_create(
-            image="image:tag",
-            mounts=["-v", "/a:/b"],
-            env={"KEY": "value"},
-            command="echo hello",
-            workdir="/work",
-            network="network-name",
-        )
-
-        mock_runner.run_post_create.assert_called_once_with(
-            image="image:tag",
-            mounts=["-v", "/a:/b"],
-            env={"KEY": "value"},
-            command="echo hello",
-            workdir="/work",
-            network="network-name",
-        )
-        assert result is True
 
 
 class TestBackendProtocol:

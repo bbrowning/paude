@@ -389,48 +389,6 @@ class TestContainerRunner:
     """Tests for ContainerRunner."""
 
     @patch("paude.container.runner.subprocess.run")
-    def test_run_claude_includes_all_mounts(self, mock_run):
-        """run_claude includes all mounts."""
-        mock_run.return_value = MagicMock(returncode=0)
-        from paude.container.runner import ContainerRunner
-
-        runner = ContainerRunner()
-        mounts = ["-v", "/host:/container:rw"]
-        runner.run_claude("test:image", mounts, {}, [])
-
-        call_args = mock_run.call_args[0][0]
-        assert "-v" in call_args
-        assert "/host:/container:rw" in call_args
-
-    @patch("paude.container.runner.subprocess.run")
-    def test_run_claude_includes_all_env_vars(self, mock_run):
-        """run_claude includes all env vars."""
-        mock_run.return_value = MagicMock(returncode=0)
-        from paude.container.runner import ContainerRunner
-
-        runner = ContainerRunner()
-        env = {"TEST_VAR": "value"}
-        runner.run_claude("test:image", [], env, [])
-
-        call_args = mock_run.call_args[0][0]
-        assert "-e" in call_args
-        assert "TEST_VAR=value" in call_args
-
-    @patch("paude.container.runner.subprocess.run")
-    def test_run_claude_sets_working_directory(self, mock_run):
-        """run_claude sets working directory with -w flag."""
-        mock_run.return_value = MagicMock(returncode=0)
-        from paude.container.runner import ContainerRunner
-
-        runner = ContainerRunner()
-        runner.run_claude("test:image", [], {}, [], workdir="/home/user/project")
-
-        call_args = mock_run.call_args[0][0]
-        assert "-w" in call_args
-        w_idx = call_args.index("-w")
-        assert call_args[w_idx + 1] == "/home/user/project"
-
-    @patch("paude.container.runner.subprocess.run")
     def test_run_proxy_creates_container_with_network(self, mock_run):
         """run_proxy creates container with correct network including podman."""
         mock_run.return_value = MagicMock(returncode=0)
@@ -502,18 +460,6 @@ class TestContainerRunner:
             assert not call_args[idx + 1].startswith("ALLOWED_DOMAINS="), (
                 "ALLOWED_DOMAINS should not be set when not provided"
             )
-
-    @patch("paude.container.runner.subprocess.run")
-    def test_yolo_mode_adds_skip_permissions(self, mock_run):
-        """YOLO mode adds --dangerously-skip-permissions."""
-        mock_run.return_value = MagicMock(returncode=0)
-        from paude.container.runner import ContainerRunner
-
-        runner = ContainerRunner()
-        runner.run_claude("test:image", [], {}, [], yolo=True)
-
-        call_args = mock_run.call_args[0][0]
-        assert "--dangerously-skip-permissions" in call_args
 
     @patch("paude.container.runner.subprocess.run")
     def test_run_proxy_uses_unique_container_name(self, mock_run):

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -366,90 +365,6 @@ class ContainerRunner:
         except json.JSONDecodeError:
             return []
 
-    def run_claude(
-        self,
-        image: str,
-        mounts: list[str],
-        env: dict[str, str],
-        args: list[str],
-        workdir: str | None = None,
-        network: str | None = None,
-        yolo: bool = False,
-        unrestricted_network: bool = False,
-    ) -> int:
-        """Run the Claude container (ephemeral, legacy mode).
-
-        Args:
-            image: Container image to run.
-            mounts: Volume mount arguments.
-            env: Environment variables.
-            args: Arguments to pass to claude.
-            workdir: Working directory inside the container.
-            network: Optional network to attach to.
-            yolo: Enable YOLO mode (skip permission prompts).
-            unrestricted_network: Allow unrestricted network access (no proxy).
-
-        Returns:
-            Exit code from the container.
-        """
-        # Show warnings for dangerous modes (matches bash behavior)
-        if yolo and unrestricted_network:
-            warning = """
-\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557
-\u2551  WARNING: MAXIMUM RISK MODE                          \u2551
-\u2551                                                      \u2551
-\u2551  --yolo + --allowed-domains all = Claude can         \u2551
-\u2551  exfiltrate any file to the internet without         \u2551
-\u2551  confirmation. Only use if you trust the task.       \u2551
-\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d
-"""
-            print(warning, file=sys.stderr)
-        elif yolo:
-            msg = (
-                "Warning: YOLO mode enabled. "
-                "Claude can edit files and run commands without confirmation."
-            )
-            print(msg, file=sys.stderr)
-        elif unrestricted_network:
-            msg = "Warning: Network access unrestricted. Data exfiltration is possible."
-            print(msg, file=sys.stderr)
-
-        cmd = [
-            "podman",
-            "run",
-            "--rm",
-            "-it",
-            "--hostname",
-            "paude",
-        ]
-
-        # Set working directory
-        if workdir:
-            cmd.extend(["-w", workdir])
-
-        # Add network if specified
-        if network:
-            cmd.extend(["--network", network])
-
-        # Add mounts
-        cmd.extend(mounts)
-
-        # Add environment variables
-        for key, value in env.items():
-            cmd.extend(["-e", f"{key}={value}"])
-
-        # Add image
-        cmd.append(image)
-
-        # Add YOLO flag if enabled
-        if yolo:
-            args = ["--dangerously-skip-permissions", *args]
-
-        # Add claude args
-        cmd.extend(args)
-
-        result = subprocess.run(cmd)
-        return result.returncode
 
     def run_proxy(
         self,

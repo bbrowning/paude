@@ -7,12 +7,6 @@ import subprocess
 from typing import Any
 
 
-class VolumeNotFoundError(Exception):
-    """Volume not found."""
-
-    pass
-
-
 class VolumeManager:
     """Manages Podman volumes."""
 
