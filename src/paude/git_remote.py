@@ -328,6 +328,40 @@ def is_pod_running_openshift(
     return False
 
 
+def ssh_url_to_https(url: str) -> str:
+    """Convert a git SSH URL to HTTPS format.
+
+    Converts URLs like:
+        git@github.com:user/repo.git -> https://github.com/user/repo.git
+        ssh://git@github.com/user/repo.git -> https://github.com/user/repo.git
+
+    Non-SSH URLs are returned unchanged.
+
+    Args:
+        url: Git remote URL (SSH or HTTPS).
+
+    Returns:
+        HTTPS URL if input was SSH, otherwise the original URL.
+    """
+    import re
+
+    # git@host:user/repo.git format
+    match = re.match(r"^[\w.-]+@([\w.-]+):(.*)", url)
+    if match:
+        host = match.group(1)
+        path = match.group(2)
+        return f"https://{host}/{path}"
+
+    # ssh://git@host/user/repo.git format
+    match = re.match(r"^ssh://[\w.-]+@([\w.-]+)/(.*)", url)
+    if match:
+        host = match.group(1)
+        path = match.group(2)
+        return f"https://{host}/{path}"
+
+    return url
+
+
 def get_local_origin_url() -> str | None:
     """Get the URL of the local 'origin' remote.
 

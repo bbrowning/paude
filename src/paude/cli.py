@@ -1484,6 +1484,7 @@ def _setup_git_after_create(
         is_git_repository,
         set_origin_in_container_openshift,
         set_origin_in_container_podman,
+        ssh_url_to_https,
     )
 
     if not is_git_repository():
@@ -1521,6 +1522,8 @@ def _setup_git_after_create(
     # Step 4: Set origin in container if local origin exists
     origin_url = get_local_origin_url()
     if origin_url:
+        # Convert SSH URLs to HTTPS since the container has no SSH keys
+        origin_url = ssh_url_to_https(origin_url)
         typer.echo(f"Setting origin in container to {origin_url}...")
         if backend_type == "podman":
             container_name = f"paude-{session_name}"

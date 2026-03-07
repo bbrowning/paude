@@ -18,6 +18,7 @@ from paude.git_remote import (
     list_paude_remotes,
     set_origin_in_container_openshift,
     set_origin_in_container_podman,
+    ssh_url_to_https,
 )
 
 
@@ -567,6 +568,40 @@ class TestGetLocalOriginUrl:
         result = get_local_origin_url()
 
         assert result is None
+
+
+class TestSshUrlToHttps:
+    """Tests for ssh_url_to_https."""
+
+    def test_converts_git_at_format(self) -> None:
+        """Convert git@host:user/repo.git to HTTPS."""
+        result = ssh_url_to_https("git@github.com:user/repo.git")
+        assert result == "https://github.com/user/repo.git"
+
+    def test_converts_ssh_protocol_format(self) -> None:
+        """Convert ssh://git@host/user/repo.git to HTTPS."""
+        result = ssh_url_to_https("ssh://git@github.com/user/repo.git")
+        assert result == "https://github.com/user/repo.git"
+
+    def test_preserves_https_url(self) -> None:
+        """Return HTTPS URLs unchanged."""
+        url = "https://github.com/user/repo.git"
+        assert ssh_url_to_https(url) == url
+
+    def test_preserves_http_url(self) -> None:
+        """Return HTTP URLs unchanged."""
+        url = "http://github.com/user/repo.git"
+        assert ssh_url_to_https(url) == url
+
+    def test_converts_gitlab_ssh(self) -> None:
+        """Convert GitLab SSH URLs."""
+        result = ssh_url_to_https("git@gitlab.com:group/project.git")
+        assert result == "https://gitlab.com/group/project.git"
+
+    def test_converts_nested_path(self) -> None:
+        """Convert SSH URL with nested group path."""
+        result = ssh_url_to_https("git@gitlab.com:group/subgroup/repo.git")
+        assert result == "https://gitlab.com/group/subgroup/repo.git"
 
 
 class TestGitPushTagsToRemote:
