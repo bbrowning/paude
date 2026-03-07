@@ -67,39 +67,39 @@ run:
 
 # Run unit tests (default, fast - integration tests excluded via pyproject.toml)
 test:
-	pytest --cov=paude --cov-report=term-missing
+	uv run pytest --cov=paude --cov-report=term-missing
 
 # Run all integration tests (requires infrastructure)
 test-integration:
-	pytest tests/integration/ -v -m integration
+	uv run pytest tests/integration/ -v -m integration
 
 # Run all tests (unit + integration, for CI)
 test-all:
-	pytest -o "addopts=-v" --cov=paude --cov-report=term-missing
+	uv run pytest -o "addopts=-v" --cov=paude --cov-report=term-missing
 
 # Run Podman integration tests
 test-podman:
-	pytest tests/integration/ -v -m podman
+	uv run pytest tests/integration/ -v -m podman
 
 # Run Kubernetes integration tests
 test-kubernetes:
-	pytest tests/integration/ -v -m kubernetes
+	uv run pytest tests/integration/ -v -m kubernetes
 
 # Development targets
 install:
-	uv pip install -e ".[dev]"
+	uv sync
 
 install-hooks:
 	uv run pre-commit install
 
 lint:
-	ruff check src tests
+	uv run ruff check src tests
 
 format:
-	ruff format src tests
+	uv run ruff format src tests
 
 typecheck:
-	mypy src
+	uv run mypy src
 
 # Login to container registry
 login:
