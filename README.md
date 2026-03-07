@@ -42,36 +42,32 @@ uv tool install paude
 
 ### The Workflow (Podman)
 
-You'll use two terminals: one stays connected to Claude (interactive session), the other manages code sync via git.
-
 ```bash
-# Terminal 1: Create and start session
+# Create session, push code, and set up origin — all in one step
 cd your-project
-paude create --yolo my-project
-paude start my-project          # Opens tmux with Claude Code
+paude create --yolo --git my-project
 
-# Terminal 2: Push your code (while Terminal 1 is running)
-paude remote add --push my-project
+# Connect to the running session
+paude connect my-project        # Opens tmux with Claude Code
 
-# Claude works autonomously in Terminal 1...
+# Claude works autonomously...
 # When ready, pull Claude's commits (use your branch name):
 git pull paude-my-project main
 ```
 
-**You'll know it's working when**: Terminal 1 shows the Claude Code interface, and `git pull` brings back commits that Claude made.
+**You'll know it's working when**: `paude connect` shows the Claude Code interface, and `git pull` brings back commits that Claude made.
 
 ### The Workflow (OpenShift)
 
-Same two-terminal approach, but runs on your cluster instead of locally.
+Same approach, but runs on your cluster instead of locally.
 
 ```bash
-# Terminal 1: Create and start on OpenShift
+# Create on OpenShift with code push
 cd your-project
-paude create --yolo --backend=openshift my-project
-paude start my-project          # Opens tmux with Claude Code
+paude create --yolo --backend=openshift --git my-project
 
-# Terminal 2: Push your code (while pod is running)
-paude remote add --push my-project
+# Connect to the running session
+paude connect my-project        # Opens tmux with Claude Code
 
 # Pull Claude's commits (use your branch name):
 git pull paude-my-project main
@@ -178,11 +174,14 @@ paude
 ### Examples
 
 ```bash
-# Create a named session (without starting)
+# Create session and push code in one step
+paude create my-project --git
+
+# Create a named session (starts container automatically)
 paude create my-project
 
-# Start the session (launches container, connects)
-paude start my-project
+# Connect to the running session
+paude connect my-project
 
 # Work in Claude... then detach with Ctrl+b d
 
@@ -214,18 +213,34 @@ paude create my-project --backend=openshift \
 
 ## Code Synchronization
 
-Sessions use git for code synchronization. Use `paude remote` to set up git remotes:
+Sessions use git for code synchronization. The easiest way is the `--git` flag on create:
 
 ```bash
-# Terminal 1: Create and start a session
+# One-step: create session, push code+tags, set up origin
+paude create my-project --git
+paude connect my-project
+
+# In container: gh pr list, git describe, etc. all work
+```
+
+The `--git` flag:
+1. Creates the session and starts the container
+2. Adds a `paude-<name>` git remote locally
+3. Pushes the current branch and all tags to the container
+4. Sets the `origin` remote inside the container (from your local origin)
+5. Fetches tags from origin inside the container (for `git describe`)
+
+### Manual code sync
+
+You can also set up git remotes manually:
+
+```bash
+# Create session (container starts automatically)
 paude create my-project
-paude start my-project           # Stays attached to container
+paude connect my-project         # Connect in one terminal
 
-# Terminal 2: Set up remote and push code (while container is running)
+# In another terminal: Set up remote and push code
 paude remote add --push my-project  # Init git in container + push
-
-# In container (Terminal 1): Install dependencies manually
-pip install -e .                 # Or your preferred install command
 
 # Later: Push more changes
 git push paude-my-project main
@@ -234,20 +249,12 @@ git push paude-my-project main
 git pull paude-my-project main
 ```
 
-The `paude remote add` command:
-1. Checks that the container is running (required)
-2. Initializes a git repository in the container's workspace
-3. Adds a git remote using the `ext::` protocol
-4. Optionally pushes current branch with `--push`
-
 ## OpenShift Backend
 
 For remote execution on OpenShift/Kubernetes clusters:
 
 ```bash
-paude create --backend=openshift
-paude start                       # In one terminal
-paude remote add --push           # In another terminal (while running)
+paude create --backend=openshift --git
 paude connect
 ```
 

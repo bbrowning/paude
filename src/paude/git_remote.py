@@ -328,6 +328,157 @@ def is_pod_running_openshift(
     return False
 
 
+def get_local_origin_url() -> str | None:
+    """Get the URL of the local 'origin' remote.
+
+    Returns:
+        Origin URL or None if not set.
+    """
+    result = subprocess.run(
+        ["git", "config", "--get", "remote.origin.url"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return result.stdout.strip()
+    return None
+
+
+def git_push_tags_to_remote(remote_name: str) -> bool:
+    """Push all tags to a git remote.
+
+    Args:
+        remote_name: Name of the remote to push tags to.
+
+    Returns:
+        True if successful, False if failed.
+    """
+    result = subprocess.run(
+        ["git", "push", remote_name, "--tags"],
+        capture_output=False,
+    )
+    return result.returncode == 0
+
+
+def set_origin_in_container_podman(
+    container_name: str, origin_url: str
+) -> bool:
+    """Set the origin remote URL in a Podman container's workspace.
+
+    Idempotent: adds origin if missing, updates URL if it exists.
+
+    Args:
+        container_name: Name of the container.
+        origin_url: URL to set for the origin remote.
+
+    Returns:
+        True if successful, False if failed.
+    """
+    cmd = (
+        f'git -C /pvc/workspace remote add origin "{origin_url}" 2>/dev/null || '
+        f'git -C /pvc/workspace remote set-url origin "{origin_url}"'
+    )
+    result = subprocess.run(
+        ["podman", "exec", container_name, "bash", "-c", cmd],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"Failed to set origin in container: {result.stderr}", file=sys.stderr)
+        return False
+    return True
+
+
+def set_origin_in_container_openshift(
+    pod_name: str,
+    namespace: str,
+    origin_url: str,
+    context: str | None = None,
+) -> bool:
+    """Set the origin remote URL in an OpenShift pod's workspace.
+
+    Idempotent: adds origin if missing, updates URL if it exists.
+
+    Args:
+        pod_name: Name of the pod.
+        namespace: Kubernetes namespace.
+        origin_url: URL to set for the origin remote.
+        context: Optional kubeconfig context.
+
+    Returns:
+        True if successful, False if failed.
+    """
+    cmd = (
+        f'git -C /pvc/workspace remote add origin "{origin_url}" 2>/dev/null || '
+        f'git -C /pvc/workspace remote set-url origin "{origin_url}"'
+    )
+    oc_cmd = ["oc"]
+    if context:
+        oc_cmd.extend(["--context", context])
+    oc_cmd.extend(["exec", pod_name, "-n", namespace, "--", "bash", "-c", cmd])
+
+    result = subprocess.run(
+        oc_cmd,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"Failed to set origin in container: {result.stderr}", file=sys.stderr)
+        return False
+    return True
+
+
+def fetch_tags_in_container_podman(container_name: str) -> bool:
+    """Fetch tags from origin in a Podman container's workspace.
+
+    Args:
+        container_name: Name of the container.
+
+    Returns:
+        True if successful, False if failed.
+    """
+    result = subprocess.run(
+        [
+            "podman", "exec", container_name, "bash", "-c",
+            "git -C /pvc/workspace fetch origin --tags",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+def fetch_tags_in_container_openshift(
+    pod_name: str,
+    namespace: str,
+    context: str | None = None,
+) -> bool:
+    """Fetch tags from origin in an OpenShift pod's workspace.
+
+    Args:
+        pod_name: Name of the pod.
+        namespace: Kubernetes namespace.
+        context: Optional kubeconfig context.
+
+    Returns:
+        True if successful, False if failed.
+    """
+    oc_cmd = ["oc"]
+    if context:
+        oc_cmd.extend(["--context", context])
+    oc_cmd.extend([
+        "exec", pod_name, "-n", namespace, "--",
+        "bash", "-c", "git -C /pvc/workspace fetch origin --tags",
+    ])
+
+    result = subprocess.run(
+        oc_cmd,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
 def git_push_to_remote(remote_name: str, branch: str | None = None) -> bool:
     """Push to a git remote.
 

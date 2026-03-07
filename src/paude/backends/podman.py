@@ -316,6 +316,27 @@ class PodmanBackend:
             volume_name=volume_name,
         )
 
+    def start_session_no_attach(self, name: str) -> None:
+        """Start containers without attaching (for git setup, etc.).
+
+        Starts the proxy (if present) and main container but does not
+        attach or run the entrypoint.
+
+        Args:
+            name: Session name.
+
+        Raises:
+            SessionNotFoundError: If session not found.
+        """
+        container_name = self._container_name(name)
+        if not self._runner.container_exists(container_name):
+            raise SessionNotFoundError(f"Session '{name}' not found")
+        if self._runner.container_running(container_name):
+            return
+        self._ensure_gcp_adc_secret()
+        self._start_proxy_if_needed(name)
+        self._runner.start_container(container_name)
+
     def delete_session(self, name: str, confirm: bool = False) -> None:
         """Delete a session and all its resources.
 

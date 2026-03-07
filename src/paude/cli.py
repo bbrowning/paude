@@ -128,6 +128,7 @@ OPTIONS (for 'create' command):
                         Special: 'all' (unrestricted), 'default' (vertexai+pypi+github)
                         Aliases: 'vertexai', 'pypi', 'github'
                         Custom domains REPLACE defaults; use with 'default' to add.
+    --git               Set up git remote, push code+tags, configure origin
     --rebuild           Force rebuild of workspace container image
     --dry-run           Show configuration without creating session
     -a, --args          Arguments to pass to claude (e.g., -a '-p "prompt"')
@@ -148,15 +149,14 @@ OPTIONS (global):
     -V, --version       Show paude version and exit
 
 WORKFLOW:
-    # Terminal 1:
-    paude create my-project         # Create session
-    paude start my-project          # Start and connect (stays attached)
+    # Quick start (create + push code in one step):
+    paude create my-project --git   # Create, start, push code+tags, set origin
+    paude connect my-project        # Connect to running session
 
-    # Terminal 2 (while container running):
-    paude remote add --push my-project  # Init git repo in container + push code
-
-    # In container (Terminal 1):
-    pip install -e .                # Install deps manually if needed
+    # Manual workflow:
+    paude create my-project         # Create and start session
+    paude remote add --push my-project  # Init git repo + push code
+    paude connect my-project        # Connect to running session
 
     # Later:
     paude connect                   # Reconnect to running session
@@ -315,6 +315,13 @@ def session_create(
             help="Inactivity minutes before removing credentials (OpenShift).",
         ),
     ] = 60,
+    git: Annotated[
+        bool,
+        typer.Option(
+            "--git",
+            help="Set up git remote, push code+tags, configure origin.",
+        ),
+    ] = False,
 ) -> None:
     """Create a new persistent session (does not start it)."""
     import shlex
@@ -448,14 +455,25 @@ def session_create(
         try:
             backend_instance = PodmanBackend()
             session = backend_instance.create_session(session_config)
-            typer.echo(f"Session '{session.name}' created.")
+
+            # Auto-start the container (entrypoint is sleep infinity)
+            backend_instance.start_session_no_attach(session.name)
+
+            typer.echo(f"Session '{session.name}' created and running.")
             domains_display = format_domains_for_display(expanded_domains)
             typer.echo(f"  Network: {domains_display}")
             if yolo:
                 typer.echo("  Mode: YOLO (no permission prompts)")
+
+            if git:
+                _setup_git_after_create(
+                    session_name=session.name,
+                    backend_type="podman",
+                )
+
             typer.echo("")
             typer.echo("To start working:")
-            typer.echo("  paude start")
+            typer.echo(f"  paude connect {session.name}")
         except SessionExistsError as e:
             typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1) from None
@@ -551,6 +569,15 @@ def session_create(
             typer.echo(f"  Network: {domains_display}")
             if yolo:
                 typer.echo("  Mode: YOLO (no permission prompts)")
+
+            if git:
+                _setup_git_after_create(
+                    session_name=session.name,
+                    backend_type="openshift",
+                    openshift_context=openshift_context,
+                    openshift_namespace=os_backend.namespace,
+                )
+
             typer.echo("")
             typer.echo("Session is running. Connect with:")
             typer.echo(f"  paude connect {session.name}")
@@ -1428,6 +1455,107 @@ def _find_session_for_remote(
             pass
 
     return (None, None)
+
+
+def _setup_git_after_create(
+    session_name: str,
+    backend_type: str,
+    openshift_context: str | None = None,
+    openshift_namespace: str | None = None,
+) -> bool:
+    """Set up git remote, push code and tags, and configure origin after create.
+
+    Args:
+        session_name: Name of the created session.
+        backend_type: "podman" or "openshift".
+        openshift_context: OpenShift context (if applicable).
+        openshift_namespace: OpenShift namespace (if applicable).
+
+    Returns:
+        True if all steps succeeded, False if any step failed.
+    """
+    from paude.git_remote import (
+        fetch_tags_in_container_openshift,
+        fetch_tags_in_container_podman,
+        get_current_branch,
+        get_local_origin_url,
+        git_push_tags_to_remote,
+        git_push_to_remote,
+        is_git_repository,
+        set_origin_in_container_openshift,
+        set_origin_in_container_podman,
+    )
+
+    if not is_git_repository():
+        typer.echo(
+            "Warning: Not in a git repository. Skipping --git setup.",
+            err=True,
+        )
+        return False
+
+    typer.echo("")
+    typer.echo("Setting up git...")
+
+    # Step 1: Add remote and init git in container (without pushing)
+    _remote_add(
+        name=session_name,
+        openshift_context=openshift_context,
+        openshift_namespace=openshift_namespace,
+        push=False,
+    )
+
+    # Step 2: Push current branch
+    remote_name = f"paude-{session_name}"
+    branch = get_current_branch() or "main"
+    typer.echo(f"Pushing {branch} to container...")
+    if not git_push_to_remote(remote_name, branch):
+        typer.echo("Warning: Failed to push branch.", err=True)
+        return False
+
+    # Step 3: Push tags
+    typer.echo("Pushing tags...")
+    if not git_push_tags_to_remote(remote_name):
+        typer.echo("Warning: Failed to push tags.", err=True)
+        # Non-fatal, continue
+
+    # Step 4: Set origin in container if local origin exists
+    origin_url = get_local_origin_url()
+    if origin_url:
+        typer.echo(f"Setting origin in container to {origin_url}...")
+        if backend_type == "podman":
+            container_name = f"paude-{session_name}"
+            origin_set = set_origin_in_container_podman(container_name, origin_url)
+        else:
+            pod_name = f"paude-{session_name}-0"
+            namespace = openshift_namespace or "default"
+            origin_set = set_origin_in_container_openshift(
+                pod_name, namespace, origin_url, context=openshift_context,
+            )
+
+        # Step 5: Fetch tags from origin in container
+        if origin_set:
+            typer.echo("Fetching tags from origin in container...")
+            if backend_type == "podman":
+                if not fetch_tags_in_container_podman(container_name):
+                    typer.echo(
+                        "Warning: Could not fetch tags from origin "
+                        "(network may be restricted).",
+                        err=True,
+                    )
+            else:
+                if not fetch_tags_in_container_openshift(
+                    pod_name, namespace, context=openshift_context,
+                ):
+                    typer.echo(
+                        "Warning: Could not fetch tags from origin "
+                        "(network may be restricted).",
+                        err=True,
+                    )
+    else:
+        typer.echo("No local origin remote found. Skipping origin setup in container.")
+
+    typer.echo("Git setup complete.")
+    return True
 
 
 def _remote_add(

@@ -16,14 +16,14 @@ Run Claude Code in OpenShift/Kubernetes pods with persistent sessions, credentia
 oc whoami
 oc project
 
-# Create a session
-paude create --backend=openshift
+# Create a session and push code in one step
+paude create --backend=openshift --git
 
 # Or with explicit namespace
 paude create --backend=openshift --openshift-namespace=my-namespace
 
-# Start the session
-paude start
+# Connect to the running session
+paude connect
 ```
 
 ## How It Works
@@ -31,7 +31,7 @@ paude start
 1. **Image Push**: Local paude container image is pushed to the OpenShift internal registry
 2. **Pod Creation**: A pod is created with persistent storage and credentials injected
 3. **Session Persistence**: tmux inside the pod preserves your Claude session across reconnects
-4. **Git-Based Sync**: Use `paude remote add` and `git push/pull` to sync code
+4. **Git-Based Sync**: Use `--git` on create or `paude remote add` and `git push/pull` to sync code
 5. **Network Filtering**: NetworkPolicy restricts pod egress to approved destinations
 
 ## Session Management
@@ -41,20 +41,11 @@ Paude uses a unified session model across all backends. Sessions are persistent 
 ### Persistent Sessions
 
 ```bash
-# Create a named session (without starting)
-paude create my-project --backend=openshift
-
-# Start the session (scales StatefulSet, connects)
-paude start my-project --backend=openshift
-
-# Set up git remote for code sync
-paude remote add my-project
-
-# Push code to the session
-git push paude-my-project main
+# Create session and push code in one step
+paude create my-project --backend=openshift --git
 
 # Connect and work with Claude... then detach with Ctrl+b d
-paude connect my-project --backend=openshift
+paude connect my-project
 
 # Pull changes made by Claude
 git pull paude-my-project main
