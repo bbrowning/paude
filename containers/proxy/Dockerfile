@@ -3,7 +3,9 @@ FROM quay.io/centos/centos:stream9
 # Enable EPEL repository and install Squid + debugging tools
 RUN dnf install -y epel-release && \
     dnf install -y --allowerasing squid curl wget bind-utils iputils && \
-    dnf clean all
+    dnf clean all && \
+    # Ensure squid runtime directories are writable (needed for OpenShift random UIDs)
+    chmod -R 777 /var/spool/squid /var/log/squid /run/squid 2>/dev/null || true
 
 # Copy allowlist configuration and custom entrypoint
 COPY squid.conf /etc/squid/squid.conf

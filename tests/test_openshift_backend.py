@@ -1381,6 +1381,55 @@ class TestCreateProxyDeployment:
         assert container["ports"][0]["containerPort"] == 3128
 
 
+class TestProxyImagePullPolicy:
+    """Tests for proxy deployment imagePullPolicy from env var."""
+
+    @patch("subprocess.run")
+    def test_proxy_default_image_pull_policy(self, mock_run: MagicMock) -> None:
+        """Proxy deployment defaults to Always imagePullPolicy."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._create_proxy_deployment("my-session", "quay.io/test/proxy:latest")
+
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        assert len(apply_calls) >= 1
+
+        call_kwargs = apply_calls[0][1]
+        spec = json.loads(call_kwargs["input"])
+        container = spec["spec"]["template"]["spec"]["containers"][0]
+        assert container["imagePullPolicy"] == "Always"
+
+    @patch("subprocess.run")
+    def test_proxy_image_pull_policy_from_env(self, mock_run: MagicMock) -> None:
+        """Proxy deployment uses imagePullPolicy from PAUDE_IMAGE_PULL_POLICY env var."""
+        import os
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        original = os.environ.get("PAUDE_IMAGE_PULL_POLICY")
+        try:
+            os.environ["PAUDE_IMAGE_PULL_POLICY"] = "IfNotPresent"
+
+            backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+            backend._create_proxy_deployment(
+                "my-session", "quay.io/test/proxy:latest"
+            )
+
+            apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+            assert len(apply_calls) >= 1
+
+            call_kwargs = apply_calls[0][1]
+            spec = json.loads(call_kwargs["input"])
+            container = spec["spec"]["template"]["spec"]["containers"][0]
+            assert container["imagePullPolicy"] == "IfNotPresent"
+        finally:
+            if original is None:
+                os.environ.pop("PAUDE_IMAGE_PULL_POLICY", None)
+            else:
+                os.environ["PAUDE_IMAGE_PULL_POLICY"] = original
+
+
 class TestCreateProxyService:
     """Tests for _create_proxy_service method."""
 

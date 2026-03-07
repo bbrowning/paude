@@ -73,5 +73,12 @@ if [[ -n "$ALLOWED_DOMAINS" ]]; then
     fi
 fi
 
+# Validate config before starting (errors go to stderr for pod log visibility)
+if ! /usr/sbin/squid -k parse -f "$CONFIG_FILE" 2>&1; then
+    echo "ERROR: squid config validation failed. Generated config:" >&2
+    cat -n "$CONFIG_FILE" >&2
+    exit 1
+fi
+
 # Run squid with the generated config
 exec /usr/sbin/squid -f "$CONFIG_FILE" "$@"

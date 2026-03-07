@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from typing import Any
@@ -266,7 +267,9 @@ class ProxyManager:
                             {
                                 "name": "proxy",
                                 "image": proxy_image,
-                                "imagePullPolicy": "Always",
+                                "imagePullPolicy": os.environ.get(
+                                    "PAUDE_IMAGE_PULL_POLICY", "Always"
+                                ),
                                 "ports": [{"containerPort": 3128}],
                                 "env": env_list,
                                 "resources": {
