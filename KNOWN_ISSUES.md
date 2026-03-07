@@ -131,7 +131,8 @@ paude sync pod-b --direction local
 
 ### Related Files
 
-- `src/paude/backends/openshift.py` (`sync_session`, `_rsync_from_pod` methods)
+- `src/paude/backends/openshift/backend.py` (session lifecycle methods)
+- `src/paude/backends/openshift/sync.py` (`sync_credentials`, `sync_full_config` methods)
 - `src/paude/cli.py` (`session sync` command)
 
 ## ENHANCEMENT-001: DevSpace sync as alternative to oc rsync
@@ -184,7 +185,7 @@ devspace sync --local-path=./src --container-path=/workspace \
 ### Related Files
 
 - `docs/features/2026-01-22-openshift-backend/RESEARCH.md` (detailed comparison)
-- `src/paude/backends/openshift.py` (would need new sync implementation)
+- `src/paude/backends/openshift/sync.py` (would need new sync implementation)
 
 ## BUG-004: Claude Code reports "not a git repository" on OpenShift session start
 
@@ -221,39 +222,45 @@ Added `PAUDE_WAIT_FOR_GIT` environment variable mechanism:
 
 - `src/paude/cli.py` (env var injection)
 - `containers/paude/entrypoint-session.sh` (`wait_for_git` function)
+
+## Dead Code Backlog
+
+Items identified during dead code scan (2026-03-07). Not removed because they have tests or are part of the public API.
+
+### DEAD-001: utils.py functions unused in source code
+
+**Status**: Open
+**Priority**: Low
+**Discovered**: 2026-03-07 during dead code scan
+
+`check_requirements()`, `check_git_safety()`, `RequirementError`, and `resolve_path()` in `src/paude/utils.py` are never imported from any source file in `src/paude/`. They are only referenced in `tests/test_utils.py`. Additionally, `resolve_path()` is duplicated in `src/paude/mounts.py` (which uses its own copy).
+
+### DEAD-002: ContainerRunner.run_claude() unused in source code
+
+**Status**: Open
+**Priority**: Low
+**Discovered**: 2026-03-07 during dead code scan
+
+`run_claude()` in `src/paude/container/runner.py` is never called from any source file. It appears to be a legacy method from before the session-based architecture. It has test coverage in `tests/test_container.py`.
+
+### DEAD-003: PodmanBackend.run_proxy() and run_post_create() unused in source code
+
+**Status**: Open
+**Priority**: Low
+**Discovered**: 2026-03-07 during dead code scan
+
+`run_proxy()` and `run_post_create()` wrapper methods in `src/paude/backends/podman.py` are never called from `cli.py` or any other source file. They delegate to `ContainerRunner` methods and have test coverage in `tests/test_backends.py`.
+
+### DEAD-004: VolumeNotFoundError and PodNotFoundError never raised
+
+**Status**: Open
+**Priority**: Low
+**Discovered**: 2026-03-07 during dead code scan
+
+`VolumeNotFoundError` (in `src/paude/container/volume.py`) and `PodNotFoundError` (in `src/paude/backends/openshift/exceptions.py`) are defined and re-exported via `__init__.py` / `__all__` but never raised anywhere in the codebase.
 ## Refactoring Backlog
 
 Technical debt identified during codebase analysis. Address these before adding significant new functionality to affected files.
-
-### REFACTOR-001: backends/openshift.py (2,397 lines) - COMPLETED
-
-**Status**: Completed ✓
-**Priority**: High (blocks future OpenShift development)
-**Discovered**: 2026-01-29 during code quality analysis
-**Completed**: 2026-01-29
-
-**Solution:** Split into modular package structure:
-```
-backends/openshift/
-├── __init__.py      #   70 lines - Public API re-exports
-├── backend.py       # 1132 lines - OpenShiftBackend (session lifecycle)
-├── config.py        #   28 lines - OpenShiftConfig dataclass
-├── exceptions.py    #   72 lines - OpenShift-specific exceptions
-├── oc.py            #  167 lines - OcClient wrapper class
-├── resources.py     #  266 lines - K8s resource builders + utilities
-├── sync.py          #  369 lines - ConfigSyncer class
-├── build.py         #  431 lines - BuildOrchestrator class
-└── proxy.py         #  396 lines - ProxyManager class
-                       2931 lines total
-```
-
-**Refactored methods:**
-- `_sync_config_to_pod` → ConfigSyncer with sync_gcloud, sync_claude, sync_git methods
-- `_generate_statefulset_spec` → StatefulSetBuilder with fluent API
-- Build methods → BuildOrchestrator class
-- Proxy/NetworkPolicy methods → ProxyManager class
-
-All 396 tests pass, linting and type checking pass.
 
 ### REFACTOR-002: cli.py (1,601 lines)
 

@@ -9,14 +9,17 @@ Using `paude` in a repository feels just like using `claude`, but:
 
 ---
 
-## Current State (v0.4.x)
+## Current State (v0.7.x)
 
 - Python implementation with Typer CLI
-- Podman-based container execution
-- Squid proxy for network filtering (hardcoded allowlist)
+- Podman and OpenShift backends with shared Backend protocol
+- Squid proxy for network filtering with configurable allowlists (`--allowed-domains`)
 - Vertex AI authentication via gcloud ADC
 - devcontainer.json/paude.json configuration support
 - venv isolation for Python projects
+- Session management: `create`, `start`, `stop`, `connect`, `delete`, `list`
+- Git-based code sync with `--git` flag and `paude remote`
+- GitHub CLI (`gh`) installed with GitHub domains in default allowlist
 
 ---
 
@@ -106,58 +109,40 @@ Options:
 
 **Priority: High (Usability)**
 **Theme: Configuration Flexibility**
-**Status: Designed (see config-layering feature)**
+**Status: Implemented (core functionality)**
 
-#### Problem
+#### Implemented
 
-Current network filtering has a hardcoded allowlist:
-- `*.googleapis.com`
-- `*.google.com`
+The `--allowed-domains` CLI flag provides configurable network allowlists:
 
-Users often need additional hosts:
-- Package registries (pypi.org, npmjs.org, crates.io)
-- Internal registries
-- Documentation sites
-- APIs their code calls
-
-Currently, only option is `--allow-network` which disables all filtering.
-
-#### Proposed Solution
-
-paude.json network policy (from config-layering):
-
-```json
-{
-  "network": {
-    "mode": "restricted",
-    "allowlist": [
-      "pypi.org",
-      "files.pythonhosted.org",
-      "*.internal.company.com"
-    ]
-  }
-}
-```
-
-Plus CLI override for session:
 ```bash
-paude --network-allow="custom.api.com"
+# Add custom domain to defaults
+paude create --allowed-domains default --allowed-domains .example.com
+
+# Full network access (unrestricted)
+paude create --allowed-domains all
+
+# Use only specific alias
+paude create --allowed-domains vertexai
 ```
 
-#### Implementation
+Default allowlist includes aliases: `vertexai`, `pypi`, `github`, `claude` (see `src/paude/domains.py`).
 
-- Dynamic squid.conf generation from allowlist
-- Base domains always included (googleapis.com)
-- Glob pattern support (*.domain.com)
-- Union of global + project allowlist (with project-can-only-restrict option)
+Live domain management is also available via `paude allowed-domains <session>` (add/remove/replace).
+
+#### Remaining (from config-layering)
+
+- paude.json `network` section for project-level domain configuration
+- Restrictive layering (project can only narrow global policy)
+- Glob pattern support for custom domains
 
 #### Acceptance Criteria
 
-- [ ] Custom domains accessible when in allowlist
-- [ ] Non-allowlist domains blocked
+- [x] Custom domains accessible when in allowlist
+- [x] Non-allowlist domains blocked
 - [ ] Works with glob patterns
-- [ ] CLI flag for session additions
-- [ ] Documented in README
+- [x] CLI flag for session additions
+- [x] Documented in README
 
 ---
 
@@ -165,78 +150,31 @@ paude --network-allow="custom.api.com"
 
 **Priority: High (Architecture)**
 **Theme: Backend Abstraction**
-**Status: Research needed**
+**Status: Implemented (Podman + OpenShift)**
 
-#### Problem
+#### Implemented
 
-Paude is tightly coupled to Podman. Users want:
-- **Kubernetes backend** - Run in remote cluster, persist across disconnects
+A `Backend` protocol exists at `src/paude/backends/base.py` defining the shared interface:
+- `create_session()`, `delete_session()`, `start_session()`, `stop_session()`
+- `connect_session()`, `list_sessions()`
+
+Two backends implement this protocol:
+- **Podman** (`src/paude/backends/podman.py`) — local container execution
+- **OpenShift** (`src/paude/backends/openshift/`) — remote cluster execution with StatefulSets, PVCs, and `oc cp`-based credential sync
+
+The `--backend` flag selects the backend, and session discovery auto-detects across backends.
+
+#### Remaining
+
 - **Docker backend** - For users without Podman
 - **Remote Podman** - Podman on a remote machine via SSH
-
-#### Proposed Architecture
-
-```
-paude CLI
-    │
-    ▼
-┌─────────────────────────────┐
-│     Backend Interface       │
-│  - start_session()          │
-│  - stop_session()           │
-│  - attach_session()         │
-│  - list_sessions()          │
-│  - sync_files()             │
-└─────────────────────────────┘
-    │           │           │
-    ▼           ▼           ▼
-┌───────┐  ┌────────┐  ┌────────────┐
-│Podman │  │  K8s   │  │Remote      │
-│(local)│  │        │  │Podman(SSH) │
-└───────┘  └────────┘  └────────────┘
-```
-
-#### Backend Interface (Draft)
-
-```python
-class Backend(Protocol):
-    def start_session(
-        self,
-        image: str,
-        workspace: Path,
-        env: dict[str, str],
-        network_policy: NetworkPolicy,
-    ) -> Session: ...
-
-    def attach_session(self, session_id: str) -> int: ...
-    def stop_session(self, session_id: str) -> None: ...
-    def list_sessions(self) -> list[Session]: ...
-    def sync_workspace(self, session_id: str, direction: str) -> None: ...
-```
-
-#### Podman Backend (Current, Refactored)
-
-- Minimal changes, extract current logic into Backend interface
-- Session = container ID
-- sync_workspace = no-op (direct mount)
-
-#### Kubernetes Backend (New)
-
-Major challenges to solve:
-- **Pod creation**: Generate Pod spec from paude config
-- **Network policy**: K8s NetworkPolicy instead of squid sidecar? Or keep sidecar?
-- **File sync**: No direct mounts; need sync mechanism
-- **Credential injection**: Workload Identity, Secrets, or ADC forwarding?
-- **Session persistence**: Pod stays running after disconnect
-- **Reconnection**: Attach to existing pod's terminal
-
-See [Kubernetes Backend Research](#kubernetes-backend-deep-dive) below.
+- Backend auto-detection based on available tools
 
 #### Acceptance Criteria
 
-- [ ] Backend interface defined
-- [ ] Podman backend implements interface
-- [ ] `--backend` flag to select backend
+- [x] Backend interface defined
+- [x] Podman backend implements interface
+- [x] `--backend` flag to select backend
 - [ ] Backend auto-detection (Podman available? K8s config present?)
 
 ---
@@ -397,49 +335,30 @@ Summary:
 
 **Priority: Medium (Usability)**
 **Theme: Session Management**
-**Status: Not started**
+**Status: Implemented**
 
-#### Problem
+#### Implemented
 
-Currently, paude runs interactively and exits when done. Users want:
-- Background sessions
-- Reconnection to crashed sessions
-- Multiple parallel sessions
-
-#### Proposed Features
+Session management is fully implemented for both backends:
 
 ```bash
-# Start in background
-paude --detach
-# Session started: paude-abc123
-
-# List sessions
-paude sessions
-# ID            STATUS    STARTED         WORKSPACE
-# paude-abc123  running   2 mins ago      /home/user/project
-# paude-def456  stopped   1 hour ago      /home/user/other
-
-# Attach to session
-paude attach abc123
-
-# Stop session
-paude stop abc123
+paude create my-project     # Create session
+paude start my-project      # Start session
+paude connect my-project    # Attach to running session
+paude stop my-project       # Stop session (preserves state)
+paude delete my-project     # Delete session
+paude list                  # List all sessions
 ```
 
-#### Implementation
-
-For Podman:
-- Use `podman run -d` for detached
-- Store session metadata in ~/.local/share/paude/sessions/
-- Use `podman attach` for reconnection
+Sessions persist across disconnects via tmux. Named volumes (Podman) or PVCs (OpenShift) preserve workspace state across stop/start cycles.
 
 #### Acceptance Criteria
 
-- [ ] `--detach` starts background session
-- [ ] `paude sessions` lists sessions
-- [ ] `paude attach` reconnects
-- [ ] `paude stop` cleans up
-- [ ] Session metadata persisted
+- [x] `paude create` creates session
+- [x] `paude list` lists sessions
+- [x] `paude connect` reconnects
+- [x] `paude stop` / `paude delete` cleans up
+- [x] Session state persisted across stop/start
 
 ---
 
@@ -794,44 +713,43 @@ This keeps paude CLI-focused while enabling IDE workflows.
 
 ## Phased Implementation
 
-### Phase 1: Foundation (Current + Next)
+### Phase 1: Foundation — DONE
 
-1. Claude config isolation (security gap)
-2. Configurable network allowlists (quick win)
-3. Config layering (devcontainer.json + paude.json)
+1. ~~Configurable network allowlists~~ — Implemented (`--allowed-domains`)
+2. ~~Config layering~~ — Partially implemented (devcontainer.json + paude.json support exists)
+3. Claude config isolation — Still needed (project `.claude` changes persist to host)
 
 **Goal**: Close security gaps, improve configuration
 
-### Phase 2: Polish
+### Phase 2: Polish — MOSTLY DONE
 
-4. Session management (local)
-5. Audit logging basics
-6. Documentation overhaul
+4. ~~Session management (local)~~ — Implemented (`create`, `start`, `stop`, `connect`, `delete`, `list`)
+5. Audit logging basics — Not started
+6. Documentation overhaul — In progress
 
 **Goal**: Production-ready for local use
 
-### Phase 3: Remote Execution
+### Phase 3: Remote Execution — DONE
 
-7. Backend abstraction
-8. Kubernetes backend (basic)
-9. File sync mechanism
+7. ~~Backend abstraction~~ — Implemented (Backend protocol + Podman + OpenShift)
+8. ~~OpenShift backend~~ — Implemented (StatefulSets, PVCs, credential sync, NetworkPolicy)
+9. ~~Git-based sync~~ — Implemented (`--git` flag, `paude remote`)
 
 **Goal**: Basic Kubernetes support working
 
 ### Phase 4: Enterprise
 
-10. Kubernetes backend (advanced - Workload Identity, NetworkPolicy)
-11. OpenTelemetry integration
-12. Additional cloud providers
-13. Advanced audit logging
+10. OpenTelemetry integration — Not started
+11. Additional cloud providers — Not started
+12. Advanced audit logging — Not started
 
 **Goal**: Enterprise-ready
 
 ### Phase 5: Ecosystem
 
-14. Plugin isolation
-15. IDE integration docs
-16. CI/CD integration
+13. Plugin isolation — Not started
+14. IDE integration docs — Not started
+15. CI/CD integration — Not started
 
 **Goal**: Complete ecosystem
 

@@ -120,7 +120,6 @@ class PodmanBackend:
         self._runner = ContainerRunner()
         self._network_manager = NetworkManager()
         self._volume_manager = VolumeManager()
-        self._current_session: Session | None = None
 
     def _container_name(self, session_name: str) -> str:
         """Get container name for a session."""

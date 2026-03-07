@@ -93,7 +93,7 @@ paude create my-project --backend=openshift --storage-class=fast-ssd
 | `--openshift-context=NAME` | kubeconfig context | current |
 | `--openshift-registry=URL` | Container registry URL | auto-detect |
 | `--no-openshift-tls-verify` | Disable TLS certificate verification when pushing | N/A |
-| `--allow-network` | Disable network filtering | `False` |
+| `--allowed-domains all` | Disable network filtering | `default` (vertexai + pypi + github) |
 | `--yolo` | Skip Claude permission prompts | `False` |
 
 **Notes:**
@@ -151,10 +151,10 @@ Plugin paths are automatically rewritten from host paths to container paths.
 
 By default, sessions run with restricted network access:
 
-- **Allowed**: DNS resolution, Vertex AI APIs (*.googleapis.com)
+- **Allowed**: DNS resolution, Vertex AI APIs (*.googleapis.com), PyPI (*.pypi.org), GitHub (github.com, api.github.com), Claude (*.claude.ai, *.anthropic.com)
 - **Blocked**: All other external traffic
 
-NetworkPolicy enforces egress restrictions at the Kubernetes level. Use `--allow-network` to disable filtering for unrestricted access.
+NetworkPolicy enforces egress restrictions at the Kubernetes level. Use `--allowed-domains all` to disable filtering for unrestricted access.
 
 ### Pod Security
 
@@ -312,6 +312,5 @@ For merge conflicts, use normal git workflows (rebase, merge, etc.).
 ## Limitations
 
 - **No SSH mounts**: Git push via SSH is not available (same as Podman backend)
-- **No GitHub CLI**: `gh` operations are not available (same as Podman backend)
 - **Git workflow required**: Must use git to sync code (no automatic file sync)
 - **Cluster dependency**: Requires active OpenShift cluster access

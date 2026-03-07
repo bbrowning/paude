@@ -115,7 +115,7 @@ class ProxyManager:
     def ensure_network_policy_permissive(self, session_id: str) -> None:
         """Ensure a permissive NetworkPolicy exists for this session.
 
-        Used when --allow-network is specified. Allows all egress traffic.
+        Used when --allowed-domains all is specified. Allows all egress traffic.
 
         Args:
             session_id: The session ID to scope the policy to.

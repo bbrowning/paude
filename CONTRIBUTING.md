@@ -87,37 +87,59 @@ make run
 
 ```
 paude/
-├── src/paude/             # Python implementation
-│   ├── __init__.py        # Package with version
-│   ├── __main__.py        # Entry point: python -m paude
-│   ├── cli.py             # Typer CLI
-│   ├── config/            # Configuration parsing
-│   │   ├── detector.py    # Config file detection
-│   │   ├── parser.py      # Config file parsing
-│   │   ├── models.py      # Data models
-│   │   └── dockerfile.py  # Dockerfile generation
-│   ├── container/         # Container management
-│   │   ├── podman.py      # Podman wrapper
-│   │   ├── image.py       # Image management
-│   │   ├── network.py     # Network management
-│   │   └── runner.py      # Container execution
-│   ├── features/          # Dev container features
-│   │   ├── downloader.py  # Feature downloading
-│   │   └── installer.py   # Feature installation
-│   ├── mounts.py          # Volume mount builder
-│   ├── environment.py     # Environment variables
-│   ├── hash.py            # Config hashing
-│   ├── platform.py        # Platform-specific code
-│   ├── utils.py           # Utilities
-│   └── dry_run.py         # Dry-run output
+├── src/paude/                 # Python implementation
+│   ├── __init__.py            # Package with version
+│   ├── __main__.py            # Entry point: python -m paude
+│   ├── cli.py                 # Typer CLI
+│   ├── backends/              # Backend implementations
+│   │   ├── base.py            # Backend protocol
+│   │   ├── podman.py          # Podman backend
+│   │   ├── shared.py          # Shared backend utilities
+│   │   └── openshift/         # OpenShift backend
+│   │       ├── backend.py     # OpenShift backend implementation
+│   │       ├── build.py       # Image building on OpenShift
+│   │       ├── config.py      # OpenShift configuration
+│   │       ├── exceptions.py  # OpenShift-specific exceptions
+│   │       ├── oc.py          # oc CLI wrapper
+│   │       ├── proxy.py       # Proxy pod management
+│   │       ├── resources.py   # K8s resource builders
+│   │       └── sync.py        # File synchronization
+│   ├── config/                # Configuration parsing
+│   │   ├── claude_layer.py    # Claude config layering
+│   │   ├── detector.py        # Config file detection
+│   │   ├── parser.py          # Config file parsing
+│   │   ├── models.py          # Data models
+│   │   └── dockerfile.py      # Dockerfile generation
+│   ├── container/             # Container management
+│   │   ├── podman.py          # Podman wrapper
+│   │   ├── image.py           # Image management
+│   │   ├── network.py         # Network management
+│   │   ├── runner.py          # Container execution
+│   │   └── volume.py          # Volume management
+│   ├── features/              # Dev container features
+│   │   ├── downloader.py      # Feature downloading
+│   │   └── installer.py       # Feature installation
+│   ├── domains.py             # Domain aliases and expansion
+│   ├── mounts.py              # Volume mount builder
+│   ├── environment.py         # Environment variables
+│   ├── git_remote.py          # Git remote management
+│   ├── hash.py                # Config hashing
+│   ├── platform.py            # Platform-specific code
+│   ├── session_discovery.py   # Session discovery
+│   ├── utils.py               # Utilities
+│   ├── venv.py                # Venv detection and shadowing
+│   └── dry_run.py             # Dry-run output
 ├── containers/
 │   ├── paude/
-│   │   ├── Dockerfile     # Claude Code container image
-│   │   └── entrypoint.sh  # Container entrypoint
+│   │   ├── Dockerfile             # Claude Code container image
+│   │   ├── entrypoint.sh          # Container entrypoint
+│   │   ├── entrypoint-session.sh  # Session entrypoint
+│   │   └── credential-watchdog.sh # Credential refresh watchdog
 │   └── proxy/
-│       ├── Dockerfile     # Squid proxy container image
-│       ├── entrypoint.sh  # Proxy container entrypoint
-│       └── squid.conf     # Proxy allowlist configuration
+│       ├── Dockerfile             # Squid proxy container image
+│       ├── entrypoint.sh          # Proxy container entrypoint
+│       ├── squid.conf             # Proxy allowlist configuration
+│       └── ERR_CUSTOM_ACCESS_DENIED  # Custom error page
 ├── tests/                 # Python tests (pytest)
 ├── examples/              # Example configurations
 ├── docs/
@@ -256,4 +278,4 @@ For significant features, follow the structured development process:
 
 4. Update README.md and this file with user-facing changes
 
-See `docs/features/byoc/` for an example of this process.
+See `docs/features/2026-01-21-byoc/` for an example of this process.

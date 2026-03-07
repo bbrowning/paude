@@ -68,26 +68,3 @@ def compute_content_hash(*content: bytes) -> str:
     for item in content:
         hasher.update(item)
     return hasher.hexdigest()
-
-
-def is_image_stale(image_tag: str) -> bool:
-    """Check if the image with the given tag exists.
-
-    Args:
-        image_tag: Full image tag including hash.
-
-    Returns:
-        True if image is stale (doesn't exist), False if fresh.
-    """
-    import subprocess
-
-    try:
-        result = subprocess.run(
-            ["podman", "image", "exists", image_tag],
-            capture_output=True,
-            check=False,
-        )
-        return result.returncode != 0
-    except FileNotFoundError:
-        # podman not installed
-        return True

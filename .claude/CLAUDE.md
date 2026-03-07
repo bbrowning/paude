@@ -14,49 +14,68 @@ The project consists of a Python implementation with container definitions:
 
 ```
 src/paude/
-├── __init__.py        # Package with version
-├── __main__.py        # Entry point: python -m paude
-├── cli.py             # Typer CLI
-├── config/            # Configuration parsing
-│   ├── detector.py    # Config file detection
-│   ├── parser.py      # Config file parsing
-│   ├── models.py      # Data models (PaudeConfig, FeatureSpec)
-│   └── dockerfile.py  # Dockerfile generation
-├── container/         # Container management
-│   ├── podman.py      # Podman subprocess wrapper
-│   ├── image.py       # Image building and pulling
-│   ├── network.py     # Network management
-│   └── runner.py      # Container execution
-├── features/          # Dev container features
-│   ├── downloader.py  # Feature downloading
-│   └── installer.py   # Feature installation
-├── mounts.py          # Volume mount builder
-├── environment.py     # Environment variables
-├── hash.py            # Config hashing for caching
-├── platform.py        # Platform-specific code (macOS)
-├── utils.py           # Utilities
-└── dry_run.py         # Dry-run output
+├── __init__.py            # Package with version
+├── __main__.py            # Entry point: python -m paude
+├── cli.py                 # Typer CLI
+├── backends/              # Backend implementations
+│   ├── base.py            # Backend protocol
+│   ├── podman.py          # Podman backend
+│   ├── shared.py          # Shared backend utilities
+│   └── openshift/         # OpenShift backend
+│       ├── backend.py     # OpenShift backend implementation
+│       ├── build.py       # Image building on OpenShift
+│       ├── config.py      # OpenShift configuration
+│       ├── exceptions.py  # OpenShift-specific exceptions
+│       ├── oc.py          # oc CLI wrapper
+│       ├── proxy.py       # Proxy pod management
+│       ├── resources.py   # K8s resource builders
+│       └── sync.py        # File synchronization
+├── config/                # Configuration parsing
+│   ├── claude_layer.py    # Claude config layering
+│   ├── detector.py        # Config file detection
+│   ├── parser.py          # Config file parsing
+│   ├── models.py          # Data models (PaudeConfig, FeatureSpec)
+│   └── dockerfile.py      # Dockerfile generation
+├── container/             # Container management
+│   ├── podman.py          # Podman subprocess wrapper
+│   ├── image.py           # Image building and pulling
+│   ├── network.py         # Network management
+│   ├── runner.py          # Container execution
+│   └── volume.py          # Volume management
+├── features/              # Dev container features
+│   ├── downloader.py      # Feature downloading
+│   └── installer.py       # Feature installation
+├── domains.py             # Domain aliases and expansion
+├── mounts.py              # Volume mount builder
+├── environment.py         # Environment variables
+├── git_remote.py          # Git remote management
+├── hash.py                # Config hashing for caching
+├── platform.py            # Platform-specific code (macOS)
+├── session_discovery.py   # Session discovery
+├── utils.py               # Utilities
+├── venv.py                # Venv detection and shadowing
+└── dry_run.py             # Dry-run output
 ```
 
 ### Container Definitions
 
-- `containers/paude/` - Main container (Dockerfile, entrypoint.sh) for Claude Code
-- `containers/proxy/` - Proxy container (Dockerfile, squid.conf) for network filtering
+- `containers/paude/` - Main container (Dockerfile, entrypoint.sh, entrypoint-session.sh, credential-watchdog.sh) for Claude Code
+- `containers/proxy/` - Proxy container (Dockerfile, entrypoint.sh, squid.conf, ERR_CUSTOM_ACCESS_DENIED) for network filtering
 
 ## Volume Mounts
 
 The script mounts these paths from host to container:
-- Current working directory at same path (rw) - preserves real paths for trust prompts
-- `~/.config/gcloud` → `/home/paude/.config/gcloud` (ro) - Vertex AI credentials
+- Workspace uses a named volume at `/pvc/workspace` (synced via git remote, not bind-mounted)
 - `~/.claude` → `/tmp/claude.seed` (ro) - copied into container on startup
 - `~/.claude/plugins` → same host path (ro) - plugins use hardcoded paths
 - `~/.claude.json` → `/tmp/claude.json.seed` (ro) - copied into container on startup
 - `~/.gitconfig` → `/home/paude/.gitconfig` (ro) - Git identity
+- gcloud ADC credentials are injected via Podman secrets, not bind mounts
 
 ## Security Model
 
 - No SSH keys mounted - prevents `git push` via SSH
-- No GitHub CLI config mounted - prevents `gh` operations
+- GitHub CLI (`gh`) is installed but host GH_TOKEN is not auto-propagated; users must use `PAUDE_GITHUB_TOKEN` or `--github-token`
 - gcloud credentials are read-only
 - Claude config directories are copied in, not mounted - prevents poisoning host config
 - Non-root user inside container

@@ -398,9 +398,9 @@ class ContainerRunner:
 \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557
 \u2551  WARNING: MAXIMUM RISK MODE                          \u2551
 \u2551                                                      \u2551
-\u2551  --yolo + --allow-network = Claude can exfiltrate    \u2551
-\u2551  any file to the internet without confirmation.      \u2551
-\u2551  Only use if you trust the task completely.          \u2551
+\u2551  --yolo + --allowed-domains all = Claude can         \u2551
+\u2551  exfiltrate any file to the internet without         \u2551
+\u2551  confirmation. Only use if you trust the task.       \u2551
 \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d
 """
             print(warning, file=sys.stderr)
