@@ -11,7 +11,7 @@ Run Claude Code autonomously in a container. Claude makes commits, you pull them
 
 ## Demo
 
-_Video walkthrough coming soon. Follow the Quick Start below to try it yourself._
+[![asciicast](https://asciinema.org/a/7bh955pH5e8YPbyl.svg)](https://asciinema.org/a/7bh955pH5e8YPbyl)
 
 ## Quick Start
 
