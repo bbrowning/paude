@@ -76,7 +76,7 @@ jobs:
   podman-integration:
     name: Podman Integration Tests
     needs: [detect-changes, lint, unit-tests]
-    if: needs.detect-changes.outputs.code == 'true' || needs.detect-changes.outputs.containers == 'true'
+    if: always() && !failure() && !cancelled() && (needs.detect-changes.outputs.code == 'true' || needs.detect-changes.outputs.containers == 'true')
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -103,7 +103,7 @@ jobs:
   kubernetes-integration:
     name: Kubernetes Integration Tests
     needs: [detect-changes, lint, unit-tests]
-    if: needs.detect-changes.outputs.code == 'true' || needs.detect-changes.outputs.containers == 'true'
+    if: always() && !failure() && !cancelled() && (needs.detect-changes.outputs.code == 'true' || needs.detect-changes.outputs.containers == 'true')
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
