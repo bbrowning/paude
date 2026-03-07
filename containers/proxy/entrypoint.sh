@@ -14,7 +14,7 @@ fi
 # Format: comma-separated list of domains (e.g., ".googleapis.com,.google.com")
 if [[ -n "$ALLOWED_DOMAINS" ]]; then
     # Remove existing allowed_domains ACL lines (both dstdomain and dstdom_regex)
-    sed -i '/^acl allowed_domains dst/d' "$CONFIG_FILE"
+    sed -i '/^acl allowed_domains\(_regex\)\? dst/d' "$CONFIG_FILE"
     # Also remove comment lines immediately before regex ACLs
     sed -i '/^# Regional endpoints/d' "$CONFIG_FILE"
 
@@ -61,11 +61,16 @@ if [[ -n "$ALLOWED_DOMAINS" ]]; then
         if [[ "$domain" == ~* ]]; then
             # Regex domain: strip ~ prefix and use dstdom_regex
             regex="${domain:1}"
-            NEW_ACLS="${NEW_ACLS}acl allowed_domains dstdom_regex $regex\n"
+            NEW_ACLS="${NEW_ACLS}acl allowed_domains_regex dstdom_regex $regex\n"
         else
             NEW_ACLS="${NEW_ACLS}acl allowed_domains dstdomain $domain\n"
         fi
     done
+
+    # Ensure allowed_domains_regex is always defined (squid errors on undefined ACLs)
+    if ! echo -e "$NEW_ACLS" | grep -q 'allowed_domains_regex'; then
+        NEW_ACLS="${NEW_ACLS}acl allowed_domains_regex dstdom_regex ^$\n"
+    fi
 
     # Insert new ACLs before the SSL_ports ACL (must come before http_access rules)
     if [[ -n "$NEW_ACLS" ]]; then
