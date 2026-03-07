@@ -186,6 +186,46 @@ devspace sync --local-path=./src --container-path=/workspace \
 - `docs/features/2026-01-22-openshift-backend/RESEARCH.md` (detailed comparison)
 - `src/paude/backends/openshift.py` (would need new sync implementation)
 
+## BUG-004: Claude Code reports "not a git repository" on session start
+
+**Status**: Open
+**Severity**: Low (cosmetic, does not affect functionality)
+**Discovered**: 2026-03-07 during tech debt analysis
+
+### Summary
+
+Claude Code's environment detection may report the working directory as "not a git repository" even when it is. This likely stems from a timing issue in the session startup sequence.
+
+### Root Cause (Suspected)
+
+The session startup flow is:
+1. Container created with `sleep infinity` entrypoint (`podman.py:290-291`)
+2. User pushes code via `git push paude-<session> main` (populates `/pvc/workspace/.git`)
+3. `paude start` runs `entrypoint-session.sh` via `podman exec`, which launches tmux → claude
+
+Claude Code's environment metadata is captured once at conversation init. If there's any window where the detection runs before `.git` is fully available (e.g., during `/clear` which may re-probe the environment while using cached metadata), the "not a git repo" flag persists for the entire conversation.
+
+### Impact
+
+- Worktree isolation (`isolation: "worktree"`) fails with: "not in a git repository and no WorktreeCreate hooks are configured"
+- Some git-dependent features may behave differently
+- No functional impact on code editing or file operations
+
+### Reproduction
+
+Difficult to reproduce reliably. Observed once during a session where `/clear` was used. The actual `git status` command works correctly at the same time.
+
+### Potential Fixes
+
+1. Investigate whether Claude Code re-probes git status on `/clear` or uses cached metadata
+2. Add a git repo check to entrypoint-session.sh before launching claude (ensure `.git` exists)
+3. This may be a Claude Code upstream issue rather than a paude issue
+
+### Related Files
+
+- `containers/paude/entrypoint-session.sh` (session startup)
+- `src/paude/backends/podman.py` (`create_session`, `start_session`)
+
 ## Refactoring Backlog
 
 Technical debt identified during codebase analysis. Address these before adding significant new functionality to affected files.
@@ -247,13 +287,16 @@ All 396 tests pass, linting and type checking pass.
 
 ### REFACTOR-004: Extract Duplicated Utilities
 
-**Status**: Open
+**Status**: Partially Complete
 **Priority**: Medium
 **Discovered**: 2026-01-29 during code quality analysis
+**Partial completion**: 2026-03-07 — `_encode_path()`/`_decode_path()` extracted to `backends/shared.py`
 
-**Duplicated code to extract to `backends/shared.py`:**
-- `_encode_path()` / `_decode_path()` (in both openshift.py and podman.py)
-- `_generate_session_name()` (in both backends)
+**Completed:**
+- `_encode_path()` / `_decode_path()` extracted to `backends/shared.py` with `url_safe` parameter
+
+**Remaining:**
+- `_generate_session_name()` remains duplicated (intentionally different implementations: Podman uses `secrets.token_hex`, OpenShift uses `hashlib.sha256`)
 
 ## Security Hardening Backlog
 

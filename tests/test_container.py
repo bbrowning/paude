@@ -523,6 +523,56 @@ class TestNetworkManager:
         assert "--internal" in call_args
         assert "paude-internal" in call_args
 
+    @patch("paude.container.network.network_exists")
+    @patch("paude.container.network.run_podman")
+    def test_remove_network_calls_podman_when_exists(self, mock_run, mock_exists):
+        """remove_network calls run_podman when network exists."""
+        mock_exists.return_value = True
+        from paude.container.network import NetworkManager
+
+        manager = NetworkManager()
+        manager.remove_network("paude-internal")
+
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0]
+        assert "network" in call_args
+        assert "rm" in call_args
+        assert "paude-internal" in call_args
+
+    @patch("paude.container.network.network_exists")
+    @patch("paude.container.network.run_podman")
+    def test_remove_network_does_nothing_when_not_exists(self, mock_run, mock_exists):
+        """remove_network does nothing when network doesn't exist."""
+        mock_exists.return_value = False
+        from paude.container.network import NetworkManager
+
+        manager = NetworkManager()
+        manager.remove_network("paude-internal")
+
+        mock_run.assert_not_called()
+
+    @patch("paude.container.network.network_exists")
+    def test_network_exists_returns_true(self, mock_exists):
+        """network_exists returns True when underlying function returns True."""
+        mock_exists.return_value = True
+        from paude.container.network import NetworkManager
+
+        manager = NetworkManager()
+        result = manager.network_exists("paude-internal")
+
+        assert result is True
+
+    @patch("paude.container.network.network_exists")
+    def test_network_exists_returns_false(self, mock_exists):
+        """network_exists returns False when underlying function returns False."""
+        mock_exists.return_value = False
+        from paude.container.network import NetworkManager
+
+        manager = NetworkManager()
+        result = manager.network_exists("paude-internal")
+
+        assert result is False
+
 
 class TestProxyDockerfileCopyFiles:
     """Validate that all files referenced in proxy Dockerfile COPY exist."""
@@ -555,3 +605,158 @@ class TestProxyDockerfileCopyFiles:
                 f"File '{src}' referenced in proxy Dockerfile COPY "
                 f"does not exist in {proxy_dir}"
             )
+
+
+class TestVolumeManager:
+    """Tests for VolumeManager."""
+
+    @patch("paude.container.volume.subprocess.run")
+    def test_create_volume_calls_podman(self, mock_run):
+        """create_volume calls podman volume create with correct args."""
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["podman", "volume", "create", "test-vol"],
+            returncode=0,
+            stdout="test-vol\n",
+            stderr="",
+        )
+        from paude.container.volume import VolumeManager
+
+        manager = VolumeManager()
+        result = manager.create_volume("test-vol")
+
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert call_args == ["podman", "volume", "create", "test-vol"]
+        assert result == "test-vol"
+
+    @patch("paude.container.volume.subprocess.run")
+    def test_create_volume_with_labels(self, mock_run):
+        """create_volume passes labels as --label key=value."""
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="test-vol\n", stderr=""
+        )
+        from paude.container.volume import VolumeManager
+
+        manager = VolumeManager()
+        manager.create_volume("test-vol", labels={"app": "paude", "env": "test"})
+
+        call_args = mock_run.call_args[0][0]
+        assert "--label" in call_args
+        assert "app=paude" in call_args
+        assert "env=test" in call_args
+
+    @patch("paude.container.volume.subprocess.run")
+    def test_remove_volume_calls_podman(self, mock_run):
+        """remove_volume calls podman volume rm."""
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+        from paude.container.volume import VolumeManager
+
+        manager = VolumeManager()
+        manager.remove_volume("test-vol")
+
+        call_args = mock_run.call_args[0][0]
+        assert call_args == ["podman", "volume", "rm", "test-vol"]
+
+    @patch("paude.container.volume.subprocess.run")
+    def test_remove_volume_with_force(self, mock_run):
+        """remove_volume passes -f flag when force=True."""
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+        from paude.container.volume import VolumeManager
+
+        manager = VolumeManager()
+        manager.remove_volume("test-vol", force=True)
+
+        call_args = mock_run.call_args[0][0]
+        assert "-f" in call_args
+        assert call_args == ["podman", "volume", "rm", "-f", "test-vol"]
+
+    @patch("paude.container.volume.subprocess.run")
+    def test_volume_exists_returns_true(self, mock_run):
+        """volume_exists returns True when podman returns 0."""
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+        from paude.container.volume import VolumeManager
+
+        manager = VolumeManager()
+        result = manager.volume_exists("test-vol")
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        assert call_args == ["podman", "volume", "exists", "test-vol"]
+
+    @patch("paude.container.volume.subprocess.run")
+    def test_volume_exists_returns_false(self, mock_run):
+        """volume_exists returns False when podman returns non-zero."""
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr=""
+        )
+        from paude.container.volume import VolumeManager
+
+        manager = VolumeManager()
+        result = manager.volume_exists("test-vol")
+
+        assert result is False
+
+    @patch("paude.container.volume.subprocess.run")
+    def test_get_volume_labels_returns_parsed_json(self, mock_run):
+        """get_volume_labels returns parsed JSON labels."""
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout='{"app": "paude", "workspace": "/test"}',
+            stderr="",
+        )
+        from paude.container.volume import VolumeManager
+
+        manager = VolumeManager()
+        result = manager.get_volume_labels("test-vol")
+
+        assert result == {"app": "paude", "workspace": "/test"}
+
+    @patch("paude.container.volume.subprocess.run")
+    def test_get_volume_labels_returns_empty_on_error(self, mock_run):
+        """get_volume_labels returns empty dict on error."""
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="no such volume"
+        )
+        from paude.container.volume import VolumeManager
+
+        manager = VolumeManager()
+        result = manager.get_volume_labels("nonexistent-vol")
+
+        assert result == {}
+
+    @patch("paude.container.volume.subprocess.run")
+    def test_list_volumes_returns_parsed_json(self, mock_run):
+        """list_volumes returns parsed JSON list."""
+        volumes_json = '[{"Name": "vol1"}, {"Name": "vol2"}]'
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=volumes_json, stderr=""
+        )
+        from paude.container.volume import VolumeManager
+
+        manager = VolumeManager()
+        result = manager.list_volumes(label_filter="app=paude")
+
+        assert result == [{"Name": "vol1"}, {"Name": "vol2"}]
+        call_args = mock_run.call_args[0][0]
+        assert "--filter" in call_args
+        assert "label=app=paude" in call_args
+
+    @patch("paude.container.volume.subprocess.run")
+    def test_list_volumes_returns_empty_on_error(self, mock_run):
+        """list_volumes returns empty list on error."""
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="error"
+        )
+        from paude.container.volume import VolumeManager
+
+        manager = VolumeManager()
+        result = manager.list_volumes()
+
+        assert result == []

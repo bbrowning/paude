@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -281,3 +282,62 @@ class TestGetVenvPaths:
         paths = get_venv_paths(tmp_path, "auto")
 
         assert len(paths) == 2
+
+
+class TestResolveVenvs:
+    """Tests for _resolve_venvs."""
+
+    def test_returns_empty_when_mode_is_none(self, tmp_path: Path):
+        """_resolve_venvs returns empty list when mode is 'none'."""
+        from paude.mounts import _resolve_venvs
+
+        result = _resolve_venvs(tmp_path, "none")
+
+        assert result == []
+
+    @patch("paude.venv.find_venvs")
+    def test_calls_find_venvs_when_mode_is_auto(
+        self, mock_find: MagicMock, tmp_path: Path
+    ):
+        """_resolve_venvs calls find_venvs when mode is 'auto'."""
+        venv_path = tmp_path / ".venv"
+        mock_find.return_value = [venv_path]
+        from paude.mounts import _resolve_venvs
+
+        result = _resolve_venvs(tmp_path, "auto")
+
+        mock_find.assert_called_once_with(tmp_path)
+        assert result == [venv_path]
+
+    @patch("paude.venv.is_venv")
+    def test_checks_specific_dirs_when_mode_is_list(
+        self, mock_is_venv: MagicMock, tmp_path: Path
+    ):
+        """_resolve_venvs checks specific directories when mode is a list."""
+        venv_dir = tmp_path / "my-venv"
+        venv_dir.mkdir()
+        mock_is_venv.return_value = True
+        from paude.mounts import _resolve_venvs
+
+        result = _resolve_venvs(tmp_path, ["my-venv"])
+
+        mock_is_venv.assert_called_once_with(venv_dir)
+        assert result == [venv_dir]
+
+    @patch("paude.venv.is_venv")
+    def test_only_includes_dirs_passing_is_venv(
+        self, mock_is_venv: MagicMock, tmp_path: Path
+    ):
+        """_resolve_venvs only includes directories that pass is_venv check."""
+        real_venv = tmp_path / "real-venv"
+        real_venv.mkdir()
+        fake_venv = tmp_path / "fake-venv"
+        fake_venv.mkdir()
+
+        mock_is_venv.side_effect = lambda p: p == real_venv
+        from paude.mounts import _resolve_venvs
+
+        result = _resolve_venvs(tmp_path, ["real-venv", "fake-venv"])
+
+        assert result == [real_venv]
+        assert mock_is_venv.call_count == 2

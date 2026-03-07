@@ -42,10 +42,10 @@ from paude.backends.openshift.exceptions import (
 )
 from paude.backends.openshift.resources import (
     CLAUDE_EXCLUDES,
-    _decode_path,
-    _encode_path,
     _generate_session_name,
 )
+from paude.backends.shared import decode_path as _decode_path
+from paude.backends.shared import encode_path as _encode_path
 
 __all__ = [
     # Main classes

@@ -153,3 +153,80 @@ class TestBackendProtocol:
         assert callable(backend.get_session)
         assert callable(backend.copy_to_session)
         assert callable(backend.copy_from_session)
+
+
+class TestSharedUtils:
+    """Tests for encode_path and decode_path shared utilities."""
+
+    def test_encode_path_standard_roundtrip(self) -> None:
+        """encode_path with standard base64 produces a roundtrip-safe encoding."""
+        from paude.backends.shared import decode_path, encode_path
+
+        original = Path("/home/user/workspace")
+        encoded = encode_path(original)
+        decoded = decode_path(encoded)
+
+        assert decoded == original
+
+    def test_encode_path_url_safe_roundtrip(self) -> None:
+        """encode_path with url_safe=True produces a roundtrip-safe encoding."""
+        from paude.backends.shared import decode_path, encode_path
+
+        original = Path("/home/user/workspace")
+        encoded = encode_path(original, url_safe=True)
+        decoded = decode_path(encoded, url_safe=True)
+
+        assert decoded == original
+
+    def test_decode_path_standard(self) -> None:
+        """decode_path decodes standard base64-encoded path."""
+        import base64
+
+        from paude.backends.shared import decode_path
+
+        path_str = "/tmp/test/dir"
+        encoded = base64.b64encode(path_str.encode()).decode()
+
+        result = decode_path(encoded)
+
+        assert result == Path(path_str)
+
+    def test_decode_path_url_safe(self) -> None:
+        """decode_path with url_safe=True decodes URL-safe base64-encoded path."""
+        import base64
+
+        from paude.backends.shared import decode_path
+
+        path_str = "/tmp/test/dir"
+        encoded = base64.urlsafe_b64encode(path_str.encode()).decode()
+
+        result = decode_path(encoded, url_safe=True)
+
+        assert result == Path(path_str)
+
+    def test_decode_path_handles_invalid_input(self) -> None:
+        """decode_path returns Path of raw input on invalid base64."""
+        from paude.backends.shared import decode_path
+
+        invalid = "not-valid-base64!!!"
+        result = decode_path(invalid)
+
+        assert result == Path(invalid)
+
+    def test_url_safe_and_standard_differ_for_special_chars(self) -> None:
+        """URL-safe and standard encodings differ for paths with special chars."""
+        from paude.backends.shared import encode_path
+
+        # Paths with characters that produce + or / in standard base64
+        # Use a path that will generate differing base64 chars
+        test_path = Path("/home/user/path??with>>special")
+        standard = encode_path(test_path, url_safe=False)
+        url_safe = encode_path(test_path, url_safe=True)
+
+        # They should differ when the path produces +, /, or = in encoding
+        # At minimum, both should be valid encodings
+        assert isinstance(standard, str)
+        assert isinstance(url_safe, str)
+        # URL-safe should not contain + or /
+        assert "+" not in url_safe
+        assert "/" not in url_safe

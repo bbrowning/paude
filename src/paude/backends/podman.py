@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import secrets
 import subprocess
 import sys
@@ -11,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from paude.backends.base import Session, SessionConfig
+from paude.backends.shared import decode_path, encode_path
 from paude.container.network import NetworkManager
 from paude.container.runner import (
     PAUDE_LABEL_APP,
@@ -19,6 +19,7 @@ from paude.container.runner import (
     PAUDE_LABEL_WORKSPACE,
     ContainerRunner,
 )
+from paude.container.volume import VolumeManager
 from paude.environment import build_proxy_environment
 from paude.platform import get_podman_machine_dns
 
@@ -94,30 +95,13 @@ def _generate_session_name(workspace: Path) -> str:
 
 
 def _encode_path(path: Path) -> str:
-    """Encode a path for use in labels.
-
-    Args:
-        path: Path to encode.
-
-    Returns:
-        Base64-encoded path string.
-    """
-    return base64.urlsafe_b64encode(str(path).encode()).decode()
+    """Encode a path for use in Podman labels (URL-safe base64)."""
+    return encode_path(path, url_safe=True)
 
 
 def _decode_path(encoded: str) -> Path:
-    """Decode a path from label value.
-
-    Args:
-        encoded: Base64-encoded path string.
-
-    Returns:
-        Decoded Path object.
-    """
-    try:
-        return Path(base64.urlsafe_b64decode(encoded.encode()).decode())
-    except Exception:
-        return Path(encoded)
+    """Decode a path from Podman label value (URL-safe base64)."""
+    return decode_path(encoded, url_safe=True)
 
 
 class PodmanBackend:
@@ -135,6 +119,7 @@ class PodmanBackend:
         """Initialize the Podman backend."""
         self._runner = ContainerRunner()
         self._network_manager = NetworkManager()
+        self._volume_manager = VolumeManager()
         self._current_session: Session | None = None
 
     def _container_name(self, session_name: str) -> str:
@@ -209,7 +194,7 @@ class PodmanBackend:
         labels: dict[str, str] = {
             "app": "paude",
             PAUDE_LABEL_SESSION: session_name,
-            PAUDE_LABEL_WORKSPACE: _encode_path(config.workspace),
+            PAUDE_LABEL_WORKSPACE: encode_path(config.workspace, url_safe=True),
             PAUDE_LABEL_CREATED: created_at,
         }
         if use_proxy:
@@ -221,7 +206,7 @@ class PodmanBackend:
 
         # Create volume for workspace persistence
         print(f"Creating volume {volume_name}...", file=sys.stderr)
-        self._runner.create_volume(volume_name, labels=labels)
+        self._volume_manager.create_volume(volume_name, labels=labels)
 
         # Set up proxy network and container if domain filtering is active
         network_name: str | None = None
@@ -248,7 +233,7 @@ class PodmanBackend:
                 )
             except Exception:
                 self._network_manager.remove_network(network_name)
-                self._runner.remove_volume(volume_name, force=True)
+                self._volume_manager.remove_volume(volume_name, force=True)
                 raise
 
         # Build mounts with session volume
@@ -300,7 +285,7 @@ class PodmanBackend:
                 self._network_manager.remove_network(
                     self._network_name(session_name)
                 )
-            self._runner.remove_volume(volume_name, force=True)
+            self._volume_manager.remove_volume(volume_name, force=True)
             self._runner.remove_secret("paude-gcp-adc")
             raise
 
@@ -360,11 +345,11 @@ class PodmanBackend:
 
         # Check if session exists
         if not self._runner.container_exists(container_name):
-            if not self._runner.volume_exists(volume_name):
+            if not self._volume_manager.volume_exists(volume_name):
                 raise SessionNotFoundError(f"Session '{name}' not found")
             # Volume exists without container - still delete it
             print(f"Removing orphaned volume {volume_name}...", file=sys.stderr)
-            self._runner.remove_volume(volume_name, force=True)
+            self._volume_manager.remove_volume(volume_name, force=True)
             print(f"Session '{name}' deleted.", file=sys.stderr)
             return
 
@@ -392,7 +377,7 @@ class PodmanBackend:
 
         # Remove volume and secret
         print(f"Removing volume {volume_name}...", file=sys.stderr)
-        self._runner.remove_volume(volume_name, force=True)
+        self._volume_manager.remove_volume(volume_name, force=True)
         self._runner.remove_secret("paude-gcp-adc")
 
         print(f"Session '{name}' deleted.", file=sys.stderr)
@@ -568,7 +553,9 @@ class PodmanBackend:
 
             workspace_encoded = labels.get(PAUDE_LABEL_WORKSPACE, "")
             workspace = (
-                _decode_path(workspace_encoded) if workspace_encoded else Path("/")
+                decode_path(workspace_encoded, url_safe=True)
+                if workspace_encoded
+                else Path("/")
             )
             created_at = labels.get(PAUDE_LABEL_CREATED, "")
 
@@ -610,7 +597,9 @@ class PodmanBackend:
             if labels.get(PAUDE_LABEL_SESSION) == name:
                 workspace_encoded = labels.get(PAUDE_LABEL_WORKSPACE, "")
                 workspace = (
-                    _decode_path(workspace_encoded) if workspace_encoded else Path("/")
+                    decode_path(workspace_encoded, url_safe=True)
+                    if workspace_encoded
+                    else Path("/")
                 )
                 created_at = labels.get(PAUDE_LABEL_CREATED, "")
 

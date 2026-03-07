@@ -23,13 +23,16 @@ from paude.backends.podman import (
 def _make_backend(
     mock_runner: MagicMock | None = None,
     mock_network_manager: MagicMock | None = None,
+    mock_volume_manager: MagicMock | None = None,
 ) -> PodmanBackend:
-    """Create a PodmanBackend with mocked runner and network manager."""
+    """Create a PodmanBackend with mocked runner, network, and volume manager."""
     backend = PodmanBackend()
     if mock_runner is not None:
         backend._runner = mock_runner
     if mock_network_manager is not None:
         backend._network_manager = mock_network_manager
+    # Always mock volume manager to prevent real podman calls
+    backend._volume_manager = mock_volume_manager or MagicMock()
     return backend
 
 
@@ -100,6 +103,7 @@ class TestPodmanBackendCreateSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._volume_manager = MagicMock()
 
         config = SessionConfig(
             name="my-session",
@@ -126,6 +130,7 @@ class TestPodmanBackendCreateSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._volume_manager = MagicMock()
 
         config = SessionConfig(
             name=None,
@@ -143,9 +148,11 @@ class TestPodmanBackendCreateSession:
         mock_runner = MagicMock()
         mock_runner.container_exists.return_value = False
         mock_runner_class.return_value = mock_runner
+        mock_volume = MagicMock()
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._volume_manager = mock_volume
 
         config = SessionConfig(
             name="test-session",
@@ -154,8 +161,8 @@ class TestPodmanBackendCreateSession:
         )
         backend.create_session(config)
 
-        mock_runner.create_volume.assert_called_once()
-        call_args = mock_runner.create_volume.call_args
+        mock_volume.create_volume.assert_called_once()
+        call_args = mock_volume.create_volume.call_args
         assert call_args[0][0] == "paude-test-session-workspace"
         assert "labels" in call_args[1]
 
@@ -170,6 +177,7 @@ class TestPodmanBackendCreateSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._volume_manager = MagicMock()
 
         config = SessionConfig(
             name="test-session",
@@ -194,6 +202,7 @@ class TestPodmanBackendCreateSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._volume_manager = MagicMock()
 
         config = SessionConfig(
             name="existing-session",
@@ -214,9 +223,11 @@ class TestPodmanBackendCreateSession:
         mock_runner.container_exists.return_value = False
         mock_runner.create_container.side_effect = RuntimeError("Container failed")
         mock_runner_class.return_value = mock_runner
+        mock_volume = MagicMock()
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._volume_manager = mock_volume
 
         config = SessionConfig(
             name="test-session",
@@ -228,7 +239,7 @@ class TestPodmanBackendCreateSession:
             backend.create_session(config)
 
         # Volume should be cleaned up
-        mock_runner.remove_volume.assert_called_once()
+        mock_volume.remove_volume.assert_called_once()
 
     @patch("paude.backends.podman.ContainerRunner")
     def test_create_session_with_yolo_mode(self, mock_runner_class: MagicMock) -> None:
@@ -239,6 +250,7 @@ class TestPodmanBackendCreateSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._volume_manager = MagicMock()
 
         config = SessionConfig(
             name="yolo-session",
@@ -279,15 +291,16 @@ class TestPodmanBackendDeleteSession:
         )
         mock_runner.container_running.return_value = False
         mock_runner_class.return_value = mock_runner
+        mock_volume = MagicMock()
 
-        backend = _make_backend(mock_runner, MagicMock())
+        backend = _make_backend(mock_runner, MagicMock(), mock_volume)
 
         backend.delete_session("my-session", confirm=True)
 
         mock_runner.remove_container.assert_called_once_with(
             "paude-my-session", force=True
         )
-        mock_runner.remove_volume.assert_called_once_with(
+        mock_volume.remove_volume.assert_called_once_with(
             "paude-my-session-workspace", force=True
         )
 
@@ -317,10 +330,11 @@ class TestPodmanBackendDeleteSession:
         """Delete session raises SessionNotFoundError if session doesn't exist."""
         mock_runner = MagicMock()
         mock_runner.container_exists.return_value = False
-        mock_runner.volume_exists.return_value = False
         mock_runner_class.return_value = mock_runner
+        mock_volume = MagicMock()
+        mock_volume.volume_exists.return_value = False
 
-        backend = _make_backend(mock_runner, MagicMock())
+        backend = _make_backend(mock_runner, MagicMock(), mock_volume)
 
         with pytest.raises(SessionNotFoundError) as excinfo:
             backend.delete_session("nonexistent", confirm=True)
@@ -333,15 +347,16 @@ class TestPodmanBackendDeleteSession:
         """Delete session cleans up orphaned volume without container."""
         mock_runner = MagicMock()
         mock_runner.container_exists.return_value = False
-        mock_runner.volume_exists.return_value = True
         mock_runner_class.return_value = mock_runner
+        mock_volume = MagicMock()
+        mock_volume.volume_exists.return_value = True
 
-        backend = _make_backend(mock_runner, MagicMock())
+        backend = _make_backend(mock_runner, MagicMock(), mock_volume)
 
         backend.delete_session("orphaned", confirm=True)
 
         mock_runner.remove_container.assert_not_called()
-        mock_runner.remove_volume.assert_called_once()
+        mock_volume.remove_volume.assert_called_once()
 
 
 class TestPodmanBackendStartSession:
@@ -768,6 +783,7 @@ class TestPodmanBackendGcpAdcSecret:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._volume_manager = MagicMock()
 
         config = SessionConfig(
             name="test-session",
@@ -799,6 +815,7 @@ class TestPodmanBackendGcpAdcSecret:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._volume_manager = MagicMock()
 
         config = SessionConfig(
             name="test-session",
@@ -831,6 +848,7 @@ class TestPodmanBackendGcpAdcSecret:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._volume_manager = MagicMock()
 
         config = SessionConfig(
             name="test-session",
@@ -864,6 +882,7 @@ class TestPodmanBackendGcpAdcSecret:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._volume_manager = MagicMock()
 
         config = SessionConfig(
             name="test-session",
@@ -1033,8 +1052,9 @@ class TestPodmanBackendCreateSessionWithProxy:
         mock_runner_class.return_value = mock_runner
         mock_dns.return_value = None
         mock_network = MagicMock()
+        mock_volume = MagicMock()
 
-        backend = _make_backend(mock_runner, mock_network)
+        backend = _make_backend(mock_runner, mock_network, mock_volume)
 
         config = SessionConfig(
             name="my-session",
@@ -1054,7 +1074,7 @@ class TestPodmanBackendCreateSessionWithProxy:
         mock_network.remove_network.assert_called_once_with(
             "paude-net-my-session"
         )
-        mock_runner.remove_volume.assert_called_once()
+        mock_volume.remove_volume.assert_called_once()
 
 
 class TestPodmanBackendStartSessionWithProxy:

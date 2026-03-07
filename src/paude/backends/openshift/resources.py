@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from paude.backends.shared import encode_path
 
 CLAUDE_EXCLUDES = [
     # Session-specific files (not useful on remote)
@@ -46,30 +47,6 @@ def _generate_session_name(workspace: Path) -> str:
     # Add hash for uniqueness
     path_hash = hashlib.sha256(str(workspace).encode()).hexdigest()[:8]
     return f"{sanitized}-{path_hash}"
-
-
-def _encode_path(path: Path) -> str:
-    """Base64 encode a path for storing in labels.
-
-    Args:
-        path: Path to encode.
-
-    Returns:
-        Base64-encoded path string.
-    """
-    return base64.b64encode(str(path).encode()).decode()
-
-
-def _decode_path(encoded: str) -> Path:
-    """Decode a base64-encoded path.
-
-    Args:
-        encoded: Base64-encoded path string.
-
-    Returns:
-        Decoded Path object.
-    """
-    return Path(base64.b64decode(encoded.encode()).decode())
 
 
 class StatefulSetBuilder:
@@ -160,7 +137,7 @@ class StatefulSetBuilder:
             },
         }
         if self._workspace:
-            encoded = _encode_path(self._workspace)
+            encoded = encode_path(self._workspace)
             metadata["annotations"]["paude.io/workspace"] = encoded
         return metadata
 

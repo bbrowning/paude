@@ -28,10 +28,10 @@ from paude.backends.openshift.oc import (
 from paude.backends.openshift.proxy import ProxyManager
 from paude.backends.openshift.resources import (
     StatefulSetBuilder,
-    _decode_path,
     _generate_session_name,
 )
 from paude.backends.openshift.sync import ConfigSyncer
+from paude.backends.shared import decode_path
 
 
 class OpenShiftBackend:
@@ -1014,7 +1014,7 @@ class OpenShiftBackend:
         workspace_encoded = annotations.get("paude.io/workspace", "")
         try:
             workspace = (
-                _decode_path(workspace_encoded)
+                decode_path(workspace_encoded)
                 if workspace_encoded
                 else Path("/workspace")
             )
@@ -1221,7 +1221,7 @@ class OpenShiftBackend:
                     workspace_encoded = annotations.get("paude.io/workspace", "")
                     try:
                         workspace = (
-                            _decode_path(workspace_encoded)
+                            decode_path(workspace_encoded)
                             if workspace_encoded
                             else Path("/workspace")
                         )

@@ -4,12 +4,15 @@ from paude.container.image import BuildContext, ImageManager, prepare_build_cont
 from paude.container.network import NetworkManager
 from paude.container.podman import image_exists, network_exists, run_podman
 from paude.container.runner import ContainerRunner
+from paude.container.volume import VolumeManager, VolumeNotFoundError
 
 __all__ = [
     "BuildContext",
     "ContainerRunner",
     "ImageManager",
     "NetworkManager",
+    "VolumeManager",
+    "VolumeNotFoundError",
     "image_exists",
     "network_exists",
     "prepare_build_context",

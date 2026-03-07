@@ -74,6 +74,33 @@ def build_mounts(workspace: Path, home: Path) -> list[str]:
     return mounts
 
 
+def _resolve_venvs(workspace: Path, venv_mode: VenvMode) -> list[Path]:
+    """Resolve venv paths based on mode.
+
+    Args:
+        workspace: Path to the workspace directory.
+        venv_mode: "auto" to detect venvs, "none" to disable,
+                   or list of directory names to check.
+
+    Returns:
+        List of venv paths found.
+    """
+    from paude.venv import find_venvs, is_venv
+
+    if venv_mode == "none":
+        return []
+
+    if venv_mode == "auto":
+        return find_venvs(workspace)
+
+    venvs = []
+    for name in venv_mode:
+        candidate = workspace / name
+        if candidate.exists() and is_venv(candidate):
+            venvs.append(candidate)
+    return venvs
+
+
 def build_venv_mounts(workspace: Path, venv_mode: VenvMode) -> list[str]:
     """Build tmpfs mounts to shadow Python venv directories.
 
@@ -89,19 +116,7 @@ def build_venv_mounts(workspace: Path, venv_mode: VenvMode) -> list[str]:
     Returns:
         List of mount arguments for podman (["--mount", "type=tmpfs,...", ...]).
     """
-    from paude.venv import find_venvs, is_venv
-
-    if venv_mode == "none":
-        return []
-
-    if venv_mode == "auto":
-        venvs = find_venvs(workspace)
-    else:
-        venvs = []
-        for name in venv_mode:
-            candidate = workspace / name
-            if candidate.exists() and is_venv(candidate):
-                venvs.append(candidate)
+    venvs = _resolve_venvs(workspace, venv_mode)
 
     if not venvs:
         return []
@@ -132,19 +147,7 @@ def get_venv_paths(workspace: Path, venv_mode: VenvMode) -> list[Path]:
     Returns:
         List of resolved venv paths.
     """
-    from paude.venv import find_venvs, is_venv
-
-    if venv_mode == "none":
-        return []
-
-    if venv_mode == "auto":
-        venvs = find_venvs(workspace)
-    else:
-        venvs = []
-        for name in venv_mode:
-            candidate = workspace / name
-            if candidate.exists() and is_venv(candidate):
-                venvs.append(candidate)
+    venvs = _resolve_venvs(workspace, venv_mode)
 
     result = []
     for venv_path in venvs:
