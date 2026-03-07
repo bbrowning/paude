@@ -122,6 +122,79 @@ class TestImageManager:
         mock_run.assert_not_called()
         assert "paude-runtime:" in result
 
+    @patch("paude.container.image.run_podman")
+    @patch("paude.container.image.image_exists")
+    def test_ensure_proxy_image_builds_when_missing(
+        self, mock_exists, mock_run, tmp_path
+    ):
+        """ensure_proxy_image builds proxy image when it doesn't exist."""
+        import os
+
+        proxy_dir = tmp_path / "containers" / "proxy"
+        proxy_dir.mkdir(parents=True)
+        (proxy_dir / "Dockerfile").write_text("FROM centos:stream9")
+
+        mock_exists.return_value = False
+
+        with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
+            from paude.container.image import ImageManager
+
+            manager = ImageManager(script_dir=tmp_path)
+            result = manager.ensure_proxy_image()
+
+        assert result == "paude-proxy-centos9:latest"
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0]
+        assert "build" in call_args
+
+    @patch("paude.container.image.run_podman")
+    @patch("paude.container.image.image_exists")
+    def test_ensure_proxy_image_skips_build_when_cached(
+        self, mock_exists, mock_run, tmp_path
+    ):
+        """ensure_proxy_image skips build when image already exists."""
+        import os
+
+        proxy_dir = tmp_path / "containers" / "proxy"
+        proxy_dir.mkdir(parents=True)
+        (proxy_dir / "Dockerfile").write_text("FROM centos:stream9")
+
+        mock_exists.return_value = True
+
+        with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
+            from paude.container.image import ImageManager
+
+            manager = ImageManager(script_dir=tmp_path)
+            result = manager.ensure_proxy_image()
+
+        assert result == "paude-proxy-centos9:latest"
+        mock_run.assert_not_called()
+
+    @patch("paude.container.image.run_podman")
+    @patch("paude.container.image.image_exists")
+    def test_ensure_proxy_image_force_rebuild_ignores_cache(
+        self, mock_exists, mock_run, tmp_path
+    ):
+        """ensure_proxy_image rebuilds when force_rebuild=True even if cached."""
+        import os
+
+        proxy_dir = tmp_path / "containers" / "proxy"
+        proxy_dir.mkdir(parents=True)
+        (proxy_dir / "Dockerfile").write_text("FROM centos:stream9")
+
+        mock_exists.return_value = True  # Image exists
+
+        with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
+            from paude.container.image import ImageManager
+
+            manager = ImageManager(script_dir=tmp_path)
+            result = manager.ensure_proxy_image(force_rebuild=True)
+
+        assert result == "paude-proxy-centos9:latest"
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0]
+        assert "build" in call_args
+
 
 class TestPrepareBuiltContext:
     """Tests for prepare_build_context."""

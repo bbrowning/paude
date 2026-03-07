@@ -565,8 +565,11 @@ class ImageManager:
         print(f"Build complete (cached as {tag})", file=sys.stderr)
         return tag
 
-    def ensure_proxy_image(self) -> str:
+    def ensure_proxy_image(self, force_rebuild: bool = False) -> str:
         """Ensure the proxy image is available.
+
+        Args:
+            force_rebuild: Force rebuild even if image exists.
 
         Returns:
             Image tag to use.
@@ -581,7 +584,7 @@ class ImageManager:
                 tag = f"paude-proxy-centos9:latest-{arch}"
             else:
                 tag = "paude-proxy-centos9:latest"
-            if not image_exists(tag):
+            if force_rebuild or not image_exists(tag):
                 print(f"Building {tag} image...", file=sys.stderr)
                 dockerfile = self.script_dir / "containers" / "proxy" / "Dockerfile"
                 context = self.script_dir / "containers" / "proxy"

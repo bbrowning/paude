@@ -433,7 +433,9 @@ def session_create(
         podman_proxy_image: str | None = None
         if not is_unrestricted(expanded_domains):
             try:
-                podman_proxy_image = image_manager.ensure_proxy_image()
+                podman_proxy_image = image_manager.ensure_proxy_image(
+                    force_rebuild=rebuild
+                )
             except Exception as e:
                 typer.echo(f"Error ensuring proxy image: {e}", err=True)
                 raise typer.Exit(1) from None
