@@ -11,6 +11,7 @@ import pytest
 
 from paude.workflow import (
     _get_container_branch,
+    _validate_harvest_branch,
     harvest_session,
     reset_session,
     status_sessions,
@@ -34,6 +35,21 @@ class TestGetContainerBranch:
 
         with pytest.raises(click.exceptions.Exit):
             _get_container_branch(mock_backend, "my-session")
+
+
+class TestValidateHarvestBranch:
+    """Tests for _validate_harvest_branch."""
+
+    def test_allows_feature_branch(self) -> None:
+        _validate_harvest_branch("my-feature")
+
+    @pytest.mark.parametrize(
+        "branch",
+        ["main", "master", "release", "release-1.0", "release/v2"],
+    )
+    def test_rejects_protected_branches(self, branch: str) -> None:
+        with pytest.raises(click.exceptions.Exit):
+            _validate_harvest_branch(branch)
 
 
 class TestHarvestSession:
@@ -73,18 +89,18 @@ class TestHarvestSession:
         mock_list.return_value = [("paude-test", "ext::...")]
         mock_fetch.return_value = True
         mock_diff.return_value = " 2 files changed\n"
-        # checkout existing fails, create new succeeds, merge succeeds
-        mock_run.side_effect = [
-            CompletedProcess(args=[], returncode=1, stdout="", stderr="not found"),
-            CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
-            CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
-        ]
+        # checkout -B succeeds
+        mock_run.return_value = CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
 
         harvest_session("test", "my-branch")
 
         mock_fetch.assert_called_once()
-        # checkout attempt + create branch + merge
-        assert mock_run.call_count == 3
+        # Single checkout -B call
+        assert mock_run.call_count == 1
+        args = mock_run.call_args[0][0]
+        assert args[:3] == ["git", "checkout", "-B"]
 
     @patch("paude.cli.find_session_backend")
     def test_harvest_session_not_found(self, mock_find: MagicMock) -> None:
@@ -126,7 +142,7 @@ class TestHarvestSession:
     @patch("paude.git_remote.git_fetch_from_remote")
     @patch("paude.git_remote.list_paude_remotes")
     @patch("paude.cli.find_session_backend")
-    def test_harvest_merge_failure(
+    def test_harvest_checkout_failure(
         self,
         mock_find: MagicMock,
         mock_list: MagicMock,
@@ -139,21 +155,23 @@ class TestHarvestSession:
         mock_list.return_value = [("paude-test", "ext::...")]
         mock_fetch.return_value = True
 
-        # checkout existing succeeds, merge fails
-        mock_run.side_effect = [
-            CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
-            CompletedProcess(args=[], returncode=1, stdout="", stderr="conflict"),
-        ]
+        mock_run.return_value = CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="error"
+        )
 
         with pytest.raises(click.exceptions.Exit):
             harvest_session("test", "my-branch")
 
+    def test_harvest_protected_branch_rejected(self) -> None:
+        with pytest.raises(click.exceptions.Exit):
+            harvest_session("test", "main")
+
     @patch("paude.workflow.subprocess.run")
     @patch("paude.git_remote.git_diff_stat")
     @patch("paude.git_remote.git_fetch_from_remote")
     @patch("paude.git_remote.list_paude_remotes")
     @patch("paude.cli.find_session_backend")
-    def test_harvest_existing_branch(
+    def test_harvest_with_pr_uses_force_with_lease(
         self,
         mock_find: MagicMock,
         mock_list: MagicMock,
@@ -162,53 +180,24 @@ class TestHarvestSession:
         mock_run: MagicMock,
         tmp_path: Path,
     ) -> None:
-        """Re-harvest into an existing branch picks up new changes."""
         self._setup_mocks(mock_find, tmp_path)
         mock_list.return_value = [("paude-test", "ext::...")]
         mock_fetch.return_value = True
-        mock_diff.return_value = " 1 file changed\n"
-        # checkout existing succeeds, merge succeeds
+        mock_diff.return_value = " 2 files changed\n"
+        # checkout -B succeeds, push succeeds, pr view finds existing
         mock_run.side_effect = [
             CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
-            CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
-        ]
-
-        harvest_session("test", "my-branch")
-
-        mock_fetch.assert_called_once()
-        # checkout existing + merge (no create)
-        assert mock_run.call_count == 2
-
-    @patch("paude.workflow.subprocess.run")
-    @patch("paude.git_remote.git_diff_stat")
-    @patch("paude.git_remote.git_fetch_from_remote")
-    @patch("paude.git_remote.list_paude_remotes")
-    @patch("paude.cli.find_session_backend")
-    def test_harvest_already_up_to_date(
-        self,
-        mock_find: MagicMock,
-        mock_list: MagicMock,
-        mock_fetch: MagicMock,
-        mock_diff: MagicMock,
-        mock_run: MagicMock,
-        tmp_path: Path,
-    ) -> None:
-        """Re-harvest with no new changes reports up to date."""
-        self._setup_mocks(mock_find, tmp_path)
-        mock_list.return_value = [("paude-test", "ext::...")]
-        mock_fetch.return_value = True
-        mock_diff.return_value = ""
-        mock_run.side_effect = [
             CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
             CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout="Already up to date.\n",
-                stderr="",
+                args=[], returncode=0, stdout="https://pr-url\n", stderr=""
             ),
         ]
 
-        harvest_session("test", "my-branch")
+        harvest_session("test", "my-branch", create_pr=True)
+
+        push_call = mock_run.call_args_list[1]
+        push_args = push_call[0][0]
+        assert "--force-with-lease" in push_args
 
 
 class TestStatusSessions:

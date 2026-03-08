@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import shlex
 import subprocess
 from pathlib import Path
@@ -9,6 +10,27 @@ from pathlib import Path
 import typer
 
 from paude.backends.base import Backend, Session
+
+_PROTECTED_BRANCH_PATTERNS = frozenset(
+    {
+        "main",
+        "master",
+        "release",
+        "release-*",
+        "release/*",
+    }
+)
+
+
+def _validate_harvest_branch(branch_name: str) -> None:
+    """Raise typer.Exit if branch_name is a protected branch."""
+    for pattern in _PROTECTED_BRANCH_PATTERNS:
+        if fnmatch.fnmatch(branch_name, pattern):
+            typer.echo(
+                f"Error: Cannot harvest to protected branch '{branch_name}'.",
+                err=True,
+            )
+            raise typer.Exit(1)
 
 
 def _find_backend_and_session(
@@ -114,33 +136,6 @@ def _get_container_branch(backend: Backend, session_name: str) -> str:
     return stdout.strip()
 
 
-def _checkout_or_create_branch(branch_name: str, workspace: Path) -> None:
-    """Check out an existing branch or create a new one from main."""
-    # Try checking out existing branch first
-    result = subprocess.run(
-        ["git", "checkout", branch_name],
-        capture_output=True,
-        text=True,
-        cwd=workspace,
-    )
-    if result.returncode == 0:
-        return
-
-    # Branch doesn't exist — create from main
-    result = subprocess.run(
-        ["git", "checkout", "-b", branch_name, "main"],
-        capture_output=True,
-        text=True,
-        cwd=workspace,
-    )
-    if result.returncode != 0:
-        typer.echo(
-            f"Error: Failed to create branch '{branch_name}': {result.stderr.strip()}",
-            err=True,
-        )
-        raise typer.Exit(1)
-
-
 def harvest_session(
     session_name: str,
     branch_name: str,
@@ -151,6 +146,8 @@ def harvest_session(
 ) -> None:
     """Harvest changes from a running session into a local branch."""
     from paude.git_remote import git_diff_stat, git_fetch_from_remote
+
+    _validate_harvest_branch(branch_name)
 
     backend_type, backend, session = _find_backend_and_session(
         session_name, openshift_context, openshift_namespace
@@ -182,19 +179,19 @@ def harvest_session(
         typer.echo("Error: Failed to fetch from remote.", err=True)
         raise typer.Exit(1)
 
-    _checkout_or_create_branch(branch_name, workspace)
-
-    merge_ref = f"{remote_name}/{container_branch}"
-    typer.echo(f"Merging '{merge_ref}'...", err=True)
+    remote_ref = f"{remote_name}/{container_branch}"
+    typer.echo(f"Resetting '{branch_name}' to '{remote_ref}'...", err=True)
     result = subprocess.run(
-        ["git", "merge", merge_ref],
+        ["git", "checkout", "-B", branch_name, remote_ref],
         capture_output=True,
         text=True,
         cwd=workspace,
     )
     if result.returncode != 0:
-        typer.echo(f"Error: Merge failed: {result.stderr.strip()}", err=True)
-        typer.echo("Resolve conflicts and commit manually.", err=True)
+        typer.echo(
+            f"Error: Failed to reset branch: {result.stderr.strip()}",
+            err=True,
+        )
         raise typer.Exit(1)
 
     stat = git_diff_stat("main", branch_name, cwd=workspace)
@@ -202,16 +199,12 @@ def harvest_session(
         typer.echo("")
         typer.echo(stat)
 
-    already_up_to_date = "already up to date" in result.stdout.lower()
-    if already_up_to_date:
-        typer.echo(f"Branch '{branch_name}' is already up to date.", err=True)
-    else:
-        typer.echo(f"Harvested changes to branch '{branch_name}'.", err=True)
+    typer.echo(f"Harvested changes to branch '{branch_name}'.", err=True)
 
     if create_pr:
         typer.echo(f"Pushing '{branch_name}' to origin...", err=True)
         push_result = subprocess.run(
-            ["git", "push", "-u", "origin", branch_name],
+            ["git", "push", "--force-with-lease", "-u", "origin", branch_name],
             cwd=workspace,
         )
         if push_result.returncode != 0:
