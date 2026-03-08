@@ -202,15 +202,22 @@ def test_github_domains_in_default_dry_run():
     assert "github" in result.stdout
 
 
-@pytest.mark.parametrize("command", [
-    pytest.param("start", id="start"),
-    pytest.param("connect", id="connect"),
-])
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("start", id="start"),
+        pytest.param("connect", id="connect"),
+    ],
+)
 @patch("paude.cli.find_session_backend")
-def test_command_accepts_github_token_flag(mock_find_session_backend: MagicMock, command):
+def test_command_accepts_github_token_flag(
+    mock_find_session_backend: MagicMock, command
+):
     """start/connect accept --github-token flag (session not found is expected)."""
     mock_find_session_backend.return_value = None  # Session not found
-    result = runner.invoke(app, [command, "test-session", "--github-token", "ghp_test123"])
+    result = runner.invoke(
+        app, [command, "test-session", "--github-token", "ghp_test123"]
+    )
     assert "No such option" not in result.output
     assert result.exit_code == 1  # Session not found is expected
 
@@ -234,7 +241,8 @@ def test_command_passes_github_token_to_backend(
     runner.invoke(app, [command, "test-session", "--github-token", token])
 
     getattr(mock_backend, backend_method).assert_called_once_with(
-        "test-session", github_token=token  # noqa: S106
+        "test-session",
+        github_token=token,  # noqa: S106
     )
 
 
@@ -252,7 +260,8 @@ def test_start_reads_paude_github_token_env(
     runner.invoke(app, ["start", "test-session"])
 
     mock_backend.start_session.assert_called_once_with(
-        "test-session", github_token="ghp_from_env"  # noqa: S106
+        "test-session",
+        github_token="ghp_from_env",  # noqa: S106
     )
 
 
@@ -367,10 +376,13 @@ class TestRemoteCommand:
         assert "No paude git remotes found" in result.stdout
         assert "paude remote add" in result.stdout
 
-    @pytest.mark.parametrize("action", [
-        pytest.param("add", id="add"),
-        pytest.param("remove", id="remove"),
-    ])
+    @pytest.mark.parametrize(
+        "action",
+        [
+            pytest.param("add", id="add"),
+            pytest.param("remove", id="remove"),
+        ],
+    )
     @patch("paude.git_remote.is_git_repository")
     def test_remote_action_requires_git_repo(self, mock_is_git, action):
         """remote add/remove fails if not in git repository."""
@@ -565,6 +577,10 @@ def _make_session(
 class TestConnectMultiBackend:
     """Tests for connect command searching multiple backends."""
 
+    @pytest.fixture(autouse=True)
+    def _clear_github_token(self, monkeypatch):
+        monkeypatch.delenv("PAUDE_GITHUB_TOKEN", raising=False)
+
     @patch("paude.session_discovery.PodmanBackend")
     @patch("paude.session_discovery.OpenShiftBackend")
     @patch("paude.session_discovery.OpenShiftConfig")
@@ -591,7 +607,9 @@ class TestConnectMultiBackend:
 
         assert result.exit_code == 0
         assert "Connecting to 'os-session' (openshift)..." in result.output
-        mock_os_backend.connect_session.assert_called_once_with("os-session", github_token=None)
+        mock_os_backend.connect_session.assert_called_once_with(
+            "os-session", github_token=None
+        )
 
     @patch("paude.session_discovery.PodmanBackend")
     @patch("paude.session_discovery.OpenShiftBackend")
@@ -619,7 +637,9 @@ class TestConnectMultiBackend:
 
         assert result.exit_code == 0
         assert "Connecting to 'podman-session' (podman)..." in result.output
-        mock_podman.connect_session.assert_called_once_with("podman-session", github_token=None)
+        mock_podman.connect_session.assert_called_once_with(
+            "podman-session", github_token=None
+        )
 
     @patch("paude.session_discovery.PodmanBackend")
     @patch("paude.session_discovery.OpenShiftBackend")
@@ -710,7 +730,9 @@ class TestConnectMultiBackend:
 
         assert result.exit_code == 0
         assert "Connecting to 'workspace-session' (podman)..." in result.output
-        mock_podman.connect_session.assert_called_once_with("workspace-session", github_token=None)
+        mock_podman.connect_session.assert_called_once_with(
+            "workspace-session", github_token=None
+        )
         # OpenShift should not be checked since podman had workspace match
         mock_os_backend.find_session_for_workspace.assert_not_called()
 
@@ -743,7 +765,9 @@ class TestConnectMultiBackend:
 
         assert result.exit_code == 0
         assert "Connecting to 'os-workspace-session' (openshift)..." in result.output
-        mock_os_backend.connect_session.assert_called_once_with("os-workspace-session", github_token=None)
+        mock_os_backend.connect_session.assert_called_once_with(
+            "os-workspace-session", github_token=None
+        )
 
     @patch("paude.session_discovery.PodmanBackend")
     @patch("paude.session_discovery.OpenShiftBackend")
@@ -767,7 +791,9 @@ class TestConnectMultiBackend:
         result = runner.invoke(app, ["connect"])
 
         assert result.exit_code == 0
-        mock_os_backend.connect_session.assert_called_once_with("os-session", github_token=None)
+        mock_os_backend.connect_session.assert_called_once_with(
+            "os-session", github_token=None
+        )
 
     @patch("paude.session_discovery.PodmanBackend")
     @patch("paude.session_discovery.OpenShiftBackend")
@@ -791,7 +817,9 @@ class TestConnectMultiBackend:
         result = runner.invoke(app, ["connect"])
 
         assert result.exit_code == 0
-        mock_podman.connect_session.assert_called_once_with("podman-session", github_token=None)
+        mock_podman.connect_session.assert_called_once_with(
+            "podman-session", github_token=None
+        )
 
     @patch("paude.session_discovery.PodmanBackend")
     @patch("paude.session_discovery.OpenShiftBackend")
@@ -822,7 +850,9 @@ class TestConnectMultiBackend:
         result = runner.invoke(app, ["connect"])
 
         assert result.exit_code == 0
-        mock_os_backend.connect_session.assert_called_once_with("running-session", github_token=None)
+        mock_os_backend.connect_session.assert_called_once_with(
+            "running-session", github_token=None
+        )
 
 
 class TestStartMultiBackend:
@@ -1310,12 +1340,26 @@ class TestParseCopyPath:
     @pytest.mark.parametrize(
         ("input_path", "expected"),
         [
-            pytest.param("/absolute/path", (None, "/absolute/path"), id="absolute-local"),
-            pytest.param("./relative/path", (None, "./relative/path"), id="relative-local"),
+            pytest.param(
+                "/absolute/path", (None, "/absolute/path"), id="absolute-local"
+            ),
+            pytest.param(
+                "./relative/path", (None, "./relative/path"), id="relative-local"
+            ),
             pytest.param("file.txt", (None, "file.txt"), id="bare-filename"),
-            pytest.param("../parent/file.txt", (None, "../parent/file.txt"), id="parent-relative"),
-            pytest.param("my-session:file.txt", ("my-session", "file.txt"), id="session-with-path"),
-            pytest.param("my-session:/abs/path", ("my-session", "/abs/path"), id="session-absolute"),
+            pytest.param(
+                "../parent/file.txt", (None, "../parent/file.txt"), id="parent-relative"
+            ),
+            pytest.param(
+                "my-session:file.txt",
+                ("my-session", "file.txt"),
+                id="session-with-path",
+            ),
+            pytest.param(
+                "my-session:/abs/path",
+                ("my-session", "/abs/path"),
+                id="session-absolute",
+            ),
             pytest.param(":file.txt", ("", "file.txt"), id="auto-detect-session"),
         ],
     )
