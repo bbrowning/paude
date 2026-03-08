@@ -114,6 +114,33 @@ def _get_container_branch(backend: Backend, session_name: str) -> str:
     return stdout.strip()
 
 
+def _checkout_or_create_branch(branch_name: str, workspace: Path) -> None:
+    """Check out an existing branch or create a new one from main."""
+    # Try checking out existing branch first
+    result = subprocess.run(
+        ["git", "checkout", branch_name],
+        capture_output=True,
+        text=True,
+        cwd=workspace,
+    )
+    if result.returncode == 0:
+        return
+
+    # Branch doesn't exist — create from main
+    result = subprocess.run(
+        ["git", "checkout", "-b", branch_name, "main"],
+        capture_output=True,
+        text=True,
+        cwd=workspace,
+    )
+    if result.returncode != 0:
+        typer.echo(
+            f"Error: Failed to create branch '{branch_name}': {result.stderr.strip()}",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+
 def harvest_session(
     session_name: str,
     branch_name: str,
@@ -155,18 +182,7 @@ def harvest_session(
         typer.echo("Error: Failed to fetch from remote.", err=True)
         raise typer.Exit(1)
 
-    result = subprocess.run(
-        ["git", "checkout", "-b", branch_name, "main"],
-        capture_output=True,
-        text=True,
-        cwd=workspace,
-    )
-    if result.returncode != 0:
-        typer.echo(
-            f"Error: Failed to create branch '{branch_name}': {result.stderr.strip()}",
-            err=True,
-        )
-        raise typer.Exit(1)
+    _checkout_or_create_branch(branch_name, workspace)
 
     merge_ref = f"{remote_name}/{container_branch}"
     typer.echo(f"Merging '{merge_ref}'...", err=True)
@@ -186,7 +202,11 @@ def harvest_session(
         typer.echo("")
         typer.echo(stat)
 
-    typer.echo(f"Harvested changes to branch '{branch_name}'.", err=True)
+    already_up_to_date = "already up to date" in result.stdout.lower()
+    if already_up_to_date:
+        typer.echo(f"Branch '{branch_name}' is already up to date.", err=True)
+    else:
+        typer.echo(f"Harvested changes to branch '{branch_name}'.", err=True)
 
     if create_pr:
         title = pr_title or branch_name
