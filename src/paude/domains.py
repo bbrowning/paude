@@ -69,7 +69,8 @@ def expand_domains(domains: list[str]) -> list[str] | None:
     Args:
         domains: List of domains or aliases. Special values:
             - "all": Returns None (unrestricted network)
-            - "default": Expands to all DEFAULT_ALIASES (claude, vertexai, python, github)
+            - "default": Expands to all DEFAULT_ALIASES
+              (claude, vertexai, python, github)
             - Alias names (e.g., "claude", "vertexai"): Expand to domain lists
             - Raw domains (e.g., ".example.com"): Pass through unchanged
 
