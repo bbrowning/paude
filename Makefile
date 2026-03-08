@@ -164,8 +164,10 @@ release:
 	sed -i.bak 's/^version = .*/version = "$(RELEASE_VERSION)"/' pyproject.toml && rm -f pyproject.toml.bak
 	# Update version in src/paude/__init__.py
 	sed -i.bak 's/^__version__ = .*/__version__ = "$(RELEASE_VERSION)"/' src/paude/__init__.py && rm -f src/paude/__init__.py.bak
+	# Regenerate lock file with new version
+	uv lock
 	# Commit the version change (only if there are changes)
-	git add pyproject.toml src/paude/__init__.py
+	git add pyproject.toml src/paude/__init__.py uv.lock
 	git diff --cached --quiet || git commit --no-verify -m "Release v$(RELEASE_VERSION)"
 	# Create git tag
 	git tag -a "v$(RELEASE_VERSION)" -m "Release v$(RELEASE_VERSION)"
