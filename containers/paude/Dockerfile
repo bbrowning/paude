@@ -44,6 +44,9 @@ ENV LC_ALL=en_US.UTF-8
 # Install uv package manager system-wide (available to root for pip_install builds)
 RUN curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh
 
+# Install pre-commit for automatic hook support in git-synced repos
+RUN pip3.11 install pre-commit
+
 # Install GitHub CLI (gh)
 RUN curl -fsSL https://cli.github.com/packages/rpm/gh-cli.repo -o /etc/yum.repos.d/gh-cli.repo && \
     dnf install -y gh && \

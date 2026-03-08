@@ -1426,6 +1426,8 @@ def _setup_git_after_create(
         is_git_repository,
         set_origin_in_container_openshift,
         set_origin_in_container_podman,
+        setup_precommit_in_container_openshift,
+        setup_precommit_in_container_podman,
         ssh_url_to_https,
     )
 
@@ -1461,6 +1463,13 @@ def _setup_git_after_create(
         typer.echo("Warning: Failed to push tags.", err=True)
         # Non-fatal, continue
 
+    # Pre-compute container identifiers for Steps 4-6
+    if backend_type == "podman":
+        container_name = f"paude-{session_name}"
+    else:
+        pod_name = f"paude-{session_name}-0"
+        namespace = openshift_namespace or "default"
+
     # Step 4: Set origin in container if local origin exists
     origin_url = get_local_origin_url()
     if origin_url:
@@ -1468,11 +1477,8 @@ def _setup_git_after_create(
         origin_url = ssh_url_to_https(origin_url)
         typer.echo(f"Setting origin in container to {origin_url}...")
         if backend_type == "podman":
-            container_name = f"paude-{session_name}"
             origin_set = set_origin_in_container_podman(container_name, origin_url)
         else:
-            pod_name = f"paude-{session_name}-0"
-            namespace = openshift_namespace or "default"
             origin_set = set_origin_in_container_openshift(
                 pod_name, namespace, origin_url, context=openshift_context,
             )
@@ -1498,6 +1504,16 @@ def _setup_git_after_create(
                     )
     else:
         typer.echo("No local origin remote found. Skipping origin setup in container.")
+
+    # Step 6: Set up pre-commit hooks if config exists
+    if Path(".pre-commit-config.yaml").exists():
+        typer.echo("Setting up pre-commit hooks in container...")
+        if backend_type == "podman":
+            setup_precommit_in_container_podman(container_name)
+        else:
+            setup_precommit_in_container_openshift(
+                pod_name, namespace, context=openshift_context,
+            )
 
     typer.echo("Git setup complete.")
     return True

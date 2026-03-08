@@ -18,6 +18,8 @@ from paude.git_remote import (
     list_paude_remotes,
     set_origin_in_container_openshift,
     set_origin_in_container_podman,
+    setup_precommit_in_container_openshift,
+    setup_precommit_in_container_podman,
     ssh_url_to_https,
 )
 
@@ -766,5 +768,95 @@ class TestFetchTagsInContainerOpenshift:
         mock_run.return_value.returncode = 1
 
         result = fetch_tags_in_container_openshift("pod-0", "namespace")
+
+        assert result is False
+
+
+class TestSetupPrecommitInContainerPodman:
+    """Tests for setup_precommit_in_container_podman."""
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_true_on_success(self, mock_run) -> None:
+        """Return True when pre-commit install succeeds."""
+        mock_run.return_value.returncode = 0
+
+        result = setup_precommit_in_container_podman("paude-test")
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        assert call_args[0:2] == ["podman", "exec"]
+        assert "paude-test" in call_args
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_runs_precommit_install(self, mock_run) -> None:
+        """Run pre-commit install command in container."""
+        mock_run.return_value.returncode = 0
+
+        setup_precommit_in_container_podman("paude-test")
+
+        call_args = mock_run.call_args[0][0]
+        bash_cmd_idx = call_args.index("-c") + 1
+        bash_cmd = call_args[bash_cmd_idx]
+        assert "pre-commit install" in bash_cmd
+        assert ".pre-commit-config.yaml" in bash_cmd
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_false_on_failure(self, mock_run) -> None:
+        """Return False when command fails."""
+        mock_run.return_value.returncode = 1
+
+        result = setup_precommit_in_container_podman("paude-test")
+
+        assert result is False
+
+
+class TestSetupPrecommitInContainerOpenshift:
+    """Tests for setup_precommit_in_container_openshift."""
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_true_on_success(self, mock_run) -> None:
+        """Return True when pre-commit install succeeds."""
+        mock_run.return_value.returncode = 0
+
+        result = setup_precommit_in_container_openshift("pod-0", "namespace")
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        assert "oc" in call_args
+        assert "pod-0" in call_args
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_with_context(self, mock_run) -> None:
+        """Include context when specified."""
+        mock_run.return_value.returncode = 0
+
+        result = setup_precommit_in_container_openshift(
+            "pod-0", "ns", context="my-ctx"
+        )
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        assert "--context" in call_args
+        assert "my-ctx" in call_args
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_runs_precommit_install(self, mock_run) -> None:
+        """Run pre-commit install command in pod."""
+        mock_run.return_value.returncode = 0
+
+        setup_precommit_in_container_openshift("pod-0", "ns")
+
+        call_args = mock_run.call_args[0][0]
+        bash_cmd_idx = call_args.index("-c") + 1
+        bash_cmd = call_args[bash_cmd_idx]
+        assert "pre-commit install" in bash_cmd
+        assert ".pre-commit-config.yaml" in bash_cmd
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_false_on_failure(self, mock_run) -> None:
+        """Return False when command fails."""
+        mock_run.return_value.returncode = 1
+
+        result = setup_precommit_in_container_openshift("pod-0", "namespace")
 
         assert result is False

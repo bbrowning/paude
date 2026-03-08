@@ -513,6 +513,63 @@ def fetch_tags_in_container_openshift(
     return result.returncode == 0
 
 
+def setup_precommit_in_container_podman(container_name: str) -> bool:
+    """Install pre-commit hooks in a Podman container's workspace.
+
+    Only runs if .pre-commit-config.yaml exists in the workspace.
+
+    Args:
+        container_name: Name of the container.
+
+    Returns:
+        True if successful, False if failed.
+    """
+    cmd = (
+        "test -f /pvc/workspace/.pre-commit-config.yaml && "
+        "cd /pvc/workspace && pre-commit install 2>/dev/null"
+    )
+    result = subprocess.run(
+        ["podman", "exec", container_name, "bash", "-c", cmd],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+def setup_precommit_in_container_openshift(
+    pod_name: str,
+    namespace: str,
+    context: str | None = None,
+) -> bool:
+    """Install pre-commit hooks in an OpenShift pod's workspace.
+
+    Only runs if .pre-commit-config.yaml exists in the workspace.
+
+    Args:
+        pod_name: Name of the pod.
+        namespace: Kubernetes namespace.
+        context: Optional kubeconfig context.
+
+    Returns:
+        True if successful, False if failed.
+    """
+    cmd = (
+        "test -f /pvc/workspace/.pre-commit-config.yaml && "
+        "cd /pvc/workspace && pre-commit install 2>/dev/null"
+    )
+    oc_cmd = ["oc"]
+    if context:
+        oc_cmd.extend(["--context", context])
+    oc_cmd.extend(["exec", pod_name, "-n", namespace, "--", "bash", "-c", cmd])
+
+    result = subprocess.run(
+        oc_cmd,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
 def git_push_to_remote(remote_name: str, branch: str | None = None) -> bool:
     """Push to a git remote.
 
