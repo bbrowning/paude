@@ -450,6 +450,7 @@ class ContainerRunner:
         cmd = [
             "podman",
             "create",
+            "--pull=never",
             "--name",
             name,
             "--network",

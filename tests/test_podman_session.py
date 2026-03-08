@@ -1194,3 +1194,269 @@ class TestPodmanBackendDeleteSessionWithProxy:
 
         # Should remove network
         mock_network.remove_network.assert_called_once_with("paude-net-my-session")
+
+
+class TestProxyHealthCheck:
+    """Tests for _check_proxy_health and degraded status detection."""
+
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_list_sessions_shows_degraded_when_proxy_missing(
+        self, mock_runner_class: MagicMock
+    ) -> None:
+        """Running session with expected but missing proxy shows degraded."""
+        mock_runner = MagicMock()
+        mock_runner.list_containers.return_value = [
+            {
+                "Names": ["paude-my-session"],
+                "State": "running",
+                "Labels": {
+                    "paude.io/session-name": "my-session",
+                    "paude.io/workspace": _encode_path(Path("/project")),
+                    "paude.io/created-at": "2024-01-15T10:00:00Z",
+                    PAUDE_LABEL_DOMAINS: "api.example.com",
+                },
+            }
+        ]
+        # Proxy container does not exist
+        mock_runner.container_exists.side_effect = (
+            lambda name: name != "paude-proxy-my-session"
+        )
+        mock_runner_class.return_value = mock_runner
+
+        backend = _make_backend(mock_runner)
+        sessions = backend.list_sessions()
+
+        assert len(sessions) == 1
+        assert sessions[0].status == "degraded"
+
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_list_sessions_shows_degraded_when_proxy_stopped(
+        self, mock_runner_class: MagicMock
+    ) -> None:
+        """Running session with stopped proxy shows degraded."""
+        mock_runner = MagicMock()
+        mock_runner.list_containers.return_value = [
+            {
+                "Names": ["paude-my-session"],
+                "State": "running",
+                "Labels": {
+                    "paude.io/session-name": "my-session",
+                    "paude.io/workspace": _encode_path(Path("/project")),
+                    "paude.io/created-at": "2024-01-15T10:00:00Z",
+                    PAUDE_LABEL_DOMAINS: "api.example.com",
+                },
+            }
+        ]
+        # Proxy exists but not running
+        mock_runner.container_exists.return_value = True
+        mock_runner.container_running.side_effect = (
+            lambda name: name != "paude-proxy-my-session"
+        )
+        mock_runner_class.return_value = mock_runner
+
+        backend = _make_backend(mock_runner)
+        sessions = backend.list_sessions()
+
+        assert len(sessions) == 1
+        assert sessions[0].status == "degraded"
+
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_list_sessions_running_when_proxy_healthy(
+        self, mock_runner_class: MagicMock
+    ) -> None:
+        """Running session with healthy proxy shows running."""
+        mock_runner = MagicMock()
+        mock_runner.list_containers.return_value = [
+            {
+                "Names": ["paude-my-session"],
+                "State": "running",
+                "Labels": {
+                    "paude.io/session-name": "my-session",
+                    "paude.io/workspace": _encode_path(Path("/project")),
+                    "paude.io/created-at": "2024-01-15T10:00:00Z",
+                    PAUDE_LABEL_DOMAINS: "api.example.com",
+                },
+            }
+        ]
+        # Proxy exists and running
+        mock_runner.container_exists.return_value = True
+        mock_runner.container_running.return_value = True
+        mock_runner_class.return_value = mock_runner
+
+        backend = _make_backend(mock_runner)
+        sessions = backend.list_sessions()
+
+        assert len(sessions) == 1
+        assert sessions[0].status == "running"
+
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_list_sessions_running_without_proxy_config(
+        self, mock_runner_class: MagicMock
+    ) -> None:
+        """Running session without proxy config shows running (no proxy expected)."""
+        mock_runner = MagicMock()
+        mock_runner.list_containers.return_value = [
+            {
+                "Names": ["paude-my-session"],
+                "State": "running",
+                "Labels": {
+                    "paude.io/session-name": "my-session",
+                    "paude.io/workspace": _encode_path(Path("/project")),
+                    "paude.io/created-at": "2024-01-15T10:00:00Z",
+                },
+            }
+        ]
+        mock_runner_class.return_value = mock_runner
+
+        backend = _make_backend(mock_runner)
+        sessions = backend.list_sessions()
+
+        assert len(sessions) == 1
+        assert sessions[0].status == "running"
+
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_get_session_shows_degraded_when_proxy_missing(
+        self, mock_runner_class: MagicMock
+    ) -> None:
+        """get_session returns degraded when proxy is missing."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.side_effect = (
+            lambda name: name != "paude-proxy-my-session"
+        )
+        mock_runner.list_containers.return_value = [
+            {
+                "Names": ["paude-my-session"],
+                "State": "running",
+                "Labels": {
+                    "paude.io/session-name": "my-session",
+                    "paude.io/workspace": _encode_path(Path("/project")),
+                    "paude.io/created-at": "2024-01-15T10:00:00Z",
+                    PAUDE_LABEL_DOMAINS: "api.example.com",
+                },
+            }
+        ]
+        mock_runner_class.return_value = mock_runner
+
+        backend = _make_backend(mock_runner)
+        session = backend.get_session("my-session")
+
+        assert session is not None
+        assert session.status == "degraded"
+
+
+class TestProxyRecreation:
+    """Tests for proxy recreation when proxy is missing but expected."""
+
+    @patch("paude.backends.podman.get_podman_machine_dns")
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_start_session_recreates_missing_proxy(
+        self, mock_runner_class: MagicMock, mock_dns: MagicMock
+    ) -> None:
+        """start_session recreates proxy when missing but configured in labels."""
+        mock_runner = MagicMock()
+        mock_dns.return_value = None
+        # Main container exists but proxy does not
+        mock_runner.container_exists.side_effect = (
+            lambda name: name == "paude-my-session"
+        )
+        mock_runner.get_container_state.return_value = "exited"
+        mock_runner.attach_container.return_value = 0
+        mock_runner.list_containers.return_value = [
+            {
+                "Names": ["paude-my-session"],
+                "State": "exited",
+                "Labels": {
+                    "paude.io/session-name": "my-session",
+                    "paude.io/workspace": _encode_path(Path("/project")),
+                    PAUDE_LABEL_DOMAINS: "api.example.com,cdn.example.com",
+                    PAUDE_LABEL_PROXY_IMAGE: "paude-proxy:latest",
+                },
+            }
+        ]
+        mock_runner_class.return_value = mock_runner
+        mock_network = MagicMock()
+
+        backend = _make_backend(mock_runner, mock_network)
+        backend.start_session("my-session")
+
+        # Should recreate the proxy
+        mock_runner.create_session_proxy.assert_called_once_with(
+            name="paude-proxy-my-session",
+            image="paude-proxy:latest",
+            network="paude-net-my-session",
+            dns=None,
+            allowed_domains=["api.example.com", "cdn.example.com"],
+        )
+        mock_runner.start_session_proxy.assert_called_once_with(
+            "paude-proxy-my-session"
+        )
+
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_start_session_skips_recreate_without_labels(
+        self, mock_runner_class: MagicMock
+    ) -> None:
+        """start_session does not recreate proxy when no domain labels."""
+        mock_runner = MagicMock()
+        # Only main container exists, no proxy
+        mock_runner.container_exists.side_effect = (
+            lambda name: name == "paude-my-session"
+        )
+        mock_runner.get_container_state.return_value = "exited"
+        mock_runner.attach_container.return_value = 0
+        mock_runner.list_containers.return_value = [
+            {
+                "Names": ["paude-my-session"],
+                "State": "exited",
+                "Labels": {
+                    "paude.io/session-name": "my-session",
+                    "paude.io/workspace": _encode_path(Path("/project")),
+                },
+            }
+        ]
+        mock_runner_class.return_value = mock_runner
+
+        backend = _make_backend(mock_runner)
+        backend.start_session("my-session")
+
+        mock_runner.create_session_proxy.assert_not_called()
+        mock_runner.start_session_proxy.assert_not_called()
+
+    @patch("paude.backends.podman.get_podman_machine_dns")
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_connect_session_recreates_missing_proxy(
+        self, mock_runner_class: MagicMock, mock_dns: MagicMock
+    ) -> None:
+        """connect_session recreates proxy when missing but configured."""
+        mock_runner = MagicMock()
+        mock_dns.return_value = None
+
+        def container_exists(name: str) -> bool:
+            return name == "paude-my-session"
+
+        mock_runner.container_exists.side_effect = container_exists
+        mock_runner.container_running.side_effect = (
+            lambda name: name == "paude-my-session"
+        )
+        mock_runner.attach_container.return_value = 0
+        mock_runner.exec_in_container.return_value = MagicMock(returncode=0)
+        mock_runner.list_containers.return_value = [
+            {
+                "Names": ["paude-my-session"],
+                "State": "running",
+                "Labels": {
+                    "paude.io/session-name": "my-session",
+                    "paude.io/workspace": _encode_path(Path("/project")),
+                    PAUDE_LABEL_DOMAINS: "api.example.com",
+                    PAUDE_LABEL_PROXY_IMAGE: "paude-proxy:latest",
+                },
+            }
+        ]
+        mock_runner_class.return_value = mock_runner
+        mock_network = MagicMock()
+
+        backend = _make_backend(mock_runner, mock_network)
+        backend.connect_session("my-session")
+
+        # Should recreate the proxy
+        mock_runner.create_session_proxy.assert_called_once()
+        mock_runner.start_session_proxy.assert_called_once()

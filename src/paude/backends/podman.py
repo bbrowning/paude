@@ -375,20 +375,72 @@ class PodmanBackend:
 
         print(f"Session '{name}' deleted.", file=sys.stderr)
 
+    def _get_proxy_config_from_labels(self, name: str) -> tuple[str, list[str]] | None:
+        """Read proxy configuration from the main container's labels.
+
+        Returns:
+            Tuple of (proxy_image, domains) if proxy was configured,
+            None if session has no proxy configuration.
+        """
+        containers = self._runner.list_containers(label_filter=PAUDE_LABEL_APP)
+        for container in containers:
+            labels = container.get("Labels", {}) or {}
+            if labels.get(PAUDE_LABEL_SESSION) != name:
+                continue
+
+            domains_str = labels.get(PAUDE_LABEL_DOMAINS)
+            if domains_str is None:
+                return None  # No proxy configured
+
+            proxy_image = labels.get(PAUDE_LABEL_PROXY_IMAGE, "")
+            if not proxy_image:
+                return None  # Can't recreate without image
+
+            domains = [d for d in domains_str.split(",") if d]
+            return (proxy_image, domains)
+
+        return None
+
     def _start_proxy_if_needed(self, name: str) -> None:
-        """Start the proxy container for a session if one exists.
+        """Start or recreate the proxy container for a session.
+
+        If the proxy container exists but is stopped, starts it.
+        If the proxy container is missing but was expected (based on main
+        container labels), recreates it from stored configuration.
 
         Args:
             name: Session name.
         """
         proxy_name = self._proxy_container_name(name)
-        if not self._runner.container_exists(proxy_name):
+
+        if self._runner.container_exists(proxy_name):
+            if self._runner.container_running(proxy_name):
+                return
+            print(f"Starting proxy {proxy_name}...", file=sys.stderr)
+            self._runner.start_session_proxy(proxy_name)
             return
 
-        if self._runner.container_running(proxy_name):
-            return
+        # Proxy doesn't exist — check if it was expected
+        proxy_config = self._get_proxy_config_from_labels(name)
+        if proxy_config is None:
+            return  # No proxy expected for this session
 
-        print(f"Starting proxy {proxy_name}...", file=sys.stderr)
+        # Recreate the missing proxy
+        proxy_image, domains = proxy_config
+        network_name = self._network_name(name)
+
+        # Ensure network exists (create_internal_network is idempotent)
+        self._network_manager.create_internal_network(network_name)
+
+        dns = get_podman_machine_dns()
+        print(f"Recreating missing proxy {proxy_name}...", file=sys.stderr)
+        self._runner.create_session_proxy(
+            name=proxy_name,
+            image=proxy_image,
+            network=network_name,
+            dns=dns,
+            allowed_domains=domains,
+        )
         self._runner.start_session_proxy(proxy_name)
 
     def _stop_proxy_if_needed(self, name: str) -> None:
@@ -506,6 +558,9 @@ class PodmanBackend:
             )
             return 1
 
+        # Ensure proxy is running (recreates if missing)
+        self._start_proxy_if_needed(name)
+
         # Check if workspace is empty (no .git directory)
         check_result = self._runner.exec_in_container(
             container_name,
@@ -526,6 +581,29 @@ class PodmanBackend:
             entrypoint="/usr/local/bin/entrypoint.sh",
             extra_env=extra_env,
         )
+
+    def _check_proxy_health(
+        self, session_name: str, labels: dict[str, str], status: str
+    ) -> str:
+        """Check if a running session's proxy is healthy.
+
+        Returns "degraded" if the session is running but its expected proxy
+        is missing or stopped. Returns the original status otherwise.
+        """
+        if status != "running":
+            return status
+
+        # Check if proxy was configured for this session
+        if PAUDE_LABEL_DOMAINS not in labels:
+            return status  # No proxy expected
+
+        proxy_name = self._proxy_container_name(session_name)
+        if not self._runner.container_exists(proxy_name):
+            return "degraded"
+        if not self._runner.container_running(proxy_name):
+            return "degraded"
+
+        return status
 
     def list_sessions(self) -> list[Session]:
         """List all sessions.
@@ -554,6 +632,7 @@ class PodmanBackend:
 
             # Get session status from container state
             status = _get_container_status(container)
+            status = self._check_proxy_health(session_name, labels, status)
 
             sessions.append(
                 Session(
@@ -598,6 +677,7 @@ class PodmanBackend:
 
                 # Get session status from container state
                 status = _get_container_status(container)
+                status = self._check_proxy_health(name, labels, status)
 
                 return Session(
                     name=name,

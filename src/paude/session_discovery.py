@@ -29,6 +29,22 @@ def create_openshift_backend(
         return None
 
 
+def _status_matches(session_status: str, status_filter: str | None) -> bool:
+    """Check if a session status matches the filter.
+
+    Treats "degraded" as matching "running" since the main container is
+    still running (the proxy is missing/stopped).
+    """
+    if status_filter is None:
+        return True
+    if session_status == status_filter:
+        return True
+    # A degraded session is still running (just missing its proxy)
+    if status_filter == "running" and session_status == "degraded":
+        return True
+    return False
+
+
 def find_workspace_session(
     openshift_context: str | None = None,
     openshift_namespace: str | None = None,
@@ -53,7 +69,7 @@ def find_workspace_session(
     try:
         podman = PodmanBackend()
         session = podman.find_session_for_workspace(workspace)
-        if session and (status_filter is None or session.status == status_filter):
+        if session and (_status_matches(session.status, status_filter)):
             return (session, podman)
     except Exception:  # noqa: S110 - Podman may not be available
         pass
@@ -63,7 +79,7 @@ def find_workspace_session(
     if os_backend is not None:
         try:
             session = os_backend.find_session_for_workspace(workspace)
-            if session and (status_filter is None or session.status == status_filter):
+            if session and (_status_matches(session.status, status_filter)):
                 return (session, os_backend)
         except Exception:  # noqa: S110
             pass
@@ -103,7 +119,7 @@ def collect_all_sessions(
     if podman_backend is not None:
         try:
             for s in podman_backend.list_sessions():
-                if status_filter is None or s.status == status_filter:
+                if _status_matches(s.status, status_filter):
                     all_sessions.append((s, podman_backend))
         except Exception:  # noqa: S110
             pass
@@ -115,7 +131,7 @@ def collect_all_sessions(
     if os_backend is not None:
         try:
             for s in os_backend.list_sessions():
-                if status_filter is None or s.status == status_filter:
+                if _status_matches(s.status, status_filter):
                     all_sessions.append((s, os_backend))
         except Exception:  # noqa: S110
             pass
@@ -143,7 +159,7 @@ def resolve_session_for_backend(
     workspace = Path.cwd()
 
     session = backend.find_session_for_workspace(workspace)
-    if session and (status_filter is None or session.status == status_filter):
+    if session and (_status_matches(session.status, status_filter)):
         return session.name
 
     # List sessions matching the filter
@@ -153,7 +169,7 @@ def resolve_session_for_backend(
         all_sessions = []
 
     if status_filter:
-        sessions = [s for s in all_sessions if s.status == status_filter]
+        sessions = [s for s in all_sessions if _status_matches(s.status, status_filter)]
     else:
         sessions = all_sessions
 

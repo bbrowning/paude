@@ -13,7 +13,9 @@ class Session:
 
     Attributes:
         name: Session name (user-provided or auto-generated).
-        status: Session status ("running", "stopped", "error", "pending").
+        status: Session status ("running", "stopped", "error", "pending",
+            "degraded"). "degraded" means the container is running but its
+            expected proxy is missing or stopped.
         workspace: Local workspace path.
         created_at: ISO timestamp of session creation.
         backend_type: Backend type ("podman" or "openshift").

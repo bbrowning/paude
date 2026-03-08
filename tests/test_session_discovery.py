@@ -6,6 +6,31 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from paude.backends.base import Session
+from paude.session_discovery import _status_matches
+
+
+class TestStatusMatches:
+    """Tests for _status_matches helper."""
+
+    def test_none_filter_matches_anything(self) -> None:
+        assert _status_matches("running", None) is True
+        assert _status_matches("stopped", None) is True
+        assert _status_matches("degraded", None) is True
+
+    def test_exact_match(self) -> None:
+        assert _status_matches("running", "running") is True
+        assert _status_matches("stopped", "stopped") is True
+
+    def test_no_match(self) -> None:
+        assert _status_matches("stopped", "running") is False
+        assert _status_matches("error", "running") is False
+
+    def test_degraded_matches_running(self) -> None:
+        """Degraded sessions should match 'running' filter."""
+        assert _status_matches("degraded", "running") is True
+
+    def test_degraded_does_not_match_stopped(self) -> None:
+        assert _status_matches("degraded", "stopped") is False
 
 
 def _make_session(
