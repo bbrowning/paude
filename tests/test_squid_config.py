@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import platform
 import re
 import subprocess
 from pathlib import Path
@@ -52,6 +53,10 @@ class TestSquidConfACLTypes:
         assert "http_access allow allowed_domains_regex" in content
 
 
+@pytest.mark.skipif(
+    platform.system() == "Darwin",
+    reason="entrypoint.sh uses GNU sed; macOS BSD sed is incompatible",
+)
 class TestEntrypointRegexACL:
     """Test entrypoint.sh generates separate ACL names for regex domains."""
 
@@ -93,7 +98,7 @@ export CONFIG_FILE ALLOWED_DOMAINS
                     if depth == 0:
                         break
 
-            script += "\n".join(block_lines) + "\ncat \"$CONFIG_FILE\"\n"
+            script += "\n".join(block_lines) + '\ncat "$CONFIG_FILE"\n'
 
             result = subprocess.run(
                 ["bash", "-e"],
@@ -109,9 +114,7 @@ export CONFIG_FILE ALLOWED_DOMAINS
 
     def test_regex_domain_uses_separate_acl_name(self, run_entrypoint):
         """Regex domains (~prefix) must use allowed_domains_regex, not allowed_domains."""
-        output = run_entrypoint(
-            "oauth2.googleapis.com,~aiplatform\\.googleapis\\.com$"
-        )
+        output = run_entrypoint("oauth2.googleapis.com,~aiplatform\\.googleapis\\.com$")
 
         # dstdom_regex must be under allowed_domains_regex
         for line in output.splitlines():
