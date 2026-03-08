@@ -14,34 +14,32 @@ from paude.cli import _parse_copy_path, app
 runner = CliRunner()
 
 
-def test_help_shows_help():
-    """--help shows help and exits 0."""
-    result = runner.invoke(app, ["--help"])
+@pytest.mark.parametrize(
+    "flag",
+    [
+        pytest.param("--help", id="long-flag"),
+        pytest.param("-h", id="short-flag"),
+    ],
+)
+def test_help_shows_help(flag):
+    """Help flag shows help and exits 0."""
+    result = runner.invoke(app, [flag])
     assert result.exit_code == 0
     assert "paude - Run Claude Code" in result.stdout
 
 
-def test_short_help_shows_help():
-    """-h shows help and exits 0."""
-    result = runner.invoke(app, ["-h"])
-    assert result.exit_code == 0
-    assert "paude - Run Claude Code" in result.stdout
-
-
-def test_version_shows_version():
-    """--version shows version and exits 0."""
+@pytest.mark.parametrize(
+    "flag",
+    [
+        pytest.param("--version", id="long-flag"),
+        pytest.param("-V", id="short-flag"),
+    ],
+)
+def test_version_shows_version(flag):
+    """Version flag shows version and exits 0."""
     from paude import __version__
 
-    result = runner.invoke(app, ["--version"])
-    assert result.exit_code == 0
-    assert f"paude {__version__}" in result.stdout
-
-
-def test_short_version_shows_version():
-    """-V shows version and exits 0."""
-    from paude import __version__
-
-    result = runner.invoke(app, ["-V"])
+    result = runner.invoke(app, [flag])
     assert result.exit_code == 0
     assert f"paude {__version__}" in result.stdout
 
@@ -100,11 +98,19 @@ def test_dry_run_shows_flag_states():
     assert "--allowed-domains: unrestricted" in result.stdout
 
 
-def test_yolo_flag_recognized():
-    """--yolo flag is recognized (verified via dry-run)."""
-    result = runner.invoke(app, ["create", "--yolo", "--dry-run"])
+@pytest.mark.parametrize(
+    "flag",
+    [
+        pytest.param("--yolo", id="yolo"),
+        pytest.param("--rebuild", id="rebuild"),
+        pytest.param("--verbose", id="verbose"),
+    ],
+)
+def test_flag_recognized(flag):
+    """Boolean flags are recognized (verified via dry-run)."""
+    result = runner.invoke(app, ["create", flag, "--dry-run"])
     assert result.exit_code == 0
-    assert "--yolo: True" in result.stdout
+    assert f"{flag}: True" in result.stdout
 
 
 def test_allowed_domains_default_value():
@@ -148,20 +154,6 @@ def test_allowed_domains_multiple_values():
     assert result.exit_code == 0
     # Should show both
     assert "vertexai" in result.stdout or ".example.com" in result.stdout
-
-
-def test_rebuild_flag_recognized():
-    """--rebuild flag is recognized (verified via dry-run)."""
-    result = runner.invoke(app, ["create", "--rebuild", "--dry-run"])
-    assert result.exit_code == 0
-    assert "--rebuild: True" in result.stdout
-
-
-def test_verbose_flag_recognized():
-    """--verbose flag is recognized (verified via dry-run)."""
-    result = runner.invoke(app, ["create", "--verbose", "--dry-run"])
-    assert result.exit_code == 0
-    assert "--verbose: True" in result.stdout
 
 
 def test_help_shows_dry_run_option():
@@ -210,49 +202,39 @@ def test_github_domains_in_default_dry_run():
     assert "github" in result.stdout
 
 
+@pytest.mark.parametrize("command", [
+    pytest.param("start", id="start"),
+    pytest.param("connect", id="connect"),
+])
 @patch("paude.cli.find_session_backend")
-def test_start_accepts_github_token_flag(mock_find_session_backend: MagicMock):
-    """paude start accepts --github-token flag (session not found is expected)."""
+def test_command_accepts_github_token_flag(mock_find_session_backend: MagicMock, command):
+    """start/connect accept --github-token flag (session not found is expected)."""
     mock_find_session_backend.return_value = None  # Session not found
-    result = runner.invoke(app, ["start", "test-session", "--github-token", "ghp_test123"])
+    result = runner.invoke(app, [command, "test-session", "--github-token", "ghp_test123"])
     assert "No such option" not in result.output
     assert result.exit_code == 1  # Session not found is expected
 
 
+@pytest.mark.parametrize(
+    ("command", "backend_method", "token"),
+    [
+        pytest.param("start", "start_session", "ghp_test123", id="start"),
+        pytest.param("connect", "connect_session", "ghp_test456", id="connect"),
+    ],
+)
 @patch("paude.cli.find_session_backend")
-def test_connect_accepts_github_token_flag(mock_find_session_backend: MagicMock):
-    """paude connect accepts --github-token flag (session not found is expected)."""
-    mock_find_session_backend.return_value = None  # Session not found
-    result = runner.invoke(app, ["connect", "test-session", "--github-token", "ghp_test123"])
-    assert "No such option" not in result.output
-    assert result.exit_code == 1  # Session not found is expected
-
-
-@patch("paude.cli.find_session_backend")
-def test_start_passes_github_token_to_backend(mock_find_session_backend: MagicMock):
-    """paude start passes the resolved github_token to backend.start_session()."""
+def test_command_passes_github_token_to_backend(
+    mock_find_session_backend: MagicMock, command, backend_method, token
+):
+    """start/connect pass the resolved github_token to the backend."""
     mock_backend = MagicMock()
-    mock_backend.start_session.return_value = 0
+    getattr(mock_backend, backend_method).return_value = 0
     mock_find_session_backend.return_value = (MagicMock(), mock_backend)
 
-    runner.invoke(app, ["start", "test-session", "--github-token", "ghp_test123"])
+    runner.invoke(app, [command, "test-session", "--github-token", token])
 
-    mock_backend.start_session.assert_called_once_with(
-        "test-session", github_token="ghp_test123"  # noqa: S106
-    )
-
-
-@patch("paude.cli.find_session_backend")
-def test_connect_passes_github_token_to_backend(mock_find_session_backend: MagicMock):
-    """paude connect passes the resolved github_token to backend.connect_session()."""
-    mock_backend = MagicMock()
-    mock_backend.connect_session.return_value = 0
-    mock_find_session_backend.return_value = (MagicMock(), mock_backend)
-
-    runner.invoke(app, ["connect", "test-session", "--github-token", "ghp_test456"])
-
-    mock_backend.connect_session.assert_called_once_with(
-        "test-session", github_token="ghp_test456"  # noqa: S106
+    getattr(mock_backend, backend_method).assert_called_once_with(
+        "test-session", github_token=token  # noqa: S106
     )
 
 
@@ -331,30 +313,20 @@ def test_help_shows_commands():
     assert "sync" in result.stdout
 
 
-def test_stop_help():
-    """'stop --help' shows subcommand help, not main help."""
-    result = runner.invoke(app, ["stop", "--help"])
+@pytest.mark.parametrize(
+    ("command", "description"),
+    [
+        pytest.param("stop", "Stop a session", id="stop"),
+        pytest.param("list", "List all sessions", id="list"),
+        pytest.param("connect", "Attach to a running session", id="connect"),
+    ],
+)
+def test_subcommand_help(command, description):
+    """Subcommand --help shows its own help, not main help."""
+    result = runner.invoke(app, [command, "--help"])
     assert result.exit_code == 0
-    assert "stop" in result.stdout.lower()
-    assert "Stop a session" in result.stdout
-    assert "paude - Run Claude Code" not in result.stdout
-
-
-def test_list_help():
-    """'list --help' shows subcommand help."""
-    result = runner.invoke(app, ["list", "--help"])
-    assert result.exit_code == 0
-    assert "list" in result.stdout.lower()
-    assert "List all sessions" in result.stdout
-    assert "paude - Run Claude Code" not in result.stdout
-
-
-def test_connect_help():
-    """'connect --help' shows subcommand help."""
-    result = runner.invoke(app, ["connect", "--help"])
-    assert result.exit_code == 0
-    assert "connect" in result.stdout.lower()
-    assert "Attach to a running session" in result.stdout
+    assert command in result.stdout.lower()
+    assert description in result.stdout
     assert "paude - Run Claude Code" not in result.stdout
 
 
@@ -395,23 +367,16 @@ class TestRemoteCommand:
         assert "No paude git remotes found" in result.stdout
         assert "paude remote add" in result.stdout
 
+    @pytest.mark.parametrize("action", [
+        pytest.param("add", id="add"),
+        pytest.param("remove", id="remove"),
+    ])
     @patch("paude.git_remote.is_git_repository")
-    def test_remote_add_requires_git_repo(self, mock_is_git):
-        """remote add fails if not in git repository."""
+    def test_remote_action_requires_git_repo(self, mock_is_git, action):
+        """remote add/remove fails if not in git repository."""
         mock_is_git.return_value = False
 
-        result = runner.invoke(app, ["remote", "add", "my-session"])
-
-        assert result.exit_code == 1
-        output = result.stdout + (result.stderr or "")
-        assert "Not a git repository" in output
-
-    @patch("paude.git_remote.is_git_repository")
-    def test_remote_remove_requires_git_repo(self, mock_is_git):
-        """remote remove fails if not in git repository."""
-        mock_is_git.return_value = False
-
-        result = runner.invoke(app, ["remote", "remove", "my-session"])
+        result = runner.invoke(app, ["remote", action, "my-session"])
 
         assert result.exit_code == 1
         output = result.stdout + (result.stderr or "")
@@ -1342,33 +1307,21 @@ class TestDeleteGitRemoteCleanup:
 class TestParseCopyPath:
     """Tests for _parse_copy_path helper."""
 
-    def test_absolute_local_path(self):
-        """Absolute paths are local."""
-        assert _parse_copy_path("/absolute/path") == (None, "/absolute/path")
-
-    def test_relative_local_path(self):
-        """Relative paths starting with . are local."""
-        assert _parse_copy_path("./relative/path") == (None, "./relative/path")
-
-    def test_bare_filename_is_local(self):
-        """Bare filenames without colon are local."""
-        assert _parse_copy_path("file.txt") == (None, "file.txt")
-
-    def test_session_with_path(self):
-        """session:path syntax returns session name and path."""
-        assert _parse_copy_path("my-session:file.txt") == ("my-session", "file.txt")
-
-    def test_session_with_absolute_path(self):
-        """session:/abs/path syntax returns session and absolute path."""
-        assert _parse_copy_path("my-session:/abs/path") == ("my-session", "/abs/path")
-
-    def test_auto_detect_session(self):
-        """:path syntax returns empty string for auto-detect."""
-        assert _parse_copy_path(":file.txt") == ("", "file.txt")
-
-    def test_parent_relative_path(self):
-        """Paths starting with .. are local."""
-        assert _parse_copy_path("../parent/file.txt") == (None, "../parent/file.txt")
+    @pytest.mark.parametrize(
+        ("input_path", "expected"),
+        [
+            pytest.param("/absolute/path", (None, "/absolute/path"), id="absolute-local"),
+            pytest.param("./relative/path", (None, "./relative/path"), id="relative-local"),
+            pytest.param("file.txt", (None, "file.txt"), id="bare-filename"),
+            pytest.param("../parent/file.txt", (None, "../parent/file.txt"), id="parent-relative"),
+            pytest.param("my-session:file.txt", ("my-session", "file.txt"), id="session-with-path"),
+            pytest.param("my-session:/abs/path", ("my-session", "/abs/path"), id="session-absolute"),
+            pytest.param(":file.txt", ("", "file.txt"), id="auto-detect-session"),
+        ],
+    )
+    def test_parse_copy_path(self, input_path, expected):
+        """_parse_copy_path correctly parses various path formats."""
+        assert _parse_copy_path(input_path) == expected
 
 
 class TestCpCommand:

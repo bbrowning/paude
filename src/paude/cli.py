@@ -89,6 +89,90 @@ def find_session_backend(
     return None
 
 
+def _get_backend_instance(
+    backend: BackendType,
+    openshift_context: str | None = None,
+    openshift_namespace: str | None = None,
+) -> Backend:
+    """Create a backend instance based on the backend type.
+
+    Args:
+        backend: The backend type to create.
+        openshift_context: Optional OpenShift context.
+        openshift_namespace: Optional OpenShift namespace.
+
+    Returns:
+        Backend instance (PodmanBackend or OpenShiftBackend).
+    """
+    if backend == BackendType.podman:
+        return PodmanBackend()
+    openshift_config = OpenShiftConfig(
+        context=openshift_context,
+        namespace=openshift_namespace,
+    )
+    return OpenShiftBackend(config=openshift_config)
+
+
+def _auto_select_session(
+    openshift_context: str | None,
+    openshift_namespace: str | None,
+    *,
+    status_filter: str | None = None,
+    no_sessions_hints: list[str],
+    multi_hint_format: str = "  paude start {name}  # {backend_type}",
+) -> tuple[Session, Backend]:
+    """Auto-select a session when no name/backend is specified.
+
+    Searches workspace sessions first, then all sessions. Exits with
+    code 1 if no sessions found or multiple sessions found.
+
+    Args:
+        openshift_context: Optional OpenShift context.
+        openshift_namespace: Optional OpenShift namespace.
+        status_filter: Optional status filter (e.g. "running").
+        no_sessions_hints: Messages to show when no sessions found.
+        multi_hint_format: Format string for each session in multi-session
+            list. Available placeholders: {name}, {backend_type}, {status},
+            {workspace}.
+
+    Returns:
+        Tuple of (session, backend) for the selected session.
+    """
+    workspace_match = find_workspace_session(
+        openshift_context, openshift_namespace, status_filter=status_filter
+    )
+    if workspace_match:
+        return workspace_match
+
+    all_sessions = collect_all_sessions(
+        openshift_context, openshift_namespace, status_filter=status_filter
+    )
+    if not all_sessions:
+        for hint in no_sessions_hints:
+            typer.echo(hint, err=True)
+        raise typer.Exit(1)
+    if len(all_sessions) == 1:
+        return all_sessions[0]
+
+    qualifier = "running " if status_filter == "running" else ""
+    typer.echo(f"Multiple {qualifier}sessions found. Specify one:", err=True)
+    typer.echo("", err=True)
+    for s, _ in all_sessions:
+        workspace_str = str(s.workspace)
+        if len(workspace_str) > 35:
+            workspace_str = "..." + workspace_str[-32:]
+        typer.echo(
+            multi_hint_format.format(
+                name=s.name,
+                backend_type=s.backend_type,
+                status=s.status,
+                workspace=workspace_str,
+            ),
+            err=True,
+        )
+    raise typer.Exit(1)
+
+
 def version_callback(value: bool) -> None:
     """Print version information and exit."""
     if value:
@@ -659,35 +743,19 @@ def session_delete(
             typer.echo(f"Session '{name}' not found.", err=True)
             raise typer.Exit(1)
 
-    if backend == BackendType.podman:
-        try:
-            backend_instance = PodmanBackend()
-            backend_instance.delete_session(name, confirm=True)
-            typer.echo(f"Session '{name}' deleted.")
-            _cleanup_session_git_remote(name)
-        except SessionNotFoundError as e:
-            typer.echo(f"Error: {e}", err=True)
-            raise typer.Exit(1) from None
-        except Exception as e:
-            typer.echo(f"Error deleting session: {e}", err=True)
-            raise typer.Exit(1) from None
-    else:
-        openshift_config = OpenShiftConfig(
-            context=openshift_context,
-            namespace=openshift_namespace,
-        )
-
-        try:
-            os_backend = OpenShiftBackend(config=openshift_config)
-            os_backend.delete_session(name, confirm=True)
-            typer.echo(f"Session '{name}' deleted.")
-            _cleanup_session_git_remote(name)
-        except OpenshiftSessionNotFoundError as e:
-            typer.echo(f"Error: {e}", err=True)
-            raise typer.Exit(1) from None
-        except Exception as e:
-            typer.echo(f"Error deleting session: {e}", err=True)
-            raise typer.Exit(1) from None
+    backend_instance = _get_backend_instance(
+        backend, openshift_context, openshift_namespace
+    )
+    try:
+        backend_instance.delete_session(name, confirm=True)
+        typer.echo(f"Session '{name}' deleted.")
+        _cleanup_session_git_remote(name)
+    except (SessionNotFoundError, OpenshiftSessionNotFoundError) as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+    except Exception as e:
+        typer.echo(f"Error deleting session: {e}", err=True)
+        raise typer.Exit(1) from None
 
 
 @app.command("start")
@@ -751,82 +819,43 @@ def session_start(
 
     # If no name and no backend specified, search all backends
     if not name and backend is None:
-        # No status filter: start includes all sessions (even stopped)
-        workspace_match = find_workspace_session(openshift_context, openshift_namespace)
-        if workspace_match:
-            ws_session, ws_backend = workspace_match
-            typer.echo(f"Starting '{ws_session.name}' ({ws_session.backend_type})...")
-            exit_code = ws_backend.start_session(
-                ws_session.name, github_token=resolved_token
-            )
-            raise typer.Exit(exit_code)
-
-        all_sessions = collect_all_sessions(openshift_context, openshift_namespace)
-        if not all_sessions:
-            typer.echo("No sessions found.", err=True)
-            typer.echo("", err=True)
-            typer.echo("To create and start a session:", err=True)
-            typer.echo("  paude create && paude start", err=True)
-            raise typer.Exit(1)
-        if len(all_sessions) == 1:
-            session, backend_obj = all_sessions[0]
-            typer.echo(f"Starting '{session.name}' ({session.backend_type})...")
-            exit_code = backend_obj.start_session(
-                session.name, github_token=resolved_token
-            )
-            raise typer.Exit(exit_code)
-        else:
-            typer.echo(
-                "Multiple sessions found. Specify one:",
-                err=True,
-            )
-            typer.echo("", err=True)
-            for s, _ in all_sessions:
-                typer.echo(
-                    f"  paude start {s.name}  # {s.backend_type}, {s.status}",
-                    err=True,
-                )
-            raise typer.Exit(1)
+        session, backend_obj = _auto_select_session(
+            openshift_context,
+            openshift_namespace,
+            no_sessions_hints=[
+                "No sessions found.",
+                "",
+                "To create and start a session:",
+                "  paude create && paude start",
+            ],
+            multi_hint_format="  paude start {name}  # {backend_type}, {status}",
+        )
+        typer.echo(f"Starting '{session.name}' ({session.backend_type})...")
+        exit_code = backend_obj.start_session(
+            session.name, github_token=resolved_token
+        )
+        raise typer.Exit(exit_code)
 
     # Backend specified explicitly
-    if backend == BackendType.podman:
-        backend_instance = PodmanBackend()
+    backend_instance = _get_backend_instance(
+        backend, openshift_context, openshift_namespace  # type: ignore[arg-type]
+    )
+    if not name:
+        name = resolve_session_for_backend(backend_instance)
         if not name:
-            name = resolve_session_for_backend(backend_instance)
-            if not name:
-                raise typer.Exit(1)
+            raise typer.Exit(1)
 
-        try:
-            exit_code = backend_instance.start_session(
-                name, github_token=resolved_token
-            )
-            raise typer.Exit(exit_code)
-        except SessionNotFoundError as e:
-            typer.echo(f"Error: {e}", err=True)
-            raise typer.Exit(1) from None
-        except Exception as e:
-            typer.echo(f"Error starting session: {e}", err=True)
-            raise typer.Exit(1) from None
-    elif backend == BackendType.openshift:
-        openshift_config = OpenShiftConfig(
-            context=openshift_context,
-            namespace=openshift_namespace,
+    try:
+        exit_code = backend_instance.start_session(
+            name, github_token=resolved_token
         )
-        os_backend = OpenShiftBackend(config=openshift_config)
-        if not name:
-            name = resolve_session_for_backend(os_backend)
-            if not name:
-                raise typer.Exit(1)
-
-        try:
-            exit_code = os_backend.start_session(name, github_token=resolved_token)
-            raise typer.Exit(exit_code)
-        except OpenshiftSessionNotFoundError as e:
-            typer.echo(f"Error: {e}", err=True)
-            raise typer.Exit(1) from None
-        except Exception as e:
-            typer.echo(f"Error starting session: {e}", err=True)
-            raise typer.Exit(1) from None
+        raise typer.Exit(exit_code)
+    except (SessionNotFoundError, OpenshiftSessionNotFoundError) as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+    except Exception as e:
+        typer.echo(f"Error starting session: {e}", err=True)
+        raise typer.Exit(1) from None
 
 
 @app.command("stop")
@@ -876,78 +905,38 @@ def session_stop(
 
     # If no name and no backend specified, search all backends
     if not name and backend is None:
-        # Only running sessions can be stopped
-        workspace_match = find_workspace_session(
-            openshift_context, openshift_namespace, status_filter="running"
+        session, backend_obj = _auto_select_session(
+            openshift_context,
+            openshift_namespace,
+            status_filter="running",
+            no_sessions_hints=["No running sessions to stop."],
+            multi_hint_format="  paude stop {name}  # {backend_type}",
         )
-        if workspace_match:
-            ws_session, ws_backend = workspace_match
-            typer.echo(f"Stopping '{ws_session.name}' ({ws_session.backend_type})...")
-            ws_backend.stop_session(ws_session.name)
-            typer.echo(f"Session '{ws_session.name}' stopped.")
-            return
-
-        all_sessions = collect_all_sessions(
-            openshift_context, openshift_namespace, status_filter="running"
-        )
-        if not all_sessions:
-            typer.echo("No running sessions to stop.", err=True)
-            raise typer.Exit(1)
-        if len(all_sessions) == 1:
-            session, backend_obj = all_sessions[0]
-            typer.echo(f"Stopping '{session.name}' ({session.backend_type})...")
-            backend_obj.stop_session(session.name)
-            typer.echo(f"Session '{session.name}' stopped.")
-            return
-        else:
-            typer.echo(
-                "Multiple running sessions found. Specify one:",
-                err=True,
-            )
-            typer.echo("", err=True)
-            for s, _ in all_sessions:
-                typer.echo(
-                    f"  paude stop {s.name}  # {s.backend_type}",
-                    err=True,
-                )
-            raise typer.Exit(1)
+        typer.echo(f"Stopping '{session.name}' ({session.backend_type})...")
+        backend_obj.stop_session(session.name)
+        typer.echo(f"Session '{session.name}' stopped.")
+        return
 
     # Backend specified explicitly
-    if backend == BackendType.podman:
-        backend_instance = PodmanBackend()
-        if not name:
-            name = resolve_session_for_backend(
-                backend_instance, status_filter="running"
-            )
-            if not name:
-                raise typer.Exit(1)
-
-        try:
-            backend_instance.stop_session(name)
-            typer.echo(f"Session '{name}' stopped.")
-        except Exception as e:
-            typer.echo(f"Error stopping session: {e}", err=True)
-            raise typer.Exit(1) from None
-    elif backend == BackendType.openshift:
-        openshift_config = OpenShiftConfig(
-            context=openshift_context,
-            namespace=openshift_namespace,
+    backend_instance = _get_backend_instance(
+        backend, openshift_context, openshift_namespace  # type: ignore[arg-type]
+    )
+    if not name:
+        name = resolve_session_for_backend(
+            backend_instance, status_filter="running"
         )
-        os_backend = OpenShiftBackend(config=openshift_config)
         if not name:
-            name = resolve_session_for_backend(os_backend, status_filter="running")
-            if not name:
-                raise typer.Exit(1)
+            raise typer.Exit(1)
 
-        try:
-            os_backend.stop_session(name)
-            typer.echo(f"Session '{name}' stopped.")
-        except OpenshiftSessionNotFoundError as e:
-            typer.echo(f"Error: {e}", err=True)
-            raise typer.Exit(1) from None
-        except Exception as e:
-            typer.echo(f"Error stopping session: {e}", err=True)
-            raise typer.Exit(1) from None
+    try:
+        backend_instance.stop_session(name)
+        typer.echo(f"Session '{name}' stopped.")
+    except (SessionNotFoundError, OpenshiftSessionNotFoundError) as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+    except Exception as e:
+        typer.echo(f"Error stopping session: {e}", err=True)
+        raise typer.Exit(1) from None
 
 
 @app.command("connect")
@@ -1007,80 +996,44 @@ def session_connect(
 
     # If no name and no backend specified, search all backends
     if not name and backend is None:
-        # Only running sessions can be connected to
-        workspace_match = find_workspace_session(
-            openshift_context, openshift_namespace, status_filter="running"
+        session, backend_obj = _auto_select_session(
+            openshift_context,
+            openshift_namespace,
+            status_filter="running",
+            no_sessions_hints=[
+                "No running sessions to connect to.",
+                "",
+                "To see all sessions:",
+                "  paude list",
+                "",
+                "To start a session:",
+                "  paude start",
+            ],
+            multi_hint_format="  paude connect {name}  # {backend_type}, {workspace}",
         )
-        if workspace_match:
-            ws_session, ws_backend = workspace_match
-            typer.echo(
-                f"Connecting to '{ws_session.name}' ({ws_session.backend_type})..."
-            )
-            exit_code = ws_backend.connect_session(
-                ws_session.name, github_token=resolved_token
-            )
-            raise typer.Exit(exit_code)
-
-        all_running = collect_all_sessions(
-            openshift_context, openshift_namespace, status_filter="running"
+        typer.echo(
+            f"Connecting to '{session.name}' ({session.backend_type})..."
         )
-        if not all_running:
-            typer.echo("No running sessions to connect to.", err=True)
-            typer.echo("", err=True)
-            typer.echo("To see all sessions:", err=True)
-            typer.echo("  paude list", err=True)
-            typer.echo("", err=True)
-            typer.echo("To start a session:", err=True)
-            typer.echo("  paude start", err=True)
-            raise typer.Exit(1)
-        if len(all_running) == 1:
-            session, backend_obj = all_running[0]
-            typer.echo(f"Connecting to '{session.name}' ({session.backend_type})...")
-            exit_code = backend_obj.connect_session(
-                session.name, github_token=resolved_token
-            )
-            raise typer.Exit(exit_code)
-        else:
-            typer.echo(
-                "Multiple running sessions found. Specify one:",
-                err=True,
-            )
-            typer.echo("", err=True)
-            for s, _ in all_running:
-                workspace_str = str(s.workspace)
-                if len(workspace_str) > 35:
-                    workspace_str = "..." + workspace_str[-32:]
-                typer.echo(
-                    f"  paude connect {s.name}  # {s.backend_type}, {workspace_str}",
-                    err=True,
-                )
-            raise typer.Exit(1)
+        exit_code = backend_obj.connect_session(
+            session.name, github_token=resolved_token
+        )
+        raise typer.Exit(exit_code)
 
     # Backend specified explicitly
-    if backend == BackendType.podman:
-        backend_instance = PodmanBackend()
-        if not name:
-            name = resolve_session_for_backend(
-                backend_instance, status_filter="running"
-            )
-            if not name:
-                raise typer.Exit(1)
-
-        exit_code = backend_instance.connect_session(name, github_token=resolved_token)
-        raise typer.Exit(exit_code)
-    else:
-        openshift_config = OpenShiftConfig(
-            context=openshift_context,
-            namespace=openshift_namespace,
+    backend_instance = _get_backend_instance(
+        backend, openshift_context, openshift_namespace  # type: ignore[arg-type]
+    )
+    if not name:
+        name = resolve_session_for_backend(
+            backend_instance, status_filter="running"
         )
-        os_backend = OpenShiftBackend(config=openshift_config)
         if not name:
-            name = resolve_session_for_backend(os_backend, status_filter="running")
-            if not name:
-                raise typer.Exit(1)
+            raise typer.Exit(1)
 
-        exit_code = os_backend.connect_session(name, github_token=resolved_token)
-        raise typer.Exit(exit_code)
+    exit_code = backend_instance.connect_session(
+        name, github_token=resolved_token
+    )
+    raise typer.Exit(exit_code)
 
 
 @app.command("list")
@@ -1256,31 +1209,14 @@ def session_cp(
         _, backend_obj = result
     else:
         # Auto-detect session (empty string from `:path` syntax)
-        workspace_match = find_workspace_session(
-            openshift_context, openshift_namespace, status_filter="running"
+        session_obj, backend_obj = _auto_select_session(
+            openshift_context,
+            openshift_namespace,
+            status_filter="running",
+            no_sessions_hints=["No running sessions found."],
+            multi_hint_format="  paude cp ... {name}:path",
         )
-        if workspace_match:
-            ws_session, backend_obj = workspace_match
-            session_name = ws_session.name
-        else:
-            all_running = collect_all_sessions(
-                openshift_context, openshift_namespace, status_filter="running"
-            )
-            if not all_running:
-                typer.echo("No running sessions found.", err=True)
-                raise typer.Exit(1)
-            if len(all_running) == 1:
-                session_obj, backend_obj = all_running[0]
-                session_name = session_obj.name
-            else:
-                typer.echo(
-                    "Multiple running sessions found. Specify one:",
-                    err=True,
-                )
-                typer.echo("", err=True)
-                for s, _ in all_running:
-                    typer.echo(f"  paude cp ... {s.name}:path", err=True)
-                raise typer.Exit(1)
+        session_name = session_obj.name
 
     # Resolve relative remote paths to /pvc/workspace/
     if not remote_path.startswith("/"):
@@ -1740,14 +1676,7 @@ def _resolve_backend_for_domains(
         _, backend_obj = result
         return backend_obj
 
-    if backend == BackendType.podman:
-        return PodmanBackend()
-
-    openshift_config = OpenShiftConfig(
-        context=openshift_context,
-        namespace=openshift_namespace,
-    )
-    return OpenShiftBackend(config=openshift_config)
+    return _get_backend_instance(backend, openshift_context, openshift_namespace)
 
 
 def _check_domains_mutual_exclusivity(
