@@ -860,6 +860,8 @@ class TestSetupPrecommitInContainerOpenshift:
         call_args = mock_run.call_args[0][0]
         bash_cmd_idx = call_args.index("-c") + 1
         bash_cmd = call_args[bash_cmd_idx]
+        # Must handle both empty HOME and HOME="/" (OpenShift arbitrary UID)
+        assert '"$HOME" == "/"' in bash_cmd
         assert "export HOME=" in bash_cmd
 
     @patch("paude.git_remote.subprocess.run")

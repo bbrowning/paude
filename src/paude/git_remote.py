@@ -569,7 +569,7 @@ def setup_precommit_in_container_openshift(
         True if successful, False if failed.
     """
     cmd = (
-        "export HOME=${HOME:-/home/paude}; "
+        '[[ -z "$HOME" || "$HOME" == "/" ]] && export HOME=/home/paude; '
         "test -f /pvc/workspace/.pre-commit-config.yaml && "
         "cd /pvc/workspace && pre-commit install"
     )
