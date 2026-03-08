@@ -26,7 +26,7 @@ TMUX_SEPARATOR = "---PAUDE_TMUX_SEP---"
 _TMUX_QUERY_CMD = (
     f"tmux list-windows -t claude -F '#{{window_activity}}' 2>/dev/null; "
     f"echo '{TMUX_SEPARATOR}'; "
-    "tmux capture-pane -t claude -p -l 5 2>/dev/null"
+    "tmux capture-pane -t claude:0.0 -p -S -5 2>/dev/null; true"
 )
 
 
