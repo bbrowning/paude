@@ -813,6 +813,36 @@ class PodmanBackend:
             allowed_domains=domains,
         )
 
+    def exec_in_session(self, name: str, command: str) -> tuple[int, str, str]:
+        """Execute a command inside a running session's container.
+
+        Args:
+            name: Session name.
+            command: Shell command to execute.
+
+        Returns:
+            Tuple of (return_code, stdout, stderr).
+
+        Raises:
+            SessionNotFoundError: If session not found.
+            ValueError: If session is not running.
+        """
+        container_name = self._container_name(name)
+
+        if not self._runner.container_exists(container_name):
+            raise SessionNotFoundError(f"Session '{name}' not found")
+
+        if not self._runner.container_running(container_name):
+            raise ValueError(
+                f"Session '{name}' is not running. "
+                f"Use 'paude start {name}' to start it."
+            )
+
+        result = self._runner.exec_in_container(
+            container_name, ["bash", "-c", command], check=False
+        )
+        return (result.returncode, result.stdout, result.stderr)
+
     def copy_to_session(self, name: str, local_path: str, remote_path: str) -> None:
         """Copy a file or directory from local to a running session.
 

@@ -1167,6 +1167,44 @@ class OpenShiftBackend:
 
         self._proxy.update_deployment_domains(name, domains)
 
+    def exec_in_session(self, name: str, command: str) -> tuple[int, str, str]:
+        """Execute a command inside a running session's container.
+
+        Args:
+            name: Session name.
+            command: Shell command to execute.
+
+        Returns:
+            Tuple of (return_code, stdout, stderr).
+
+        Raises:
+            SessionNotFoundError: If session not found.
+            ValueError: If session is not running.
+        """
+        if self._get_statefulset(name) is None:
+            raise SessionNotFoundError(f"Session '{name}' not found")
+
+        pod_name = self._get_pod_for_session(name)
+        if pod_name is None:
+            raise ValueError(
+                f"Session '{name}' is not running. "
+                f"Use 'paude start {name}' to start it."
+            )
+
+        result = self._oc.run(
+            "exec",
+            pod_name,
+            "-n",
+            self.namespace,
+            "--",
+            "bash",
+            "-c",
+            command,
+            check=False,
+            timeout=OC_EXEC_TIMEOUT,
+        )
+        return (result.returncode, result.stdout, result.stderr)
+
     def copy_to_session(self, name: str, local_path: str, remote_path: str) -> None:
         """Copy a file or directory from local to a running session.
 

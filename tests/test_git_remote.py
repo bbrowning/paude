@@ -1,5 +1,6 @@
 """Tests for git_remote module."""
 
+from pathlib import Path
 from unittest.mock import patch
 
 from paude.git_remote import (
@@ -10,6 +11,8 @@ from paude.git_remote import (
     fetch_tags_in_container_podman,
     get_current_branch,
     get_local_origin_url,
+    git_diff_stat,
+    git_fetch_from_remote,
     git_push_tags_to_remote,
     git_remote_add,
     git_remote_remove,
@@ -872,3 +875,74 @@ class TestSetupPrecommitInContainerOpenshift:
         result = setup_precommit_in_container_openshift("pod-0", "namespace")
 
         assert result is False
+
+
+class TestGitFetchFromRemote:
+    """Tests for git_fetch_from_remote."""
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_fetch_success(self, mock_run) -> None:
+        """Return True on successful fetch."""
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        result = git_fetch_from_remote("paude-my-session")
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        assert call_args == ["git", "fetch", "paude-my-session"]
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_fetch_with_cwd(self, mock_run) -> None:
+        """Passes cwd to subprocess."""
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        git_fetch_from_remote("paude-test", cwd=Path("/tmp/workspace"))
+
+        assert mock_run.call_args[1]["cwd"] == Path("/tmp/workspace")
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_fetch_failure(self, mock_run) -> None:
+        """Return False on failed fetch."""
+        mock_run.return_value.returncode = 1
+        mock_run.return_value.stderr = "fatal: error"
+
+        result = git_fetch_from_remote("bad-remote")
+
+        assert result is False
+
+
+class TestGitDiffStat:
+    """Tests for git_diff_stat."""
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_diff_stat_success(self, mock_run) -> None:
+        """Return diff stat output on success."""
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = " 2 files changed, 10 insertions(+)\n"
+
+        result = git_diff_stat("main", "feature")
+
+        assert "2 files changed" in result
+        call_args = mock_run.call_args[0][0]
+        assert call_args == ["git", "diff", "--stat", "main...feature"]
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_diff_stat_with_cwd(self, mock_run) -> None:
+        """Passes cwd to subprocess."""
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = ""
+
+        git_diff_stat("main", "feature", cwd=Path("/tmp/workspace"))
+
+        assert mock_run.call_args[1]["cwd"] == Path("/tmp/workspace")
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_diff_stat_failure(self, mock_run) -> None:
+        """Return empty string on failure."""
+        mock_run.return_value.returncode = 1
+
+        result = git_diff_stat("main", "nonexistent")
+
+        assert result == ""

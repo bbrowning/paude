@@ -9,6 +9,7 @@ from __future__ import annotations
 import shlex
 import subprocess
 import sys
+from pathlib import Path
 
 
 def build_openshift_remote_url(
@@ -584,6 +585,53 @@ def setup_precommit_in_container_openshift(
         text=True,
     )
     return result.returncode == 0
+
+
+def git_fetch_from_remote(remote_name: str, cwd: Path | None = None) -> bool:
+    """Fetch from a git remote.
+
+    Args:
+        remote_name: Name of the remote to fetch from.
+        cwd: Working directory for the command.
+
+    Returns:
+        True if successful, False if failed.
+    """
+    result = subprocess.run(
+        ["git", "fetch", remote_name],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+    )
+    if result.returncode != 0:
+        print(
+            f"Failed to fetch from '{remote_name}': {result.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return False
+    return True
+
+
+def git_diff_stat(ref_a: str, ref_b: str, cwd: Path | None = None) -> str:
+    """Get diff stat between two git refs.
+
+    Args:
+        ref_a: First ref (e.g., "main").
+        ref_b: Second ref (e.g., branch name).
+        cwd: Working directory for the command.
+
+    Returns:
+        Diff stat output string, or empty string on failure.
+    """
+    result = subprocess.run(
+        ["git", "diff", "--stat", f"{ref_a}...{ref_b}"],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+    )
+    if result.returncode != 0:
+        return ""
+    return result.stdout
 
 
 def git_push_to_remote(remote_name: str, branch: str | None = None) -> bool:

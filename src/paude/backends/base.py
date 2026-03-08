@@ -210,6 +210,22 @@ class Backend(Protocol):
         """
         ...
 
+    def exec_in_session(self, name: str, command: str) -> tuple[int, str, str]:
+        """Execute a command inside a running session's container.
+
+        Args:
+            name: Session name.
+            command: Shell command to execute.
+
+        Returns:
+            Tuple of (return_code, stdout, stderr).
+
+        Raises:
+            SessionNotFoundError: If session not found.
+            ValueError: If session is not running.
+        """
+        ...
+
     def copy_to_session(self, name: str, local_path: str, remote_path: str) -> None:
         """Copy a file or directory from local to a session.
 

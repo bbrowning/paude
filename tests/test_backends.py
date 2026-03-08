@@ -77,6 +77,75 @@ class TestPodmanBackend:
         mock_runner.stop_container.assert_called_once_with("container-name")
 
 
+class TestPodmanExecInSession:
+    """Tests for PodmanBackend.exec_in_session."""
+
+    def _make_backend(self) -> tuple[PodmanBackend, MagicMock]:
+        mock_runner = MagicMock()
+        backend = PodmanBackend()
+        backend._runner = mock_runner
+        return backend, mock_runner
+
+    def test_exec_in_session_success(self) -> None:
+        """exec_in_session returns (returncode, stdout, stderr) on success."""
+        backend, mock_runner = self._make_backend()
+        mock_runner.container_exists.return_value = True
+        mock_runner.container_running.return_value = True
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "hello\n"
+        mock_result.stderr = ""
+        mock_runner.exec_in_container.return_value = mock_result
+
+        rc, out, err = backend.exec_in_session("my-session", "echo hello")
+
+        assert rc == 0
+        assert out == "hello\n"
+        assert err == ""
+        mock_runner.exec_in_container.assert_called_once_with(
+            "paude-my-session", ["bash", "-c", "echo hello"], check=False
+        )
+
+    def test_exec_in_session_not_found(self) -> None:
+        """exec_in_session raises SessionNotFoundError if container missing."""
+        from paude.backends.podman import SessionNotFoundError
+
+        backend, mock_runner = self._make_backend()
+        mock_runner.container_exists.return_value = False
+
+        import pytest
+
+        with pytest.raises(SessionNotFoundError, match="not found"):
+            backend.exec_in_session("missing", "echo hello")
+
+    def test_exec_in_session_not_running(self) -> None:
+        """exec_in_session raises ValueError if container not running."""
+        backend, mock_runner = self._make_backend()
+        mock_runner.container_exists.return_value = True
+        mock_runner.container_running.return_value = False
+
+        import pytest
+
+        with pytest.raises(ValueError, match="not running"):
+            backend.exec_in_session("stopped", "echo hello")
+
+    def test_exec_in_session_nonzero_exit(self) -> None:
+        """exec_in_session returns non-zero exit code without raising."""
+        backend, mock_runner = self._make_backend()
+        mock_runner.container_exists.return_value = True
+        mock_runner.container_running.return_value = True
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+        mock_result.stderr = "error\n"
+        mock_runner.exec_in_container.return_value = mock_result
+
+        rc, out, err = backend.exec_in_session("my-session", "false")
+
+        assert rc == 1
+        assert err == "error\n"
+
+
 class TestBackendProtocol:
     """Tests for Backend Protocol conformance."""
 
@@ -100,6 +169,7 @@ class TestBackendProtocol:
         assert callable(backend.connect_session)
         assert callable(backend.list_sessions)
         assert callable(backend.get_session)
+        assert callable(backend.exec_in_session)
         assert callable(backend.copy_to_session)
         assert callable(backend.copy_from_session)
 
