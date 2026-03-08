@@ -119,13 +119,6 @@ jobs:
           kubectl cluster-info
           oc cluster-info
 
-      - name: Cache Podman layers
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/share/containers/storage
-          key: podman-layers-${{ hashFiles('containers/**') }}
-          restore-keys: podman-layers-
-
       - name: Build and load images into Kind
         run: |
           # Build images locally with Podman
