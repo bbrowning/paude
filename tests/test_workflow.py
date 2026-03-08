@@ -235,14 +235,14 @@ class TestStatusSessions:
         mock_backend = MagicMock()
         mock_collect.return_value = [(mock_session, mock_backend)]
         mock_activity.return_value = SessionActivity(
-            last_activity="2m ago", state="Working"
+            last_activity="2m ago", state="Active"
         )
 
         status_sessions()
 
         captured = capsys.readouterr()
         assert "test-session" in captured.out
-        assert "Working" in captured.out
+        assert "Active" in captured.out
         assert "myproject" in captured.out
 
     @patch("paude.session_discovery.collect_all_sessions")

@@ -59,66 +59,55 @@ class TestFormatElapsed:
 class TestDetectState:
     """Tests for _detect_state."""
 
-    def test_waiting_for_input_approve(self) -> None:
-        result = _detect_state("0", "Do you approve this plan?")
-        assert result == "Waiting for input"
-
-    def test_waiting_for_input_yn(self) -> None:
-        result = _detect_state("0", "Continue? [Y/n]")
-        assert result == "Waiting for input"
-
-    def test_idle_at_prompt(self) -> None:
-        result = _detect_state("0", "some output\n$ ")
-        assert result == "Idle"
-
-    def test_idle_at_chevron(self) -> None:
-        result = _detect_state("0", "some output\n>")
-        assert result == "Idle"
-
-    def test_working_recent_activity(self) -> None:
+    def test_active_recent(self) -> None:
         ts = str(int(time.time()) - 30)
-        result = _detect_state(ts, "Running tests...\ntest_foo PASSED")
-        assert result == "Working"
+        assert _detect_state(ts) == "Active"
 
-    def test_idle_old_activity(self) -> None:
+    def test_idle_old(self) -> None:
         ts = str(int(time.time()) - 600)
-        result = _detect_state(ts, "Running tests...\ntest_foo PASSED")
-        assert result == "Idle"
+        assert _detect_state(ts) == "Idle"
 
-    def test_empty_content(self) -> None:
-        result = _detect_state("0", "")
-        assert result == "Idle"
+    def test_active_boundary(self) -> None:
+        ts = str(int(time.time()) - 119)
+        assert _detect_state(ts) == "Active"
 
-    def test_waiting_permission(self) -> None:
-        result = _detect_state("0", "Grant permission to run command?")
-        assert result == "Waiting for input"
+    def test_idle_boundary(self) -> None:
+        ts = str(int(time.time()) - 120)
+        assert _detect_state(ts) == "Idle"
+
+    def test_invalid_timestamp(self) -> None:
+        assert _detect_state("not-a-number") == "Idle"
+
+    def test_empty_string(self) -> None:
+        assert _detect_state("") == "Idle"
 
 
 class TestParseActivity:
     """Tests for parse_activity."""
 
-    def test_returns_session_activity(self) -> None:
-        ts = str(int(time.time()) - 120)
-        result = parse_activity(ts, "output\n>")
+    def test_returns_active(self) -> None:
+        ts = str(int(time.time()) - 30)
+        result = parse_activity(ts)
         assert isinstance(result, SessionActivity)
+        assert result.state == "Active"
+
+    def test_returns_idle(self) -> None:
+        ts = str(int(time.time()) - 300)
+        result = parse_activity(ts)
         assert result.state == "Idle"
-        assert "2m ago" in result.last_activity
 
 
 class TestGetSessionActivity:
     """Tests for get_session_activity."""
 
     def test_queries_tmux(self) -> None:
-        from paude.session_status import TMUX_SEPARATOR
-
         mock_backend = MagicMock()
         ts = str(int(time.time()) - 30)
-        combined_output = f"{ts}\n{TMUX_SEPARATOR}\nWorking on task...\ntest PASSED"
-        mock_backend.exec_in_session.return_value = (0, combined_output, "")
+        mock_backend.exec_in_session.return_value = (0, f"{ts}\n", "")
 
         result = get_session_activity(mock_backend, "my-session")
 
-        assert result.state == "Working"
+        assert result.state == "Active"
         assert mock_backend.exec_in_session.call_count == 1
 
     def test_handles_tmux_failure(self) -> None:
