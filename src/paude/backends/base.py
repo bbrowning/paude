@@ -63,6 +63,7 @@ class SessionConfig:
     network: str | None = None
     proxy_image: str | None = None
     credential_timeout: int = 60  # minutes of inactivity before credential removal
+    wait_for_ready: bool = True
 
 
 class Backend(Protocol):

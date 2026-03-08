@@ -664,23 +664,25 @@ class OpenShiftBackend:
             input_data=json.dumps(sts_spec),
         )
 
-        # Wait for proxy to be ready first (if using proxy)
-        if config.allowed_domains is not None:
-            self._wait_for_proxy_ready(session_name)
+        if config.wait_for_ready:
+            # Wait for proxy to be ready first (if using proxy)
+            if config.allowed_domains is not None:
+                self._wait_for_proxy_ready(session_name)
 
-        # Wait for pod to be ready
-        pod_name = f"paude-{session_name}-0"
-        print(f"Waiting for pod {pod_name} to be ready...", file=sys.stderr)
-        self._wait_for_pod_ready(pod_name)
+            # Wait for pod to be ready
+            pod_name = f"paude-{session_name}-0"
+            print(f"Waiting for pod {pod_name} to be ready...", file=sys.stderr)
+            self._wait_for_pod_ready(pod_name)
 
-        # Sync configuration and credentials
-        self._sync_config_to_pod(pod_name)
+            # Sync configuration and credentials
+            self._sync_config_to_pod(pod_name)
 
+        session_status = "running" if config.wait_for_ready else "pending"
         print(f"Session '{session_name}' created.", file=sys.stderr)
 
         return Session(
             name=session_name,
-            status="running",
+            status=session_status,
             workspace=config.workspace,
             created_at=created_at,
             backend_type="openshift",

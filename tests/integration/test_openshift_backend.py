@@ -68,36 +68,10 @@ def cleanup_test_resources(test_namespace: str, unique_session_name: str):
     """Clean up test resources after each test."""
     yield
 
-    # Delete any resources created by the test
-    sts_name = f"paude-{unique_session_name}"
-    pvc_name = f"workspace-{sts_name}-0"
-
-    # Delete StatefulSet
+    # Delete all labeled resources in one call
     run_oc(
         "delete",
-        "statefulset",
-        sts_name,
-        "-n",
-        test_namespace,
-        "--ignore-not-found",
-        check=False,
-    )
-
-    # Delete PVC
-    run_oc(
-        "delete",
-        "pvc",
-        pvc_name,
-        "-n",
-        test_namespace,
-        "--ignore-not-found",
-        check=False,
-    )
-
-    # Delete NetworkPolicies
-    run_oc(
-        "delete",
-        "networkpolicy",
+        "statefulset,networkpolicy,deployment,service",
         "-n",
         test_namespace,
         "-l",
@@ -106,21 +80,13 @@ def cleanup_test_resources(test_namespace: str, unique_session_name: str):
         check=False,
     )
 
-    # Delete proxy resources
-    proxy_name = f"paude-proxy-{unique_session_name}"
+    # PVC needs separate deletion (created by volumeClaimTemplate, may not have session label)
+    sts_name = f"paude-{unique_session_name}"
+    pvc_name = f"workspace-{sts_name}-0"
     run_oc(
         "delete",
-        "deployment",
-        proxy_name,
-        "-n",
-        test_namespace,
-        "--ignore-not-found",
-        check=False,
-    )
-    run_oc(
-        "delete",
-        "service",
-        proxy_name,
+        "pvc",
+        pvc_name,
         "-n",
         test_namespace,
         "--ignore-not-found",
@@ -145,11 +111,13 @@ class TestOpenShiftSessionLifecycle:
             name=unique_session_name,
             workspace=temp_workspace,
             image=kubernetes_test_image,
+            wait_for_ready=False,
         )
 
         session = openshift_backend.create_session(config)
 
         assert session.name == unique_session_name
+        assert session.status == "pending"
         assert session.backend_type == "openshift"
 
         # Verify StatefulSet exists
@@ -188,6 +156,7 @@ class TestOpenShiftSessionLifecycle:
             name=unique_session_name,
             workspace=temp_workspace,
             image=kubernetes_test_image,
+            wait_for_ready=False,
         )
 
         openshift_backend.create_session(config)
@@ -210,6 +179,7 @@ class TestOpenShiftSessionLifecycle:
             name=unique_session_name,
             workspace=temp_workspace,
             image=kubernetes_test_image,
+            wait_for_ready=False,
         )
 
         openshift_backend.create_session(config)
@@ -246,6 +216,7 @@ class TestOpenShiftSessionLifecycle:
             name=unique_session_name,
             workspace=temp_workspace,
             image=kubernetes_test_image,
+            wait_for_ready=False,
         )
 
         openshift_backend.create_session(config)
@@ -268,6 +239,7 @@ class TestOpenShiftSessionLifecycle:
             name=unique_session_name,
             workspace=temp_workspace,
             image=kubernetes_test_image,
+            wait_for_ready=False,
         )
 
         openshift_backend.create_session(config)
@@ -305,6 +277,7 @@ class TestOpenShiftStatefulSetSpec:
             name=unique_session_name,
             workspace=temp_workspace,
             image=kubernetes_test_image,
+            wait_for_ready=False,
         )
 
         openshift_backend.create_session(config)
@@ -340,6 +313,7 @@ class TestOpenShiftStatefulSetSpec:
             name=unique_session_name,
             workspace=temp_workspace,
             image=kubernetes_test_image,
+            wait_for_ready=False,
         )
 
         openshift_backend.create_session(config)
@@ -379,6 +353,7 @@ class TestOpenShiftScaling:
             name=unique_session_name,
             workspace=temp_workspace,
             image=kubernetes_test_image,
+            wait_for_ready=False,
         )
 
         openshift_backend.create_session(config)
