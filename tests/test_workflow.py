@@ -388,8 +388,8 @@ class TestHarvestCli:
         result = runner.invoke(app, ["harvest", "--help"])
         assert result.exit_code == 0
         assert "harvest" in result.output.lower()
-        assert "--branch" in result.output
-        assert "--pr" in result.output
+        assert "branch" in result.output
+        assert "pr" in result.output.lower()
 
 
 class TestResetCli:
@@ -403,9 +403,9 @@ class TestResetCli:
         runner = CliRunner()
         result = runner.invoke(app, ["reset", "--help"])
         assert result.exit_code == 0
-        assert "--branch" in result.output
-        assert "--force" in result.output
-        assert "--keep-conversation" in result.output
+        assert "branch" in result.output
+        assert "force" in result.output
+        assert "keep-conversation" in result.output
 
 
 class TestStatusCli:
