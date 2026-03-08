@@ -137,6 +137,44 @@ class PodmanBackend:
         """Get internal network name for a session."""
         return f"paude-net-{session_name}"
 
+    def _require_session(self, name: str) -> str:
+        """Validate session exists and return its container name.
+
+        Args:
+            name: Session name.
+
+        Returns:
+            Container name for the session.
+
+        Raises:
+            SessionNotFoundError: If session not found.
+        """
+        container_name = self._container_name(name)
+        if not self._runner.container_exists(container_name):
+            raise SessionNotFoundError(f"Session '{name}' not found")
+        return container_name
+
+    def _require_running_session(self, name: str) -> str:
+        """Validate session exists and is running, return its container name.
+
+        Args:
+            name: Session name.
+
+        Returns:
+            Container name for the session.
+
+        Raises:
+            SessionNotFoundError: If session not found.
+            ValueError: If session is not running.
+        """
+        container_name = self._require_session(name)
+        if not self._runner.container_running(container_name):
+            raise ValueError(
+                f"Session '{name}' is not running. "
+                f"Use 'paude start {name}' to start it."
+            )
+        return container_name
+
     def _has_proxy(self, session_name: str) -> bool:
         """Check if a session has a proxy container."""
         return self._runner.container_exists(self._proxy_container_name(session_name))
@@ -306,9 +344,7 @@ class PodmanBackend:
         Raises:
             SessionNotFoundError: If session not found.
         """
-        container_name = self._container_name(name)
-        if not self._runner.container_exists(container_name):
-            raise SessionNotFoundError(f"Session '{name}' not found")
+        container_name = self._require_session(name)
         if self._runner.container_running(container_name):
             return
         self._ensure_gcp_adc_secret()
@@ -474,10 +510,7 @@ class PodmanBackend:
         Raises:
             SessionNotFoundError: If session not found.
         """
-        container_name = self._container_name(name)
-
-        if not self._runner.container_exists(container_name):
-            raise SessionNotFoundError(f"Session '{name}' not found")
+        container_name = self._require_session(name)
 
         state = self._runner.get_container_state(container_name)
 
@@ -724,9 +757,7 @@ class PodmanBackend:
         Raises:
             SessionNotFoundError: If session not found.
         """
-        container_name = self._container_name(name)
-        if not self._runner.container_exists(container_name):
-            raise SessionNotFoundError(f"Session '{name}' not found")
+        self._require_session(name)
 
         proxy_name = self._proxy_container_name(name)
         if not self._runner.container_exists(proxy_name):
@@ -749,9 +780,7 @@ class PodmanBackend:
             SessionNotFoundError: If session not found.
             ValueError: If proxy is not running.
         """
-        container_name = self._container_name(name)
-        if not self._runner.container_exists(container_name):
-            raise SessionNotFoundError(f"Session '{name}' not found")
+        self._require_session(name)
 
         proxy_name = self._proxy_container_name(name)
         if not self._runner.container_exists(proxy_name):
@@ -780,9 +809,7 @@ class PodmanBackend:
             SessionNotFoundError: If session not found.
             ValueError: If session has no proxy deployment.
         """
-        container_name = self._container_name(name)
-        if not self._runner.container_exists(container_name):
-            raise SessionNotFoundError(f"Session '{name}' not found")
+        self._require_session(name)
 
         proxy_name = self._proxy_container_name(name)
         if not self._runner.container_exists(proxy_name):
@@ -827,16 +854,7 @@ class PodmanBackend:
             SessionNotFoundError: If session not found.
             ValueError: If session is not running.
         """
-        container_name = self._container_name(name)
-
-        if not self._runner.container_exists(container_name):
-            raise SessionNotFoundError(f"Session '{name}' not found")
-
-        if not self._runner.container_running(container_name):
-            raise ValueError(
-                f"Session '{name}' is not running. "
-                f"Use 'paude start {name}' to start it."
-            )
+        container_name = self._require_running_session(name)
 
         result = self._runner.exec_in_container(
             container_name, ["bash", "-c", command], check=False
@@ -855,16 +873,7 @@ class PodmanBackend:
             SessionNotFoundError: If session not found.
             ValueError: If session is not running.
         """
-        container_name = self._container_name(name)
-
-        if not self._runner.container_exists(container_name):
-            raise SessionNotFoundError(f"Session '{name}' not found")
-
-        if not self._runner.container_running(container_name):
-            raise ValueError(
-                f"Session '{name}' is not running. "
-                f"Use 'paude start {name}' to start it."
-            )
+        container_name = self._require_running_session(name)
 
         subprocess.run(
             ["podman", "cp", local_path, f"{container_name}:{remote_path}"],
@@ -883,16 +892,7 @@ class PodmanBackend:
             SessionNotFoundError: If session not found.
             ValueError: If session is not running.
         """
-        container_name = self._container_name(name)
-
-        if not self._runner.container_exists(container_name):
-            raise SessionNotFoundError(f"Session '{name}' not found")
-
-        if not self._runner.container_running(container_name):
-            raise ValueError(
-                f"Session '{name}' is not running. "
-                f"Use 'paude start {name}' to start it."
-            )
+        container_name = self._require_running_session(name)
 
         subprocess.run(
             ["podman", "cp", f"{container_name}:{remote_path}", local_path],
