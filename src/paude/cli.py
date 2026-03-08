@@ -565,6 +565,10 @@ def session_create(
             raise typer.Exit(1) from None
         except Exception as e:
             typer.echo(f"Error creating session: {e}", err=True)
+            try:
+                backend_instance.delete_session(session.name)
+            except Exception:  # noqa: S110 - best-effort cleanup
+                pass
             raise typer.Exit(1) from None
     else:
         # OpenShift backend
@@ -831,14 +835,14 @@ def session_start(
             multi_hint_format="  paude start {name}  # {backend_type}, {status}",
         )
         typer.echo(f"Starting '{session.name}' ({session.backend_type})...")
-        exit_code = backend_obj.start_session(
-            session.name, github_token=resolved_token
-        )
+        exit_code = backend_obj.start_session(session.name, github_token=resolved_token)
         raise typer.Exit(exit_code)
 
     # Backend specified explicitly
     backend_instance = _get_backend_instance(
-        backend, openshift_context, openshift_namespace  # type: ignore[arg-type]
+        backend,  # type: ignore[arg-type]
+        openshift_context,
+        openshift_namespace,
     )
     if not name:
         name = resolve_session_for_backend(backend_instance)
@@ -846,9 +850,7 @@ def session_start(
             raise typer.Exit(1)
 
     try:
-        exit_code = backend_instance.start_session(
-            name, github_token=resolved_token
-        )
+        exit_code = backend_instance.start_session(name, github_token=resolved_token)
         raise typer.Exit(exit_code)
     except (SessionNotFoundError, OpenshiftSessionNotFoundError) as e:
         typer.echo(f"Error: {e}", err=True)
@@ -919,12 +921,12 @@ def session_stop(
 
     # Backend specified explicitly
     backend_instance = _get_backend_instance(
-        backend, openshift_context, openshift_namespace  # type: ignore[arg-type]
+        backend,  # type: ignore[arg-type]
+        openshift_context,
+        openshift_namespace,
     )
     if not name:
-        name = resolve_session_for_backend(
-            backend_instance, status_filter="running"
-        )
+        name = resolve_session_for_backend(backend_instance, status_filter="running")
         if not name:
             raise typer.Exit(1)
 
@@ -1011,9 +1013,7 @@ def session_connect(
             ],
             multi_hint_format="  paude connect {name}  # {backend_type}, {workspace}",
         )
-        typer.echo(
-            f"Connecting to '{session.name}' ({session.backend_type})..."
-        )
+        typer.echo(f"Connecting to '{session.name}' ({session.backend_type})...")
         exit_code = backend_obj.connect_session(
             session.name, github_token=resolved_token
         )
@@ -1021,18 +1021,16 @@ def session_connect(
 
     # Backend specified explicitly
     backend_instance = _get_backend_instance(
-        backend, openshift_context, openshift_namespace  # type: ignore[arg-type]
+        backend,  # type: ignore[arg-type]
+        openshift_context,
+        openshift_namespace,
     )
     if not name:
-        name = resolve_session_for_backend(
-            backend_instance, status_filter="running"
-        )
+        name = resolve_session_for_backend(backend_instance, status_filter="running")
         if not name:
             raise typer.Exit(1)
 
-    exit_code = backend_instance.connect_session(
-        name, github_token=resolved_token
-    )
+    exit_code = backend_instance.connect_session(name, github_token=resolved_token)
     raise typer.Exit(exit_code)
 
 
@@ -1480,7 +1478,10 @@ def _setup_git_after_create(
             origin_set = set_origin_in_container_podman(container_name, origin_url)
         else:
             origin_set = set_origin_in_container_openshift(
-                pod_name, namespace, origin_url, context=openshift_context,
+                pod_name,
+                namespace,
+                origin_url,
+                context=openshift_context,
             )
 
         # Step 5: Fetch tags from origin in container
@@ -1495,7 +1496,9 @@ def _setup_git_after_create(
                     )
             else:
                 if not fetch_tags_in_container_openshift(
-                    pod_name, namespace, context=openshift_context,
+                    pod_name,
+                    namespace,
+                    context=openshift_context,
                 ):
                     typer.echo(
                         "Warning: Could not fetch tags from origin "
@@ -1512,7 +1515,9 @@ def _setup_git_after_create(
             setup_precommit_in_container_podman(container_name)
         else:
             setup_precommit_in_container_openshift(
-                pod_name, namespace, context=openshift_context,
+                pod_name,
+                namespace,
+                context=openshift_context,
             )
 
     typer.echo("Git setup complete.")
@@ -1768,8 +1773,7 @@ def _add_domains(backend_obj: Backend, name: str, add: list[str]) -> None:
     current = backend_obj.get_allowed_domains(name)
     if current is None:
         typer.echo(
-            "Error: Session has unrestricted network (no proxy). "
-            "Cannot add domains.",
+            "Error: Session has unrestricted network (no proxy). Cannot add domains.",
             err=True,
         )
         raise typer.Exit(1)
@@ -1810,8 +1814,7 @@ def _remove_domains(backend_obj: Backend, name: str, remove: list[str]) -> None:
 
     if not remaining:
         typer.echo(
-            "Error: Cannot remove all domains. "
-            "At least one domain must remain.",
+            "Error: Cannot remove all domains. At least one domain must remain.",
             err=True,
         )
         raise typer.Exit(1)

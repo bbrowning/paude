@@ -6,6 +6,7 @@ with paude containers using the ext:: protocol.
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 import sys
 
@@ -225,8 +226,9 @@ def initialize_container_workspace_podman(
     Returns:
         True if successful, False if failed.
     """
+    quoted_branch = shlex.quote(branch)
     init_cmd = (
-        f"test -d /pvc/workspace/.git || git init -b {branch} /pvc/workspace && "
+        f"test -d /pvc/workspace/.git || git init -b {quoted_branch} /pvc/workspace && "
         "git -C /pvc/workspace config receive.denyCurrentBranch updateInstead"
     )
     result = subprocess.run(
@@ -257,8 +259,9 @@ def initialize_container_workspace_openshift(
     Returns:
         True if successful, False if failed.
     """
+    quoted_branch = shlex.quote(branch)
     init_cmd = (
-        f"test -d /pvc/workspace/.git || git init -b {branch} /pvc/workspace && "
+        f"test -d /pvc/workspace/.git || git init -b {quoted_branch} /pvc/workspace && "
         "git -C /pvc/workspace config receive.denyCurrentBranch updateInstead"
     )
     oc_cmd = ["oc"]
@@ -394,9 +397,7 @@ def git_push_tags_to_remote(remote_name: str) -> bool:
     return result.returncode == 0
 
 
-def set_origin_in_container_podman(
-    container_name: str, origin_url: str
-) -> bool:
+def set_origin_in_container_podman(container_name: str, origin_url: str) -> bool:
     """Set the origin remote URL in a Podman container's workspace.
 
     Idempotent: adds origin if missing, updates URL if it exists.
@@ -408,9 +409,10 @@ def set_origin_in_container_podman(
     Returns:
         True if successful, False if failed.
     """
+    quoted_url = shlex.quote(origin_url)
     cmd = (
-        f'git -C /pvc/workspace remote add origin "{origin_url}" 2>/dev/null || '
-        f'git -C /pvc/workspace remote set-url origin "{origin_url}"'
+        f"git -C /pvc/workspace remote add origin {quoted_url} 2>/dev/null || "
+        f"git -C /pvc/workspace remote set-url origin {quoted_url}"
     )
     result = subprocess.run(
         ["podman", "exec", container_name, "bash", "-c", cmd],
@@ -442,9 +444,10 @@ def set_origin_in_container_openshift(
     Returns:
         True if successful, False if failed.
     """
+    quoted_url = shlex.quote(origin_url)
     cmd = (
-        f'git -C /pvc/workspace remote add origin "{origin_url}" 2>/dev/null || '
-        f'git -C /pvc/workspace remote set-url origin "{origin_url}"'
+        f"git -C /pvc/workspace remote add origin {quoted_url} 2>/dev/null || "
+        f"git -C /pvc/workspace remote set-url origin {quoted_url}"
     )
     oc_cmd = ["oc"]
     if context:
@@ -473,7 +476,11 @@ def fetch_tags_in_container_podman(container_name: str) -> bool:
     """
     result = subprocess.run(
         [
-            "podman", "exec", container_name, "bash", "-c",
+            "podman",
+            "exec",
+            container_name,
+            "bash",
+            "-c",
             "git -C /pvc/workspace fetch origin --tags",
         ],
         capture_output=True,
@@ -500,10 +507,18 @@ def fetch_tags_in_container_openshift(
     oc_cmd = ["oc"]
     if context:
         oc_cmd.extend(["--context", context])
-    oc_cmd.extend([
-        "exec", pod_name, "-n", namespace, "--",
-        "bash", "-c", "git -C /pvc/workspace fetch origin --tags",
-    ])
+    oc_cmd.extend(
+        [
+            "exec",
+            pod_name,
+            "-n",
+            namespace,
+            "--",
+            "bash",
+            "-c",
+            "git -C /pvc/workspace fetch origin --tags",
+        ]
+    )
 
     result = subprocess.run(
         oc_cmd,
