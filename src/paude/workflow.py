@@ -209,6 +209,15 @@ def harvest_session(
         typer.echo(f"Harvested changes to branch '{branch_name}'.", err=True)
 
     if create_pr:
+        typer.echo(f"Pushing '{branch_name}' to origin...", err=True)
+        push_result = subprocess.run(
+            ["git", "push", "-u", "origin", branch_name],
+            cwd=workspace,
+        )
+        if push_result.returncode != 0:
+            typer.echo("Error: Failed to push branch to origin.", err=True)
+            raise typer.Exit(1)
+
         title = pr_title or branch_name
         typer.echo(f"Creating PR: {title}...", err=True)
         pr_result = subprocess.run(
