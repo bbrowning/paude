@@ -230,10 +230,10 @@ def initialize_container_workspace_podman(
         True if successful, False if failed.
     """
     quoted_branch = shlex.quote(branch)
-    ws = CONTAINER_WORKSPACE
     init_cmd = (
-        f"test -d {ws}/.git || git init -b {quoted_branch} {ws} && "
-        f"git -C {ws} config receive.denyCurrentBranch updateInstead"
+        f"test -d {CONTAINER_WORKSPACE}/.git || "
+        f"git init -b {quoted_branch} {CONTAINER_WORKSPACE} && "
+        f"git -C {CONTAINER_WORKSPACE} config receive.denyCurrentBranch updateInstead"
     )
     result = subprocess.run(
         ["podman", "exec", container_name, "bash", "-c", init_cmd],
@@ -264,10 +264,10 @@ def initialize_container_workspace_openshift(
         True if successful, False if failed.
     """
     quoted_branch = shlex.quote(branch)
-    ws = CONTAINER_WORKSPACE
     init_cmd = (
-        f"test -d {ws}/.git || git init -b {quoted_branch} {ws} && "
-        f"git -C {ws} config receive.denyCurrentBranch updateInstead"
+        f"test -d {CONTAINER_WORKSPACE}/.git || "
+        f"git init -b {quoted_branch} {CONTAINER_WORKSPACE} && "
+        f"git -C {CONTAINER_WORKSPACE} config receive.denyCurrentBranch updateInstead"
     )
     oc_cmd = ["oc"]
     if context:
