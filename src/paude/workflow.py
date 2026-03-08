@@ -229,12 +229,11 @@ def harvest_session(
             pr_url = view_result.stdout.strip()
             typer.echo(f"PR already exists and updated: {pr_url}", err=True)
         else:
-            title = pr_title or branch_name
-            typer.echo(f"Creating PR: {title}...", err=True)
-            pr_result = subprocess.run(
-                ["gh", "pr", "create", "--title", title, "--head", branch_name],
-                cwd=workspace,
-            )
+            typer.echo("Creating PR...", err=True)
+            pr_cmd = ["gh", "pr", "create", "--head", branch_name]
+            if pr_title:
+                pr_cmd += ["--title", pr_title]
+            pr_result = subprocess.run(pr_cmd, cwd=workspace)
             if pr_result.returncode != 0:
                 typer.echo("Error: Failed to create PR.", err=True)
                 raise typer.Exit(1)
