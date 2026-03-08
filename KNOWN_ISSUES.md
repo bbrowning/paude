@@ -191,30 +191,32 @@ devspace sync --local-path=./src --container-path=/workspace \
 
 Technical debt identified during codebase analysis. Address these before adding significant new functionality to affected files.
 
-### REFACTOR-002: cli.py (1,601 lines)
+### REFACTOR-002: cli.py (1,918 lines)
 
-**Status**: Open
+**Status**: Partially Complete
 **Priority**: High (every new command adds complexity)
 **Discovered**: 2026-01-29 during code quality analysis
+**Partial completion**: 2026-03-08 — Extracted `_get_backend_instance()` and `_auto_select_session()` helpers
 
 **Problem:** Commands implement logic instead of delegating. Backend detection repeated in every command.
 
-**Recommended changes:**
-- Extract `find_session_backend()` to shared function
+**Completed:**
+- `_get_backend_instance()` consolidates PodmanBackend/OpenShiftConfig+OpenShiftBackend creation (was repeated 6+ times)
+- `_auto_select_session()` consolidates workspace-match → all-sessions → 0/1/multi logic (was repeated 4 times)
+- `_resolve_backend_for_domains()` simplified to use `_get_backend_instance()`
+- `session_delete`, `session_start`, `session_stop`, `session_connect`, `session_cp` refactored to use helpers
+
+**Remaining:**
+- File still 1,918 lines — needs splitting into a package (cli/ directory)
 - Move image building orchestration to dedicated module
 - Each command should be < 50 lines, delegating to helpers
 
 ### REFACTOR-003: container/image.py (708 lines)
 
-**Status**: Open
+**Status**: Resolved
 **Priority**: Medium
 **Discovered**: 2026-01-29 during code quality analysis
-
-**Problem:** `prepare_build_context` is 319 lines mixing local and remote build logic.
-
-**Recommended split:**
-- Separate `BuildContextBuilder` class
-- Split remote vs local build paths
+**Resolved**: 2026-03-08 — Split into `image.py` (301 lines) and `build_context.py` (331 lines). Extracted shared helpers (`resolve_entrypoint`, `copy_entrypoints`, `inject_features`, `copy_features_cache`, `generate_dockerfile_content`). `prepare_build_context` reduced from 261 to ~45 lines. `ensure_custom_image` reduced from 145 to ~40 lines.
 
 ### REFACTOR-004: Extract Duplicated Utilities
 
