@@ -43,6 +43,44 @@ def parse_config(config_file: Path) -> PaudeConfig:
         raise ConfigError(f"Unknown config file type: {config_file}")
 
 
+def _extract_build_config(
+    config_dir: Path, data: dict[str, Any]
+) -> tuple[Path | None, Path | None, dict[str, str]]:
+    """Extract dockerfile, build context, and build args from config data.
+
+    Args:
+        config_dir: Directory containing the config file.
+        data: Parsed JSON data (must contain optional "build" key).
+
+    Returns:
+        Tuple of (dockerfile, build_context, build_args).
+    """
+    build_config = data.get("build", {})
+    dockerfile: Path | None = None
+    build_context: Path | None = None
+
+    if "dockerfile" in build_config:
+        dockerfile_path = build_config["dockerfile"]
+        if not Path(dockerfile_path).is_absolute():
+            dockerfile = config_dir / dockerfile_path
+        else:
+            dockerfile = Path(dockerfile_path)
+
+    if "context" in build_config:
+        context_path = build_config["context"]
+        if not Path(context_path).is_absolute():
+            build_context = config_dir / context_path
+        else:
+            build_context = Path(context_path)
+        if build_context.exists():
+            build_context = build_context.resolve()
+    elif dockerfile:
+        build_context = config_dir
+
+    build_args = build_config.get("args", {})
+    return dockerfile, build_context, build_args
+
+
 def _parse_devcontainer(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
     """Parse a devcontainer.json file.
 
@@ -58,34 +96,8 @@ def _parse_devcontainer(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
     # Extract image
     base_image = data.get("image")
 
-    # Extract dockerfile path
-    dockerfile: Path | None = None
-    build_context: Path | None = None
-
-    build_config = data.get("build", {})
-    if "dockerfile" in build_config:
-        dockerfile_path = build_config["dockerfile"]
-        if not Path(dockerfile_path).is_absolute():
-            dockerfile = config_dir / dockerfile_path
-        else:
-            dockerfile = Path(dockerfile_path)
-
-    # Extract build context
-    if "context" in build_config:
-        context_path = build_config["context"]
-        if not Path(context_path).is_absolute():
-            build_context = config_dir / context_path
-        else:
-            build_context = Path(context_path)
-        # Normalize the path
-        if build_context.exists():
-            build_context = build_context.resolve()
-    elif dockerfile:
-        # Default context is config directory
-        build_context = config_dir
-
-    # Extract build args
-    build_args = build_config.get("args", {})
+    # Extract build config
+    dockerfile, build_context, build_args = _extract_build_config(config_dir, data)
 
     # Parse features
     features: list[FeatureSpec] = []
@@ -142,34 +154,8 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
     packages = data.get("packages", [])
     setup_command = data.get("setup")
 
-    # Extract dockerfile path (same as devcontainer.json)
-    dockerfile: Path | None = None
-    build_context: Path | None = None
-
-    build_config = data.get("build", {})
-    if "dockerfile" in build_config:
-        dockerfile_path = build_config["dockerfile"]
-        if not Path(dockerfile_path).is_absolute():
-            dockerfile = config_dir / dockerfile_path
-        else:
-            dockerfile = Path(dockerfile_path)
-
-    # Extract build context
-    if "context" in build_config:
-        context_path = build_config["context"]
-        if not Path(context_path).is_absolute():
-            build_context = config_dir / context_path
-        else:
-            build_context = Path(context_path)
-        # Normalize the path
-        if build_context.exists():
-            build_context = build_context.resolve()
-    elif dockerfile:
-        # Default context is config directory
-        build_context = config_dir
-
-    # Extract build args
-    build_args = build_config.get("args", {})
+    # Extract build config
+    dockerfile, build_context, build_args = _extract_build_config(config_dir, data)
 
     if "pip_install" in data:
         print(
