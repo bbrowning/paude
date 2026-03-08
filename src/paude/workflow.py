@@ -218,9 +218,21 @@ def harvest_session(
             typer.echo("Error: Failed to push branch to origin.", err=True)
             raise typer.Exit(1)
 
-        # Check if a PR already exists for this branch
+        # Check if an open PR already exists for this branch
         view_result = subprocess.run(
-            ["gh", "pr", "view", branch_name, "--json", "url", "-q", ".url"],
+            [
+                "gh",
+                "pr",
+                "list",
+                "--head",
+                branch_name,
+                "--state",
+                "open",
+                "--json",
+                "url",
+                "-q",
+                ".[0].url",
+            ],
             capture_output=True,
             text=True,
             cwd=workspace,
