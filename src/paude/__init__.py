@@ -1,3 +1,3 @@
 """Paude - Podman wrapper for running Claude Code in isolated containers."""
 
-__version__ = "0.8.1"
+__version__ = "0.8.2"
