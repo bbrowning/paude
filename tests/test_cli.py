@@ -1541,3 +1541,98 @@ class TestCreateGitEnvVar:
             assert session_config.env.get("PAUDE_WAIT_FOR_GIT") == "1"
         else:
             assert "PAUDE_WAIT_FOR_GIT" not in session_config.env
+
+
+# ---------------------------------------------------------------------------
+# blocked-domains subcommand
+# ---------------------------------------------------------------------------
+
+
+class TestBlockedDomainsCLI:
+    """Tests for the blocked-domains CLI subcommand."""
+
+    @patch("paude.cli._resolve_backend_for_domains")
+    def test_unrestricted_network_message(self, mock_resolve: MagicMock) -> None:
+        """Shows unrestricted message when no proxy."""
+        mock_backend = MagicMock()
+        mock_backend.get_proxy_blocked_log.return_value = None
+        mock_resolve.return_value = mock_backend
+
+        result = runner.invoke(app, ["blocked-domains", "my-session"])
+        assert result.exit_code == 0
+        assert "unrestricted network" in result.stdout
+
+    @patch("paude.cli._resolve_backend_for_domains")
+    def test_no_blocked_domains_message(self, mock_resolve: MagicMock) -> None:
+        """Shows no-blocked message when log is empty."""
+        mock_backend = MagicMock()
+        mock_backend.get_proxy_blocked_log.return_value = ""
+        mock_resolve.return_value = mock_backend
+
+        result = runner.invoke(app, ["blocked-domains", "my-session"])
+        assert result.exit_code == 0
+        assert "No blocked domains" in result.stdout
+
+    @patch("paude.cli._resolve_backend_for_domains")
+    def test_raw_output(self, mock_resolve: MagicMock) -> None:
+        """--raw dumps raw log content."""
+        log = "08/Mar/2026:14:23:45 +0000 10.0.0.2 TCP_DENIED/403 CONNECT evil.com:443 BLOCKED\n"
+        mock_backend = MagicMock()
+        mock_backend.get_proxy_blocked_log.return_value = log
+        mock_resolve.return_value = mock_backend
+
+        result = runner.invoke(app, ["blocked-domains", "my-session", "--raw"])
+        assert result.exit_code == 0
+        assert "evil.com:443" in result.stdout
+        assert "BLOCKED" in result.stdout
+
+    @patch("paude.cli._resolve_backend_for_domains")
+    def test_parsed_summary_output(self, mock_resolve: MagicMock) -> None:
+        """Default output shows parsed summary."""
+        log = (
+            "08/Mar/2026:14:00:00 +0000 10.0.0.2 TCP_DENIED/403 CONNECT evil.com:443 BLOCKED\n"
+            "08/Mar/2026:14:01:00 +0000 10.0.0.2 TCP_DENIED/403 CONNECT evil.com:443 BLOCKED\n"
+            "08/Mar/2026:14:02:00 +0000 10.0.0.2 TCP_DENIED/403 CONNECT other.com:443 BLOCKED\n"
+        )
+        mock_backend = MagicMock()
+        mock_backend.get_proxy_blocked_log.return_value = log
+        mock_resolve.return_value = mock_backend
+
+        result = runner.invoke(app, ["blocked-domains", "my-session"])
+        assert result.exit_code == 0
+        assert "evil.com" in result.stdout
+        assert "other.com" in result.stdout
+        assert "2 unique domain(s) blocked (3 total requests)" in result.stdout
+        assert "paude allowed-domains my-session --add" in result.stdout
+
+    @patch("paude.cli._resolve_backend_for_domains")
+    def test_session_not_found_error(self, mock_resolve: MagicMock) -> None:
+        """Shows error when session not found."""
+        from paude.backends.podman import SessionNotFoundError
+
+        mock_backend = MagicMock()
+        mock_backend.get_proxy_blocked_log.side_effect = SessionNotFoundError(
+            "Session 'nope' not found"
+        )
+        mock_resolve.return_value = mock_backend
+
+        result = runner.invoke(app, ["blocked-domains", "nope"])
+        assert result.exit_code == 1
+
+    @patch("paude.cli._resolve_backend_for_domains")
+    def test_proxy_not_running_error(self, mock_resolve: MagicMock) -> None:
+        """Shows error when proxy not running."""
+        mock_backend = MagicMock()
+        mock_backend.get_proxy_blocked_log.side_effect = ValueError(
+            "Proxy for session 'x' is not running."
+        )
+        mock_resolve.return_value = mock_backend
+
+        result = runner.invoke(app, ["blocked-domains", "x"])
+        assert result.exit_code == 1
+
+
+def test_help_includes_blocked_domains() -> None:
+    """Help output includes blocked-domains command."""
+    result = runner.invoke(app, ["--help"])
+    assert "blocked-domains" in result.stdout

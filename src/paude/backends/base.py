@@ -186,6 +186,19 @@ class Backend(Protocol):
         """
         ...
 
+    def get_proxy_blocked_log(self, name: str) -> str | None:
+        """Get raw squid blocked log from the proxy container.
+
+        Returns:
+            Raw log content string, empty string if no blocks yet,
+            or None if session has no proxy (unrestricted network).
+
+        Raises:
+            SessionNotFoundError: If session not found.
+            ValueError: If proxy is not running.
+        """
+        ...
+
     def update_allowed_domains(self, name: str, domains: list[str]) -> None:
         """Update allowed domains for a session.
 

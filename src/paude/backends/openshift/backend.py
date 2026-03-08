@@ -31,7 +31,7 @@ from paude.backends.openshift.resources import (
     _generate_session_name,
 )
 from paude.backends.openshift.sync import ConfigSyncer
-from paude.backends.shared import decode_path
+from paude.backends.shared import SQUID_BLOCKED_LOG_PATH, decode_path
 
 
 class OpenShiftBackend:
@@ -1078,6 +1078,62 @@ class OpenShiftBackend:
             return None  # No proxy = unrestricted
 
         return self._proxy.get_deployment_domains(name)
+
+    def get_proxy_blocked_log(self, name: str) -> str | None:
+        """Get raw squid blocked log from the proxy container.
+
+        Returns:
+            Raw log content, empty string if no blocks yet,
+            or None if no proxy (unrestricted).
+
+        Raises:
+            SessionNotFoundError: If session not found.
+            ValueError: If proxy is not running.
+        """
+        if self._get_statefulset(name) is None:
+            raise SessionNotFoundError(f"Session '{name}' not found")
+
+        proxy_deployment = f"paude-proxy-{name}"
+        result = self._run_oc(
+            "get",
+            "deployment",
+            proxy_deployment,
+            "-n",
+            self.namespace,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+
+        # Find proxy pod
+        pod_result = self._run_oc(
+            "get",
+            "pods",
+            "-l",
+            f"app=paude-proxy,paude.io/session-name={name}",
+            "-o",
+            "jsonpath={.items[0].metadata.name}",
+            "-n",
+            self.namespace,
+            check=False,
+        )
+        if pod_result.returncode != 0 or not pod_result.stdout.strip():
+            raise ValueError(f"Proxy for session '{name}' is not running.")
+
+        pod_name = pod_result.stdout.strip()
+        log_result = self._run_oc(
+            "exec",
+            pod_name,
+            "-n",
+            self.namespace,
+            "--",
+            "cat",
+            SQUID_BLOCKED_LOG_PATH,
+            check=False,
+        )
+        if log_result.returncode != 0:
+            return ""
+        return log_result.stdout
 
     def update_allowed_domains(self, name: str, domains: list[str]) -> None:
         """Update allowed domains for a session.

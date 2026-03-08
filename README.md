@@ -310,6 +310,37 @@ Opt-in language ecosystem aliases:
 
 **Special values**: `all` (unrestricted), `default` (vertexai + python + github), `vertexai`, `python`, `golang`, `nodejs`, `rust`, `github`. Specifying domains without `default` replaces the allowlist entirely.
 
+### Diagnosing Blocked Domains
+
+When a tool or package install fails due to network filtering, check what the proxy blocked:
+
+```bash
+# 1. View blocked domains
+paude blocked-domains my-session
+
+# Output:
+#   Blocked domains for session 'my-session':
+#
+#     registry.npmjs.org     8 requests
+#     cdn.jsdelivr.net       3 requests
+#
+#   2 unique domain(s) blocked (11 total requests).
+
+# 2. Allow the domain you need
+paude allowed-domains my-session --add registry.npmjs.org
+
+# 3. Verify it was added
+paude allowed-domains my-session
+
+# 4. Retry the failed operation inside the session
+```
+
+Use `--raw` to see the full proxy log with timestamps:
+
+```bash
+paude blocked-domains my-session --raw
+```
+
 ### GitHub CLI Access
 
 Paude installs the `gh` CLI in the container and includes GitHub domains in the default network allowlist. To use `gh` for read-only operations (e.g., fetching issues, PRs, or code), set a fine-grained personal access token before connecting:

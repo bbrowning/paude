@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
+SQUID_BLOCKED_LOG_PATH = "/tmp/squid-blocked.log"  # noqa: S108
+
 
 def encode_path(path: Path, *, url_safe: bool = False) -> str:
     """Encode a path for storing in labels.
