@@ -686,7 +686,9 @@ class TestSetOriginInContainerOpenshift:
         mock_run.return_value.stderr = ""
 
         result = set_origin_in_container_openshift(
-            "pod-0", "ns", "https://github.com/user/repo",
+            "pod-0",
+            "ns",
+            "https://github.com/user/repo",
             context="my-ctx",
         )
 
@@ -753,9 +755,7 @@ class TestFetchTagsInContainerOpenshift:
         """Include context when specified."""
         mock_run.return_value.returncode = 0
 
-        result = fetch_tags_in_container_openshift(
-            "pod-0", "ns", context="my-ctx"
-        )
+        result = fetch_tags_in_container_openshift("pod-0", "ns", context="my-ctx")
 
         assert result is True
         call_args = mock_run.call_args[0][0]
@@ -830,9 +830,7 @@ class TestSetupPrecommitInContainerOpenshift:
         """Include context when specified."""
         mock_run.return_value.returncode = 0
 
-        result = setup_precommit_in_container_openshift(
-            "pod-0", "ns", context="my-ctx"
-        )
+        result = setup_precommit_in_container_openshift("pod-0", "ns", context="my-ctx")
 
         assert result is True
         call_args = mock_run.call_args[0][0]
@@ -851,6 +849,18 @@ class TestSetupPrecommitInContainerOpenshift:
         bash_cmd = call_args[bash_cmd_idx]
         assert "pre-commit install" in bash_cmd
         assert ".pre-commit-config.yaml" in bash_cmd
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_sets_home_for_arbitrary_uid(self, mock_run) -> None:
+        """Set HOME explicitly for OpenShift arbitrary UID compatibility."""
+        mock_run.return_value.returncode = 0
+
+        setup_precommit_in_container_openshift("pod-0", "ns")
+
+        call_args = mock_run.call_args[0][0]
+        bash_cmd_idx = call_args.index("-c") + 1
+        bash_cmd = call_args[bash_cmd_idx]
+        assert "export HOME=" in bash_cmd
 
     @patch("paude.git_remote.subprocess.run")
     def test_returns_false_on_failure(self, mock_run) -> None:

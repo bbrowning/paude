@@ -1512,12 +1512,17 @@ def _setup_git_after_create(
     if Path(".pre-commit-config.yaml").exists():
         typer.echo("Setting up pre-commit hooks in container...")
         if backend_type == "podman":
-            setup_precommit_in_container_podman(container_name)
+            success = setup_precommit_in_container_podman(container_name)
         else:
-            setup_precommit_in_container_openshift(
+            success = setup_precommit_in_container_openshift(
                 pod_name,
                 namespace,
                 context=openshift_context,
+            )
+        if not success:
+            typer.echo(
+                "Warning: Failed to install pre-commit hooks in container.",
+                err=True,
             )
 
     typer.echo("Git setup complete.")

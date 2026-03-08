@@ -541,7 +541,7 @@ def setup_precommit_in_container_podman(container_name: str) -> bool:
     """
     cmd = (
         "test -f /pvc/workspace/.pre-commit-config.yaml && "
-        "cd /pvc/workspace && pre-commit install 2>/dev/null"
+        "cd /pvc/workspace && pre-commit install"
     )
     result = subprocess.run(
         ["podman", "exec", container_name, "bash", "-c", cmd],
@@ -569,8 +569,9 @@ def setup_precommit_in_container_openshift(
         True if successful, False if failed.
     """
     cmd = (
+        "export HOME=${HOME:-/home/paude}; "
         "test -f /pvc/workspace/.pre-commit-config.yaml && "
-        "cd /pvc/workspace && pre-commit install 2>/dev/null"
+        "cd /pvc/workspace && pre-commit install"
     )
     oc_cmd = ["oc"]
     if context:
