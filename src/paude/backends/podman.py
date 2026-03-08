@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from paude.backends.base import Session, SessionConfig
-from paude.backends.shared import decode_path, encode_path
+from paude.backends.shared import SQUID_BLOCKED_LOG_PATH, decode_path, encode_path
 from paude.container.network import NetworkManager
 from paude.container.runner import (
     PAUDE_LABEL_APP,
@@ -657,6 +657,35 @@ class PodmanBackend:
             return []
 
         return [d for d in domains_str.split(",") if d]
+
+    def get_proxy_blocked_log(self, name: str) -> str | None:
+        """Get raw squid blocked log from the proxy container.
+
+        Returns:
+            Raw log content, empty string if no blocks yet,
+            or None if no proxy (unrestricted).
+
+        Raises:
+            SessionNotFoundError: If session not found.
+            ValueError: If proxy is not running.
+        """
+        container_name = self._container_name(name)
+        if not self._runner.container_exists(container_name):
+            raise SessionNotFoundError(f"Session '{name}' not found")
+
+        proxy_name = self._proxy_container_name(name)
+        if not self._runner.container_exists(proxy_name):
+            return None
+
+        if not self._runner.container_running(proxy_name):
+            raise ValueError(f"Proxy for session '{name}' is not running.")
+
+        result = self._runner.exec_in_container(
+            proxy_name, ["cat", SQUID_BLOCKED_LOG_PATH], check=False
+        )
+        if result.returncode != 0:
+            return ""
+        return result.stdout
 
     def update_allowed_domains(self, name: str, domains: list[str]) -> None:
         """Update allowed domains for a session.

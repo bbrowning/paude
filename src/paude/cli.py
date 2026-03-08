@@ -29,6 +29,7 @@ from paude.backends.openshift import (
 from paude.backends.openshift import (
     SessionNotFoundError as OpenshiftSessionNotFoundError,
 )
+from paude.proxy_log import parse_blocked_log
 from paude.session_discovery import (
     collect_all_sessions,
     create_openshift_backend,
@@ -204,6 +205,8 @@ COMMANDS:
     remote <ACTION>     Manage git remotes for code sync
     allowed-domains NAME
                         Manage allowed egress domains for a session
+    blocked-domains NAME
+                        Show domains blocked by the proxy for a session
     delete NAME         Delete a session and all its resources
 
 OPTIONS (for 'create' command):
@@ -269,6 +272,8 @@ EGRESS FILTERING:
     paude allowed-domains my-session --remove .pypi.org   Remove domain
     paude allowed-domains my-session --replace default .example.com
                                                           Replace entire list
+    paude blocked-domains my-session                      Show blocked domains
+    paude blocked-domains my-session --raw                Show raw proxy log
 
 EXAMPLES:
     paude create --yolo --allowed-domains all
@@ -1910,6 +1915,88 @@ def allowed_domains_cmd(
     except Exception as e:
         typer.echo(f"Error managing domains: {e}", err=True)
         raise typer.Exit(1) from None
+
+
+@app.command("blocked-domains")
+def blocked_domains_cmd(
+    name: Annotated[str, typer.Argument(help="Session name.")],
+    raw: Annotated[
+        bool,
+        typer.Option("--raw", help="Show raw proxy log instead of parsed summary."),
+    ] = False,
+    backend: Annotated[
+        BackendType | None,
+        typer.Option(
+            "--backend",
+            help="Container backend (auto-detected from session if not specified).",
+        ),
+    ] = None,
+    openshift_context: Annotated[
+        str | None,
+        typer.Option(
+            "--openshift-context",
+            help="Kubeconfig context for OpenShift.",
+        ),
+    ] = None,
+    openshift_namespace: Annotated[
+        str | None,
+        typer.Option(
+            "--openshift-namespace",
+            help="OpenShift namespace (default: current context namespace).",
+        ),
+    ] = None,
+) -> None:
+    """Show domains blocked by the proxy for a session."""
+    backend_obj = _resolve_backend_for_domains(
+        name, backend, openshift_context, openshift_namespace
+    )
+
+    try:
+        log_content = backend_obj.get_proxy_blocked_log(name)
+    except (OpenshiftSessionNotFoundError, SessionNotFoundError) as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+    except Exception as e:
+        typer.echo(f"Error reading blocked domains: {e}", err=True)
+        raise typer.Exit(1) from None
+
+    if log_content is None:
+        typer.echo(
+            f"Session '{name}' has unrestricted network (no proxy). "
+            "No domains are blocked."
+        )
+        return
+
+    if raw:
+        if not log_content.strip():
+            typer.echo(f"No blocked domains for session '{name}'.")
+            return
+        typer.echo(log_content, nl=False)
+        return
+
+    entries = parse_blocked_log(log_content)
+    if not entries:
+        typer.echo(f"No blocked domains for session '{name}'.")
+        return
+
+    total_requests = sum(e.count for e in entries)
+    max_domain_len = max(len(e.domain) for e in entries)
+
+    typer.echo(f"Blocked domains for session '{name}':")
+    typer.echo("")
+    for entry in entries:
+        label = "request" if entry.count == 1 else "requests"
+        typer.echo(f"  {entry.domain:<{max_domain_len}}  {entry.count:>4} {label}")
+    typer.echo("")
+    typer.echo(
+        f"{len(entries)} unique domain(s) blocked ({total_requests} total requests)."
+    )
+    typer.echo("")
+    typer.echo("Tip: To allow a domain, run:")
+    typer.echo(f"  paude allowed-domains {name} --add <domain>")
 
 
 @app.callback(invoke_without_command=True)
