@@ -84,7 +84,7 @@ The script mounts these paths from host to container:
 
 **All new features must include tests.** This is a hard requirement.
 
-**Before committing any code changes**, always run `make lint` to catch errors early. Do not commit if linting fails.
+**Before committing any code changes**, always run `make lint` and `make typecheck` to catch errors early. Do not commit if either fails.
 
 ```bash
 # Run all tests
