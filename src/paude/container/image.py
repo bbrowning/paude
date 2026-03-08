@@ -24,6 +24,16 @@ from paude.hash import compute_config_hash, compute_content_hash
 __all__ = ["BuildContext", "ImageManager", "prepare_build_context"]
 
 
+def _detect_native_platform() -> str:
+    """Detect the native platform for container builds."""
+    import platform as plat
+
+    machine = plat.machine().lower()
+    if machine in ("arm64", "aarch64"):
+        return "linux/arm64"
+    return "linux/amd64"
+
+
 class ImageManager:
     """Manages container images for paude."""
 
@@ -42,7 +52,7 @@ class ImageManager:
         self.dev_mode = os.environ.get("PAUDE_DEV", "0") == "1"
         self.registry = os.environ.get("PAUDE_REGISTRY", "quay.io/bbrowning")
         self.version = __version__
-        self.platform = platform
+        self.platform = platform if platform is not None else _detect_native_platform()
 
     def ensure_default_image(self) -> str:
         """Ensure the default paude image is available.
@@ -85,7 +95,7 @@ class ImageManager:
             if not image_exists(tag):
                 print(f"Pulling {tag}...", file=sys.stderr)
                 try:
-                    run_podman("pull", tag, capture=False)
+                    run_podman("pull", "--platform", self.platform, tag, capture=False)
                 except Exception:
                     print(
                         "Check your network connection or run 'podman login' "
@@ -196,9 +206,7 @@ class ImageManager:
                 copy_features_cache(Path(tmpdir))
 
             build_args = {"BASE_IMAGE": base_image}
-            self.build_image(
-                Path(tmpdir) / "Dockerfile", tag, Path(tmpdir), build_args
-            )
+            self.build_image(Path(tmpdir) / "Dockerfile", tag, Path(tmpdir), build_args)
 
         print(f"Build complete (cached as {tag})", file=sys.stderr)
         return tag
@@ -215,9 +223,7 @@ class ImageManager:
 
         if config.dockerfile:
             if not config.dockerfile.exists():
-                raise FileNotFoundError(
-                    f"Dockerfile not found: {config.dockerfile}"
-                )
+                raise FileNotFoundError(f"Dockerfile not found: {config.dockerfile}")
             user_image = f"paude-user-base:{config_hash}"
             build_context = config.build_context or config.dockerfile.parent
             print(f"  → Building from: {config.dockerfile}", file=sys.stderr)
@@ -232,9 +238,7 @@ class ImageManager:
             return config.base_image, False
         else:
             base_image = self.ensure_default_image()
-            print(
-                f"  → Using default paude image: {base_image}", file=sys.stderr
-            )
+            print(f"  → Using default paude image: {base_image}", file=sys.stderr)
             return base_image, True
 
     def ensure_proxy_image(self, force_rebuild: bool = False) -> str:
@@ -265,7 +269,7 @@ class ImageManager:
             if not image_exists(tag):
                 print(f"Pulling {tag}...", file=sys.stderr)
                 try:
-                    run_podman("pull", tag, capture=False)
+                    run_podman("pull", "--platform", self.platform, tag, capture=False)
                 except Exception:
                     print(
                         "Check your network connection or run 'podman login' "

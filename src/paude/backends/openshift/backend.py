@@ -934,9 +934,7 @@ class OpenShiftBackend:
             )
         else:
             # First connect: full config sync (gcloud + claude + git)
-            self._sync_config_to_pod(
-                pod_name, verbose=False, github_token=github_token
-            )
+            self._sync_config_to_pod(pod_name, verbose=False, github_token=github_token)
 
         # Check if workspace is empty (no .git directory)
         check_result = self._run_oc(

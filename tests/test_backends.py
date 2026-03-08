@@ -77,7 +77,6 @@ class TestPodmanBackend:
         mock_runner.stop_container.assert_called_once_with("container-name")
 
 
-
 class TestBackendProtocol:
     """Tests for Backend Protocol conformance."""
 

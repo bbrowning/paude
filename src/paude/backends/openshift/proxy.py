@@ -411,9 +411,7 @@ class ProxyManager:
 
         return [d for d in result.stdout.strip().split(",") if d]
 
-    def update_deployment_domains(
-        self, session_name: str, domains: list[str]
-    ) -> None:
+    def update_deployment_domains(self, session_name: str, domains: list[str]) -> None:
         """Update the ALLOWED_DOMAINS env var on the proxy Deployment.
 
         Args:

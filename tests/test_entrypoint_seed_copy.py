@@ -14,7 +14,9 @@ import textwrap
 from pathlib import Path
 
 # Path to the real entrypoint, used by contract tests
-ENTRYPOINT_PATH = Path(__file__).parent.parent / "containers" / "paude" / "entrypoint-session.sh"
+ENTRYPOINT_PATH = (
+    Path(__file__).parent.parent / "containers" / "paude" / "entrypoint-session.sh"
+)
 
 
 def _build_script(home_dir: str, seed_dir: str, credentials_dir: str | None) -> str:
@@ -83,16 +85,18 @@ class TestEntrypointContract:
     def test_entrypoint_uses_cp_archive(self) -> None:
         """The entrypoint must use 'cp -a' for seed copy, not a file loop."""
         content = ENTRYPOINT_PATH.read_text()
-        assert "cp -a /tmp/claude.seed/." in content or \
-            'cp -a "$SEED_DIR/."' in content or \
-            "cp -a /tmp/claude.seed/" in content, \
-            "entrypoint-session.sh must use 'cp -a' for recursive seed copy"
+        assert (
+            "cp -a /tmp/claude.seed/." in content
+            or 'cp -a "$SEED_DIR/."' in content
+            or "cp -a /tmp/claude.seed/" in content
+        ), "entrypoint-session.sh must use 'cp -a' for recursive seed copy"
 
     def test_entrypoint_no_old_file_loop(self) -> None:
         """The old file-by-file loop pattern must not be present."""
         content = ENTRYPOINT_PATH.read_text()
-        assert "for f in /tmp/claude.seed/*" not in content, \
+        assert "for f in /tmp/claude.seed/*" not in content, (
             "entrypoint-session.sh still contains the old file-by-file loop"
+        )
 
     def test_entrypoint_handles_claude_json_after_copy(self) -> None:
         """claude.json must be moved (not copied separately) after cp -a."""
@@ -322,6 +326,10 @@ class TestSeedCopyMixedContent:
         assert (home / ".claude.json").read_text() == '{"claude": true}'
         assert not (home / ".claude" / "claude.json").exists()
         # Directory copied
-        assert (home / ".claude" / "commands" / "my-skill.md").read_text() == "# My Skill"
+        assert (
+            home / ".claude" / "commands" / "my-skill.md"
+        ).read_text() == "# My Skill"
         # Plugins directory copied
-        assert (home / ".claude" / "plugins" / "plugin.json").read_text() == '{"plugin": true}'
+        assert (
+            home / ".claude" / "plugins" / "plugin.json"
+        ).read_text() == '{"plugin": true}'

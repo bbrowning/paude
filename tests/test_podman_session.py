@@ -777,7 +777,11 @@ class TestPodmanBackendGcpAdcSecret:
         mock_adc = MagicMock()
         mock_adc.is_file.return_value = True
         mock_home.__truediv__ = lambda self, key: (
-            MagicMock(__truediv__=lambda self, k: MagicMock(__truediv__=lambda self, k2: mock_adc))
+            MagicMock(
+                __truediv__=lambda self, k: MagicMock(
+                    __truediv__=lambda self, k2: mock_adc
+                )
+            )
         )
         mock_path_class.home.return_value = mock_home
 
@@ -809,7 +813,11 @@ class TestPodmanBackendGcpAdcSecret:
         mock_adc = MagicMock()
         mock_adc.is_file.return_value = True
         mock_home.__truediv__ = lambda self, key: (
-            MagicMock(__truediv__=lambda self, k: MagicMock(__truediv__=lambda self, k2: mock_adc))
+            MagicMock(
+                __truediv__=lambda self, k: MagicMock(
+                    __truediv__=lambda self, k2: mock_adc
+                )
+            )
         )
         mock_path_class.home.return_value = mock_home
 
@@ -825,7 +833,9 @@ class TestPodmanBackendGcpAdcSecret:
         backend.create_session(config)
 
         call_kwargs = mock_runner.create_container.call_args[1]
-        expected_target = "/home/paude/.config/gcloud/application_default_credentials.json"
+        expected_target = (
+            "/home/paude/.config/gcloud/application_default_credentials.json"
+        )
         assert call_kwargs["secrets"] == [f"paude-gcp-adc,target={expected_target}"]
 
     @patch("paude.backends.podman.Path")
@@ -842,7 +852,11 @@ class TestPodmanBackendGcpAdcSecret:
         mock_adc = MagicMock()
         mock_adc.is_file.return_value = False
         mock_home.__truediv__ = lambda self, key: (
-            MagicMock(__truediv__=lambda self, k: MagicMock(__truediv__=lambda self, k2: mock_adc))
+            MagicMock(
+                __truediv__=lambda self, k: MagicMock(
+                    __truediv__=lambda self, k2: mock_adc
+                )
+            )
         )
         mock_path_class.home.return_value = mock_home
 
@@ -876,7 +890,11 @@ class TestPodmanBackendGcpAdcSecret:
         mock_adc = MagicMock()
         mock_adc.is_file.return_value = True
         mock_home.__truediv__ = lambda self, key: (
-            MagicMock(__truediv__=lambda self, k: MagicMock(__truediv__=lambda self, k2: mock_adc))
+            MagicMock(
+                __truediv__=lambda self, k: MagicMock(
+                    __truediv__=lambda self, k2: mock_adc
+                )
+            )
         )
         mock_path_class.home.return_value = mock_home
 
@@ -912,7 +930,11 @@ class TestPodmanBackendGcpAdcSecret:
         mock_adc = MagicMock()
         mock_adc.is_file.return_value = True
         mock_home.__truediv__ = lambda self, key: (
-            MagicMock(__truediv__=lambda self, k: MagicMock(__truediv__=lambda self, k2: mock_adc))
+            MagicMock(
+                __truediv__=lambda self, k: MagicMock(
+                    __truediv__=lambda self, k2: mock_adc
+                )
+            )
         )
         mock_path_class.home.return_value = mock_home
 
@@ -1071,9 +1093,7 @@ class TestPodmanBackendCreateSessionWithProxy:
         mock_runner.remove_container.assert_called_once_with(
             "paude-proxy-my-session", force=True
         )
-        mock_network.remove_network.assert_called_once_with(
-            "paude-net-my-session"
-        )
+        mock_network.remove_network.assert_called_once_with("paude-net-my-session")
         mock_volume.remove_volume.assert_called_once()
 
 
@@ -1143,12 +1163,8 @@ class TestPodmanBackendStopSessionWithProxy:
 
         backend.stop_session("my-session")
 
-        mock_runner.stop_container_graceful.assert_called_once_with(
-            "paude-my-session"
-        )
-        mock_runner.stop_container.assert_called_once_with(
-            "paude-proxy-my-session"
-        )
+        mock_runner.stop_container_graceful.assert_called_once_with("paude-my-session")
+        mock_runner.stop_container.assert_called_once_with("paude-proxy-my-session")
 
 
 class TestPodmanBackendDeleteSessionWithProxy:
@@ -1172,13 +1188,9 @@ class TestPodmanBackendDeleteSessionWithProxy:
 
         # Should remove both containers
         assert mock_runner.remove_container.call_count == 2
-        remove_calls = [
-            c[0][0] for c in mock_runner.remove_container.call_args_list
-        ]
+        remove_calls = [c[0][0] for c in mock_runner.remove_container.call_args_list]
         assert "paude-proxy-my-session" in remove_calls
         assert "paude-my-session" in remove_calls
 
         # Should remove network
-        mock_network.remove_network.assert_called_once_with(
-            "paude-net-my-session"
-        )
+        mock_network.remove_network.assert_called_once_with("paude-net-my-session")

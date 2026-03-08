@@ -44,8 +44,7 @@ class ContainerRunner:
             subprocess.CalledProcessError: If secret creation fails.
         """
         subprocess.run(
-            ["podman", "secret", "create", "--replace=true",
-             name, str(source_file)],
+            ["podman", "secret", "create", "--replace=true", name, str(source_file)],
             capture_output=True,
             check=True,
         )
@@ -365,7 +364,6 @@ class ContainerRunner:
         except json.JSONDecodeError:
             return []
 
-
     def run_proxy(
         self,
         image: str,
@@ -554,7 +552,7 @@ class ContainerRunner:
             prefix = f"{var_name}="
             for entry in env_list:
                 if entry.startswith(prefix):
-                    return str(entry[len(prefix):])
+                    return str(entry[len(prefix) :])
         except (json.JSONDecodeError, TypeError):
             pass
 

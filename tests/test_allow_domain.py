@@ -99,9 +99,7 @@ class TestProxyManagerUpdateDomains:
         oc.run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         pm = ProxyManager(oc, "test-ns")
-        pm.update_deployment_domains(
-            "my-session", [".googleapis.com", ".pypi.org"]
-        )
+        pm.update_deployment_domains("my-session", [".googleapis.com", ".pypi.org"])
 
         oc.run.assert_called_once()
         args = oc.run.call_args[0]
@@ -156,9 +154,7 @@ class TestOpenShiftGetAllowedDomains:
     """Tests for OpenShiftBackend.get_allowed_domains method."""
 
     @patch("subprocess.run")
-    def test_returns_none_when_no_proxy_deployment(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_returns_none_when_no_proxy_deployment(self, mock_run: MagicMock) -> None:
         """get_allowed_domains returns None when no proxy deployment exists (unrestricted)."""
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
 
@@ -192,9 +188,7 @@ class TestOpenShiftGetAllowedDomains:
         assert result is None
 
     @patch("subprocess.run")
-    def test_returns_domain_list_when_proxy_exists(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_returns_domain_list_when_proxy_exists(self, mock_run: MagicMock) -> None:
         """get_allowed_domains returns domain list when proxy deployment exists."""
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
 
@@ -236,9 +230,7 @@ class TestOpenShiftGetAllowedDomains:
         assert ".pypi.org" in result
 
     @patch("subprocess.run")
-    def test_raises_session_not_found_error(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_raises_session_not_found_error(self, mock_run: MagicMock) -> None:
         """get_allowed_domains raises SessionNotFoundError when session doesn't exist."""
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
 
@@ -294,15 +286,11 @@ class TestOpenShiftUpdateAllowedDomains:
         )
 
         # Should have called oc patch on the proxy deployment
-        patch_calls = [
-            c for c in mock_run.call_args_list if "patch" in str(c)
-        ]
+        patch_calls = [c for c in mock_run.call_args_list if "patch" in str(c)]
         assert len(patch_calls) >= 1
 
     @patch("subprocess.run")
-    def test_raises_session_not_found_error(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_raises_session_not_found_error(self, mock_run: MagicMock) -> None:
         """update_allowed_domains raises SessionNotFoundError when session doesn't exist."""
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
 
@@ -313,9 +301,7 @@ class TestOpenShiftUpdateAllowedDomains:
         )
 
         with pytest.raises(SessionNotFoundError):
-            backend.update_allowed_domains(
-                "nonexistent", [".example.com"]
-            )
+            backend.update_allowed_domains("nonexistent", [".example.com"])
 
 
 # ---------------------------------------------------------------------------

@@ -139,9 +139,7 @@ class PodmanBackend:
 
     def _has_proxy(self, session_name: str) -> bool:
         """Check if a session has a proxy container."""
-        return self._runner.container_exists(
-            self._proxy_container_name(session_name)
-        )
+        return self._runner.container_exists(self._proxy_container_name(session_name))
 
     def _ensure_gcp_adc_secret(self) -> str | None:
         """Create or replace the GCP ADC Podman secret.
@@ -216,9 +214,7 @@ class PodmanBackend:
             proxy_name = self._proxy_container_name(session_name)
             proxy_image = config.proxy_image
             if not proxy_image:
-                raise ValueError(
-                    "proxy_image is required when allowed_domains is set"
-                )
+                raise ValueError("proxy_image is required when allowed_domains is set")
 
             dns = get_podman_machine_dns()
             print(f"Creating proxy {proxy_name}...", file=sys.stderr)
@@ -281,9 +277,7 @@ class PodmanBackend:
             if use_proxy:
                 proxy_name = self._proxy_container_name(session_name)
                 self._runner.remove_container(proxy_name, force=True)
-                self._network_manager.remove_network(
-                    self._network_name(session_name)
-                )
+                self._network_manager.remove_network(self._network_name(session_name))
             self._volume_manager.remove_volume(volume_name, force=True)
             self._runner.remove_secret("paude-gcp-adc")
             raise
@@ -658,9 +652,7 @@ class PodmanBackend:
         if not self._runner.container_exists(proxy_name):
             return None  # No proxy = unrestricted
 
-        domains_str = self._runner.get_container_env(
-            proxy_name, "ALLOWED_DOMAINS"
-        )
+        domains_str = self._runner.get_container_env(proxy_name, "ALLOWED_DOMAINS")
         if not domains_str:
             return []
 
@@ -775,4 +767,3 @@ class PodmanBackend:
             name: Container name.
         """
         self._runner.stop_container(name)
-

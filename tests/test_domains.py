@@ -208,7 +208,9 @@ class TestDomainAliases:
     def test_vertexai_no_broad_wildcards(self):
         """vertexai alias must NOT contain broad wildcards."""
         vertexai = DOMAIN_ALIASES["vertexai"]
-        assert ".googleapis.com" not in vertexai, "broad .googleapis.com wildcard not allowed"
+        assert ".googleapis.com" not in vertexai, (
+            "broad .googleapis.com wildcard not allowed"
+        )
         assert ".google.com" not in vertexai, "broad .google.com wildcard not allowed"
         assert ".gstatic.com" not in vertexai, ".gstatic.com not needed for API auth"
 

@@ -1412,9 +1412,7 @@ class TestProxyImagePullPolicy:
             os.environ["PAUDE_IMAGE_PULL_POLICY"] = "IfNotPresent"
 
             backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-            backend._create_proxy_deployment(
-                "my-session", "quay.io/test/proxy:latest"
-            )
+            backend._create_proxy_deployment("my-session", "quay.io/test/proxy:latest")
 
             apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
             assert len(apply_calls) >= 1
