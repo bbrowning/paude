@@ -218,15 +218,26 @@ def harvest_session(
             typer.echo("Error: Failed to push branch to origin.", err=True)
             raise typer.Exit(1)
 
-        title = pr_title or branch_name
-        typer.echo(f"Creating PR: {title}...", err=True)
-        pr_result = subprocess.run(
-            ["gh", "pr", "create", "--title", title, "--head", branch_name],
+        # Check if a PR already exists for this branch
+        view_result = subprocess.run(
+            ["gh", "pr", "view", branch_name, "--json", "url", "-q", ".url"],
+            capture_output=True,
+            text=True,
             cwd=workspace,
         )
-        if pr_result.returncode != 0:
-            typer.echo("Error: Failed to create PR.", err=True)
-            raise typer.Exit(1)
+        if view_result.returncode == 0 and view_result.stdout.strip():
+            pr_url = view_result.stdout.strip()
+            typer.echo(f"PR already exists and updated: {pr_url}", err=True)
+        else:
+            title = pr_title or branch_name
+            typer.echo(f"Creating PR: {title}...", err=True)
+            pr_result = subprocess.run(
+                ["gh", "pr", "create", "--title", title, "--head", branch_name],
+                cwd=workspace,
+            )
+            if pr_result.returncode != 0:
+                typer.echo("Error: Failed to create PR.", err=True)
+                raise typer.Exit(1)
 
 
 def status_sessions(
