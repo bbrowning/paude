@@ -376,6 +376,13 @@ class TestResetSession:
             reset_session("test", force=True)
 
 
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text."""
+    import re
+
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
 class TestHarvestCli:
     """Tests for harvest CLI command."""
 
@@ -386,10 +393,11 @@ class TestHarvestCli:
 
         runner = CliRunner()
         result = runner.invoke(app, ["harvest", "--help"])
+        output = _strip_ansi(result.output)
         assert result.exit_code == 0
-        assert "harvest" in result.output.lower()
-        assert "branch" in result.output
-        assert "pr" in result.output.lower()
+        assert "harvest" in output.lower()
+        assert "--branch" in output
+        assert "--pr" in output
 
 
 class TestResetCli:
@@ -402,10 +410,11 @@ class TestResetCli:
 
         runner = CliRunner()
         result = runner.invoke(app, ["reset", "--help"])
+        output = _strip_ansi(result.output)
         assert result.exit_code == 0
-        assert "branch" in result.output
-        assert "force" in result.output
-        assert "keep-conversation" in result.output
+        assert "--branch" in output
+        assert "--force" in output
+        assert "--keep-conversation" in output
 
 
 class TestStatusCli:
@@ -418,5 +427,6 @@ class TestStatusCli:
 
         runner = CliRunner()
         result = runner.invoke(app, ["status", "--help"])
+        output = _strip_ansi(result.output)
         assert result.exit_code == 0
-        assert "status" in result.output.lower()
+        assert "status" in output.lower()
