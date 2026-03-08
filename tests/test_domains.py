@@ -24,8 +24,8 @@ class TestExpandDomains:
         result = expand_domains(["vertexai", "all", ".example.com"])
         assert result is None
 
-    def test_expand_default_includes_vertexai_and_pypi(self):
-        """'default' expands to vertexai + pypi domains."""
+    def test_expand_default_includes_vertexai_and_python(self):
+        """'default' expands to vertexai + python domains."""
         result = expand_domains(["default"])
         assert result is not None
 
@@ -33,8 +33,8 @@ class TestExpandDomains:
         for domain in DOMAIN_ALIASES["vertexai"]:
             assert domain in result
 
-        # Should include all pypi domains
-        for domain in DOMAIN_ALIASES["pypi"]:
+        # Should include all python domains
+        for domain in DOMAIN_ALIASES["python"]:
             assert domain in result
 
     def test_expand_default_includes_github(self):
@@ -61,11 +61,11 @@ class TestExpandDomains:
         assert result is not None
         assert result == DOMAIN_ALIASES["vertexai"]
 
-    def test_expand_pypi_alias(self):
-        """'pypi' expands to pypi domains."""
-        result = expand_domains(["pypi"])
+    def test_expand_python_alias(self):
+        """'python' expands to python domains."""
+        result = expand_domains(["python"])
         assert result is not None
-        assert result == DOMAIN_ALIASES["pypi"]
+        assert result == DOMAIN_ALIASES["python"]
 
     def test_raw_domain_passthrough(self):
         """Raw domains pass through unchanged."""
@@ -95,13 +95,13 @@ class TestExpandDomains:
 
     def test_order_preserved(self):
         """Order is preserved (first occurrence wins)."""
-        result = expand_domains(["pypi", "vertexai"])
+        result = expand_domains(["python", "vertexai"])
         assert result is not None
 
-        # pypi domains should come before vertexai domains
-        pypi_first = result.index(DOMAIN_ALIASES["pypi"][0])
+        # python domains should come before vertexai domains
+        python_first = result.index(DOMAIN_ALIASES["python"][0])
         vertexai_first = result.index(DOMAIN_ALIASES["vertexai"][0])
-        assert pypi_first < vertexai_first
+        assert python_first < vertexai_first
 
     def test_empty_list(self):
         """Empty list returns empty list."""
@@ -127,8 +127,8 @@ class TestExpandDomains:
         for domain in DOMAIN_ALIASES["vertexai"]:
             assert domain in result
 
-        # Should include all pypi domains
-        for domain in DOMAIN_ALIASES["pypi"]:
+        # Should include all python domains
+        for domain in DOMAIN_ALIASES["python"]:
             assert domain in result
 
         # Should include custom domain
@@ -143,8 +143,8 @@ class TestExpandDomains:
         for domain in DOMAIN_ALIASES["vertexai"]:
             assert domain not in result
 
-        # Should NOT include pypi domains
-        for domain in DOMAIN_ALIASES["pypi"]:
+        # Should NOT include python domains
+        for domain in DOMAIN_ALIASES["python"]:
             assert domain not in result
 
 
@@ -167,18 +167,18 @@ class TestFormatDomainsForDisplay:
         result = format_domains_for_display(domains)
         assert "vertexai" in result
 
-    def test_pypi_domains_show_alias(self):
-        """Full pypi domains show alias name."""
-        domains = list(DOMAIN_ALIASES["pypi"])
+    def test_python_domains_show_alias(self):
+        """Full python domains show alias name."""
+        domains = list(DOMAIN_ALIASES["python"])
         result = format_domains_for_display(domains)
-        assert "pypi" in result
+        assert "python" in result
 
     def test_mixed_aliases_both_shown(self):
         """Both aliases shown when both are present."""
-        domains = list(DOMAIN_ALIASES["vertexai"]) + list(DOMAIN_ALIASES["pypi"])
+        domains = list(DOMAIN_ALIASES["vertexai"]) + list(DOMAIN_ALIASES["python"])
         result = format_domains_for_display(domains)
         assert "vertexai" in result
-        assert "pypi" in result
+        assert "python" in result
 
     def test_custom_domains_shown(self):
         """Custom domains are displayed."""
@@ -200,6 +200,11 @@ class TestDomainAliases:
         """DEFAULT_ALIASES references valid aliases."""
         for alias in DEFAULT_ALIASES:
             assert alias in DOMAIN_ALIASES
+
+    def test_default_aliases_include_python(self):
+        """DEFAULT_ALIASES includes 'python' (not 'pypi')."""
+        assert "python" in DEFAULT_ALIASES
+        assert "pypi" not in DEFAULT_ALIASES
 
     def test_vertexai_has_googleapis(self):
         """vertexai alias includes specific googleapis.com subdomains."""
@@ -229,13 +234,131 @@ class TestDomainAliases:
         regex_entries = [d for d in vertexai if d.startswith("~")]
         assert any("aiplatform" in d for d in regex_entries)
 
-    def test_pypi_has_pypi_org(self):
-        """pypi alias includes pypi.org."""
-        assert any("pypi.org" in d for d in DOMAIN_ALIASES["pypi"])
+    def test_python_has_pypi_org(self):
+        """python alias includes pypi.org."""
+        assert any("pypi.org" in d for d in DOMAIN_ALIASES["python"])
+
+    def test_python_has_pytorch(self):
+        """python alias includes download.pytorch.org."""
+        assert "download.pytorch.org" in DOMAIN_ALIASES["python"]
 
     def test_claude_has_claude_ai(self):
         """claude alias includes .claude.ai."""
         assert any(".claude.ai" in d for d in DOMAIN_ALIASES["claude"])
+
+
+class TestPypiBackwardCompatibility:
+    """Tests for 'pypi' backward-compatible alias."""
+
+    def test_pypi_alias_exists(self):
+        """'pypi' alias exists in DOMAIN_ALIASES."""
+        assert "pypi" in DOMAIN_ALIASES
+
+    def test_pypi_expands_to_same_as_python(self):
+        """'pypi' expands to the same domains as 'python'."""
+        assert DOMAIN_ALIASES["pypi"] is DOMAIN_ALIASES["python"]
+
+    def test_pypi_alias_expands_correctly(self):
+        """expand_domains(['pypi']) returns same result as expand_domains(['python'])."""
+        pypi_result = expand_domains(["pypi"])
+        python_result = expand_domains(["python"])
+        assert pypi_result == python_result
+
+    def test_pypi_includes_pytorch(self):
+        """'pypi' backward-compat alias also includes pytorch."""
+        result = expand_domains(["pypi"])
+        assert result is not None
+        assert "download.pytorch.org" in result
+
+
+class TestGolangAlias:
+    """Tests for the 'golang' domain alias."""
+
+    def test_golang_alias_exists(self):
+        """'golang' alias exists in DOMAIN_ALIASES."""
+        assert "golang" in DOMAIN_ALIASES
+
+    def test_golang_not_in_defaults(self):
+        """'golang' is NOT in DEFAULT_ALIASES (opt-in only)."""
+        assert "golang" not in DEFAULT_ALIASES
+
+    def test_golang_expands_to_correct_domains(self):
+        """'golang' expands to Go ecosystem domains."""
+        result = expand_domains(["golang"])
+        assert result is not None
+        assert "go.dev" in result
+        assert "dl.google.com" in result
+        assert "proxy.golang.org" in result
+        assert "sum.golang.org" in result
+        assert "storage.googleapis.com" in result
+
+    def test_golang_dedup_with_vertexai(self):
+        """storage.googleapis.com is deduplicated when both vertexai and golang are used."""
+        result = expand_domains(["vertexai", "golang"])
+        assert result is not None
+        count = result.count("storage.googleapis.com")
+        assert count == 1
+
+    def test_golang_in_format_display(self):
+        """format_domains_for_display recognizes golang alias."""
+        domains = expand_domains(["golang"])
+        assert domains is not None
+        result = format_domains_for_display(domains)
+        assert "golang" in result
+
+
+class TestNodejsAlias:
+    """Tests for the 'nodejs' domain alias."""
+
+    def test_nodejs_alias_exists(self):
+        """'nodejs' alias exists in DOMAIN_ALIASES."""
+        assert "nodejs" in DOMAIN_ALIASES
+
+    def test_nodejs_not_in_defaults(self):
+        """'nodejs' is NOT in DEFAULT_ALIASES (opt-in only)."""
+        assert "nodejs" not in DEFAULT_ALIASES
+
+    def test_nodejs_expands_to_correct_domains(self):
+        """'nodejs' expands to Node.js ecosystem domains."""
+        result = expand_domains(["nodejs"])
+        assert result is not None
+        assert "registry.npmjs.org" in result
+        assert ".npmjs.org" in result
+        assert ".yarnpkg.com" in result
+
+    def test_nodejs_in_format_display(self):
+        """format_domains_for_display recognizes nodejs alias."""
+        domains = expand_domains(["nodejs"])
+        assert domains is not None
+        result = format_domains_for_display(domains)
+        assert "nodejs" in result
+
+
+class TestRustAlias:
+    """Tests for the 'rust' domain alias."""
+
+    def test_rust_alias_exists(self):
+        """'rust' alias exists in DOMAIN_ALIASES."""
+        assert "rust" in DOMAIN_ALIASES
+
+    def test_rust_not_in_defaults(self):
+        """'rust' is NOT in DEFAULT_ALIASES (opt-in only)."""
+        assert "rust" not in DEFAULT_ALIASES
+
+    def test_rust_expands_to_correct_domains(self):
+        """'rust' expands to Rust ecosystem domains."""
+        result = expand_domains(["rust"])
+        assert result is not None
+        assert "crates.io" in result
+        assert "static.crates.io" in result
+        assert "static.rust-lang.org" in result
+
+    def test_rust_in_format_display(self):
+        """format_domains_for_display recognizes rust alias."""
+        domains = expand_domains(["rust"])
+        assert domains is not None
+        result = format_domains_for_display(domains)
+        assert "rust" in result
 
 
 class TestIsUnrestricted:
@@ -265,7 +388,7 @@ class TestClaudeAlias:
         assert ".anthropic.com" in result
 
     def test_claude_alias_combined_with_default(self):
-        """'default' + 'claude' includes vertexai, pypi, github, and claude domains."""
+        """'default' + 'claude' includes vertexai, python, github, and claude domains."""
         result = expand_domains(["default", "claude"])
         assert result is not None
 
@@ -273,8 +396,8 @@ class TestClaudeAlias:
         for domain in DOMAIN_ALIASES["vertexai"]:
             assert domain in result
 
-        # Should include all pypi domains
-        for domain in DOMAIN_ALIASES["pypi"]:
+        # Should include all python domains
+        for domain in DOMAIN_ALIASES["python"]:
             assert domain in result
 
         # Should include all github domains
@@ -313,7 +436,7 @@ class TestGithubAlias:
         assert "results-receiver.actions.githubusercontent.com" in result
 
     def test_github_alias_combined_with_default(self):
-        """'default' + 'github' includes vertexai, pypi, and github domains."""
+        """'default' + 'github' includes vertexai, python, and github domains."""
         result = expand_domains(["default", "github"])
         assert result is not None
 
@@ -321,8 +444,8 @@ class TestGithubAlias:
         for domain in DOMAIN_ALIASES["vertexai"]:
             assert domain in result
 
-        # Should include all pypi domains
-        for domain in DOMAIN_ALIASES["pypi"]:
+        # Should include all python domains
+        for domain in DOMAIN_ALIASES["python"]:
             assert domain in result
 
         # Should include all github domains

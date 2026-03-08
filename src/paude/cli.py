@@ -209,8 +209,8 @@ COMMANDS:
 OPTIONS (for 'create' command):
     --yolo              Enable YOLO mode (skip all permission prompts)
     --allowed-domains   Domains to allow network access (repeatable).
-                        Special: 'all' (unrestricted), 'default' (vertexai+pypi+github)
-                        Aliases: 'vertexai', 'pypi', 'github'
+                        Special: 'all' (unrestricted), 'default' (vertexai+python+github)
+                        Aliases: 'vertexai', 'python', 'golang', 'nodejs', 'rust', 'github'
                         Custom domains REPLACE defaults; use with 'default' to add.
     --git               Set up git remote, push code+tags, configure origin
     --rebuild           Force rebuild of workspace container image
@@ -322,8 +322,8 @@ def session_create(
             "--allowed-domains",
             help=(
                 "Domains to allow network access. Can be repeated. "
-                "Special values: 'all' (unrestricted), 'default' (vertexai+pypi), "
-                "'vertexai', 'pypi'. Default: 'default'."
+                "Special values: 'all' (unrestricted), 'default' (vertexai+python+github), "
+                "'vertexai', 'python', 'golang', 'nodejs', 'rust'. Default: 'default'."
             ),
         ),
     ] = None,

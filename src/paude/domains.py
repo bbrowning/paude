@@ -24,9 +24,27 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
         ".claude.ai",
         ".anthropic.com",
     ],
-    "pypi": [
+    "python": [
         ".pypi.org",
         ".pythonhosted.org",
+        "download.pytorch.org",
+    ],
+    "golang": [
+        "go.dev",
+        "dl.google.com",
+        "proxy.golang.org",
+        "sum.golang.org",
+        "storage.googleapis.com",
+    ],
+    "nodejs": [
+        "registry.npmjs.org",
+        ".npmjs.org",
+        ".yarnpkg.com",
+    ],
+    "rust": [
+        "crates.io",
+        "static.crates.io",
+        "static.rust-lang.org",
     ],
     "github": [
         "github.com",
@@ -38,8 +56,11 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
     ],
 }
 
+# Backward-compatible alias: pypi -> python
+DOMAIN_ALIASES["pypi"] = DOMAIN_ALIASES["python"]
+
 # Default aliases when --allowed-domains is not specified
-DEFAULT_ALIASES = ["claude", "vertexai", "pypi", "github"]
+DEFAULT_ALIASES = ["claude", "vertexai", "python", "github"]
 
 
 def expand_domains(domains: list[str]) -> list[str] | None:
@@ -48,7 +69,7 @@ def expand_domains(domains: list[str]) -> list[str] | None:
     Args:
         domains: List of domains or aliases. Special values:
             - "all": Returns None (unrestricted network)
-            - "default": Expands to all DEFAULT_ALIASES (claude, vertexai, pypi, github)
+            - "default": Expands to all DEFAULT_ALIASES (claude, vertexai, python, github)
             - Alias names (e.g., "claude", "vertexai"): Expand to domain lists
             - Raw domains (e.g., ".example.com"): Pass through unchanged
 

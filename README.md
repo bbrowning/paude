@@ -271,7 +271,7 @@ See [docs/OPENSHIFT.md](docs/OPENSHIFT.md) for detailed setup and usage.
 
 ### Network Domains
 
-By default, paude runs a proxy sidecar that filters network access to Vertex AI and PyPI only.
+By default, paude runs a proxy sidecar that filters network access to Vertex AI, Python packages, and GitHub only.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -292,13 +292,23 @@ paude create --allowed-domains all
 
 # Use only vertexai (replaces default)
 paude create --allowed-domains vertexai
+
+# Add Go module proxy access
+paude create --allowed-domains default --allowed-domains golang
 ```
 
 The default allowlist includes:
 - **vertexai**: Vertex AI and Google OAuth domains (`.googleapis.com`, `.google.com`)
-- **pypi**: Python package repositories (`.pypi.org`, `.pythonhosted.org`)
+- **python**: Python package repositories (`.pypi.org`, `.pythonhosted.org`, `download.pytorch.org`)
 
-**Special values**: `all` (unrestricted), `default` (vertexai + pypi), `vertexai`, `pypi`, `github`. Specifying domains without `default` replaces the allowlist entirely.
+Opt-in language ecosystem aliases:
+- **golang**: Go modules (`go.dev`, `proxy.golang.org`, `sum.golang.org`, `dl.google.com`, `storage.googleapis.com`)
+- **nodejs**: npm/Yarn registries (`registry.npmjs.org`, `.npmjs.org`, `.yarnpkg.com`)
+- **rust**: Cargo/rustup (`crates.io`, `static.crates.io`, `static.rust-lang.org`)
+
+> **Note**: `pypi` is a backward-compatible alias for `python`.
+
+**Special values**: `all` (unrestricted), `default` (vertexai + python + github), `vertexai`, `python`, `golang`, `nodejs`, `rust`, `github`. Specifying domains without `default` replaces the allowlist entirely.
 
 ### GitHub CLI Access
 

@@ -114,12 +114,12 @@ def test_flag_recognized(flag):
 
 
 def test_allowed_domains_default_value():
-    """Default --allowed-domains value shows vertexai + pypi."""
+    """Default --allowed-domains value shows vertexai + python."""
     result = runner.invoke(app, ["create", "--dry-run"])
     assert result.exit_code == 0
     assert "--allowed-domains:" in result.stdout
-    # Default should expand to vertexai + pypi
-    assert "vertexai" in result.stdout or "pypi" in result.stdout
+    # Default should expand to vertexai + python
+    assert "vertexai" in result.stdout or "python" in result.stdout
 
 
 def test_allowed_domains_all_value():
