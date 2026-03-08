@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -14,8 +15,8 @@ def _find_backend_and_session(
     session_name: str,
     openshift_context: str | None = None,
     openshift_namespace: str | None = None,
-) -> tuple[str, Backend]:
-    """Find the backend containing a session. Raises typer.Exit if not found."""
+) -> tuple[str, Backend, Session]:
+    """Find the backend and session. Raises typer.Exit if not found."""
     from paude.cli import find_session_backend
 
     result = find_session_backend(session_name, openshift_context, openshift_namespace)
@@ -23,7 +24,13 @@ def _find_backend_and_session(
         typer.echo(f"Error: Session '{session_name}' not found.", err=True)
         raise typer.Exit(1)
 
-    return result[0], result[1]
+    backend_type, backend = result[0], result[1]
+    session = backend.get_session(session_name)
+    if session is None:
+        typer.echo(f"Error: Session '{session_name}' not found.", err=True)
+        raise typer.Exit(1)
+
+    return backend_type, backend, session
 
 
 def _ensure_remote_exists(
@@ -118,23 +125,15 @@ def harvest_session(
     """Harvest changes from a running session into a local branch."""
     from paude.git_remote import git_diff_stat, git_fetch_from_remote
 
-    backend_type, backend = _find_backend_and_session(
+    backend_type, backend, session = _find_backend_and_session(
         session_name, openshift_context, openshift_namespace
     )
 
-    session = backend.get_session(session_name)
-    if session is None:
-        typer.echo(f"Error: Session '{session_name}' not found.", err=True)
-        raise typer.Exit(1)
-
     workspace = session.workspace
-    if not workspace.exists():
-        typer.echo(f"Error: Workspace '{workspace}' does not exist.", err=True)
-        raise typer.Exit(1)
-
-    if not (workspace / ".git").exists():
+    if not (workspace / ".git").is_dir():
         typer.echo(
-            f"Error: Workspace '{workspace}' is not a git repository.",
+            f"Error: Workspace '{workspace}' is not a git repository "
+            f"(missing or no .git directory).",
             err=True,
         )
         raise typer.Exit(1)
@@ -261,14 +260,9 @@ def reset_session(
     openshift_namespace: str | None = None,
 ) -> None:
     """Reset a session's workspace for a new task."""
-    _backend_type, backend = _find_backend_and_session(
+    _backend_type, backend, session = _find_backend_and_session(
         session_name, openshift_context, openshift_namespace
     )
-
-    session = backend.get_session(session_name)
-    if session is None:
-        typer.echo(f"Error: Session '{session_name}' not found.", err=True)
-        raise typer.Exit(1)
 
     if session.status != "running":
         typer.echo(
@@ -282,10 +276,11 @@ def reset_session(
         _check_unmerged_work(backend, session_name)
 
     typer.echo(f"Resetting workspace to '{branch}'...", err=True)
+    quoted_branch = shlex.quote(branch)
     reset_cmd = (
         f"git -C /pvc/workspace fetch origin 2>/dev/null; "
-        f"git -C /pvc/workspace checkout {branch} 2>/dev/null; "
-        f"git -C /pvc/workspace reset --hard origin/{branch} "
+        f"git -C /pvc/workspace checkout {quoted_branch} 2>/dev/null; "
+        f"git -C /pvc/workspace reset --hard origin/{quoted_branch} "
         f"2>/dev/null || "
         f"git -C /pvc/workspace reset --hard HEAD; "
         f"git -C /pvc/workspace clean -fdx"

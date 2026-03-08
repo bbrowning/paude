@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any
+
+from paude.backends.base import Backend
 
 
 @dataclass
@@ -20,7 +21,16 @@ class SessionActivity:
     state: str
 
 
-def get_session_activity(backend: Any, session_name: str) -> SessionActivity:
+TMUX_SEPARATOR = "---PAUDE_TMUX_SEP---"
+
+_TMUX_QUERY_CMD = (
+    f"tmux list-windows -t claude -F '#{{window_activity}}' 2>/dev/null; "
+    f"echo '{TMUX_SEPARATOR}'; "
+    "tmux capture-pane -t claude -p -l 5 2>/dev/null"
+)
+
+
+def get_session_activity(backend: Backend, session_name: str) -> SessionActivity:
     """Query tmux state in a running session.
 
     Args:
@@ -30,18 +40,14 @@ def get_session_activity(backend: Any, session_name: str) -> SessionActivity:
     Returns:
         SessionActivity with parsed state and timing.
     """
-    rc, activity_out, _ = backend.exec_in_session(
-        session_name,
-        "tmux list-windows -t claude -F '#{window_activity}' 2>/dev/null",
-    )
+    rc, output, _ = backend.exec_in_session(session_name, _TMUX_QUERY_CMD)
 
-    rc2, pane_content, _ = backend.exec_in_session(
-        session_name,
-        "tmux capture-pane -t claude -p -l 5 2>/dev/null",
-    )
-
-    activity_ts = activity_out.strip() if rc == 0 else ""
-    pane_text = pane_content if rc2 == 0 else ""
+    activity_ts = ""
+    pane_text = ""
+    if rc == 0 and TMUX_SEPARATOR in output:
+        parts = output.split(TMUX_SEPARATOR, 1)
+        activity_ts = parts[0].strip()
+        pane_text = parts[1] if len(parts) > 1 else ""
 
     return parse_activity(activity_ts, pane_text)
 

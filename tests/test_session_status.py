@@ -109,24 +109,21 @@ class TestGetSessionActivity:
     """Tests for get_session_activity."""
 
     def test_queries_tmux(self) -> None:
+        from paude.session_status import TMUX_SEPARATOR
+
         mock_backend = MagicMock()
         ts = str(int(time.time()) - 30)
-        mock_backend.exec_in_session.side_effect = [
-            (0, f"{ts}\n", ""),
-            (0, "Working on task...\ntest PASSED", ""),
-        ]
+        combined_output = f"{ts}\n{TMUX_SEPARATOR}\nWorking on task...\ntest PASSED"
+        mock_backend.exec_in_session.return_value = (0, combined_output, "")
 
         result = get_session_activity(mock_backend, "my-session")
 
         assert result.state == "Working"
-        assert mock_backend.exec_in_session.call_count == 2
+        assert mock_backend.exec_in_session.call_count == 1
 
     def test_handles_tmux_failure(self) -> None:
         mock_backend = MagicMock()
-        mock_backend.exec_in_session.side_effect = [
-            (1, "", "no tmux"),
-            (1, "", "no tmux"),
-        ]
+        mock_backend.exec_in_session.return_value = (1, "", "no tmux")
 
         result = get_session_activity(mock_backend, "my-session")
 
