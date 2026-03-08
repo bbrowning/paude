@@ -277,12 +277,10 @@ class TestStatusSessions:
 class TestResetSession:
     """Tests for reset_session."""
 
-    @patch("paude.git_remote.list_paude_remotes")
     @patch("paude.cli.find_session_backend")
     def test_reset_success(
         self,
         mock_find: MagicMock,
-        mock_list: MagicMock,
     ) -> None:
         mock_backend = MagicMock()
         mock_session = MagicMock()
@@ -290,7 +288,6 @@ class TestResetSession:
         mock_backend.get_session.return_value = mock_session
         mock_backend.exec_in_session.return_value = (0, "", "")
         mock_find.return_value = ("podman", mock_backend)
-        mock_list.return_value = []
 
         reset_session("test", force=True)
 
@@ -308,12 +305,10 @@ class TestResetSession:
         with pytest.raises(click.exceptions.Exit):
             reset_session("test")
 
-    @patch("paude.git_remote.list_paude_remotes")
     @patch("paude.cli.find_session_backend")
     def test_reset_keeps_conversation(
         self,
         mock_find: MagicMock,
-        mock_list: MagicMock,
     ) -> None:
         mock_backend = MagicMock()
         mock_session = MagicMock()
@@ -321,37 +316,55 @@ class TestResetSession:
         mock_backend.get_session.return_value = mock_session
         mock_backend.exec_in_session.return_value = (0, "", "")
         mock_find.return_value = ("podman", mock_backend)
-        mock_list.return_value = []
 
         reset_session("test", force=True, keep_conversation=True)
 
         # Only reset cmd, no clear cmd
         assert mock_backend.exec_in_session.call_count == 1
 
-    @patch("paude.git_remote.list_paude_remotes")
     @patch("paude.cli.find_session_backend")
     def test_reset_unmerged_work_blocks(
         self,
         mock_find: MagicMock,
-        mock_list: MagicMock,
     ) -> None:
         mock_backend = MagicMock()
         mock_session = MagicMock()
         mock_session.status = "running"
         mock_backend.get_session.return_value = mock_session
-        mock_backend.exec_in_session.return_value = (0, "abc1234 Some work\n", "")
+        # fetch+merge-base returns non-zero (diverged), log returns commit
+        mock_backend.exec_in_session.side_effect = [
+            (1, "", ""),  # git fetch && git merge-base --is-ancestor (diverged)
+            (0, "abc1234 Some work\n", ""),  # git log --oneline -1 HEAD
+        ]
         mock_find.return_value = ("podman", mock_backend)
-        mock_list.return_value = [("paude-test", "ext::...")]
 
         with pytest.raises(click.exceptions.Exit):
             reset_session("test")
 
-    @patch("paude.git_remote.list_paude_remotes")
+    @patch("paude.cli.find_session_backend")
+    def test_reset_merged_work_passes(
+        self,
+        mock_find: MagicMock,
+    ) -> None:
+        mock_backend = MagicMock()
+        mock_session = MagicMock()
+        mock_session.status = "running"
+        mock_backend.get_session.return_value = mock_session
+        # fetch+merge-base returns 0 (HEAD is ancestor of origin/main),
+        # then the reset exec calls
+        mock_backend.exec_in_session.side_effect = [
+            (0, "", ""),  # git fetch && git merge-base --is-ancestor (merged)
+            (0, "", ""),  # git reset --hard
+            (0, "", ""),  # rm -rf (clear conversation)
+        ]
+        mock_find.return_value = ("podman", mock_backend)
+
+        reset_session("test")
+
     @patch("paude.cli.find_session_backend")
     def test_reset_exec_failure(
         self,
         mock_find: MagicMock,
-        mock_list: MagicMock,
     ) -> None:
         mock_backend = MagicMock()
         mock_session = MagicMock()
@@ -359,7 +372,6 @@ class TestResetSession:
         mock_backend.get_session.return_value = mock_session
         mock_backend.exec_in_session.return_value = (1, "", "error")
         mock_find.return_value = ("podman", mock_backend)
-        mock_list.return_value = []
 
         with pytest.raises(click.exceptions.Exit):
             reset_session("test", force=True)

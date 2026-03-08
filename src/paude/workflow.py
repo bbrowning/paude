@@ -305,7 +305,7 @@ def reset_session(
         raise typer.Exit(1)
 
     if not force:
-        _check_unmerged_work(backend, session_name)
+        _check_unmerged_work(backend, session_name, branch)
 
     typer.echo(f"Resetting workspace to '{branch}'...", err=True)
     quoted_branch = shlex.quote(branch)
@@ -336,27 +336,29 @@ def reset_session(
 def _check_unmerged_work(
     backend: Backend,
     session_name: str,
+    branch: str = "main",
 ) -> None:
     """Check if session has unmerged work and warn the user."""
-    from paude.git_remote import list_paude_remotes
-
-    remote_name = f"paude-{session_name}"
-    has_remote = any(name == remote_name for name, _ in list_paude_remotes())
-    if not has_remote:
+    # Fetch origin and check if HEAD is an ancestor of origin/<branch>
+    rc, _, _ = backend.exec_in_session(
+        session_name,
+        "git -C /pvc/workspace fetch origin 2>/dev/null"
+        f" && git -C /pvc/workspace merge-base --is-ancestor HEAD origin/{branch}",
+    )
+    if rc == 0:
+        # HEAD is already in origin/main — nothing unmerged
         return
 
+    # There's diverged work — get latest commit for the warning message
     rc, stdout, _ = backend.exec_in_session(
         session_name,
         "git -C /pvc/workspace log --oneline -1 HEAD",
     )
-    if rc == 0 and stdout.strip():
-        typer.echo(
-            "Warning: Session has work that may not be harvested.",
-            err=True,
-        )
-        typer.echo(f"  Latest commit: {stdout.strip()}", err=True)
-        typer.echo(
-            "  Use --force to skip this check, or 'paude harvest' first.",
-            err=True,
-        )
-        raise typer.Exit(1)
+    latest = stdout.strip() if rc == 0 else "unknown"
+    typer.echo("Warning: Session has work that may not be harvested.", err=True)
+    typer.echo(f"  Latest commit: {latest}", err=True)
+    typer.echo(
+        "  Use --force to skip this check, or 'paude harvest' first.",
+        err=True,
+    )
+    raise typer.Exit(1)
