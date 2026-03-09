@@ -641,9 +641,8 @@ class TestPodmanProxyBehavior:
         self, running_proxy_session: tuple[PodmanBackend, str, str]
     ) -> None:
         """Proxy allows requests to permitted domains."""
-        _backend, name, proxy_ip = running_proxy_session
+        backend, name, proxy_ip = running_proxy_session
         container_name = f"paude-{name}"
-        proxy_name = f"paude-proxy-{name}"
 
         subprocess.run(
             [
@@ -666,16 +665,12 @@ class TestPodmanProxyBehavior:
             text=True,
             timeout=15,
         )
-        # Check proxy logs: squid only logs BLOCKED requests.
-        # If the domain appears in the logs, the proxy denied it.
-        log_result = subprocess.run(
-            ["podman", "logs", proxy_name],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        assert "oauth2.googleapis.com" not in log_result.stdout, (
-            f"Proxy blocked an allowed domain, proxy_logs={log_result.stdout}"
+        # Squid only writes to the blocked log for denied requests.
+        # If the domain appears there, the proxy blocked it.
+        blocked_log = backend.get_proxy_blocked_log(name)
+        assert blocked_log is not None
+        assert "oauth2.googleapis.com" not in blocked_log, (
+            f"Proxy blocked an allowed domain, blocked_log={blocked_log}"
         )
 
     def test_proxy_blocks_non_permitted_domains(
@@ -870,13 +865,9 @@ class TestPodmanProxyDomainUpdate:
                 text=True,
                 timeout=15,
             )
-            # Check proxy logs — example.com should NOT appear (it's now allowed)
-            log_result = subprocess.run(
-                ["podman", "logs", proxy_name],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            assert "example.com" not in log_result.stdout
+            # Check blocked log — example.com should NOT appear (it's allowed now)
+            blocked_log = backend.get_proxy_blocked_log(unique_session_name)
+            assert blocked_log is not None
+            assert "example.com" not in blocked_log
         finally:
             cleanup_session(backend, unique_session_name)
