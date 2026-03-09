@@ -2,6 +2,5 @@
     "build": {
         "dockerfile": "containers/paude/Dockerfile",
         "context": "containers/paude"
-    },
-    "venv": "auto"
+    }
 }
