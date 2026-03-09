@@ -628,8 +628,9 @@ class OpenShiftBackend:
         if claude_args:
             session_env["PAUDE_CLAUDE_ARGS"] = " ".join(claude_args)
 
-        # Add proxy environment variables when using proxy (allowed_domains is set)
+        # Add proxy env vars and suppress prompts when egress filtering is active
         if config.allowed_domains is not None:
+            session_env["PAUDE_SUPPRESS_PROMPTS"] = "1"
             proxy_url = f"http://paude-proxy-{session_name}:3128"
             session_env["HTTP_PROXY"] = proxy_url
             session_env["HTTPS_PROXY"] = proxy_url

@@ -326,6 +326,10 @@ class PodmanBackend:
             proxy_name = self._proxy_container_name(session_name)
             env.update(build_proxy_environment(proxy_name))
 
+        # Suppress interactive prompts when egress filtering is active
+        if use_proxy:
+            env["PAUDE_SUPPRESS_PROMPTS"] = "1"
+
         # Add YOLO flag to args if enabled
         claude_args = list(config.args)
         if config.yolo:

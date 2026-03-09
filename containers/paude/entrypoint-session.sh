@@ -229,6 +229,45 @@ if [[ -f /tmp/claude.json.seed ]] || [[ -L /tmp/claude.json.seed ]]; then
     chmod g+rw "$HOME/.claude.json" 2>/dev/null || true
 fi
 
+# Suppress Claude Code interactive prompts in sandboxed containers
+apply_sandbox_config() {
+    if [[ "${PAUDE_SUPPRESS_PROMPTS:-}" != "1" ]]; then
+        return 0
+    fi
+
+    local workspace="${PAUDE_WORKSPACE:-/workspace}"
+    local claude_json="$HOME/.claude.json"
+    local settings_json="$HOME/.claude/settings.json"
+
+    # Suppress trust prompt and onboarding by patching ~/.claude.json
+    if [[ -f "$claude_json" ]]; then
+        jq --arg ws "$workspace" '. * {
+            hasCompletedOnboarding: true,
+            projects: {($ws): {hasTrustDialogAccepted: true}}
+        }' "$claude_json" > "${claude_json}.tmp" \
+            && mv "${claude_json}.tmp" "$claude_json"
+    else
+        jq -n --arg ws "$workspace" '{
+            hasCompletedOnboarding: true,
+            projects: {($ws): {hasTrustDialogAccepted: true}}
+        }' > "$claude_json"
+    fi
+
+    # Suppress bypass permissions warning when --dangerously-skip-permissions is in args
+    if [[ "${PAUDE_CLAUDE_ARGS:-}" == *"--dangerously-skip-permissions"* ]]; then
+        mkdir -p "$HOME/.claude" 2>/dev/null || true
+        local skip_patch='{"skipDangerousModePermissionPrompt": true}'
+        if [[ -f "$settings_json" ]]; then
+            jq --argjson patch "$skip_patch" '. * $patch' "$settings_json" > "${settings_json}.tmp" \
+                && mv "${settings_json}.tmp" "$settings_json"
+        else
+            echo "$skip_patch" > "$settings_json"
+        fi
+    fi
+}
+
+apply_sandbox_config 2>/dev/null || true
+
 # Session workspace setup
 # For persistent sessions, workspace is at /workspace (mounted volume)
 WORKSPACE="${PAUDE_WORKSPACE:-/workspace}"

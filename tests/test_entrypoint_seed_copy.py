@@ -9,6 +9,7 @@ expected cp -a pattern and not the old file-by-file loop.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import textwrap
 from pathlib import Path
@@ -90,6 +91,22 @@ class TestEntrypointContract:
             or 'cp -a "$SEED_DIR/."' in content
             or "cp -a /tmp/claude.seed/" in content
         ), "entrypoint-session.sh must use 'cp -a' for recursive seed copy"
+
+    def test_entrypoint_has_apply_sandbox_config(self) -> None:
+        """The entrypoint must contain the apply_sandbox_config function."""
+        content = ENTRYPOINT_PATH.read_text()
+        assert "apply_sandbox_config()" in content, (
+            "entrypoint-session.sh must define apply_sandbox_config()"
+        )
+        assert "hasCompletedOnboarding" in content, (
+            "apply_sandbox_config must set hasCompletedOnboarding"
+        )
+        assert "hasTrustDialogAccepted" in content, (
+            "apply_sandbox_config must set hasTrustDialogAccepted"
+        )
+        assert "skipDangerousModePermissionPrompt" in content, (
+            "apply_sandbox_config must set skipDangerousModePermissionPrompt"
+        )
 
     def test_entrypoint_no_old_file_loop(self) -> None:
         """The old file-by-file loop pattern must not be present."""
@@ -333,3 +350,171 @@ class TestSeedCopyMixedContent:
         assert (
             home / ".claude" / "plugins" / "plugin.json"
         ).read_text() == '{"plugin": true}'
+
+
+def _build_sandbox_script(
+    home_dir: str,
+    workspace: str,
+    suppress_prompts: bool,
+    claude_args: str = "",
+) -> str:
+    """Build a script that replicates the apply_sandbox_config logic."""
+    env_lines = f'export HOME="{home_dir}"\n'
+    env_lines += f'export PAUDE_WORKSPACE="{workspace}"\n'
+    if suppress_prompts:
+        env_lines += 'export PAUDE_SUPPRESS_PROMPTS="1"\n'
+    else:
+        env_lines += "unset PAUDE_SUPPRESS_PROMPTS 2>/dev/null || true\n"
+    if claude_args:
+        env_lines += f'export PAUDE_CLAUDE_ARGS="{claude_args}"\n'
+    else:
+        env_lines += "unset PAUDE_CLAUDE_ARGS 2>/dev/null || true\n"
+
+    return textwrap.dedent(f"""\
+        #!/bin/bash
+        set -e
+        {env_lines}
+        apply_sandbox_config() {{
+            if [[ "${{PAUDE_SUPPRESS_PROMPTS:-}}" != "1" ]]; then
+                return 0
+            fi
+
+            local workspace="${{PAUDE_WORKSPACE:-/workspace}}"
+            local claude_json="$HOME/.claude.json"
+            local settings_json="$HOME/.claude/settings.json"
+
+            if [[ -f "$claude_json" ]]; then
+                jq --arg ws "$workspace" '. * {{
+                    hasCompletedOnboarding: true,
+                    projects: {{($ws): {{hasTrustDialogAccepted: true}}}}
+                }}' "$claude_json" > "${{claude_json}}.tmp" \\
+                    && mv "${{claude_json}}.tmp" "$claude_json"
+            else
+                jq -n --arg ws "$workspace" '{{
+                    hasCompletedOnboarding: true,
+                    projects: {{($ws): {{hasTrustDialogAccepted: true}}}}
+                }}' > "$claude_json"
+            fi
+
+            if [[ "${{PAUDE_CLAUDE_ARGS:-}}" == *"--dangerously-skip-permissions"* ]]; then
+                mkdir -p "$HOME/.claude" 2>/dev/null || true
+                local skip_patch='{{"skipDangerousModePermissionPrompt": true}}'
+                if [[ -f "$settings_json" ]]; then
+                    jq --argjson patch "$skip_patch" '. * $patch' "$settings_json" > "${{settings_json}}.tmp" \\
+                        && mv "${{settings_json}}.tmp" "$settings_json"
+                else
+                    echo "$skip_patch" > "$settings_json"
+                fi
+            fi
+        }}
+
+        apply_sandbox_config
+    """)
+
+
+class TestSandboxPromptSuppression:
+    """Tests for apply_sandbox_config() in entrypoint-session.sh."""
+
+    def test_creates_trust_config_when_suppress_enabled(self, tmp_path: Path) -> None:
+        """Trust + onboarding set when PAUDE_SUPPRESS_PROMPTS=1 (new file)."""
+        home = tmp_path / "home"
+        home.mkdir()
+        workspace = "/pvc/workspace"
+
+        script = _build_sandbox_script(str(home), workspace, suppress_prompts=True)
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        claude_json = json.loads((home / ".claude.json").read_text())
+        assert claude_json["hasCompletedOnboarding"] is True
+        assert claude_json["projects"][workspace]["hasTrustDialogAccepted"] is True
+
+    def test_merges_into_existing_claude_json(self, tmp_path: Path) -> None:
+        """Merged into existing ~/.claude.json preserving other keys."""
+        home = tmp_path / "home"
+        home.mkdir()
+        workspace = "/pvc/workspace"
+
+        existing = {"existingKey": "preserved", "numericField": 42}
+        (home / ".claude.json").write_text(json.dumps(existing))
+
+        script = _build_sandbox_script(str(home), workspace, suppress_prompts=True)
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        claude_json = json.loads((home / ".claude.json").read_text())
+        assert claude_json["existingKey"] == "preserved"
+        assert claude_json["numericField"] == 42
+        assert claude_json["hasCompletedOnboarding"] is True
+        assert claude_json["projects"][workspace]["hasTrustDialogAccepted"] is True
+
+    def test_patches_settings_json_with_skip_permissions(self, tmp_path: Path) -> None:
+        """settings.json patched when PAUDE_SUPPRESS_PROMPTS=1 + skip perms."""
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / ".claude").mkdir()
+        workspace = "/pvc/workspace"
+
+        script = _build_sandbox_script(
+            str(home),
+            workspace,
+            suppress_prompts=True,
+            claude_args="--dangerously-skip-permissions",
+        )
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        settings = json.loads((home / ".claude" / "settings.json").read_text())
+        assert settings["skipDangerousModePermissionPrompt"] is True
+
+    def test_merges_settings_json_preserving_existing(self, tmp_path: Path) -> None:
+        """Existing settings.json keys are preserved during merge."""
+        home = tmp_path / "home"
+        home.mkdir()
+        claude_dir = home / ".claude"
+        claude_dir.mkdir()
+        workspace = "/pvc/workspace"
+
+        existing = {"permissions": {"allow": ["Bash"]}}
+        (claude_dir / "settings.json").write_text(json.dumps(existing))
+
+        script = _build_sandbox_script(
+            str(home),
+            workspace,
+            suppress_prompts=True,
+            claude_args="--dangerously-skip-permissions",
+        )
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        settings = json.loads((claude_dir / "settings.json").read_text())
+        assert settings["skipDangerousModePermissionPrompt"] is True
+        assert settings["permissions"]["allow"] == ["Bash"]
+
+    def test_no_changes_when_suppress_unset(self, tmp_path: Path) -> None:
+        """No changes when PAUDE_SUPPRESS_PROMPTS is unset."""
+        home = tmp_path / "home"
+        home.mkdir()
+        workspace = "/pvc/workspace"
+
+        script = _build_sandbox_script(str(home), workspace, suppress_prompts=False)
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        assert not (home / ".claude.json").exists()
+        assert not (home / ".claude").exists()
+
+    def test_no_settings_json_without_skip_permissions(self, tmp_path: Path) -> None:
+        """No settings.json changes when --dangerously-skip-permissions not in args."""
+        home = tmp_path / "home"
+        home.mkdir()
+        workspace = "/pvc/workspace"
+
+        script = _build_sandbox_script(str(home), workspace, suppress_prompts=True)
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        # claude.json should exist (trust config)
+        assert (home / ".claude.json").exists()
+        # settings.json should NOT exist
+        assert not (home / ".claude" / "settings.json").exists()

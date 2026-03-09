@@ -281,6 +281,58 @@ class TestPodmanBackendCreateSession:
         env = call_args[1]["env"]
         assert "--dangerously-skip-permissions" in env.get("PAUDE_CLAUDE_ARGS", "")
 
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_create_session_sets_suppress_prompts_with_domains(
+        self, mock_runner_class: MagicMock
+    ) -> None:
+        """PAUDE_SUPPRESS_PROMPTS=1 set when allowed_domains is a list."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = False
+        mock_runner_class.return_value = mock_runner
+
+        backend = PodmanBackend()
+        backend._runner = mock_runner
+        backend._volume_manager = MagicMock()
+        backend._network_manager = MagicMock()
+
+        config = SessionConfig(
+            name="filtered-session",
+            workspace=Path("/home/user/project"),
+            image="paude:latest",
+            allowed_domains=[".googleapis.com"],
+            proxy_image="proxy:latest",
+        )
+        backend.create_session(config)
+
+        call_args = mock_runner.create_container.call_args
+        env = call_args[1]["env"]
+        assert env.get("PAUDE_SUPPRESS_PROMPTS") == "1"
+
+    @patch("paude.backends.podman.ContainerRunner")
+    def test_create_session_no_suppress_prompts_without_domains(
+        self, mock_runner_class: MagicMock
+    ) -> None:
+        """PAUDE_SUPPRESS_PROMPTS absent when allowed_domains is None."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = False
+        mock_runner_class.return_value = mock_runner
+
+        backend = PodmanBackend()
+        backend._runner = mock_runner
+        backend._volume_manager = MagicMock()
+
+        config = SessionConfig(
+            name="open-session",
+            workspace=Path("/home/user/project"),
+            image="paude:latest",
+            allowed_domains=None,
+        )
+        backend.create_session(config)
+
+        call_args = mock_runner.create_container.call_args
+        env = call_args[1]["env"]
+        assert "PAUDE_SUPPRESS_PROMPTS" not in env
+
 
 class TestPodmanBackendDeleteSession:
     """Tests for PodmanBackend.delete_session."""
