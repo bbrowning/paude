@@ -6,8 +6,7 @@ Run Claude Code in OpenShift/Kubernetes pods with persistent sessions, credentia
 
 1. **oc CLI** - OpenShift command-line tools installed and in PATH
 2. **Cluster Access** - Logged in to an OpenShift cluster (`oc login`)
-3. **Podman** - For building and pushing images locally
-4. **gcloud credentials** - Vertex AI authentication at `~/.config/gcloud`
+3. **gcloud credentials** - Vertex AI authentication at `~/.config/gcloud`
 
 ## Quick Start
 
@@ -28,7 +27,7 @@ paude connect
 
 ## How It Works
 
-1. **Image Push**: Local paude container image is pushed to the OpenShift internal registry
+1. **Binary Build**: Container image is built on-cluster via OpenShift BuildConfig and `oc start-build`
 2. **Pod Creation**: A pod is created with persistent storage and credentials injected
 3. **Session Persistence**: tmux inside the pod preserves your Claude session across reconnects
 4. **Git-Based Sync**: Use `--git` on create or `paude remote add` and `git push/pull` to sync code
@@ -91,22 +90,18 @@ paude create my-project --backend=openshift --storage-class=fast-ssd
 | `--backend=openshift` | Use OpenShift backend | `podman` |
 | `--openshift-namespace=NAME` | Kubernetes namespace | current context namespace |
 | `--openshift-context=NAME` | kubeconfig context | current |
-| `--openshift-registry=URL` | Container registry URL | auto-detect |
-| `--no-openshift-tls-verify` | Disable TLS certificate verification when pushing | N/A |
 | `--allowed-domains all` | Disable network filtering | `default` (vertexai + pypi + github) |
 | `--yolo` | Skip Claude permission prompts | `False` |
 
 **Notes:**
 - The namespace must already exist - paude will not create namespaces
 - If no namespace is specified, paude uses the current namespace from your kubeconfig context
-- If the OpenShift internal registry route is not exposed, paude will attempt `oc port-forward` (unstable for large images)
-- **Recommended**: Use `--openshift-registry` to specify an external registry (e.g., `quay.io/myuser`) for reliable image pushing
 
 ### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `PAUDE_REGISTRY` | Custom container registry | `quay.io/bbrowning` |
+| `PAUDE_REGISTRY` | Container registry for pulling and building base images | `quay.io/bbrowning` |
 
 ## Security
 
@@ -199,41 +194,25 @@ paude create --backend=openshift --openshift-namespace=my-namespace
 
 3. Or ask an administrator to create the namespace for you.
 
-### Image push failures
+### Image build failures
 
-Paude tries these methods in order to push images:
-
-1. **External registry** - If `--openshift-registry` is specified
-2. **Registry route** - If the internal registry has an exposed route
-3. **Port-forward** - Automatic fallback using `oc port-forward`
-
-Check if the registry route exists:
-```bash
-oc get route -n openshift-image-registry
-```
-
-**Using an external registry (recommended):**
-
-The most reliable approach is to use an external registry like Quay.io or Docker Hub:
+Paude builds container images on-cluster using OpenShift Binary Build (BuildConfig + `oc start-build`). If the build fails:
 
 ```bash
-# Login to your registry first
-podman login quay.io
+# Check build logs
+oc logs -f bc/paude-build -n <namespace>
 
-# Create session with your registry
-paude create --backend=openshift --openshift-registry=quay.io/myuser
+# List builds and their status
+oc get builds -n <namespace>
+
+# Describe a failed build for events and errors
+oc describe build paude-build-1 -n <namespace>
 ```
 
-**Port-forward fallback (experimental):**
-
-If no external route or registry is specified, paude attempts to use `oc port-forward`. This is unstable for large images and may fail with "connection refused" errors.
-
-If you see TLS certificate errors with port-forward:
-```bash
-paude create --backend=openshift --no-openshift-tls-verify
-```
-
-If port-forward fails with connection errors, use an external registry instead.
+Common causes:
+- Insufficient cluster resources for the build pod
+- BuildConfig not created (check `oc get bc -n <namespace>`)
+- Image stream issues (check `oc get is -n <namespace>`)
 
 ### Pod stuck in Pending
 

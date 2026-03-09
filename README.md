@@ -336,7 +336,7 @@ The OpenShift backend provides:
 - **Survive network disconnects** via tmux attachment
 - **Git-based sync** via `paude remote` and git push/pull
 - **Full config sync** including plugins and CLAUDE.md from `~/.claude/`
-- **Automatic image push** to OpenShift internal registry
+- **On-cluster image builds** via OpenShift Binary Build
 
 See [docs/OPENSHIFT.md](docs/OPENSHIFT.md) for detailed setup and usage.
 
@@ -499,7 +499,6 @@ See [`examples/README.md`](examples/README.md) for more configurations (Python, 
 | `build.args` | Build arguments for Dockerfile |
 | `packages` | Additional system packages to install |
 | `setup` | Run after first start |
-| `venv` | Venv isolation: `"auto"`, `"none"`, or list of directories |
 
 **devcontainer.json properties:**
 
@@ -598,7 +597,7 @@ These properties are ignored for security reasons:
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and release instructions.
 
-**Status**: Paude is a work-in-progress. See the [roadmap](docs/ROADMAP.md) for planned features.
+**Status**: See the [roadmap](docs/ROADMAP.md) for current status and planned features.
 
 ## License
 

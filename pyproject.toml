@@ -80,9 +80,6 @@ ignore = [
 "src/paude/platform.py" = [
     "A005",  # intentionally named to match domain concept
 ]
-"src/paude/venv.py" = [
-    "A005",  # intentionally named to match domain concept
-]
 
 [tool.mypy]
 python_version = "3.11"

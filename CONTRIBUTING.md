@@ -112,6 +112,7 @@ paude/
 │   │   └── dockerfile.py      # Dockerfile generation
 │   ├── container/             # Container management
 │   │   ├── podman.py          # Podman wrapper
+│   │   ├── build_context.py   # Build context preparation
 │   │   ├── image.py           # Image management
 │   │   ├── network.py         # Network management
 │   │   ├── runner.py          # Container execution
@@ -119,15 +120,17 @@ paude/
 │   ├── features/              # Dev container features
 │   │   ├── downloader.py      # Feature downloading
 │   │   └── installer.py       # Feature installation
+│   ├── constants.py           # Shared constants
 │   ├── domains.py             # Domain aliases and expansion
 │   ├── mounts.py              # Volume mount builder
 │   ├── environment.py         # Environment variables
 │   ├── git_remote.py          # Git remote management
 │   ├── hash.py                # Config hashing
 │   ├── platform.py            # Platform-specific code
+│   ├── proxy_log.py           # Proxy log parsing
 │   ├── session_discovery.py   # Session discovery
-│   ├── utils.py               # Utilities
-│   ├── venv.py                # Venv detection and shadowing
+│   ├── session_status.py      # Session status tracking
+│   ├── workflow.py            # Orchestration workflow (harvest, reset)
 │   └── dry_run.py             # Dry-run output
 ├── containers/
 │   ├── paude/
@@ -142,8 +145,7 @@ paude/
 │       └── ERR_CUSTOM_ACCESS_DENIED  # Custom error page
 ├── tests/                 # Python tests (pytest)
 ├── examples/              # Example configurations
-├── docs/
-│   └── features/          # Feature development documentation
+├── docs/                  # Documentation
 ├── pyproject.toml         # Python project configuration
 ├── Makefile               # Build and release automation
 └── README.md
@@ -260,22 +262,3 @@ This project enforces strict code quality standards to maintain long-term mainta
 
 For detailed standards including abstraction patterns, refactoring triggers, and testability requirements, see `.claude/CLAUDE.md`.
 
-## Adding New Features
-
-For significant features, follow the structured development process:
-
-1. Create documentation in `docs/features/<feature-name>/`:
-   - `RESEARCH.md` - Background research and prior art
-   - `PLAN.md` - Design decisions and phased approach
-   - `TASKS.md` - Implementation tasks with acceptance criteria
-   - `README.md` - Overview and verification checklist
-
-2. Implement in phases (MVP first, then enhancements)
-
-3. **Add tests** (required):
-   - Add tests in `tests/test_<module>.py`
-   - Run `make test` to verify all tests pass
-
-4. Update README.md and this file with user-facing changes
-
-See `docs/features/2026-01-21-byoc/` for an example of this process.

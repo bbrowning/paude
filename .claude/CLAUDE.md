@@ -38,6 +38,7 @@ src/paude/
 │   └── dockerfile.py      # Dockerfile generation
 ├── container/             # Container management
 │   ├── podman.py          # Podman subprocess wrapper
+│   ├── build_context.py   # Build context preparation
 │   ├── image.py           # Image building and pulling
 │   ├── network.py         # Network management
 │   ├── runner.py          # Container execution
@@ -45,15 +46,17 @@ src/paude/
 ├── features/              # Dev container features
 │   ├── downloader.py      # Feature downloading
 │   └── installer.py       # Feature installation
+├── constants.py           # Shared constants
 ├── domains.py             # Domain aliases and expansion
 ├── mounts.py              # Volume mount builder
 ├── environment.py         # Environment variables
 ├── git_remote.py          # Git remote management
 ├── hash.py                # Config hashing for caching
 ├── platform.py            # Platform-specific code (macOS)
+├── proxy_log.py           # Proxy log parsing
 ├── session_discovery.py   # Session discovery
-├── utils.py               # Utilities
-├── venv.py                # Venv detection and shadowing
+├── session_status.py      # Session status tracking
+├── workflow.py            # Orchestration workflow (harvest, reset)
 └── dry_run.py             # Dry-run output
 ```
 
@@ -154,7 +157,7 @@ When adding a new CLI flag, add tests in `tests/test_cli.py`.
 **No duplication:** If code appears twice, extract to shared function.
 
 **Shared utilities locations:**
-- Cross-cutting: `src/paude/utils.py`
+- Cross-cutting: `src/paude/constants.py`
 - Backend-shared: `src/paude/backends/shared.py`
 
 ### Abstraction Patterns
@@ -190,33 +193,6 @@ When adding or changing user-facing features (flags, options, behavior):
 ## macOS Considerations
 
 Paths outside `/Users/` require Podman machine configuration. The script detects this and provides guidance when volume mounts fail.
-
-## Feature Development Process
-
-When developing new features, follow this structured approach:
-
-1. **Create feature documentation** in `docs/features/`:
-   - Use `PENDING-<feature-name>/` for features in planning (not yet implemented)
-   - After implementation, rename to `YYYY-MM-DD-<feature-name>/` using the implementation date
-   - Include these files:
-     - `RESEARCH.md` - Background research, prior art, compatibility considerations
-     - `PLAN.md` - High-level design decisions, security considerations, phased approach
-     - `TASKS.md` - Detailed implementation tasks with acceptance criteria
-     - `README.md` - Feature overview and verification checklist
-
-2. **Implementation phases**: Break work into logical phases (MVP first, then enhancements)
-
-3. **Testing** (required): Add tests for all new functionality
-   - Python code → `tests/test_<module>.py`
-   - CLI flags → `tests/test_cli.py`
-   - Run `make test` to verify all tests pass
-
-4. **Documentation**: Update README.md and CONTRIBUTING.md with user-facing changes
-
-5. **Rename folder**: After implementation, rename from `PENDING-<feature-name>/` to `YYYY-MM-DD-<feature-name>/`
-
-Example: See `docs/features/2026-01-21-byoc/` for an implemented feature.
-Example: See `docs/features/PENDING-config-layering/` for a feature in planning.
 
 ## Issue Tracking During Development
 

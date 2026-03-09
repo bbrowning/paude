@@ -26,23 +26,6 @@ Technical debt identified during codebase analysis. Address these before adding 
 - Move image building orchestration to dedicated module
 - Each command should be < 50 lines, delegating to helpers
 
-### REFACTOR-003: container/image.py (708 lines)
-
-**Status**: Resolved
-**Priority**: Medium
-**Discovered**: 2026-01-29 during code quality analysis
-**Resolved**: 2026-03-08 — Split into `image.py` (301 lines) and `build_context.py` (331 lines). Extracted shared helpers (`resolve_entrypoint`, `copy_entrypoints`, `inject_features`, `copy_features_cache`, `generate_dockerfile_content`). `prepare_build_context` reduced from 261 to ~45 lines. `ensure_custom_image` reduced from 145 to ~40 lines.
-
-### REFACTOR-005: Extract `_find_container_by_session_name` helper in PodmanBackend
-
-**Status**: Resolved
-**Priority**: Medium
-**Discovered**: 2026-03-08 during proxy health check implementation
-**Resolved**: 2026-03-09 — Extracted `_find_container_by_session_name()` and `_build_session_from_container()` helpers. `get_session()`, `_get_proxy_config_from_labels()`, and `list_sessions()` now use these instead of duplicated lookup/construction logic.
-
-**Related files:**
-- `src/paude/backends/podman.py` (`list_sessions`, `get_session`, `_get_proxy_config_from_labels`)
-
 ### REFACTOR-004: Extract Duplicated Utilities
 
 **Status**: Partially Complete
