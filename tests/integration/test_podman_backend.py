@@ -3,47 +3,20 @@
 from __future__ import annotations
 
 import subprocess
-import time
 from pathlib import Path
 
 import pytest
 
-from paude.backends.base import SessionConfig
+from paude.backends.base import Session, SessionConfig
 from paude.backends.podman import (
     PodmanBackend,
     SessionExistsError,
     SessionNotFoundError,
 )
 
+from .conftest import _start_proxy_session, cleanup_session
+
 pytestmark = [pytest.mark.integration, pytest.mark.podman]
-
-
-def cleanup_session(backend: PodmanBackend, session_name: str) -> None:
-    """Clean up a session, ignoring errors if it doesn't exist."""
-    try:
-        backend.delete_session(session_name, confirm=True)
-    except SessionNotFoundError:
-        pass
-    except Exception:
-        # Also try direct podman cleanup as fallback
-        subprocess.run(
-            ["podman", "rm", "-f", f"paude-{session_name}"],
-            capture_output=True,
-        )
-        subprocess.run(
-            ["podman", "volume", "rm", "-f", f"paude-{session_name}-workspace"],
-            capture_output=True,
-        )
-
-    # Always clean up proxy container and network (may exist from proxy tests)
-    subprocess.run(
-        ["podman", "rm", "-f", f"paude-proxy-{session_name}"],
-        capture_output=True,
-    )
-    subprocess.run(
-        ["podman", "network", "rm", "-f", f"paude-net-{session_name}"],
-        capture_output=True,
-    )
 
 
 class TestPodmanSessionLifecycle:
@@ -165,71 +138,262 @@ class TestPodmanSessionLifecycle:
         with pytest.raises(SessionNotFoundError):
             backend.delete_session("nonexistent-session-xyz", confirm=True)
 
-    def test_list_sessions_returns_created_sessions(
+    def test_delete_session_cleans_up_proxy_and_network(
+        self,
+        require_podman: None,
+        require_test_image: None,
+        require_proxy_image: None,
+        temp_workspace: Path,
+        unique_session_name: str,
+        podman_test_image: str,
+        podman_proxy_image: str,
+    ) -> None:
+        """Deleting a proxy session removes proxy container and network."""
+        network_name = f"paude-net-{unique_session_name}"
+        proxy_name = f"paude-proxy-{unique_session_name}"
+
+        backend = PodmanBackend()
+        config = SessionConfig(
+            name=unique_session_name,
+            workspace=temp_workspace,
+            image=podman_test_image,
+            allowed_domains=[".googleapis.com"],
+            proxy_image=podman_proxy_image,
+        )
+        backend.create_session(config)
+
+        # Delete the session
+        backend.delete_session(unique_session_name, confirm=True)
+
+        # Verify proxy container is gone
+        result = subprocess.run(
+            ["podman", "container", "exists", proxy_name],
+            capture_output=True,
+        )
+        assert result.returncode != 0, "Proxy container should be deleted"
+
+        # Verify network is gone
+        result = subprocess.run(
+            ["podman", "network", "exists", network_name],
+            capture_output=True,
+        )
+        assert result.returncode != 0, "Network should be deleted"
+
+    def test_delete_session_cleans_orphaned_volume(
         self,
         require_podman: None,
         require_test_image: None,
         temp_workspace: Path,
         unique_session_name: str,
         podman_test_image: str,
+    ) -> None:
+        """Deleting a session whose container was removed still cleans the volume."""
+        backend = PodmanBackend()
+        try:
+            config = SessionConfig(
+                name=unique_session_name,
+                workspace=temp_workspace,
+                image=podman_test_image,
+            )
+            backend.create_session(config)
+
+            volume_name = f"paude-{unique_session_name}-workspace"
+
+            # Manually remove the container, leaving the volume orphaned
+            subprocess.run(
+                ["podman", "rm", "-f", f"paude-{unique_session_name}"],
+                capture_output=True,
+                check=True,
+            )
+
+            # Verify the volume still exists
+            result = subprocess.run(
+                ["podman", "volume", "exists", volume_name],
+                capture_output=True,
+            )
+            assert result.returncode == 0, "Volume should still exist"
+
+            # delete_session should clean up the orphaned volume
+            backend.delete_session(unique_session_name, confirm=True)
+
+            # Verify the volume is now gone
+            result = subprocess.run(
+                ["podman", "volume", "exists", volume_name],
+                capture_output=True,
+            )
+            assert result.returncode != 0, "Volume should be deleted"
+        finally:
+            cleanup_session(backend, unique_session_name)
+
+
+class TestPodmanStoppedSession:
+    """Tests against a shared stopped session (class-scoped)."""
+
+    def test_list_sessions_returns_created_sessions(
+        self, stopped_session: tuple[PodmanBackend, str, Session, Path]
     ) -> None:
         """List sessions includes created sessions."""
-        backend = PodmanBackend()
+        backend, name, _session, _workspace = stopped_session
 
-        try:
-            config = SessionConfig(
-                name=unique_session_name,
-                workspace=temp_workspace,
-                image=podman_test_image,
-            )
-            backend.create_session(config)
+        sessions = backend.list_sessions()
+        session_names = [s.name for s in sessions]
 
-            sessions = backend.list_sessions()
-            session_names = [s.name for s in sessions]
-
-            assert unique_session_name in session_names
-
-        finally:
-            cleanup_session(backend, unique_session_name)
+        assert name in session_names
 
     def test_get_session_returns_session_info(
-        self,
-        require_podman: None,
-        require_test_image: None,
-        temp_workspace: Path,
-        unique_session_name: str,
-        podman_test_image: str,
+        self, stopped_session: tuple[PodmanBackend, str, Session, Path]
     ) -> None:
         """Get session returns correct session information."""
-        backend = PodmanBackend()
+        backend, name, _session, _workspace = stopped_session
 
-        try:
-            config = SessionConfig(
-                name=unique_session_name,
-                workspace=temp_workspace,
-                image=podman_test_image,
-            )
-            backend.create_session(config)
+        session = backend.get_session(name)
 
-            session = backend.get_session(unique_session_name)
-
-            assert session is not None
-            assert session.name == unique_session_name
-            assert session.status == "stopped"
-            assert session.backend_type == "podman"
-
-        finally:
-            cleanup_session(backend, unique_session_name)
+        assert session is not None
+        assert session.name == name
+        assert session.status == "stopped"
+        assert session.backend_type == "podman"
 
     def test_get_nonexistent_session_returns_none(
-        self,
-        require_podman: None,
+        self, stopped_session: tuple[PodmanBackend, str, Session, Path]
     ) -> None:
         """Get session returns None for nonexistent session."""
-        backend = PodmanBackend()
+        backend, _name, _session, _workspace = stopped_session
 
         session = backend.get_session("nonexistent-session-xyz")
         assert session is None
+
+    def test_find_session_for_workspace(
+        self, stopped_session: tuple[PodmanBackend, str, Session, Path]
+    ) -> None:
+        """find_session_for_workspace returns the matching session or None."""
+        backend, name, _session, workspace = stopped_session
+
+        # Should find the session for the workspace
+        session = backend.find_session_for_workspace(workspace)
+        assert session is not None
+        assert session.name == name
+
+        # Should return None for a non-existent workspace
+        result = backend.find_session_for_workspace(
+            Path("/tmp/nonexistent-workspace-xyz")
+        )
+        assert result is None
+
+    def test_stop_already_stopped_session(
+        self, stopped_session: tuple[PodmanBackend, str, Session, Path]
+    ) -> None:
+        """Stopping an already-stopped session should not raise."""
+        backend, name, _session, _workspace = stopped_session
+        # Session is created in stopped state; stopping again should be fine
+        backend.stop_session(name)
+
+    def test_stop_nonexistent_session(
+        self, stopped_session: tuple[PodmanBackend, str, Session, Path]
+    ) -> None:
+        """Stopping a nonexistent session should not raise."""
+        backend, _name, _session, _workspace = stopped_session
+        # Should print "not found" to stderr but not raise
+        backend.stop_session("nonexistent-session-xyz")
+
+
+class TestPodmanRunningSession:
+    """Tests against a shared running session (class-scoped)."""
+
+    def test_workspace_directory_exists(
+        self, running_session: tuple[PodmanBackend, str, Path]
+    ) -> None:
+        """The /pvc/workspace directory exists in the container."""
+        _backend, name, _workspace = running_session
+        container_name = f"paude-{name}"
+
+        # Check that /pvc directory exists
+        result = subprocess.run(
+            ["podman", "exec", container_name, "test", "-d", "/pvc"],
+            capture_output=True,
+        )
+        assert result.returncode == 0, "/pvc should exist"
+
+        # Check that we can write to /pvc/workspace
+        result = subprocess.run(
+            [
+                "podman",
+                "exec",
+                container_name,
+                "bash",
+                "-c",
+                "mkdir -p /pvc/workspace && touch /pvc/workspace/test",
+            ],
+            capture_output=True,
+        )
+        assert result.returncode == 0, "Should be able to write to /pvc/workspace"
+
+    def test_paude_workspace_env_is_set(
+        self, running_session: tuple[PodmanBackend, str, Path]
+    ) -> None:
+        """PAUDE_WORKSPACE environment variable is set in container."""
+        _backend, name, _workspace = running_session
+        container_name = f"paude-{name}"
+
+        result = subprocess.run(
+            [
+                "podman",
+                "exec",
+                container_name,
+                "printenv",
+                "PAUDE_WORKSPACE",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "/pvc/workspace" in result.stdout
+
+    def test_exec_in_session(
+        self, running_session: tuple[PodmanBackend, str, Path]
+    ) -> None:
+        """Exec a command in a running session and check output."""
+        backend, name, _workspace = running_session
+
+        returncode, stdout, _stderr = backend.exec_in_session(name, "echo hello")
+
+        assert returncode == 0
+        assert "hello" in stdout
+
+    def test_copy_to_and_from_session(
+        self,
+        running_session: tuple[PodmanBackend, str, Path],
+        tmp_path: Path,
+    ) -> None:
+        """Copy a file into a session and back out, verifying contents."""
+        backend, name, _workspace = running_session
+
+        # Write a local file with known content
+        local_file = tmp_path / "upload.txt"
+        content = "integration-test-copy-data"
+        local_file.write_text(content)
+
+        # Copy into the session
+        backend.copy_to_session(
+            name,
+            str(local_file),
+            "/pvc/workspace/copied.txt",
+        )
+
+        # Verify the file arrived
+        returncode, stdout, _stderr = backend.exec_in_session(
+            name, "cat /pvc/workspace/copied.txt"
+        )
+        assert returncode == 0
+        assert content in stdout
+
+        # Copy back out
+        download_path = tmp_path / "download.txt"
+        backend.copy_from_session(
+            name,
+            "/pvc/workspace/copied.txt",
+            str(download_path),
+        )
+        assert download_path.read_text().strip() == content
 
 
 class TestPodmanContainerOperations:
@@ -283,10 +447,6 @@ class TestPodmanContainerOperations:
 
         finally:
             cleanup_session(backend, unique_session_name)
-
-
-class TestPodmanVolumes:
-    """Test volume persistence with real Podman."""
 
     def test_volume_persists_data(
         self,
@@ -359,114 +519,9 @@ class TestPodmanVolumes:
         finally:
             cleanup_session(backend, unique_session_name)
 
-    def test_workspace_directory_exists(
-        self,
-        require_podman: None,
-        require_test_image: None,
-        temp_workspace: Path,
-        unique_session_name: str,
-        podman_test_image: str,
-    ) -> None:
-        """The /pvc/workspace directory exists in the container."""
-        backend = PodmanBackend()
 
-        try:
-            config = SessionConfig(
-                name=unique_session_name,
-                workspace=temp_workspace,
-                image=podman_test_image,
-            )
-            backend.create_session(config)
-
-            container_name = f"paude-{unique_session_name}"
-
-            # Start container
-            subprocess.run(
-                ["podman", "start", container_name],
-                capture_output=True,
-                check=True,
-            )
-
-            # Check that /pvc directory exists and is writable
-            result = subprocess.run(
-                [
-                    "podman",
-                    "exec",
-                    container_name,
-                    "test",
-                    "-d",
-                    "/pvc",
-                ],
-                capture_output=True,
-            )
-            assert result.returncode == 0, "/pvc should exist"
-
-            # Check that we can write to /pvc/workspace
-            result = subprocess.run(
-                [
-                    "podman",
-                    "exec",
-                    container_name,
-                    "bash",
-                    "-c",
-                    "mkdir -p /pvc/workspace && touch /pvc/workspace/test",
-                ],
-                capture_output=True,
-            )
-            assert result.returncode == 0, "Should be able to write to /pvc/workspace"
-
-        finally:
-            cleanup_session(backend, unique_session_name)
-
-
-class TestPodmanEnvironment:
-    """Test environment variable handling with real Podman."""
-
-    def test_paude_workspace_env_is_set(
-        self,
-        require_podman: None,
-        require_test_image: None,
-        temp_workspace: Path,
-        unique_session_name: str,
-        podman_test_image: str,
-    ) -> None:
-        """PAUDE_WORKSPACE environment variable is set in container."""
-        backend = PodmanBackend()
-
-        try:
-            config = SessionConfig(
-                name=unique_session_name,
-                workspace=temp_workspace,
-                image=podman_test_image,
-            )
-            backend.create_session(config)
-
-            container_name = f"paude-{unique_session_name}"
-
-            # Start container
-            subprocess.run(
-                ["podman", "start", container_name],
-                capture_output=True,
-                check=True,
-            )
-
-            # Check PAUDE_WORKSPACE is set
-            result = subprocess.run(
-                [
-                    "podman",
-                    "exec",
-                    container_name,
-                    "printenv",
-                    "PAUDE_WORKSPACE",
-                ],
-                capture_output=True,
-                text=True,
-            )
-            assert result.returncode == 0
-            assert "/pvc/workspace" in result.stdout
-
-        finally:
-            cleanup_session(backend, unique_session_name)
+class TestPodmanYoloMode:
+    """Test YOLO mode with real Podman."""
 
     def test_yolo_mode_sets_claude_args(
         self,
@@ -516,71 +571,8 @@ class TestPodmanEnvironment:
             cleanup_session(backend, unique_session_name)
 
 
-def _start_proxy_session(
-    backend: PodmanBackend,
-    session_name: str,
-    workspace: Path,
-    main_image: str,
-    proxy_image: str,
-    allowed_domains: list[str],
-) -> str:
-    """Create and start a session with proxy egress filtering.
-
-    Uses PodmanBackend.create_session() which creates:
-    - Internal network (paude-net-{session_name})
-    - Proxy container on internal + podman networks
-    - Main container on internal network only with HTTP_PROXY set
-
-    Then starts both proxy and main containers.
-
-    Returns the proxy container's IP address on the internal network.
-    """
-    config = SessionConfig(
-        name=session_name,
-        workspace=workspace,
-        image=main_image,
-        allowed_domains=allowed_domains,
-        proxy_image=proxy_image,
-    )
-    backend.create_session(config)
-
-    # Start proxy container first (created stopped by create_session)
-    proxy_name = f"paude-proxy-{session_name}"
-    subprocess.run(
-        ["podman", "start", proxy_name],
-        capture_output=True,
-        check=True,
-    )
-    # Give squid time to initialize
-    time.sleep(2)
-
-    # Start main container
-    container_name = f"paude-{session_name}"
-    subprocess.run(
-        ["podman", "start", container_name],
-        capture_output=True,
-        check=True,
-    )
-
-    # Get proxy IP on the internal network (avoids DNS resolution issues in CI)
-    network_name = f"paude-net-{session_name}"
-    result = subprocess.run(
-        [
-            "podman",
-            "inspect",
-            "--format",
-            f'{{{{(index .NetworkSettings.Networks "{network_name}").IPAddress}}}}',
-            proxy_name,
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return result.stdout.strip()
-
-
-class TestPodmanProxyEgressFiltering:
-    """Test proxy-based egress filtering with real Podman."""
+class TestPodmanProxySetup:
+    """Test proxy session creation with real Podman."""
 
     def test_create_session_with_domains_creates_proxy_and_network(
         self,
@@ -641,137 +633,166 @@ class TestPodmanProxyEgressFiltering:
         finally:
             cleanup_session(backend, unique_session_name)
 
+
+class TestPodmanProxyBehavior:
+    """Test proxy behavior with a shared running proxy session (class-scoped)."""
+
     def test_proxy_allows_permitted_domains(
-        self,
-        require_podman: None,
-        require_test_image: None,
-        require_proxy_image: None,
-        temp_workspace: Path,
-        unique_session_name: str,
-        podman_test_image: str,
-        podman_proxy_image: str,
+        self, running_proxy_session: tuple[PodmanBackend, str, str]
     ) -> None:
         """Proxy allows requests to permitted domains."""
-        backend = PodmanBackend()
-        container_name = f"paude-{unique_session_name}"
+        backend, name, proxy_ip = running_proxy_session
+        container_name = f"paude-{name}"
 
-        try:
-            proxy_ip = _start_proxy_session(
-                backend=backend,
-                session_name=unique_session_name,
-                workspace=temp_workspace,
-                main_image=podman_test_image,
-                proxy_image=podman_proxy_image,
-                allowed_domains=[".googleapis.com"],
-            )
-
-            # Curl an allowed domain through the proxy using explicit IP.
-            # Uses -x to specify proxy directly, bypassing DNS resolution
-            # (aardvark-dns may not work on --internal networks in CI).
-            proxy_name = f"paude-proxy-{unique_session_name}"
-            subprocess.run(
-                [
-                    "podman",
-                    "exec",
-                    container_name,
-                    "curl",
-                    "-s",
-                    "-o",
-                    "/dev/null",
-                    "-x",
-                    f"http://{proxy_ip}:3128",
-                    "--connect-timeout",
-                    "10",
-                    "-m",
-                    "15",
-                    "https://oauth2.googleapis.com/",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            # Check proxy logs: squid only logs BLOCKED requests
-            # (access_log ... !allowed_domains). If the domain appears in
-            # the logs, the proxy denied it. Absence means it was allowed,
-            # regardless of whether the upstream was actually reachable.
-            log_result = subprocess.run(
-                ["podman", "logs", proxy_name],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            assert "oauth2.googleapis.com" not in log_result.stdout, (
-                f"Proxy blocked an allowed domain, proxy_logs={log_result.stdout}"
-            )
-
-        finally:
-            cleanup_session(backend, unique_session_name)
+        subprocess.run(
+            [
+                "podman",
+                "exec",
+                container_name,
+                "curl",
+                "-s",
+                "-o",
+                "/dev/null",
+                "-x",
+                f"http://{proxy_ip}:3128",
+                "--connect-timeout",
+                "3",
+                "-m",
+                "5",
+                "https://oauth2.googleapis.com/",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        # Squid only writes to the blocked log for denied requests.
+        # If the domain appears there, the proxy blocked it.
+        blocked_log = backend.get_proxy_blocked_log(name)
+        assert blocked_log is not None
+        assert "oauth2.googleapis.com" not in blocked_log, (
+            f"Proxy blocked an allowed domain, blocked_log={blocked_log}"
+        )
 
     def test_proxy_blocks_non_permitted_domains(
-        self,
-        require_podman: None,
-        require_test_image: None,
-        require_proxy_image: None,
-        temp_workspace: Path,
-        unique_session_name: str,
-        podman_test_image: str,
-        podman_proxy_image: str,
+        self, running_proxy_session: tuple[PodmanBackend, str, str]
     ) -> None:
         """Proxy blocks requests to non-permitted domains with 403."""
-        backend = PodmanBackend()
-        container_name = f"paude-{unique_session_name}"
+        _backend, name, proxy_ip = running_proxy_session
+        container_name = f"paude-{name}"
 
-        try:
-            proxy_ip = _start_proxy_session(
-                backend=backend,
-                session_name=unique_session_name,
-                workspace=temp_workspace,
-                main_image=podman_test_image,
-                proxy_image=podman_proxy_image,
-                allowed_domains=[".googleapis.com"],
-            )
-
-            # Curl a blocked domain through the proxy using explicit IP
-            # (bypasses DNS resolution issues in CI)
-            result = subprocess.run(
-                [
-                    "podman",
-                    "exec",
-                    container_name,
-                    "curl",
-                    "-s",
-                    "-o",
-                    "/dev/null",
-                    "-w",
-                    "%{http_code}",
-                    "-x",
-                    f"http://{proxy_ip}:3128",
-                    "--connect-timeout",
-                    "10",
-                    "-m",
-                    "15",
-                    "https://example.com/",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            # Squid may return 403 (explicit denial) or reset the connection
-            # (curl exit code != 0, http_code 000) depending on version.
-            # Both mean the request was blocked.
-            http_code = result.stdout.strip()
-            assert http_code == "403" or (
-                http_code == "000" and result.returncode != 0
-            ), (
-                f"curl to blocked domain should be denied (403 or connection reset), "
-                f"got http_code={http_code}, returncode={result.returncode}, "
-                f"stderr={result.stderr}"
-            )
-
-        finally:
-            cleanup_session(backend, unique_session_name)
+        result = subprocess.run(
+            [
+                "podman",
+                "exec",
+                container_name,
+                "curl",
+                "-s",
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code}",
+                "-x",
+                f"http://{proxy_ip}:3128",
+                "--connect-timeout",
+                "3",
+                "-m",
+                "5",
+                "https://example.com/",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        http_code = result.stdout.strip()
+        assert http_code == "403" or (http_code == "000" and result.returncode != 0), (
+            f"curl to blocked domain should be denied (403 or connection reset), "
+            f"got http_code={http_code}, returncode={result.returncode}, "
+            f"stderr={result.stderr}"
+        )
 
     def test_no_direct_internet_without_proxy(
+        self, running_proxy_session: tuple[PodmanBackend, str, str]
+    ) -> None:
+        """Main container cannot reach the internet bypassing the proxy."""
+        _backend, name, _proxy_ip = running_proxy_session
+        container_name = f"paude-{name}"
+
+        result = subprocess.run(
+            [
+                "podman",
+                "exec",
+                container_name,
+                "curl",
+                "--noproxy",
+                "*",
+                "-sf",
+                "--connect-timeout",
+                "3",
+                "-m",
+                "5",
+                "https://example.com/",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        assert result.returncode != 0, (
+            "Direct internet access should fail on internal network"
+        )
+
+    def test_get_allowed_domains(
+        self, running_proxy_session: tuple[PodmanBackend, str, str]
+    ) -> None:
+        """get_allowed_domains returns the configured domain list."""
+        backend, name, _proxy_ip = running_proxy_session
+
+        domains = backend.get_allowed_domains(name)
+        assert domains == [".googleapis.com"]
+
+    def test_get_proxy_blocked_log(
+        self, running_proxy_session: tuple[PodmanBackend, str, str]
+    ) -> None:
+        """get_proxy_blocked_log reflects blocked requests."""
+        backend, name, proxy_ip = running_proxy_session
+        container_name = f"paude-{name}"
+
+        # Initial log should not contain our unique test domain
+        initial_log = backend.get_proxy_blocked_log(name)
+        assert initial_log is not None
+
+        # Make a request to a blocked domain through the proxy
+        subprocess.run(
+            [
+                "podman",
+                "exec",
+                container_name,
+                "curl",
+                "-s",
+                "-o",
+                "/dev/null",
+                "-x",
+                f"http://{proxy_ip}:3128",
+                "--connect-timeout",
+                "3",
+                "-m",
+                "5",
+                "https://blocked-test.example.com/",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+
+        # Blocked log should now contain the blocked domain
+        updated_log = backend.get_proxy_blocked_log(name)
+        assert updated_log is not None
+        assert "blocked-test.example.com" in updated_log
+
+
+class TestPodmanProxyDomainUpdate:
+    """Tests that modify proxy configuration (need their own session)."""
+
+    def test_update_allowed_domains(
         self,
         require_podman: None,
         require_test_image: None,
@@ -781,10 +802,8 @@ class TestPodmanProxyEgressFiltering:
         podman_test_image: str,
         podman_proxy_image: str,
     ) -> None:
-        """Main container cannot reach the internet bypassing the proxy."""
+        """update_allowed_domains changes the proxy's domain list."""
         backend = PodmanBackend()
-        container_name = f"paude-{unique_session_name}"
-
         try:
             _start_proxy_session(
                 backend=backend,
@@ -795,71 +814,60 @@ class TestPodmanProxyEgressFiltering:
                 allowed_domains=[".googleapis.com"],
             )
 
-            # Try to reach the internet directly, bypassing proxy
+            # Update domains to also allow example.com
+            backend.update_allowed_domains(
+                unique_session_name, [".example.com", ".googleapis.com"]
+            )
+
+            # Verify updated domains
+            domains = backend.get_allowed_domains(unique_session_name)
+            assert domains is not None
+            assert ".example.com" in domains
+            assert ".googleapis.com" in domains
+
+            # Need to get new proxy IP after recreation
+            proxy_name = f"paude-proxy-{unique_session_name}"
+            network_name = f"paude-net-{unique_session_name}"
             result = subprocess.run(
+                [
+                    "podman",
+                    "inspect",
+                    "--format",
+                    f'{{{{(index .NetworkSettings.Networks "{network_name}").IPAddress}}}}',
+                    proxy_name,
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            new_proxy_ip = result.stdout.strip()
+
+            # Verify example.com is now allowed
+            container_name = f"paude-{unique_session_name}"
+            subprocess.run(
                 [
                     "podman",
                     "exec",
                     container_name,
                     "curl",
-                    "--noproxy",
-                    "*",
-                    "-sf",
+                    "-s",
+                    "-o",
+                    "/dev/null",
+                    "-x",
+                    f"http://{new_proxy_ip}:3128",
                     "--connect-timeout",
-                    "5",
+                    "3",
                     "-m",
-                    "10",
+                    "5",
                     "https://example.com/",
                 ],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=15,
             )
-            # Should fail — internal network has no gateway
-            assert result.returncode != 0, (
-                "Direct internet access should fail on internal network"
-            )
-
+            # Check blocked log — example.com should NOT appear (it's allowed now)
+            blocked_log = backend.get_proxy_blocked_log(unique_session_name)
+            assert blocked_log is not None
+            assert "example.com" not in blocked_log
         finally:
             cleanup_session(backend, unique_session_name)
-
-    def test_delete_session_cleans_up_proxy_and_network(
-        self,
-        require_podman: None,
-        require_test_image: None,
-        require_proxy_image: None,
-        temp_workspace: Path,
-        unique_session_name: str,
-        podman_test_image: str,
-        podman_proxy_image: str,
-    ) -> None:
-        """Deleting a proxy session removes proxy container and network."""
-        network_name = f"paude-net-{unique_session_name}"
-        proxy_name = f"paude-proxy-{unique_session_name}"
-
-        backend = PodmanBackend()
-        config = SessionConfig(
-            name=unique_session_name,
-            workspace=temp_workspace,
-            image=podman_test_image,
-            allowed_domains=[".googleapis.com"],
-            proxy_image=podman_proxy_image,
-        )
-        backend.create_session(config)
-
-        # Delete the session
-        backend.delete_session(unique_session_name, confirm=True)
-
-        # Verify proxy container is gone
-        result = subprocess.run(
-            ["podman", "container", "exists", proxy_name],
-            capture_output=True,
-        )
-        assert result.returncode != 0, "Proxy container should be deleted"
-
-        # Verify network is gone
-        result = subprocess.run(
-            ["podman", "network", "exists", network_name],
-            capture_output=True,
-        )
-        assert result.returncode != 0, "Network should be deleted"
