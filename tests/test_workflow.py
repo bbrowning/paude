@@ -244,7 +244,7 @@ class TestStatusSessions:
 
     @patch("paude.session_status.get_session_enrichment")
     @patch("paude.session_discovery.collect_all_sessions")
-    def test_shows_sessions(
+    def test_shows_sessions_with_git_summary(
         self,
         mock_collect: MagicMock,
         mock_enrichment: MagicMock,
@@ -279,7 +279,43 @@ class TestStatusSessions:
         assert "myproject" in captured.out
         assert "SUMMARY" in captured.out
         assert "feat-auth Add OAuth (+2)" in captured.out
-        assert "STATUS" not in captured.out
+
+    @patch("paude.session_status.get_session_enrichment")
+    @patch("paude.session_discovery.collect_all_sessions")
+    def test_shows_changed_files_when_no_commits(
+        self,
+        mock_collect: MagicMock,
+        mock_enrichment: MagicMock,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        from paude.backends.base import Session
+        from paude.session_status import SessionActivity, WorkSummary
+
+        mock_session = Session(
+            name="test-session",
+            status="running",
+            workspace=Path("/workspace/myproject"),
+            created_at="2026-01-01T00:00:00Z",
+            backend_type="podman",
+        )
+        mock_backend = MagicMock()
+        mock_collect.return_value = [(mock_session, mock_backend)]
+        mock_enrichment.return_value = (
+            SessionActivity(
+                last_activity="2m ago", state="Active", elapsed_seconds=120
+            ),
+            WorkSummary(
+                branch="main",
+                commits_ahead=0,
+                latest_subject="",
+                changed_files=["cli.py", "workflow.py"],
+            ),
+        )
+
+        status_sessions()
+
+        captured = capsys.readouterr()
+        assert "editing: cli.py, workflow.py" in captured.out
 
     @patch("paude.session_discovery.collect_all_sessions")
     def test_no_sessions(

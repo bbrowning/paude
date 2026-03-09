@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from paude.backends.base import Backend
+from paude.constants import CONTAINER_WORKSPACE
 
 
 @dataclass
@@ -16,23 +17,27 @@ class WorkSummary:
         branch: Current branch name (or "HEAD" if detached).
         commits_ahead: Number of commits ahead of origin/main.
         latest_subject: Subject of the most recent commit ahead of origin/main.
+        changed_files: Basenames of uncommitted changed files (up to 5).
     """
 
     branch: str
     commits_ahead: int
     latest_subject: str
+    changed_files: list[str] = field(default_factory=list)
 
 
 _COMBINED_QUERY_CMD = (
     "tmux list-windows -t claude"
     " -F '#{window_activity}' 2>/dev/null; true"
-    " && cd /pvc/workspace"
+    f" && cd {CONTAINER_WORKSPACE}"
     ' && echo "BRANCH:$(git rev-parse --abbrev-ref HEAD'
     ' 2>/dev/null)"'
     ' && echo "AHEAD:$(git rev-list --count'
     ' origin/main..HEAD 2>/dev/null)"'
     ' && echo "SUBJECT:$(git log --oneline -1'
     ' --format=%s origin/main..HEAD 2>/dev/null)"'
+    ' && echo "CHANGED:$(git diff --name-only HEAD 2>/dev/null'
+    " | head -5 | sed 's|.*/||' | paste -sd,)\""
 )
 
 
@@ -42,7 +47,7 @@ def get_session_enrichment(
     """Query tmux and git state in a single exec call.
 
     Combines activity and work summary queries to minimize
-    remote execution overhead (one exec instead of two).
+    remote execution overhead (one exec instead of multiple).
 
     Args:
         backend: Backend instance with exec_in_session method.
@@ -55,11 +60,11 @@ def get_session_enrichment(
 
     lines = output.strip().splitlines() if rc == 0 else []
 
-    # First line(s) before any tagged output are tmux timestamps
     activity_ts = ""
     branch = ""
     ahead = 0
     subject = ""
+    changed_files: list[str] = []
 
     for line in lines:
         if line.startswith("BRANCH:"):
@@ -71,12 +76,20 @@ def get_session_enrichment(
                 ahead = 0
         elif line.startswith("SUBJECT:"):
             subject = line[len("SUBJECT:") :].strip()
+        elif line.startswith("CHANGED:"):
+            raw = line[len("CHANGED:") :].strip()
+            changed_files = [f for f in raw.split(",") if f] if raw else []
         elif not activity_ts:
             activity_ts = line.strip()
 
     activity = parse_activity(activity_ts)
     summary = (
-        WorkSummary(branch=branch, commits_ahead=ahead, latest_subject=subject)
+        WorkSummary(
+            branch=branch,
+            commits_ahead=ahead,
+            latest_subject=subject,
+            changed_files=changed_files,
+        )
         if branch
         else None
     )
@@ -86,6 +99,9 @@ def get_session_enrichment(
 
 def format_work_summary(summary: WorkSummary | None, max_width: int = 40) -> str:
     """Format a WorkSummary into a display string.
+
+    When there are commits ahead, shows branch + subject + count.
+    When there are no commits but files are changed, shows file names.
 
     Args:
         summary: WorkSummary to format, or None.
@@ -102,33 +118,67 @@ def format_work_summary(summary: WorkSummary | None, max_width: int = 40) -> str
 
     is_default = summary.branch in ("main", "master")
 
-    prefix_parts: list[str] = []
-    if not is_default:
-        prefix_parts.append(summary.branch)
-    if summary.latest_subject:
-        prefix_parts.append(summary.latest_subject)
+    # Case 1: commits ahead — show branch + subject + count
+    if summary.commits_ahead > 0 or summary.latest_subject:
+        prefix_parts: list[str] = []
+        if not is_default:
+            prefix_parts.append(summary.branch)
+        if summary.latest_subject:
+            prefix_parts.append(summary.latest_subject)
 
-    suffix = f"(+{summary.commits_ahead})" if summary.commits_ahead > 0 else ""
+        suffix = f"(+{summary.commits_ahead})" if summary.commits_ahead > 0 else ""
 
-    if not prefix_parts and not suffix:
-        return ""
+        if not prefix_parts and not suffix:
+            return ""
 
-    prefix = " ".join(prefix_parts)
-    if prefix and suffix:
-        text = f"{prefix} {suffix}"
-    else:
-        text = prefix or suffix
-
-    if len(text) > max_width:
-        # Truncate prefix but preserve the (+N) suffix
-        suffix_with_space = f" {suffix}" if suffix else ""
-        avail = max_width - len(suffix_with_space) - 3  # 3 for "..."
-        if avail > 0:
-            text = prefix[:avail] + "..." + suffix_with_space
+        prefix = " ".join(prefix_parts)
+        if prefix and suffix:
+            text = f"{prefix} {suffix}"
         else:
-            text = text[:max_width]
+            text = prefix or suffix
 
-    return text
+        if len(text) > max_width:
+            suffix_with_space = f" {suffix}" if suffix else ""
+            avail = max_width - len(suffix_with_space) - 3  # 3 for "..."
+            if avail > 0:
+                text = prefix[:avail] + "..." + suffix_with_space
+            else:
+                text = text[:max_width]
+
+        return text
+
+    # Case 2: no commits but files changed — show file names
+    if summary.changed_files:
+        return _format_changed_files(summary.changed_files, max_width)
+
+    # Case 3: non-default branch with no commits and no changes
+    if not is_default:
+        return summary.branch
+
+    return ""
+
+
+def _format_changed_files(files: list[str], max_width: int) -> str:
+    """Format changed file names for display.
+
+    Format: "editing: file1.py, file2.py (+N)" where N is remaining count.
+    """
+    prefix = "editing: "
+    total = len(files)
+    shown: list[str] = []
+
+    for f in files:
+        shown.append(f)
+        remaining = total - len(shown)
+        suffix = f" (+{remaining})" if remaining > 0 else ""
+        text = prefix + ", ".join(shown) + suffix
+        if len(text) > max_width and len(shown) > 1:
+            shown.pop()
+            break
+
+    remaining = total - len(shown)
+    suffix = f" (+{remaining})" if remaining > 0 else ""
+    return prefix + ", ".join(shown) + suffix
 
 
 @dataclass
