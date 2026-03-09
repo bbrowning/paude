@@ -153,24 +153,26 @@ paude/
 
 ## Releasing
 
-Releases are published to:
+Releases are published automatically via GitHub Actions to:
 - **PyPI** (pypi.org/project/paude) - Python package
 - **Quay.io** (quay.io/bbrowning) - Container images
+- **GitHub Releases** - Release notes
 
 ### One-Time Setup
 
-1. **PyPI**: Create an account at https://pypi.org and generate an API token at https://pypi.org/manage/account/token/
+These steps only need to be done once per repository:
 
-2. **Container Registry**: Authenticate with Quay.io:
-   ```bash
-   podman login quay.io
-   ```
+1. **PyPI Trusted Publisher**: Go to pypi.org → project "paude" → Publishing → Add GitHub as a trusted publisher:
+   - Owner: `bbrowning`
+   - Repository: `paude`
+   - Workflow: `release.yml`
+   - Environment: `pypi`
 
-3. **Build Tools**: Install Python build and upload tools:
-   ```bash
-   uv tool install build
-   uv tool install twine
-   ```
+2. **GitHub Environment**: Create a `pypi` environment in GitHub repo settings (Settings → Environments → New environment → name it `pypi`)
+
+3. **Quay.io Robot Account**: Create a robot account on Quay.io with push access to the `bbrowning` namespace, then add these as GitHub repo secrets (Settings → Secrets and variables → Actions):
+   - `QUAY_USERNAME` - Robot account username
+   - `QUAY_PASSWORD` - Robot account password/token
 
 ### Release Process
 
@@ -186,59 +188,60 @@ make test
 # 3. Update version and create git tag
 make release VERSION=0.6.0
 
-# 4. Build and publish container images
-make publish VERSION=0.6.0
-
-# 5. Build and publish Python package to PyPI
-make pypi-build
-make pypi-publish
-# When prompted: Username is __token__, Password is your PyPI API token
-
-# 6. Push the commit and tag to GitHub
+# 4. Push the commit and tag to GitHub
 git push origin main --tags
 
-# 7. Create GitHub release
-#    Go to: https://github.com/bbrowning/paude/releases/new?tag=v0.6.0
-#    - Title: v0.6.0
-#    - Add release notes describing changes
+# Done! GitHub Actions handles the rest:
+#   - Runs tests
+#   - Builds and pushes container images to Quay.io
+#   - Builds and publishes Python package to PyPI
+#   - Creates a GitHub release with auto-generated notes
 ```
 
-### What the Release Does
+### What Happens Automatically
 
-1. `make release VERSION=x.y.z`:
-   - Updates version in `pyproject.toml` and `src/paude/__init__.py`
-   - Commits the change
-   - Creates an annotated git tag `vx.y.z`
+When a tag matching `v*` is pushed, the `.github/workflows/release.yml` workflow:
 
-2. `make publish VERSION=x.y.z`:
-   - Builds multi-arch container images (amd64 + arm64)
-   - Pushes to quay.io/bbrowning/paude-base-centos9:x.y.z and :latest
-   - Pushes to quay.io/bbrowning/paude-proxy-centos9:x.y.z and :latest
+1. **Tests** - Runs lint, type check, and unit tests across Python 3.11 and 3.12
+2. **Container images** - Builds multi-arch images (amd64 + arm64) and pushes versioned + `latest` tags to Quay.io
+3. **PyPI** - Builds and publishes the Python package using OIDC trusted publishing (no API token needed)
+4. **GitHub Release** - Creates a release with auto-generated notes from commits since the last tag
 
-3. `make pypi-build`:
-   - Cleans the `dist/` directory
-   - Builds source distribution and wheel
+### What `make release` Does Locally
 
-4. `make pypi-publish`:
-   - Uploads the built packages to PyPI
+`make release VERSION=x.y.z`:
+- Updates version in `pyproject.toml` and `src/paude/__init__.py`
+- Regenerates `uv.lock`
+- Commits the version change
+- Creates an annotated git tag `vx.y.z`
+
+### Manual Release (Fallback)
+
+If you need to publish manually (e.g., CI is down):
+
+```bash
+# Container images
+make publish VERSION=x.y.z
+
+# PyPI
+make pypi-build
+make pypi-publish
+```
 
 ### Verifying a Release
 
-After publishing, test the installed experience in a fresh environment:
+After the GitHub Actions workflow completes:
+
+1. Check the workflow run at: https://github.com/bbrowning/paude/actions/workflows/release.yml
+2. Verify container images on Quay.io
+3. Test the PyPI package:
 
 ```bash
-# Create a fresh test environment
 uv venv /tmp/test-paude
 source /tmp/test-paude/bin/activate
-
-# Install from PyPI
 uv pip install paude
-
-# Test basic commands
 paude --version
 paude --help
-
-# Cleanup
 deactivate
 rm -rf /tmp/test-paude
 ```

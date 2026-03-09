@@ -1,0 +1,136 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+env:
+  REGISTRY: quay.io/bbrowning
+  PLATFORMS: linux/amd64,linux/arm64
+
+jobs:
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run linter
+        run: make lint
+
+      - name: Run type checker
+        run: make typecheck
+
+  test:
+    name: Unit Tests
+    needs: lint
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run unit tests
+        run: make test
+
+  publish-containers:
+    name: Publish ${{ matrix.image.name }}
+    needs: test
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        image:
+          - name: paude-base-centos9
+            context: ./containers/paude
+          - name: paude-proxy-centos9
+            context: ./containers/proxy
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Quay.io
+        run: podman login -u "${{ secrets.QUAY_USERNAME }}" -p "${{ secrets.QUAY_PASSWORD }}" quay.io
+
+      - name: Build and push image
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          IMAGE: ${{ matrix.image.name }}
+          CONTEXT: ${{ matrix.image.context }}
+        run: |
+          FULL="${REGISTRY}/${IMAGE}:${VERSION}"
+          LATEST="${REGISTRY}/${IMAGE}:latest"
+
+          # Build multi-arch manifest and push versioned tag
+          podman manifest create "${FULL}"
+          podman build --platform "${PLATFORMS}" --manifest "${FULL}" "${CONTEXT}"
+          podman manifest push --all "${FULL}" "${FULL}"
+
+          # Push same manifest as latest (no rebuild)
+          podman manifest push --all "${FULL}" "${LATEST}"
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: test
+    runs-on: ubuntu-22.04
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build package
+        run: uv run python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: Create GitHub Release
+    needs: [publish-containers, publish-pypi]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes
+        run: |
+          PREV_TAG=$(git tag --sort=-version:refname | grep '^v' | sed -n '2p')
+          if [ -n "${PREV_TAG}" ]; then
+            echo "Generating notes from ${PREV_TAG} to ${GITHUB_REF_NAME}"
+            git log --pretty=format:"- %s" "${PREV_TAG}..${GITHUB_REF_NAME}" \
+              | grep -v "^- Release v" > /tmp/release-notes.txt
+          else
+            echo "No previous tag found, using all commits"
+            git log --pretty=format:"- %s" "${GITHUB_REF_NAME}" \
+              | grep -v "^- Release v" > /tmp/release-notes.txt
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file /tmp/release-notes.txt

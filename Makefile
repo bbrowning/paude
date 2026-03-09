@@ -173,12 +173,13 @@ release:
 	git tag -a "v$(RELEASE_VERSION)" -m "Release v$(RELEASE_VERSION)"
 	@echo ""
 	@echo "Version updated and tagged. Now run:"
-	@echo "  make publish VERSION=$(RELEASE_VERSION)"
-	@echo "  make pypi-build && make pypi-publish"
 	@echo "  git push origin main --tags"
 	@echo ""
-	@echo "Then create a GitHub release at:"
-	@echo "  https://github.com/bbrowning/paude/releases/new?tag=v$(RELEASE_VERSION)"
+	@echo "GitHub Actions will automatically:"
+	@echo "  - Run tests"
+	@echo "  - Build and push container images to Quay.io"
+	@echo "  - Publish Python package to PyPI"
+	@echo "  - Create a GitHub release"
 
 # Build Python package for PyPI
 pypi-build:
