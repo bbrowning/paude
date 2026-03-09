@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -286,6 +287,7 @@ def status_sessions(
             activity, summary = get_session_enrichment(backend, session.name)
         except Exception:  # noqa: S110
             pass
+
         rows.append((session, session.backend_type, activity, summary))
 
     def _sort_key(
@@ -298,6 +300,10 @@ def status_sessions(
 
     rows.sort(key=_sort_key)
 
+    fixed_width = 20 + 15 + 10 + 10 + 10 + 5  # columns + spaces before SUMMARY
+    term_width = shutil.get_terminal_size((80, 24)).columns
+    summary_width = max(30, term_width - fixed_width)
+
     cols = (
         f"{'SESSION':<20} {'PROJECT':<15} {'BACKEND':<10} "
         f"{'ACTIVITY':<10} {'STATE':<10} {'SUMMARY'}"
@@ -309,7 +315,7 @@ def status_sessions(
         project = session.workspace.name if session.workspace else ""
         act_str = activity.last_activity if activity else ""
         state_str = activity.state if activity else ""
-        summary_str = format_work_summary(summary, max_width=50)
+        summary_str = format_work_summary(summary, max_width=summary_width)
 
         typer.echo(
             f"{session.name:<20} {project:<15} {backend_type:<10} "

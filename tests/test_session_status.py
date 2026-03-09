@@ -186,6 +186,48 @@ class TestFormatWorkSummary:
         result = format_work_summary(summary, max_width=100)
         assert "..." not in result
 
+    def test_main_no_commits_with_changed_files(self) -> None:
+        summary = WorkSummary(
+            branch="main",
+            commits_ahead=0,
+            latest_subject="",
+            changed_files=["status.py", "workflow.py", "constants.py"],
+        )
+        result = format_work_summary(summary, max_width=50)
+        assert result.startswith("editing: ")
+        assert "status.py" in result
+        assert "workflow.py" in result
+
+    def test_main_no_commits_single_changed_file(self) -> None:
+        summary = WorkSummary(
+            branch="main",
+            commits_ahead=0,
+            latest_subject="",
+            changed_files=["cli.py"],
+        )
+        assert format_work_summary(summary) == "editing: cli.py"
+
+    def test_changed_files_with_overflow(self) -> None:
+        summary = WorkSummary(
+            branch="main",
+            commits_ahead=0,
+            latest_subject="",
+            changed_files=["a.py", "b.py", "c.py", "d.py", "e.py"],
+        )
+        result = format_work_summary(summary, max_width=30)
+        assert "(+" in result
+
+    def test_commits_take_priority_over_changed_files(self) -> None:
+        summary = WorkSummary(
+            branch="feat",
+            commits_ahead=2,
+            latest_subject="Add feature",
+            changed_files=["a.py", "b.py"],
+        )
+        result = format_work_summary(summary)
+        assert "feat Add feature (+2)" == result
+        assert "editing" not in result
+
 
 class TestGetSessionEnrichment:
     """Tests for get_session_enrichment."""
@@ -195,7 +237,7 @@ class TestGetSessionEnrichment:
         ts = str(int(time.time()) - 30)
         mock_backend.exec_in_session.return_value = (
             0,
-            f"{ts}\nBRANCH:feat-auth\nAHEAD:3\nSUBJECT:Fix login bug\n",
+            (f"{ts}\nBRANCH:feat-auth\nAHEAD:3\nSUBJECT:Fix login bug\nCHANGED:\n"),
             "",
         )
 
@@ -206,6 +248,7 @@ class TestGetSessionEnrichment:
         assert summary.branch == "feat-auth"
         assert summary.commits_ahead == 3
         assert summary.latest_subject == "Fix login bug"
+        assert summary.changed_files == []
         assert mock_backend.exec_in_session.call_count == 1
 
     def test_returns_idle_and_none_on_failure(self) -> None:
@@ -222,7 +265,7 @@ class TestGetSessionEnrichment:
         ts = str(int(time.time()) - 30)
         mock_backend.exec_in_session.return_value = (
             0,
-            f"{ts}\nBRANCH:main\nAHEAD:\nSUBJECT:\n",
+            f"{ts}\nBRANCH:main\nAHEAD:\nSUBJECT:\nCHANGED:\n",
             "",
         )
 
@@ -237,7 +280,7 @@ class TestGetSessionEnrichment:
         ts = str(int(time.time()) - 30)
         mock_backend.exec_in_session.return_value = (
             0,
-            f"{ts}\nBRANCH:\nAHEAD:0\nSUBJECT:\n",
+            f"{ts}\nBRANCH:\nAHEAD:0\nSUBJECT:\nCHANGED:\n",
             "",
         )
 
@@ -245,3 +288,34 @@ class TestGetSessionEnrichment:
 
         assert activity.state == "Active"
         assert summary is None
+
+    def test_parses_changed_files(self) -> None:
+        mock_backend = MagicMock()
+        ts = str(int(time.time()) - 30)
+        mock_backend.exec_in_session.return_value = (
+            0,
+            (
+                f"{ts}\nBRANCH:main\nAHEAD:0\n"
+                "SUBJECT:\nCHANGED:cli.py,workflow.py,constants.py\n"
+            ),
+            "",
+        )
+
+        _activity, summary = get_session_enrichment(mock_backend, "my-session")
+
+        assert summary is not None
+        assert summary.changed_files == ["cli.py", "workflow.py", "constants.py"]
+
+    def test_empty_changed_files(self) -> None:
+        mock_backend = MagicMock()
+        ts = str(int(time.time()) - 30)
+        mock_backend.exec_in_session.return_value = (
+            0,
+            f"{ts}\nBRANCH:main\nAHEAD:0\nSUBJECT:\nCHANGED:\n",
+            "",
+        )
+
+        _activity, summary = get_session_enrichment(mock_backend, "my-session")
+
+        assert summary is not None
+        assert summary.changed_files == []
