@@ -101,16 +101,6 @@ def _generate_session_name(workspace: Path) -> str:
     return f"{project_name}-{suffix}"
 
 
-def _encode_path(path: Path) -> str:
-    """Encode a path for use in Podman labels (URL-safe base64)."""
-    return encode_path(path, url_safe=True)
-
-
-def _decode_path(encoded: str) -> Path:
-    """Decode a path from Podman label value (URL-safe base64)."""
-    return decode_path(encoded, url_safe=True)
-
-
 class PodmanBackend:
     """Podman container backend with persistent sessions.
 

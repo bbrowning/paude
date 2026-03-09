@@ -14,16 +14,26 @@ from paude.backends.podman import (
     PodmanBackend,
     SessionExistsError,
     SessionNotFoundError,
-    _decode_path,
-    _encode_path,
     _generate_session_name,
 )
+from paude.backends.shared import decode_path as _decode_path_raw
+from paude.backends.shared import encode_path as _encode_path_raw
 from paude.container.runner import (
     PAUDE_LABEL_APP,
     PAUDE_LABEL_CREATED,
     PAUDE_LABEL_SESSION,
     PAUDE_LABEL_WORKSPACE,
 )
+
+
+def encode_path(path: Path) -> str:
+    """Encode path with url_safe=True (matches Podman backend usage)."""
+    return _encode_path_raw(path, url_safe=True)
+
+
+def decode_path(encoded: str) -> Path:
+    """Decode path with url_safe=True (matches Podman backend usage)."""
+    return _decode_path_raw(encoded, url_safe=True)
 
 
 def _make_backend(
@@ -76,21 +86,21 @@ class TestHelperFunctions:
     def test_encode_decode_path_roundtrip(self) -> None:
         """Path encoding and decoding is reversible."""
         original = Path("/home/user/my project/src")
-        encoded = _encode_path(original)
-        decoded = _decode_path(encoded)
+        encoded = encode_path(original)
+        decoded = decode_path(encoded)
         assert decoded == original
 
     def test_encode_path_is_url_safe(self) -> None:
         """Encoded paths are URL-safe (no special chars)."""
         path = Path("/home/user/project with spaces & symbols!")
-        encoded = _encode_path(path)
+        encoded = encode_path(path)
         # URL-safe base64 only uses alphanumeric, -, _, =
         assert all(c.isalnum() or c in "-_=" for c in encoded)
 
     def test_decode_path_handles_invalid_input(self) -> None:
         """Decoding invalid input returns the raw input as path."""
         invalid = "not-valid-base64!!!"
-        result = _decode_path(invalid)
+        result = decode_path(invalid)
         # Should return the raw input as a Path (fallback)
         assert result == Path(invalid)
 
@@ -587,7 +597,7 @@ class TestPodmanBackendListSessions:
                 "Labels": {
                     "app": "paude",
                     "paude.io/session-name": "test-session",
-                    "paude.io/workspace": _encode_path(Path("/home/user/project")),
+                    "paude.io/workspace": encode_path(Path("/home/user/project")),
                     "paude.io/created-at": "2024-01-15T10:00:00Z",
                 },
             }
@@ -616,7 +626,7 @@ class TestPodmanBackendListSessions:
                 "State": "exited",
                 "Labels": {
                     "paude.io/session-name": "session1",
-                    "paude.io/workspace": _encode_path(Path("/path1")),
+                    "paude.io/workspace": encode_path(Path("/path1")),
                     "paude.io/created-at": "2024-01-15T10:00:00Z",
                 },
             },
@@ -625,7 +635,7 @@ class TestPodmanBackendListSessions:
                 "State": "dead",
                 "Labels": {
                     "paude.io/session-name": "session2",
-                    "paude.io/workspace": _encode_path(Path("/path2")),
+                    "paude.io/workspace": encode_path(Path("/path2")),
                     "paude.io/created-at": "2024-01-15T10:00:00Z",
                 },
             },
@@ -673,7 +683,7 @@ class TestPodmanBackendGetSession:
                 "State": "running",
                 "Labels": {
                     "paude.io/session-name": "my-session",
-                    "paude.io/workspace": _encode_path(Path("/home/user/project")),
+                    "paude.io/workspace": encode_path(Path("/home/user/project")),
                     "paude.io/created-at": "2024-01-15T10:00:00Z",
                 },
             }
@@ -722,7 +732,7 @@ class TestPodmanBackendFindSessionForWorkspace:
                 "State": "running",
                 "Labels": {
                     "paude.io/session-name": "project-session",
-                    "paude.io/workspace": _encode_path(workspace),
+                    "paude.io/workspace": encode_path(workspace),
                     "paude.io/created-at": "2024-01-15T10:00:00Z",
                 },
             }
@@ -750,7 +760,7 @@ class TestPodmanBackendFindSessionForWorkspace:
                 "State": "running",
                 "Labels": {
                     "paude.io/session-name": "other-session",
-                    "paude.io/workspace": _encode_path(Path("/other/path")),
+                    "paude.io/workspace": encode_path(Path("/other/path")),
                     "paude.io/created-at": "2024-01-15T10:00:00Z",
                 },
             }
@@ -1217,7 +1227,7 @@ class TestProxyHealthCheck:
                 "State": "running",
                 "Labels": {
                     "paude.io/session-name": "my-session",
-                    "paude.io/workspace": _encode_path(Path("/project")),
+                    "paude.io/workspace": encode_path(Path("/project")),
                     "paude.io/created-at": "2024-01-15T10:00:00Z",
                     PAUDE_LABEL_DOMAINS: "api.example.com",
                 },
@@ -1247,7 +1257,7 @@ class TestProxyHealthCheck:
                 "State": "running",
                 "Labels": {
                     "paude.io/session-name": "my-session",
-                    "paude.io/workspace": _encode_path(Path("/project")),
+                    "paude.io/workspace": encode_path(Path("/project")),
                     "paude.io/created-at": "2024-01-15T10:00:00Z",
                     PAUDE_LABEL_DOMAINS: "api.example.com",
                 },
@@ -1278,7 +1288,7 @@ class TestProxyHealthCheck:
                 "State": "running",
                 "Labels": {
                     "paude.io/session-name": "my-session",
-                    "paude.io/workspace": _encode_path(Path("/project")),
+                    "paude.io/workspace": encode_path(Path("/project")),
                     "paude.io/created-at": "2024-01-15T10:00:00Z",
                     PAUDE_LABEL_DOMAINS: "api.example.com",
                 },
@@ -1307,7 +1317,7 @@ class TestProxyHealthCheck:
                 "State": "running",
                 "Labels": {
                     "paude.io/session-name": "my-session",
-                    "paude.io/workspace": _encode_path(Path("/project")),
+                    "paude.io/workspace": encode_path(Path("/project")),
                     "paude.io/created-at": "2024-01-15T10:00:00Z",
                 },
             }
@@ -1335,7 +1345,7 @@ class TestProxyHealthCheck:
                 "State": "running",
                 "Labels": {
                     "paude.io/session-name": "my-session",
-                    "paude.io/workspace": _encode_path(Path("/project")),
+                    "paude.io/workspace": encode_path(Path("/project")),
                     "paude.io/created-at": "2024-01-15T10:00:00Z",
                     PAUDE_LABEL_DOMAINS: "api.example.com",
                 },
@@ -1373,7 +1383,7 @@ class TestProxyRecreation:
                 "State": "exited",
                 "Labels": {
                     "paude.io/session-name": "my-session",
-                    "paude.io/workspace": _encode_path(Path("/project")),
+                    "paude.io/workspace": encode_path(Path("/project")),
                     PAUDE_LABEL_DOMAINS: "api.example.com,cdn.example.com",
                     PAUDE_LABEL_PROXY_IMAGE: "paude-proxy:latest",
                 },
@@ -1415,7 +1425,7 @@ class TestProxyRecreation:
                 "State": "exited",
                 "Labels": {
                     "paude.io/session-name": "my-session",
-                    "paude.io/workspace": _encode_path(Path("/project")),
+                    "paude.io/workspace": encode_path(Path("/project")),
                 },
             }
         ]
@@ -1451,7 +1461,7 @@ class TestProxyRecreation:
                 "State": "running",
                 "Labels": {
                     "paude.io/session-name": "my-session",
-                    "paude.io/workspace": _encode_path(Path("/project")),
+                    "paude.io/workspace": encode_path(Path("/project")),
                     PAUDE_LABEL_DOMAINS: "api.example.com",
                     PAUDE_LABEL_PROXY_IMAGE: "paude-proxy:latest",
                 },
@@ -1474,7 +1484,7 @@ class TestFindContainerBySessionName:
     def test_returns_matching_container(self) -> None:
         """Returns the container dict when session name matches."""
         mock_runner = MagicMock()
-        encoded_workspace = _encode_path(Path("/home/user/project"))
+        encoded_workspace = encode_path(Path("/home/user/project"))
         container = {
             "Id": "abc123",
             "Labels": {
@@ -1520,7 +1530,7 @@ class TestBuildSessionFromContainer:
     def test_constructs_session_correctly(self) -> None:
         """Builds a Session with correct fields from container dict."""
         mock_runner = MagicMock()
-        encoded_workspace = _encode_path(Path("/home/user/project"))
+        encoded_workspace = encode_path(Path("/home/user/project"))
         container = {
             "Id": "abc123",
             "Labels": {
@@ -1567,7 +1577,7 @@ class TestBuildSessionFromContainer:
     def test_includes_proxy_health_check(self) -> None:
         """Status is degraded when proxy is expected but missing."""
         mock_runner = MagicMock()
-        encoded_workspace = _encode_path(Path("/home/user/project"))
+        encoded_workspace = encode_path(Path("/home/user/project"))
         container = {
             "Id": "abc123",
             "Labels": {

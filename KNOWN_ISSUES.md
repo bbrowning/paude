@@ -6,38 +6,12 @@ Tracking known issues that need to be fixed. Each bug includes enough context fo
 
 Technical debt identified during codebase analysis. Address these before adding significant new functionality to affected files.
 
-### REFACTOR-002: cli.py (1,918 lines)
+### REFACTOR-002: cli.py monolith
 
-**Status**: Partially Complete
+**Status**: Resolved
 **Priority**: High (every new command adds complexity)
 **Discovered**: 2026-01-29 during code quality analysis
-**Partial completion**: 2026-03-08 — Extracted `_get_backend_instance()` and `_auto_select_session()` helpers
-
-**Problem:** Commands implement logic instead of delegating. Backend detection repeated in every command.
-
-**Completed:**
-- `_get_backend_instance()` consolidates PodmanBackend/OpenShiftConfig+OpenShiftBackend creation (was repeated 6+ times)
-- `_auto_select_session()` consolidates workspace-match → all-sessions → 0/1/multi logic (was repeated 4 times)
-- `_resolve_backend_for_domains()` simplified to use `_get_backend_instance()`
-- `session_delete`, `session_start`, `session_stop`, `session_connect`, `session_cp` refactored to use helpers
-
-**Remaining:**
-- File still 1,918 lines — needs splitting into a package (cli/ directory)
-- Move image building orchestration to dedicated module
-- Each command should be < 50 lines, delegating to helpers
-
-### REFACTOR-004: Extract Duplicated Utilities
-
-**Status**: Partially Complete
-**Priority**: Medium
-**Discovered**: 2026-01-29 during code quality analysis
-**Partial completion**: 2026-03-07 — `_encode_path()`/`_decode_path()` extracted to `backends/shared.py`
-
-**Completed:**
-- `_encode_path()` / `_decode_path()` extracted to `backends/shared.py` with `url_safe` parameter
-
-**Remaining:**
-- `_generate_session_name()` remains duplicated (intentionally different implementations: Podman uses `secrets.token_hex`, OpenShift uses `hashlib.sha256`)
+**Resolved**: 2026-03-09 — Split 2,246-line `cli.py` into `cli/` package with 8 modules (app.py, help.py, helpers.py, create.py, commands.py, remote.py, domains.py, status.py). Backward compatibility preserved via `__init__.py` re-exports. Dead `_encode_path`/`_decode_path` wrappers removed from `podman.py`.
 
 ## Security Hardening Backlog
 

@@ -209,7 +209,7 @@ def test_github_domains_in_default_dry_run():
         pytest.param("connect", id="connect"),
     ],
 )
-@patch("paude.cli.find_session_backend")
+@patch("paude.cli.commands.find_session_backend")
 def test_command_accepts_github_token_flag(
     mock_find_session_backend: MagicMock, command
 ):
@@ -229,7 +229,7 @@ def test_command_accepts_github_token_flag(
         pytest.param("connect", "connect_session", "ghp_test456", id="connect"),
     ],
 )
-@patch("paude.cli.find_session_backend")
+@patch("paude.cli.commands.find_session_backend")
 def test_command_passes_github_token_to_backend(
     mock_find_session_backend: MagicMock, command, backend_method, token
 ):
@@ -246,7 +246,7 @@ def test_command_passes_github_token_to_backend(
     )
 
 
-@patch("paude.cli.find_session_backend")
+@patch("paude.cli.commands.find_session_backend")
 def test_start_reads_paude_github_token_env(
     mock_find_session_backend: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
@@ -428,7 +428,7 @@ class TestRemoteCommand:
         assert "Unknown action: invalid" in output
         assert "Valid actions: add, list, remove" in output
 
-    @patch("paude.cli.find_session_backend")
+    @patch("paude.cli.remote.find_session_backend")
     @patch("paude.git_remote.is_git_repository")
     @patch("paude.git_remote.is_ext_protocol_allowed")
     @patch("paude.git_remote.is_container_running_podman")
@@ -456,7 +456,7 @@ class TestRemoteCommand:
         assert "Container not running" in output
         assert "paude start test-session" in output
 
-    @patch("paude.cli.find_session_backend")
+    @patch("paude.cli.remote.find_session_backend")
     @patch("paude.git_remote.is_git_repository")
     @patch("paude.git_remote.is_ext_protocol_allowed")
     @patch("paude.git_remote.is_container_running_podman")
@@ -503,7 +503,7 @@ class TestRemoteCommand:
         mock_init.assert_called_once_with("paude-test-session", branch="main")
         mock_push.assert_called_once_with("paude-test-session", "main")
 
-    @patch("paude.cli.find_session_backend")
+    @patch("paude.cli.remote.find_session_backend")
     @patch("paude.git_remote.is_git_repository")
     @patch("paude.git_remote.is_ext_protocol_allowed")
     @patch("paude.git_remote.is_container_running_podman")
@@ -1148,8 +1148,8 @@ class TestStopMultiBackend:
 class TestDeleteGitRemoteCleanup:
     """Tests for git remote cleanup when deleting sessions."""
 
-    @patch("paude.cli._cleanup_session_git_remote")
-    @patch("paude.cli.PodmanBackend")
+    @patch("paude.cli.remote._cleanup_session_git_remote")
+    @patch("paude.cli.helpers.PodmanBackend")
     def test_delete_removes_git_remote(
         self,
         mock_podman_class: MagicMock,
@@ -1167,9 +1167,9 @@ class TestDeleteGitRemoteCleanup:
         assert "Session 'my-session' deleted." in result.output
         mock_cleanup.assert_called_once_with("my-session")
 
-    @patch("paude.cli.subprocess.run")
+    @patch("paude.cli.remote.subprocess.run")
     @patch("paude.git_remote.is_git_repository")
-    @patch("paude.cli.PodmanBackend")
+    @patch("paude.cli.helpers.PodmanBackend")
     def test_delete_works_when_not_in_git_repo(
         self,
         mock_podman_class: MagicMock,
@@ -1192,9 +1192,9 @@ class TestDeleteGitRemoteCleanup:
         # Should not have called git remote remove since not in git repo
         mock_subprocess_run.assert_not_called()
 
-    @patch("paude.cli.subprocess.run")
+    @patch("paude.cli.remote.subprocess.run")
     @patch("paude.git_remote.is_git_repository")
-    @patch("paude.cli.PodmanBackend")
+    @patch("paude.cli.helpers.PodmanBackend")
     def test_delete_works_when_remote_does_not_exist(
         self,
         mock_podman_class: MagicMock,
@@ -1225,9 +1225,9 @@ class TestDeleteGitRemoteCleanup:
             text=True,
         )
 
-    @patch("paude.cli.subprocess.run")
+    @patch("paude.cli.remote.subprocess.run")
     @patch("paude.git_remote.is_git_repository")
-    @patch("paude.cli.PodmanBackend")
+    @patch("paude.cli.helpers.PodmanBackend")
     def test_delete_shows_message_when_remote_removed(
         self,
         mock_podman_class: MagicMock,
@@ -1248,9 +1248,9 @@ class TestDeleteGitRemoteCleanup:
         assert "Session 'my-session' deleted." in result.output
         assert "Removed git remote 'paude-my-session'." in result.output
 
-    @patch("paude.cli.subprocess.run")
+    @patch("paude.cli.remote.subprocess.run")
     @patch("paude.git_remote.is_git_repository")
-    @patch("paude.cli.PodmanBackend")
+    @patch("paude.cli.helpers.PodmanBackend")
     def test_delete_continues_on_git_remote_failure(
         self,
         mock_podman_class: MagicMock,
@@ -1276,8 +1276,8 @@ class TestDeleteGitRemoteCleanup:
         output = result.stdout + (result.stderr or "")
         assert "Warning: Failed to remove git remote: fatal: some other error" in output
 
-    @patch("paude.cli._cleanup_session_git_remote")
-    @patch("paude.cli.PodmanBackend")
+    @patch("paude.cli.remote._cleanup_session_git_remote")
+    @patch("paude.cli.helpers.PodmanBackend")
     def test_delete_does_not_cleanup_git_remote_on_failure(
         self,
         mock_podman_class: MagicMock,
@@ -1296,8 +1296,8 @@ class TestDeleteGitRemoteCleanup:
         # Cleanup should NOT have been called since deletion failed
         mock_cleanup.assert_not_called()
 
-    @patch("paude.cli._cleanup_session_git_remote")
-    @patch("paude.cli.find_session_backend")
+    @patch("paude.cli.remote._cleanup_session_git_remote")
+    @patch("paude.cli.commands.find_session_backend")
     def test_delete_cleans_git_remote_with_auto_detected_backend(
         self,
         mock_find_backend: MagicMock,
@@ -1312,9 +1312,9 @@ class TestDeleteGitRemoteCleanup:
         assert result.exit_code == 0
         mock_cleanup.assert_called_once_with("auto-session")
 
-    @patch("paude.cli._cleanup_session_git_remote")
-    @patch("paude.cli.OpenShiftBackend")
-    @patch("paude.cli.OpenShiftConfig")
+    @patch("paude.cli.remote._cleanup_session_git_remote")
+    @patch("paude.cli.helpers.OpenShiftBackend")
+    @patch("paude.cli.helpers.OpenShiftConfig")
     def test_delete_cleans_git_remote_with_openshift_backend(
         self,
         mock_os_config_class: MagicMock,
@@ -1387,7 +1387,7 @@ class TestCpCommand:
         output = result.stdout + (result.stderr or "")
         assert "Only one of SRC or DEST can be a remote path" in output
 
-    @patch("paude.cli.find_session_backend")
+    @patch("paude.cli.commands.find_session_backend")
     def test_cp_to_session_calls_copy_to(self, mock_find):
         """cp local -> session calls copy_to_session."""
         mock_backend = MagicMock()
@@ -1400,7 +1400,7 @@ class TestCpCommand:
             "my-session", "./file.txt", "/pvc/workspace/file.txt"
         )
 
-    @patch("paude.cli.find_session_backend")
+    @patch("paude.cli.commands.find_session_backend")
     def test_cp_from_session_calls_copy_from(self, mock_find):
         """cp session -> local calls copy_from_session."""
         mock_backend = MagicMock()
@@ -1413,7 +1413,7 @@ class TestCpCommand:
             "my-session", "/pvc/workspace/output.log", "./"
         )
 
-    @patch("paude.cli.find_session_backend")
+    @patch("paude.cli.commands.find_session_backend")
     def test_cp_relative_remote_path_resolved(self, mock_find):
         """Relative remote paths get /pvc/workspace/ prefix."""
         mock_backend = MagicMock()
@@ -1426,7 +1426,7 @@ class TestCpCommand:
             "my-session", "./local", "/pvc/workspace/subdir/file"
         )
 
-    @patch("paude.cli.find_session_backend")
+    @patch("paude.cli.commands.find_session_backend")
     def test_cp_absolute_remote_path_preserved(self, mock_find):
         """Absolute remote paths are used as-is."""
         mock_backend = MagicMock()
@@ -1439,7 +1439,7 @@ class TestCpCommand:
             "my-session", "./local", "/tmp/file"
         )
 
-    @patch("paude.cli.find_session_backend")
+    @patch("paude.cli.commands.find_session_backend")
     def test_cp_session_not_found(self, mock_find):
         """Error when session doesn't exist."""
         mock_find.return_value = None
@@ -1450,7 +1450,7 @@ class TestCpCommand:
         output = result.stdout + (result.stderr or "")
         assert "not found" in output
 
-    @patch("paude.cli.find_session_backend")
+    @patch("paude.cli.commands.find_session_backend")
     def test_cp_copy_failure_shows_error(self, mock_find):
         """Backend raises, CLI shows error."""
         mock_backend = MagicMock()
@@ -1463,7 +1463,7 @@ class TestCpCommand:
         output = result.stdout + (result.stderr or "")
         assert "copy failed" in output
 
-    @patch("paude.cli.find_session_backend")
+    @patch("paude.cli.commands.find_session_backend")
     def test_cp_session_not_running_shows_error(self, mock_find):
         """ValueError from backend shows error."""
         mock_backend = MagicMock()
@@ -1504,9 +1504,9 @@ class TestCreateGitEnvVar:
         ],
         ids=["with-git", "without-git"],
     )
-    @patch("paude.cli._setup_git_after_create")
-    @patch("paude.cli.OpenShiftBackend")
-    @patch("paude.cli.OpenShiftConfig")
+    @patch("paude.cli.remote._setup_git_after_create")
+    @patch("paude.cli.create.OpenShiftBackend")
+    @patch("paude.cli.create.OpenShiftConfig")
     @patch("paude.config.detect_config", return_value=None)
     @patch("paude.environment.build_environment")
     def test_openshift_create_git_wait_env(
@@ -1551,7 +1551,7 @@ class TestCreateGitEnvVar:
 class TestBlockedDomainsCLI:
     """Tests for the blocked-domains CLI subcommand."""
 
-    @patch("paude.cli._resolve_backend_for_domains")
+    @patch("paude.cli.domains._resolve_backend_for_domains")
     def test_unrestricted_network_message(self, mock_resolve: MagicMock) -> None:
         """Shows unrestricted message when no proxy."""
         mock_backend = MagicMock()
@@ -1562,7 +1562,7 @@ class TestBlockedDomainsCLI:
         assert result.exit_code == 0
         assert "unrestricted network" in result.stdout
 
-    @patch("paude.cli._resolve_backend_for_domains")
+    @patch("paude.cli.domains._resolve_backend_for_domains")
     def test_no_blocked_domains_message(self, mock_resolve: MagicMock) -> None:
         """Shows no-blocked message when log is empty."""
         mock_backend = MagicMock()
@@ -1573,7 +1573,7 @@ class TestBlockedDomainsCLI:
         assert result.exit_code == 0
         assert "No blocked domains" in result.stdout
 
-    @patch("paude.cli._resolve_backend_for_domains")
+    @patch("paude.cli.domains._resolve_backend_for_domains")
     def test_raw_output(self, mock_resolve: MagicMock) -> None:
         """--raw dumps raw log content."""
         log = "08/Mar/2026:14:23:45 +0000 10.0.0.2 TCP_DENIED/403 CONNECT evil.com:443 BLOCKED\n"
@@ -1586,7 +1586,7 @@ class TestBlockedDomainsCLI:
         assert "evil.com:443" in result.stdout
         assert "BLOCKED" in result.stdout
 
-    @patch("paude.cli._resolve_backend_for_domains")
+    @patch("paude.cli.domains._resolve_backend_for_domains")
     def test_parsed_summary_output(self, mock_resolve: MagicMock) -> None:
         """Default output shows parsed summary."""
         log = (
@@ -1605,7 +1605,7 @@ class TestBlockedDomainsCLI:
         assert "2 unique domain(s) blocked (3 total requests)" in result.stdout
         assert "paude allowed-domains my-session --add" in result.stdout
 
-    @patch("paude.cli._resolve_backend_for_domains")
+    @patch("paude.cli.domains._resolve_backend_for_domains")
     def test_session_not_found_error(self, mock_resolve: MagicMock) -> None:
         """Shows error when session not found."""
         from paude.backends.podman import SessionNotFoundError
@@ -1619,7 +1619,7 @@ class TestBlockedDomainsCLI:
         result = runner.invoke(app, ["blocked-domains", "nope"])
         assert result.exit_code == 1
 
-    @patch("paude.cli._resolve_backend_for_domains")
+    @patch("paude.cli.domains._resolve_backend_for_domains")
     def test_proxy_not_running_error(self, mock_resolve: MagicMock) -> None:
         """Shows error when proxy not running."""
         mock_backend = MagicMock()
