@@ -571,6 +571,130 @@ class TestPodmanYoloMode:
             cleanup_session(backend, unique_session_name)
 
 
+def _get_container_env(container_name: str, var_name: str) -> str | None:
+    """Get an environment variable from a running container.
+
+    Returns the value if set, None if the variable is not set.
+    """
+    result = subprocess.run(
+        ["podman", "exec", container_name, "printenv", var_name],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return result.stdout.strip()
+    return None
+
+
+class TestPodmanGeminiAgent:
+    """Test Gemini agent sessions with real Podman."""
+
+    def test_gemini_session_stores_agent_label(
+        self,
+        require_podman: None,
+        require_test_image: None,
+        temp_workspace: Path,
+        unique_session_name: str,
+        podman_test_image: str,
+    ) -> None:
+        """Creating a session with agent='gemini' stores the agent label."""
+        backend = PodmanBackend()
+
+        try:
+            config = SessionConfig(
+                name=unique_session_name,
+                workspace=temp_workspace,
+                image=podman_test_image,
+                agent="gemini",
+            )
+            session = backend.create_session(config)
+
+            assert session.agent == "gemini"
+
+            # Verify agent persists through get_session
+            retrieved = backend.get_session(unique_session_name)
+            assert retrieved is not None
+            assert retrieved.agent == "gemini"
+
+        finally:
+            cleanup_session(backend, unique_session_name)
+
+    def test_gemini_yolo_mode_sets_agent_args(
+        self,
+        require_podman: None,
+        require_test_image: None,
+        temp_workspace: Path,
+        unique_session_name: str,
+        podman_test_image: str,
+    ) -> None:
+        """YOLO mode with Gemini sets PAUDE_AGENT_ARGS with --yolo flag."""
+        backend = PodmanBackend()
+
+        try:
+            config = SessionConfig(
+                name=unique_session_name,
+                workspace=temp_workspace,
+                image=podman_test_image,
+                yolo=True,
+                agent="gemini",
+            )
+            backend.create_session(config)
+
+            container_name = f"paude-{unique_session_name}"
+            subprocess.run(
+                ["podman", "start", container_name],
+                capture_output=True,
+                check=True,
+            )
+
+            agent_args = _get_container_env(container_name, "PAUDE_AGENT_ARGS")
+            assert agent_args is not None, "PAUDE_AGENT_ARGS should be set"
+            assert "--yolo" in agent_args
+
+            # Gemini should NOT set PAUDE_CLAUDE_ARGS
+            assert _get_container_env(container_name, "PAUDE_CLAUDE_ARGS") is None, (
+                "PAUDE_CLAUDE_ARGS should not be set for Gemini agent"
+            )
+
+        finally:
+            cleanup_session(backend, unique_session_name)
+
+    def test_gemini_agent_env_vars_set(
+        self,
+        require_podman: None,
+        require_test_image: None,
+        temp_workspace: Path,
+        unique_session_name: str,
+        podman_test_image: str,
+    ) -> None:
+        """Gemini session has correct agent seed env vars."""
+        backend = PodmanBackend()
+
+        try:
+            config = SessionConfig(
+                name=unique_session_name,
+                workspace=temp_workspace,
+                image=podman_test_image,
+                agent="gemini",
+            )
+            backend.create_session(config)
+
+            container_name = f"paude-{unique_session_name}"
+            subprocess.run(
+                ["podman", "start", container_name],
+                capture_output=True,
+                check=True,
+            )
+
+            assert _get_container_env(container_name, "PAUDE_AGENT_SEED_DIR") == (
+                "/tmp/gemini.seed"
+            )
+            assert _get_container_env(container_name, "PAUDE_AGENT_NAME") == "gemini"
+
+        finally:
+            cleanup_session(backend, unique_session_name)
+
+
 class TestPodmanProxySetup:
     """Test proxy session creation with real Podman."""
 

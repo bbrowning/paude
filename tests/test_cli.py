@@ -202,6 +202,73 @@ def test_github_domains_in_default_dry_run():
     assert "github" in result.stdout
 
 
+def _extract_domains_display(stdout: str) -> str:
+    """Extract the --allowed-domains value from dry-run output."""
+    parts = stdout.split("--allowed-domains:")
+    assert len(parts) > 1, f"--allowed-domains not found in output:\n{stdout}"
+    return parts[1].split("\n")[0].strip()
+
+
+class TestAgentSpecificDomainExpansion:
+    """Verify that --agent affects which default domains are expanded."""
+
+    @pytest.fixture(scope="class")
+    def claude_dry_run(self):
+        result = runner.invoke(app, ["create", "--agent", "claude", "--dry-run"])
+        assert result.exit_code == 0
+        return result
+
+    @pytest.fixture(scope="class")
+    def gemini_dry_run(self):
+        result = runner.invoke(app, ["create", "--agent", "gemini", "--dry-run"])
+        assert result.exit_code == 0
+        return result
+
+    def test_claude_default_includes_claude_alias(self, claude_dry_run):
+        """--agent claude default domains include claude alias."""
+        assert "claude" in _extract_domains_display(claude_dry_run.stdout)
+
+    def test_claude_default_excludes_gemini_alias(self, claude_dry_run):
+        """--agent claude default domains exclude gemini alias."""
+        assert "gemini" not in _extract_domains_display(claude_dry_run.stdout)
+
+    def test_gemini_default_includes_gemini_alias(self, gemini_dry_run):
+        """--agent gemini default domains include gemini alias."""
+        assert "gemini" in _extract_domains_display(gemini_dry_run.stdout)
+
+    def test_gemini_default_includes_nodejs_alias(self, gemini_dry_run):
+        """--agent gemini default domains include nodejs alias."""
+        assert "nodejs" in _extract_domains_display(gemini_dry_run.stdout)
+
+    def test_gemini_default_excludes_claude_alias(self, gemini_dry_run):
+        """--agent gemini default domains exclude claude alias."""
+        assert "claude" not in _extract_domains_display(gemini_dry_run.stdout)
+
+    def test_both_agents_include_shared_base_aliases(
+        self, claude_dry_run, gemini_dry_run
+    ):
+        """Both agents include vertexai, python, and github in defaults."""
+        for base in ["vertexai", "python", "github"]:
+            assert base in claude_dry_run.stdout, f"{base} missing from claude"
+            assert base in gemini_dry_run.stdout, f"{base} missing from gemini"
+
+    def test_explicit_domains_override_agent_defaults(self):
+        """Explicit --allowed-domains ignores agent-specific defaults."""
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--agent",
+                "gemini",
+                "--allowed-domains",
+                "vertexai",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "gemini" not in _extract_domains_display(result.stdout)
+
+
 @pytest.mark.parametrize(
     "command",
     [
