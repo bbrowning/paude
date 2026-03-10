@@ -239,8 +239,6 @@ def _setup_git_after_create(
         True if all steps succeeded, False if any step failed.
     """
     from paude.git_remote import (
-        fetch_tags_in_container_openshift,
-        fetch_tags_in_container_podman,
         get_branch_remote_url,
         get_current_branch,
         git_push_tags_to_remote,
@@ -313,32 +311,12 @@ def _setup_git_after_create(
                 origin_url,
                 context=openshift_context,
             )
-
-        # Step 5: Fetch tags from origin in container
-        if origin_set:
-            typer.echo("Fetching tags from origin in container...")
-            if backend_type == "podman":
-                if not fetch_tags_in_container_podman(container_name):
-                    typer.echo(
-                        "Warning: Could not fetch tags from origin "
-                        "(network may be restricted).",
-                        err=True,
-                    )
-            else:
-                if not fetch_tags_in_container_openshift(
-                    pod_name,
-                    namespace,
-                    context=openshift_context,
-                ):
-                    typer.echo(
-                        "Warning: Could not fetch tags from origin "
-                        "(network may be restricted).",
-                        err=True,
-                    )
+        if not origin_set:
+            typer.echo("Warning: Failed to set origin in container.", err=True)
     else:
         typer.echo("No local origin remote found. Skipping origin setup in container.")
 
-    # Step 6: Set up pre-commit hooks if config exists
+    # Step 5: Set up pre-commit hooks if config exists
     if Path(".pre-commit-config.yaml").exists():
         typer.echo("Setting up pre-commit hooks in container...")
         if backend_type == "podman":
