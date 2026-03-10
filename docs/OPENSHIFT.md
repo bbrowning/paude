@@ -1,6 +1,6 @@
 # OpenShift Backend
 
-Run Claude Code in OpenShift/Kubernetes pods with persistent sessions, credential management, and network filtering.
+Run AI coding agents in OpenShift/Kubernetes pods with persistent sessions, credential management, and network filtering.
 
 ## Prerequisites
 
@@ -29,7 +29,7 @@ paude connect
 
 1. **Binary Build**: Container image is built on-cluster via OpenShift BuildConfig and `oc start-build`
 2. **Pod Creation**: A pod is created with persistent storage and credentials injected
-3. **Session Persistence**: tmux inside the pod preserves your Claude session across reconnects
+3. **Session Persistence**: tmux inside the pod preserves your agent session across reconnects
 4. **Git-Based Sync**: Use `--git` on create or `paude remote add` and `git push/pull` to sync code
 5. **Network Filtering**: NetworkPolicy restricts pod egress to approved destinations
 
@@ -43,10 +43,10 @@ Paude uses a unified session model across all backends. Sessions are persistent 
 # Create session and push code in one step
 paude create my-project --backend=openshift --git
 
-# Connect and work with Claude... then detach with Ctrl+b d
+# Connect and work with the agent... then detach with Ctrl+b d
 paude connect my-project
 
-# Pull changes made by Claude
+# Pull changes made by the agent
 git pull paude-my-project main
 
 # Stop to save cluster resources (scales to 0, preserves PVC)
@@ -91,7 +91,7 @@ paude create my-project --backend=openshift --storage-class=fast-ssd
 | `--openshift-namespace=NAME` | Kubernetes namespace | current context namespace |
 | `--openshift-context=NAME` | kubeconfig context | current |
 | `--allowed-domains all` | Disable network filtering | `default` (vertexai + pypi + github) |
-| `--yolo` | Skip Claude permission prompts | `False` |
+| `--yolo` | Skip agent permission prompts | `False` |
 
 **Notes:**
 - The namespace must already exist - paude will not create namespaces
@@ -123,11 +123,11 @@ Configuration is synced via `oc cp` to tmpfs on session start and reconnect:
 **Synced from host:**
 - `~/.config/gcloud` → gcloud credentials for Vertex AI authentication
 - `~/.gitconfig` → Git identity configuration
-- `~/.claude/` → Full Claude config directory, including:
+- `~/.claude/` → Agent config directory (for Claude Code), including:
   - `settings.json`, `credentials.json` - Core settings
   - `plugins/` - Installed plugins and marketplace metadata
   - `CLAUDE.md` - Global instructions
-- `~/.claude.json` → Claude preferences
+- `~/.claude.json` → Agent preferences
 
 **Excluded (session-specific):**
 - `history.jsonl`, `tasks/`, `todos/` - Session state
@@ -146,7 +146,7 @@ Plugin paths are automatically rewritten from host paths to container paths.
 
 By default, sessions run with restricted network access:
 
-- **Allowed**: DNS resolution, Vertex AI APIs (*.googleapis.com), PyPI (*.pypi.org), GitHub (github.com, api.github.com), Claude (*.claude.ai, *.anthropic.com)
+- **Allowed**: DNS resolution, Vertex AI APIs (*.googleapis.com), PyPI (*.pypi.org), GitHub (github.com, api.github.com), plus agent-specific domains
 - **Blocked**: All other external traffic
 
 NetworkPolicy enforces egress restrictions at the Kubernetes level. Use `--allowed-domains all` to disable filtering for unrestricted access.

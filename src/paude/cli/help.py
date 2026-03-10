@@ -7,7 +7,7 @@ import typer
 
 def show_help() -> None:
     """Show custom help message matching bash format."""
-    help_text = """paude - Run Claude Code in a secure container
+    help_text = """paude - Run AI coding agents in secure containers
 
 USAGE:
     paude                           List all sessions
@@ -28,6 +28,7 @@ COMMANDS:
     delete NAME         Delete a session and all its resources
 
 OPTIONS (for 'create' command):
+    --agent             Agent to use: claude (default), gemini
     --yolo              Enable YOLO mode (skip all permission prompts)
     --allowed-domains   Domains to allow network access (repeatable).
                         Special: 'all', 'default' (vertexai+python+github)
@@ -37,7 +38,7 @@ OPTIONS (for 'create' command):
     --git               Set up git remote, push code+tags, configure origin
     --rebuild           Force rebuild of workspace container image
     --dry-run           Show configuration without creating session
-    -a, --args          Arguments to pass to claude (e.g., -a '-p "prompt"')
+    -a, --args          Arguments to pass to the agent (e.g., -a '-p "prompt"')
     --backend           Container backend: podman (default), openshift
     --platform          Target platform for image builds (e.g., linux/amd64)
     --openshift-context Kubeconfig context for OpenShift
@@ -109,7 +110,11 @@ SECURITY:
     By default, paude runs with network restricted to Vertex AI, PyPI, and GitHub.
     Use --allowed-domains all to permit all network access (enables data exfil).
     Combining --yolo with --allowed-domains all is maximum risk mode.
-    PAUDE_GITHUB_TOKEN is explicit only; host GH_TOKEN is never auto-propagated."""
+    PAUDE_GITHUB_TOKEN is explicit only; host GH_TOKEN is never auto-propagated.
+
+AGENTS:
+    --agent claude      Claude Code (default)
+    --agent gemini      Gemini CLI"""
     typer.echo(help_text)
 
 

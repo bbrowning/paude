@@ -11,7 +11,7 @@ from paude import __version__
 
 app = typer.Typer(
     name="paude",
-    help="Run Claude Code in an isolated container.",
+    help="Run AI coding agents in isolated containers.",
     add_completion=False,
     context_settings={"allow_interspersed_args": False},
 )

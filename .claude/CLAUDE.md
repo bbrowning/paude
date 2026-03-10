@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Paude is a Podman wrapper that runs Claude Code inside a container for isolated, secure usage with Google Vertex AI authentication.
+Paude is a container wrapper that runs AI coding agents (Claude Code, Gemini CLI) in isolated, secure containers with Google Vertex AI authentication.
 
 ## Architecture
 
@@ -46,6 +46,11 @@ src/paude/
 ├── features/              # Dev container features
 │   ├── downloader.py      # Feature downloading
 │   └── installer.py       # Feature installation
+├── agents/                # Agent definitions
+│   ├── __init__.py        # Agent registry (get_agent, list_agents)
+│   ├── base.py            # Agent protocol
+│   ├── claude.py          # Claude Code agent
+│   └── gemini.py          # Gemini CLI agent
 ├── constants.py           # Shared constants
 ├── domains.py             # Domain aliases and expansion
 ├── mounts.py              # Volume mount builder
@@ -62,16 +67,14 @@ src/paude/
 
 ### Container Definitions
 
-- `containers/paude/` - Main container (Dockerfile, entrypoint.sh, entrypoint-session.sh, credential-watchdog.sh) for Claude Code
+- `containers/paude/` - Main container (Dockerfile, entrypoint.sh, entrypoint-session.sh, credential-watchdog.sh) for AI coding agents
 - `containers/proxy/` - Proxy container (Dockerfile, entrypoint.sh, squid.conf, ERR_CUSTOM_ACCESS_DENIED) for network filtering
 
 ## Volume Mounts
 
-The script mounts these paths from host to container:
+The script mounts these paths from host to container (mount paths vary by agent):
 - Workspace uses a named volume at `/pvc/workspace` (synced via git remote, not bind-mounted)
-- `~/.claude` → `/tmp/claude.seed` (ro) - copied into container on startup
-- `~/.claude/plugins` → same host path (ro) - plugins use hardcoded paths
-- `~/.claude.json` → `/tmp/claude.json.seed` (ro) - copied into container on startup
+- Agent config directories (e.g., `~/.claude` for Claude Code) → copied into container on startup
 - `~/.gitconfig` → `/home/paude/.gitconfig` (ro) - Git identity
 - gcloud ADC credentials are injected via Podman secrets, not bind mounts
 
@@ -80,7 +83,7 @@ The script mounts these paths from host to container:
 - No SSH keys mounted - prevents `git push` via SSH
 - GitHub CLI (`gh`) is installed but host GH_TOKEN is not auto-propagated; users must use `PAUDE_GITHUB_TOKEN` or `--github-token`
 - gcloud credentials are read-only
-- Claude config directories are copied in, not mounted - prevents poisoning host config
+- Agent config directories are copied in, not mounted - prevents poisoning host config
 - Non-root user inside container
 
 ## Testing Changes
@@ -187,12 +190,16 @@ When adding a new CLI flag, add tests in `tests/test_cli.py`.
 
 When adding or changing user-facing features (flags, options, behavior):
 1. Update `README.md` with the new usage patterns
-2. Update the `show_help()` function in `src/paude/cli.py` if adding new flags
+2. Update the `show_help()` function in `src/paude/cli/help.py` if adding new flags
 3. Keep examples consistent between README and help output
 
 ## macOS Considerations
 
 Paths outside `/Users/` require Podman machine configuration. The script detects this and provides guidance when volume mounts fail.
+
+## Documentation Language
+
+Use agent-agnostic language in all user-facing text (README, docs/, CLI help). Say "the agent" or "your agent" instead of "Claude". Reference specific agents only in examples or when discussing agent-specific configuration.
 
 ## Issue Tracking During Development
 
