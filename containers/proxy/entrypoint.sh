@@ -33,10 +33,22 @@ if [[ -n "$ALLOWED_DOMAINS" ]]; then
                 UNIQUE_DOMAINS="${UNIQUE_DOMAINS:+$UNIQUE_DOMAINS,}$domain"
             fi
         elif [[ "$domain" == .* ]]; then
-            # Wildcard domain - add it, and remove exact match if present
-            exact="${domain:1}"
-            # Remove exact match from list if present
-            UNIQUE_DOMAINS=$(echo "$UNIQUE_DOMAINS" | sed "s/,${exact},/,/g; s/^${exact},//; s/,${exact}$//; s/^${exact}$//")
+            # Wildcard domain - add it, and remove base domain + any subdomains
+            # Squid treats .npmjs.org as matching npmjs.org AND *.npmjs.org,
+            # so registry.npmjs.org is redundant and causes a fatal error.
+            exact="${domain:1}"  # e.g. npmjs.org
+            # Remove exact match and any subdomain (anything ending with the wildcard)
+            NEW_UNIQUE=""
+            IFS=',' read -ra EXISTING <<< "$UNIQUE_DOMAINS"
+            for entry in "${EXISTING[@]}"; do
+                [[ -z "$entry" ]] && continue
+                # Skip if entry is the exact base domain or a subdomain
+                if [[ "$entry" == "$exact" ]] || [[ "$entry" == *"$domain" ]]; then
+                    continue
+                fi
+                NEW_UNIQUE="${NEW_UNIQUE:+$NEW_UNIQUE,}$entry"
+            done
+            UNIQUE_DOMAINS="$NEW_UNIQUE"
             # Add wildcard if not already present
             if ! echo ",$UNIQUE_DOMAINS," | grep -q ",${domain},"; then
                 UNIQUE_DOMAINS="${UNIQUE_DOMAINS:+$UNIQUE_DOMAINS,}$domain"

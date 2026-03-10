@@ -41,7 +41,6 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
         "storage.googleapis.com",
     ],
     "nodejs": [
-        "registry.npmjs.org",
         ".npmjs.org",
         ".yarnpkg.com",
     ],
@@ -124,7 +123,31 @@ def expand_domains(
                 expanded.append(domain)
                 seen.add(domain)
 
-    return expanded
+    return remove_wildcard_covered(expanded)
+
+
+def remove_wildcard_covered(domains: list[str]) -> list[str]:
+    """Remove domains that are already covered by a wildcard in the list.
+
+    Squid treats .example.com as matching both example.com and *.example.com,
+    so having both .example.com and foo.example.com is a fatal config error.
+
+    Args:
+        domains: List of domains (may include wildcards and regex entries).
+
+    Returns:
+        Filtered list with redundant domains removed, preserving order.
+    """
+    wildcards = [d for d in domains if d.startswith(".")]
+    if not wildcards:
+        return domains
+    return [
+        d
+        for d in domains
+        if d.startswith(".")
+        or d.startswith("~")
+        or not any(d == w[1:] or d.endswith(w) for w in wildcards)
+    ]
 
 
 def is_unrestricted(domains: list[str] | None) -> bool:
