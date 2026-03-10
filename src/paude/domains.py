@@ -41,6 +41,7 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
         "storage.googleapis.com",
     ],
     "nodejs": [
+        ".nodejs.org",
         ".npmjs.org",
         ".yarnpkg.com",
     ],
