@@ -362,6 +362,7 @@ class TestNodejsAlias:
         """'nodejs' expands to Node.js ecosystem domains."""
         result = expand_domains(["nodejs"])
         assert result is not None
+        assert ".nodejs.org" in result
         assert ".npmjs.org" in result
         assert ".yarnpkg.com" in result
         # registry.npmjs.org is redundant with .npmjs.org
