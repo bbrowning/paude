@@ -7,6 +7,7 @@ from typing import Any
 
 import typer
 
+from paude.agents import get_agent
 from paude.config import detect_config, parse_config
 from paude.config.dockerfile import generate_workspace_dockerfile
 from paude.domains import format_domains_for_display
@@ -65,7 +66,8 @@ def show_dry_run(flags: dict[str, Any]) -> None:
                 typer.echo("")
                 typer.echo("Generated Dockerfile:")
                 typer.echo("-" * 40)
-                dockerfile = generate_workspace_dockerfile(config)
+                agent_instance = get_agent(flags.get("agent", "claude"))
+                dockerfile = generate_workspace_dockerfile(config, agent=agent_instance)
                 for line in dockerfile.split("\n"):
                     typer.echo(f"  {line}")
                 typer.echo("-" * 40)

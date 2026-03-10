@@ -15,6 +15,7 @@ from paude.backends.openshift.oc import (
     RSYNC_TIMEOUT,
     OcClient,
 )
+from paude.backends.shared import config_file_basename
 from paude.constants import CONTAINER_HOME, GCP_ADC_FILENAME
 
 
@@ -216,7 +217,9 @@ class ConfigSyncer:
             print("  Refreshed gcloud credentials", file=sys.stderr)
         print("Credentials refreshed.", file=sys.stderr)
 
-    def _prepare_config_directory(self, pod_name: str) -> None:
+    def _prepare_config_directory(
+        self, pod_name: str, agent_name: str = "claude"
+    ) -> None:
         """Prepare the config directory on the pod."""
         config_path = "/credentials"
         prep_result = self._oc.run(
@@ -227,7 +230,7 @@ class ConfigSyncer:
             "--",
             "bash",
             "-c",
-            f"mkdir -p {config_path}/gcloud {config_path}/claude && "
+            f"mkdir -p {config_path}/gcloud {config_path}/{agent_name} && "
             f"(chmod -R g+rwX {config_path} 2>/dev/null || true)",
             check=False,
             timeout=OC_EXEC_TIMEOUT,
@@ -290,13 +293,18 @@ class ConfigSyncer:
 
             rsync_success = self.rsync_with_retry(
                 f"{config_dir}/",
-                f"{pod_name}:{config_path}/claude",
+                f"{pod_name}:{config_path}/{agent_name}",
                 exclude_args,
                 verbose=verbose,
             )
 
             if rsync_success:
-                self._rewrite_plugin_paths(pod_name, config_path)
+                self._rewrite_plugin_paths(
+                    pod_name,
+                    config_path,
+                    agent_name=agent_name,
+                    config_dir_name=agent.config.config_dir_name,
+                )
                 if verbose:
                     cfg_dir = agent.config.config_dir_name
                     print(
@@ -313,7 +321,12 @@ class ConfigSyncer:
 
         if config_file and config_file.exists():
             try:
-                dest = f"{pod_name}:{config_path}/claude/claude.json"
+                basename = (
+                    config_file_basename(agent.config.config_file_name)
+                    if agent.config.config_file_name
+                    else ""
+                )
+                dest = f"{pod_name}:{config_path}/{agent_name}/{basename}"
                 self._oc.run(
                     "cp",
                     str(config_file),
@@ -411,10 +424,11 @@ class ConfigSyncer:
         pod_name: str,
         verbose: bool = False,
         github_token: str | None = None,
+        agent_name: str = "claude",
     ) -> None:
         """Sync all configuration to pod /credentials/ directory.
 
-        Full sync including gcloud credentials, claude config, gitconfig,
+        Full sync including gcloud credentials, agent config, gitconfig,
         global gitignore, and optional GitHub token.
 
         Args:
@@ -422,12 +436,13 @@ class ConfigSyncer:
             verbose: Whether to show sync progress.
             github_token: Optional GitHub token to inject into pod tmpfs.
                 Falls back to PAUDE_GITHUB_TOKEN env var if not provided.
+            agent_name: Agent name for config directory naming.
         """
         print("Syncing configuration to pod...", file=sys.stderr)
 
-        self._prepare_config_directory(pod_name)
+        self._prepare_config_directory(pod_name, agent_name=agent_name)
         self._sync_gcloud_credentials(pod_name)
-        self._sync_agent_config(pod_name, verbose=verbose)
+        self._sync_agent_config(pod_name, verbose=verbose, agent_name=agent_name)
         self._sync_gitconfig(pod_name, verbose=verbose)
         self._sync_global_gitignore(pod_name, verbose=verbose)
         self._sync_github_token(pod_name, github_token)
@@ -435,15 +450,21 @@ class ConfigSyncer:
 
         print("Configuration synced.", file=sys.stderr)
 
-    def _rewrite_plugin_paths(self, pod_name: str, config_path: str) -> None:
+    def _rewrite_plugin_paths(
+        self,
+        pod_name: str,
+        config_path: str,
+        agent_name: str = "claude",
+        config_dir_name: str = ".claude",
+    ) -> None:
         """Rewrite absolute paths in plugin metadata files using jq.
 
-        Claude Code writes plugin paths as absolute host paths. These need
+        Agent tools write plugin paths as absolute host paths. These need
         to be rewritten to container paths.
         """
-        container_plugins_path = f"{CONTAINER_HOME}/.claude/plugins"
+        container_plugins_path = f"{CONTAINER_HOME}/{config_dir_name}/plugins"
 
-        installed_plugins = f"{config_path}/claude/plugins/installed_plugins.json"
+        installed_plugins = f"{config_path}/{agent_name}/plugins/installed_plugins.json"
         jq_expr = (
             ".plugins |= with_entries(.value |= map("
             "if .installPath then "
@@ -467,7 +488,9 @@ class ConfigSyncer:
             timeout=OC_EXEC_TIMEOUT,
         )
 
-        known_marketplaces = f"{config_path}/claude/plugins/known_marketplaces.json"
+        known_marketplaces = (
+            f"{config_path}/{agent_name}/plugins/known_marketplaces.json"
+        )
         jq_expr2 = (
             "with_entries(if .value.installLocation then "
             '.value.installLocation = ($prefix + "/marketplaces/" + .key) '

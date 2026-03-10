@@ -385,6 +385,14 @@ class TestGenerateWorkspaceDockerfile:
 
         assert "--allowerasing" in dockerfile
 
+    def test_copies_tmux_conf(self):
+        """generate_workspace_dockerfile includes COPY for tmux.conf."""
+        config = PaudeConfig()
+        dockerfile = generate_workspace_dockerfile(config)
+
+        assert "COPY --chmod=644 tmux.conf" in dockerfile
+        assert ".tmux.conf" in dockerfile
+
 
 class TestGeneratePipInstallDockerfile:
     """Tests for feature layer Dockerfile generation."""

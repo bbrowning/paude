@@ -169,12 +169,19 @@ _parse_claude_args = _parse_agent_args
 
 def _expand_allowed_domains(
     allowed_domains: list[str] | None,
+    extra_aliases: list[str] | None = None,
 ) -> list[str] | None:
-    """Expand domain aliases, defaulting to ["default"]."""
+    """Expand domain aliases, defaulting to ["default"].
+
+    Args:
+        allowed_domains: Raw domain list from CLI, or None for defaults.
+        extra_aliases: Agent-specific aliases to add on top of BASE_ALIASES
+            when expanding "default". If None, falls back to DEFAULT_ALIASES.
+    """
     from paude.domains import expand_domains
 
     domains_input = allowed_domains if allowed_domains else ["default"]
-    return expand_domains(domains_input)
+    return expand_domains(domains_input, extra_aliases=extra_aliases)
 
 
 def _prepare_session_create(
@@ -200,7 +207,9 @@ def _prepare_session_create(
     if config_obj and config_obj.container_env:
         env.update(config_obj.container_env)
 
-    expanded_domains = _expand_allowed_domains(allowed_domains)
+    expanded_domains = _expand_allowed_domains(
+        allowed_domains, extra_aliases=agent_instance.config.extra_domain_aliases
+    )
     unrestricted = is_unrestricted(expanded_domains)
 
     # Show warnings for dangerous configurations

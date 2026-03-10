@@ -90,6 +90,7 @@ class TestEntrypointContract:
             "cp -a /tmp/claude.seed/." in content
             or 'cp -a "$SEED_DIR/."' in content
             or "cp -a /tmp/claude.seed/" in content
+            or 'cp -a "$AGENT_SEED_DIR/."' in content
         ), "entrypoint-session.sh must use 'cp -a' for recursive seed copy"
 
     def test_entrypoint_has_apply_sandbox_config(self) -> None:
@@ -116,15 +117,19 @@ class TestEntrypointContract:
         )
 
     def test_entrypoint_handles_claude_json_after_copy(self) -> None:
-        """claude.json must be moved (not copied separately) after cp -a."""
+        """Config file must be moved (not copied separately) after cp -a."""
         content = ENTRYPOINT_PATH.read_text()
-        # Scope to the Podman seed block (uses /tmp/claude.seed, not /credentials)
-        cp_pos = content.find("cp -a /tmp/claude.seed/.")
-        assert cp_pos != -1, "Missing cp -a command for /tmp/claude.seed"
+        # Scope to the Podman seed block (uses $AGENT_SEED_DIR or /tmp/claude.seed)
+        cp_pos = content.find('cp -a "$AGENT_SEED_DIR/."')
+        if cp_pos == -1:
+            cp_pos = content.find("cp -a /tmp/claude.seed/.")
+        assert cp_pos != -1, "Missing cp -a command for seed dir"
         # Find the mv that comes after this specific cp -a
-        # Uses parameterized paths via $AGENT_CONFIG_DIR and $AGENT_CONFIG_FILE
-        mv_pos = content.find("claude.json", cp_pos + 1)
-        assert mv_pos != -1, "Missing mv command for claude.json after cp -a"
+        mv_pos = max(
+            content.find("AGENT_CONFIG_FILE_BASENAME", cp_pos + 1),
+            content.find("claude.json", cp_pos + 1),
+        )
+        assert mv_pos != -1, "Missing mv command for config file after cp -a"
         assert mv_pos > cp_pos, "mv must come after cp -a"
 
 
@@ -351,6 +356,51 @@ class TestSeedCopyMixedContent:
         ).read_text() == '{"plugin": true}'
 
 
+def _build_gemini_sandbox_script(
+    home_dir: str,
+    workspace: str,
+    suppress_prompts: bool,
+) -> str:
+    """Build a script that replicates Gemini apply_sandbox_config logic."""
+    env_lines = f'export HOME="{home_dir}"\n'
+    env_lines += f'export PAUDE_WORKSPACE="{workspace}"\n'
+    env_lines += 'AGENT_NAME="gemini"\n'
+    env_lines += 'AGENT_CONFIG_DIR=".gemini"\n'
+    if suppress_prompts:
+        env_lines += 'export PAUDE_SUPPRESS_PROMPTS="1"\n'
+    else:
+        env_lines += "unset PAUDE_SUPPRESS_PROMPTS 2>/dev/null || true\n"
+
+    return textwrap.dedent(f"""\
+        #!/bin/bash
+        set -e
+        {env_lines}
+        apply_sandbox_config() {{
+            if [[ "${{PAUDE_SUPPRESS_PROMPTS:-}}" != "1" ]]; then
+                return 0
+            fi
+
+            local workspace="${{PAUDE_WORKSPACE:-/workspace}}"
+
+            case "$AGENT_NAME" in
+                gemini)
+                    local trusted_json="$HOME/$AGENT_CONFIG_DIR/trustedFolders.json"
+                    mkdir -p "$HOME/$AGENT_CONFIG_DIR" 2>/dev/null || true
+                    if [[ -f "$trusted_json" ]]; then
+                        jq --arg ws "$workspace" '. + {{($ws): "TRUST_FOLDER"}}' \\
+                            "$trusted_json" > "${{trusted_json}}.tmp" \\
+                            && mv "${{trusted_json}}.tmp" "$trusted_json"
+                    else
+                        jq -n --arg ws "$workspace" '{{($ws): "TRUST_FOLDER"}}' > "$trusted_json"
+                    fi
+                    ;;
+            esac
+        }}
+
+        apply_sandbox_config
+    """)
+
+
 def _build_sandbox_script(
     home_dir: str,
     workspace: str,
@@ -517,3 +567,67 @@ class TestSandboxPromptSuppression:
         assert (home / ".claude.json").exists()
         # settings.json should NOT exist
         assert not (home / ".claude" / "settings.json").exists()
+
+
+class TestGeminiSandboxConfig:
+    """Tests for Gemini apply_sandbox_config() in entrypoint-session.sh."""
+
+    def test_creates_trusted_folders_json(self, tmp_path: Path) -> None:
+        """trustedFolders.json created with workspace trust when suppress enabled."""
+        home = tmp_path / "home"
+        home.mkdir()
+        workspace = "/pvc/workspace"
+
+        script = _build_gemini_sandbox_script(
+            str(home), workspace, suppress_prompts=True
+        )
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        trusted = json.loads((home / ".gemini" / "trustedFolders.json").read_text())
+        assert trusted[workspace] == "TRUST_FOLDER"
+
+    def test_merges_into_existing_trusted_folders(self, tmp_path: Path) -> None:
+        """Existing trusted folders are preserved when adding workspace."""
+        home = tmp_path / "home"
+        home.mkdir()
+        gemini_dir = home / ".gemini"
+        gemini_dir.mkdir()
+        workspace = "/pvc/workspace"
+
+        existing = {"/other/project": "TRUST_FOLDER"}
+        (gemini_dir / "trustedFolders.json").write_text(json.dumps(existing))
+
+        script = _build_gemini_sandbox_script(
+            str(home), workspace, suppress_prompts=True
+        )
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        trusted = json.loads((gemini_dir / "trustedFolders.json").read_text())
+        assert trusted[workspace] == "TRUST_FOLDER"
+        assert trusted["/other/project"] == "TRUST_FOLDER"
+
+    def test_no_changes_when_suppress_unset(self, tmp_path: Path) -> None:
+        """No changes when PAUDE_SUPPRESS_PROMPTS is unset."""
+        home = tmp_path / "home"
+        home.mkdir()
+        workspace = "/pvc/workspace"
+
+        script = _build_gemini_sandbox_script(
+            str(home), workspace, suppress_prompts=False
+        )
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        assert not (home / ".gemini").exists()
+
+    def test_entrypoint_has_gemini_trust_case(self) -> None:
+        """Contract: entrypoint-session.sh handles Gemini trusted folders."""
+        content = ENTRYPOINT_PATH.read_text()
+        assert "trustedFolders.json" in content, (
+            "entrypoint-session.sh must handle Gemini trustedFolders.json"
+        )
+        assert "TRUST_FOLDER" in content, (
+            "entrypoint-session.sh must set TRUST_FOLDER for Gemini"
+        )

@@ -2692,7 +2692,12 @@ class TestSyncConfigWithPlugins:
             # Patch the syncer's method since sync is now delegated to ConfigSyncer
             with patch.object(backend._syncer, "_rewrite_plugin_paths") as mock_rewrite:
                 backend._sync_config_to_pod("test-pod-0")
-                mock_rewrite.assert_called_once_with("test-pod-0", "/credentials")
+                mock_rewrite.assert_called_once_with(
+                    "test-pod-0",
+                    "/credentials",
+                    agent_name="claude",
+                    config_dir_name=".claude",
+                )
 
     @patch("subprocess.run")
     def test_sync_config_handles_missing_claude_dir(

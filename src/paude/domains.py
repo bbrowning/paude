@@ -24,6 +24,10 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
         ".claude.ai",
         ".anthropic.com",
     ],
+    "gemini": [
+        "cloudcode-pa.googleapis.com",
+        "play.googleapis.com",
+    ],
     "python": [
         ".pypi.org",
         ".pythonhosted.org",
@@ -37,7 +41,6 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
         "storage.googleapis.com",
     ],
     "nodejs": [
-        "registry.npmjs.org",
         ".npmjs.org",
         ".yarnpkg.com",
     ],
@@ -59,20 +62,29 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
 # Backward-compatible alias: pypi -> python
 DOMAIN_ALIASES["pypi"] = DOMAIN_ALIASES["python"]
 
-# Default aliases when --allowed-domains is not specified
-DEFAULT_ALIASES = ["claude", "vertexai", "python", "github"]
+# Base aliases shared across all agents
+BASE_ALIASES = ["vertexai", "python", "github"]
+
+# Default aliases when --allowed-domains is not specified (backward compat)
+DEFAULT_ALIASES = BASE_ALIASES + ["claude"]
 
 
-def expand_domains(domains: list[str]) -> list[str] | None:
+def expand_domains(
+    domains: list[str],
+    extra_aliases: list[str] | None = None,
+) -> list[str] | None:
     """Expand domain aliases to a list of actual domains.
 
     Args:
         domains: List of domains or aliases. Special values:
             - "all": Returns None (unrestricted network)
-            - "default": Expands to all DEFAULT_ALIASES
-              (claude, vertexai, python, github)
+            - "default": Expands to BASE_ALIASES + extra_aliases
+              (falls back to DEFAULT_ALIASES if extra_aliases is None)
             - Alias names (e.g., "claude", "vertexai"): Expand to domain lists
             - Raw domains (e.g., ".example.com"): Pass through unchanged
+        extra_aliases: Agent-specific aliases to add on top of BASE_ALIASES
+            when expanding "default". If None, falls back to DEFAULT_ALIASES
+            for backward compatibility.
 
     Returns:
         List of expanded domains, or None if "all" is specified (unrestricted).
@@ -85,10 +97,16 @@ def expand_domains(domains: list[str]) -> list[str] | None:
     expanded: list[str] = []
     seen: set[str] = set()
 
+    # Determine which aliases to use for "default"
+    if extra_aliases is not None:
+        default_aliases = BASE_ALIASES + extra_aliases
+    else:
+        default_aliases = DEFAULT_ALIASES
+
     for domain in domains:
         # Handle "default" alias
         if domain == "default":
-            for alias in DEFAULT_ALIASES:
+            for alias in default_aliases:
                 for d in DOMAIN_ALIASES.get(alias, []):
                     if d not in seen:
                         expanded.append(d)
@@ -105,7 +123,31 @@ def expand_domains(domains: list[str]) -> list[str] | None:
                 expanded.append(domain)
                 seen.add(domain)
 
-    return expanded
+    return remove_wildcard_covered(expanded)
+
+
+def remove_wildcard_covered(domains: list[str]) -> list[str]:
+    """Remove domains that are already covered by a wildcard in the list.
+
+    Squid treats .example.com as matching both example.com and *.example.com,
+    so having both .example.com and foo.example.com is a fatal config error.
+
+    Args:
+        domains: List of domains (may include wildcards and regex entries).
+
+    Returns:
+        Filtered list with redundant domains removed, preserving order.
+    """
+    wildcards = [d for d in domains if d.startswith(".")]
+    if not wildcards:
+        return domains
+    return [
+        d
+        for d in domains
+        if d.startswith(".")
+        or d.startswith("~")
+        or not any(d == w[1:] or d.endswith(w) for w in wildcards)
+    ]
 
 
 def is_unrestricted(domains: list[str] | None) -> bool:

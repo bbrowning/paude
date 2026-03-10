@@ -13,6 +13,10 @@ AGENT_CONFIG_FILE="${PAUDE_AGENT_CONFIG_FILE:-.claude.json}"
 AGENT_INSTALL_SCRIPT="${PAUDE_AGENT_INSTALL_SCRIPT:-curl -fsSL https://claude.ai/install.sh | bash}"
 AGENT_SESSION_NAME="${PAUDE_AGENT_SESSION_NAME:-claude}"
 AGENT_LAUNCH_CMD="${PAUDE_AGENT_LAUNCH_CMD:-claude}"
+AGENT_SEED_DIR="${PAUDE_AGENT_SEED_DIR:-/tmp/claude.seed}"
+AGENT_SEED_FILE="${PAUDE_AGENT_SEED_FILE:-/tmp/claude.json.seed}"
+# Derive basename for config file (e.g., ".claude.json" -> "claude.json")
+AGENT_CONFIG_FILE_BASENAME="${AGENT_CONFIG_FILE#.}"
 # Backward compat: PAUDE_AGENT_ARGS > PAUDE_CLAUDE_ARGS > positional args
 AGENT_ARGS="${PAUDE_AGENT_ARGS:-${PAUDE_CLAUDE_ARGS:-$*}}"
 
@@ -109,16 +113,16 @@ setup_credentials() {
     fi
 
     # Copy agent config (need to be writable, so copy instead of symlink)
-    if [[ -d "$config_path/claude" ]]; then
+    if [[ -d "$config_path/$AGENT_NAME" ]]; then
         mkdir -p "$HOME/$AGENT_CONFIG_DIR"
         chmod g+rwX "$HOME/$AGENT_CONFIG_DIR" 2>/dev/null || true
 
         # Copy entire synced directory structure
-        cp -a "$config_path/claude/." "$HOME/$AGENT_CONFIG_DIR/" 2>/dev/null || true
+        cp -a "$config_path/$AGENT_NAME/." "$HOME/$AGENT_CONFIG_DIR/" 2>/dev/null || true
 
         # Handle config file specially - goes to ~/.<config_file>
-        if [[ -n "$AGENT_CONFIG_FILE" ]] && [[ -f "$HOME/$AGENT_CONFIG_DIR/claude.json" ]]; then
-            mv "$HOME/$AGENT_CONFIG_DIR/claude.json" "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
+        if [[ -n "$AGENT_CONFIG_FILE" ]] && [[ -n "$AGENT_CONFIG_FILE_BASENAME" ]] && [[ -f "$HOME/$AGENT_CONFIG_DIR/$AGENT_CONFIG_FILE_BASENAME" ]]; then
+            mv "$HOME/$AGENT_CONFIG_DIR/$AGENT_CONFIG_FILE_BASENAME" "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
             chmod g+rw "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
         fi
 
@@ -176,6 +180,11 @@ install_agent() {
         return 0
     fi
 
+    # Check if agent is available in system PATH (e.g., npm global install)
+    if command -v "$AGENT_PROCESS" >/dev/null 2>&1; then
+        return 0
+    fi
+
     echo "Installing $AGENT_NAME to PVC..." >&2
 
     # Set up installation directory in PVC for persistence
@@ -214,16 +223,16 @@ if [[ -z "${PAUDE_SKIP_AGENT_INSTALL:-}" ]] && [[ -z "${PAUDE_SKIP_CLAUDE_INSTAL
 fi
 
 # Legacy: Copy seed files if provided via Secret mount (Podman backend fallback)
-if [[ -d /tmp/claude.seed ]] && [[ ! -d /credentials ]]; then
+if [[ -d "$AGENT_SEED_DIR" ]] && [[ ! -d /credentials ]]; then
     mkdir -p "$HOME/$AGENT_CONFIG_DIR"
     chmod g+rwX "$HOME/$AGENT_CONFIG_DIR" 2>/dev/null || true
 
     # Copy entire seed directory structure (includes commands/, plugins/, etc.)
-    cp -a /tmp/claude.seed/. "$HOME/$AGENT_CONFIG_DIR/" 2>/dev/null || true
+    cp -a "$AGENT_SEED_DIR/." "$HOME/$AGENT_CONFIG_DIR/" 2>/dev/null || true
 
     # Handle config file specially - goes to ~/.<config_file>
-    if [[ -n "$AGENT_CONFIG_FILE" ]] && [[ -f "$HOME/$AGENT_CONFIG_DIR/claude.json" ]]; then
-        mv "$HOME/$AGENT_CONFIG_DIR/claude.json" "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
+    if [[ -n "$AGENT_CONFIG_FILE_BASENAME" ]] && [[ -f "$HOME/$AGENT_CONFIG_DIR/$AGENT_CONFIG_FILE_BASENAME" ]]; then
+        mv "$HOME/$AGENT_CONFIG_DIR/$AGENT_CONFIG_FILE_BASENAME" "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
         chmod g+rw "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
     fi
 
@@ -236,9 +245,9 @@ if [[ -d /tmp/claude.seed ]] && [[ ! -d /credentials ]]; then
 fi
 
 # Also check for separate config file seed mount (Podman backend)
-if [[ -f /tmp/claude.json.seed ]] || [[ -L /tmp/claude.json.seed ]]; then
+if [[ -n "$AGENT_SEED_FILE" ]] && { [[ -f "$AGENT_SEED_FILE" ]] || [[ -L "$AGENT_SEED_FILE" ]]; }; then
     if [[ -n "$AGENT_CONFIG_FILE" ]]; then
-        cp -L /tmp/claude.json.seed "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
+        cp -L "$AGENT_SEED_FILE" "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
         chmod g+rw "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
     fi
 fi
@@ -256,36 +265,54 @@ apply_sandbox_config() {
         return 0
     fi
 
-    # Fallback: built-in Claude Code sandbox config
+    # Fallback: built-in sandbox config keyed on agent
     local workspace="${PAUDE_WORKSPACE:-/workspace}"
-    local config_file="$HOME/$AGENT_CONFIG_FILE"
-    local settings_json="$HOME/$AGENT_CONFIG_DIR/settings.json"
 
-    # Suppress trust prompt and onboarding
-    if [[ -f "$config_file" ]]; then
-        jq --arg ws "$workspace" '. * {
-            hasCompletedOnboarding: true,
-            projects: {($ws): {hasTrustDialogAccepted: true}}
-        }' "$config_file" > "${config_file}.tmp" \
-            && mv "${config_file}.tmp" "$config_file"
-    else
-        jq -n --arg ws "$workspace" '{
-            hasCompletedOnboarding: true,
-            projects: {($ws): {hasTrustDialogAccepted: true}}
-        }' > "$config_file"
-    fi
+    case "$AGENT_NAME" in
+        gemini)
+            # Pre-trust workspace folder so Gemini doesn't prompt on every connect
+            local trusted_json="$HOME/$AGENT_CONFIG_DIR/trustedFolders.json"
+            mkdir -p "$HOME/$AGENT_CONFIG_DIR" 2>/dev/null || true
+            if [[ -f "$trusted_json" ]]; then
+                jq --arg ws "$workspace" '. + {($ws): "TRUST_FOLDER"}' \
+                    "$trusted_json" > "${trusted_json}.tmp" \
+                    && mv "${trusted_json}.tmp" "$trusted_json"
+            else
+                jq -n --arg ws "$workspace" '{($ws): "TRUST_FOLDER"}' > "$trusted_json"
+            fi
+            ;;
+        *)
+            # Claude Code sandbox config
+            local config_file="$HOME/$AGENT_CONFIG_FILE"
+            local settings_json="$HOME/$AGENT_CONFIG_DIR/settings.json"
 
-    # Suppress bypass permissions warning when yolo flag is in args
-    if [[ "${AGENT_ARGS:-}" == *"--dangerously-skip-permissions"* ]]; then
-        mkdir -p "$HOME/$AGENT_CONFIG_DIR" 2>/dev/null || true
-        local skip_patch='{"skipDangerousModePermissionPrompt": true}'
-        if [[ -f "$settings_json" ]]; then
-            jq --argjson patch "$skip_patch" '. * $patch' "$settings_json" > "${settings_json}.tmp" \
-                && mv "${settings_json}.tmp" "$settings_json"
-        else
-            echo "$skip_patch" > "$settings_json"
-        fi
-    fi
+            # Suppress trust prompt and onboarding
+            if [[ -f "$config_file" ]]; then
+                jq --arg ws "$workspace" '. * {
+                    hasCompletedOnboarding: true,
+                    projects: {($ws): {hasTrustDialogAccepted: true}}
+                }' "$config_file" > "${config_file}.tmp" \
+                    && mv "${config_file}.tmp" "$config_file"
+            else
+                jq -n --arg ws "$workspace" '{
+                    hasCompletedOnboarding: true,
+                    projects: {($ws): {hasTrustDialogAccepted: true}}
+                }' > "$config_file"
+            fi
+
+            # Suppress bypass permissions warning when yolo flag is in args
+            if [[ "${AGENT_ARGS:-}" == *"--dangerously-skip-permissions"* ]]; then
+                mkdir -p "$HOME/$AGENT_CONFIG_DIR" 2>/dev/null || true
+                local skip_patch='{"skipDangerousModePermissionPrompt": true}'
+                if [[ -f "$settings_json" ]]; then
+                    jq --argjson patch "$skip_patch" '. * $patch' "$settings_json" > "${settings_json}.tmp" \
+                        && mv "${settings_json}.tmp" "$settings_json"
+                else
+                    echo "$skip_patch" > "$settings_json"
+                fi
+            fi
+            ;;
+    esac
 }
 
 apply_sandbox_config 2>/dev/null || true
@@ -306,7 +333,10 @@ fi
 SESSION_NAME="$AGENT_SESSION_NAME"
 
 # Set up terminal environment for tmux
-export TERM="${TERM:-xterm-256color}"
+# Force xterm-256color so the container's tmux knows the outer terminal supports
+# 256 colors. The inherited TERM (often "screen" from a host tmux) understates
+# the actual capabilities of the terminal chain.
+export TERM=xterm-256color
 
 # Set UTF-8 locale for proper character rendering
 export LANG="${LANG:-C.UTF-8}"

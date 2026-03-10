@@ -96,6 +96,21 @@ class TestCopyEntrypoints:
         assert "\r\n" not in session_dest.read_text()
         assert session_dest.stat().st_mode & 0o755 == 0o755
 
+    def test_copies_tmux_conf_when_exists(self, tmp_path: Path) -> None:
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        entrypoint = src_dir / "entrypoint.sh"
+        entrypoint.write_text("#!/bin/bash\n")
+        tmux_conf = src_dir / "tmux.conf"
+        tmux_conf.write_text('set-option -g default-terminal "tmux-256color"\n')
+
+        dest_dir = tmp_path / "dest"
+        dest_dir.mkdir()
+        copy_entrypoints(entrypoint, dest_dir)
+
+        assert (dest_dir / "tmux.conf").exists()
+        assert "tmux-256color" in (dest_dir / "tmux.conf").read_text()
+
 
 class TestInjectFeatures:
     """Tests for inject_features()."""
@@ -166,7 +181,9 @@ class TestGenerateDockerfileContent:
 
         generate_dockerfile_content(config, using_default_paude_image=True)
 
-        mock_pip.assert_called_once_with(config, include_claude_install=False)
+        mock_pip.assert_called_once_with(
+            config, include_claude_install=False, agent=None
+        )
         mock_inject.assert_called_once()
 
     @patch("paude.container.build_context.inject_features")
@@ -180,7 +197,7 @@ class TestGenerateDockerfileContent:
 
         generate_dockerfile_content(config, using_default_paude_image=False)
 
-        mock_ws.assert_called_once_with(config)
+        mock_ws.assert_called_once_with(config, agent=None)
         mock_inject.assert_called_once()
 
     @patch("paude.container.build_context.inject_features")

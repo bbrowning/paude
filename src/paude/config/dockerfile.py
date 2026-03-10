@@ -167,10 +167,11 @@ RUN if command -v apt-get >/dev/null 2>&1; then \\
     lines.extend(agent.dockerfile_install_lines(CONTAINER_HOME))
 
     lines.append("")
-    lines.append("# Copy entrypoints (requires root)")
+    lines.append("# Copy entrypoints and tmux config (requires root)")
     lines.append("USER root")
     lines.append(f"COPY entrypoint.sh {CONTAINER_ENTRYPOINT}")
     lines.append("COPY entrypoint-session.sh /usr/local/bin/entrypoint-session.sh")
+    lines.append(f"COPY --chmod=644 tmux.conf {CONTAINER_HOME}/.tmux.conf")
     lines.append(
         f"RUN chmod +x {CONTAINER_ENTRYPOINT} /usr/local/bin/entrypoint-session.sh"
     )

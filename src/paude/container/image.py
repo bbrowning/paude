@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 from paude import __version__
+from paude.agents.base import Agent
 from paude.config.claude_layer import generate_claude_layer_dockerfile
 from paude.config.models import PaudeConfig
 from paude.container.build_context import (
@@ -41,18 +42,25 @@ class ImageManager:
         self,
         script_dir: Path | None = None,
         platform: str | None = None,
+        agent: Agent | None = None,
     ):
         """Initialize the image manager.
 
         Args:
             script_dir: Path to the paude script directory (for dev mode).
             platform: Target platform (e.g., "linux/amd64"). If None, uses native arch.
+            agent: Agent instance for CLI installation. If None, uses Claude defaults.
         """
         self.script_dir = script_dir
         self.dev_mode = os.environ.get("PAUDE_DEV", "0") == "1"
         self.registry = os.environ.get("PAUDE_REGISTRY", "quay.io/bbrowning")
         self.version = __version__
         self.platform = platform if platform is not None else _detect_native_platform()
+        if agent is None:
+            from paude.agents import get_agent
+
+            agent = get_agent("claude")
+        self.agent = agent
 
     def ensure_default_image(self) -> str:
         """Ensure the default paude image is available.
@@ -116,7 +124,7 @@ class ImageManager:
         """
         import sys
 
-        layer_content = generate_claude_layer_dockerfile()
+        layer_content = generate_claude_layer_dockerfile(agent=self.agent)
         layer_hash = compute_content_hash(
             base_image.encode(),
             self.version.encode(),
@@ -133,7 +141,8 @@ class ImageManager:
             print(f"Using cached runtime image: {runtime_tag}", file=sys.stderr)
             return runtime_tag
 
-        print("Installing Claude Code (first run only)...", file=sys.stderr)
+        agent_display = self.agent.config.display_name
+        print(f"Installing {agent_display} (first run only)...", file=sys.stderr)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             dockerfile_path = Path(tmpdir) / "Dockerfile"
@@ -144,7 +153,7 @@ class ImageManager:
                 self.build_image(dockerfile_path, runtime_tag, Path(tmpdir), build_args)
             except Exception:
                 print(
-                    "\nClaude Code installation failed. This usually means:\n"
+                    f"\n{agent_display} installation failed. This usually means:\n"
                     "  - Network connectivity issues (check your connection)\n"
                     "  - Podman machine not running (run 'podman machine start')\n"
                     "  - Disk space issues\n",
@@ -152,7 +161,7 @@ class ImageManager:
                 )
                 raise
 
-        print("Claude Code installed successfully.", file=sys.stderr)
+        print(f"{agent_display} installed successfully.", file=sys.stderr)
         return runtime_tag
 
     def ensure_custom_image(
@@ -194,7 +203,9 @@ class ImageManager:
 
         print("Building workspace image...", file=sys.stderr)
         base_image, using_default = self._resolve_custom_base(config, config_hash)
-        dockerfile_content = generate_dockerfile_content(config, using_default)
+        dockerfile_content = generate_dockerfile_content(
+            config, using_default, agent=self.agent
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             (Path(tmpdir) / "Dockerfile").write_text(dockerfile_content)
