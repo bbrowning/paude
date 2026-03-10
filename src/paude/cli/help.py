@@ -76,6 +76,7 @@ SYNCING CODE (via git):
     paude remote add --push [NAME]  Add remote AND push current branch
     paude remote list               List all paude git remotes
     paude remote remove [NAME]      Remove git remote for session
+    paude remote cleanup            Remove remotes for deleted sessions
     git push paude-<name> main      Push code to container
     git pull paude-<name> main      Pull changes from container
 
