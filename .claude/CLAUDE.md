@@ -193,10 +193,6 @@ When adding or changing user-facing features (flags, options, behavior):
 2. Update the `show_help()` function in `src/paude/cli/help.py` if adding new flags
 3. Keep examples consistent between README and help output
 
-## macOS Considerations
-
-Paths outside `/Users/` require Podman machine configuration. The script detects this and provides guidance when volume mounts fail.
-
 ## Documentation Language
 
 Use agent-agnostic language in all user-facing text (README, docs/, CLI help). Say "the agent" or "your agent" instead of "Claude". Reference specific agents only in examples or when discussing agent-specific configuration.

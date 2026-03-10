@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
-from paude.platform import get_podman_machine_dns, is_macos, show_macos_volume_help
+from paude.platform import get_podman_machine_dns, is_macos
 
 
 class TestIsMacos:
@@ -29,31 +26,6 @@ class TestIsMacos:
         """is_macos returns False on Linux."""
         mock_system.return_value = "Linux"
         assert is_macos() is False
-
-
-class TestCheckMacosVolumes:
-    """Tests for check_macos_volumes."""
-
-    @patch("paude.platform.is_macos")
-    def test_skipped_on_linux(self, mock_is_macos):
-        """check_macos_volumes skipped on Linux."""
-        mock_is_macos.return_value = False
-        from paude.platform import check_macos_volumes
-
-        # Should return True without doing anything
-        result = check_macos_volumes(Path("/some/path"), "test:image")
-        assert result is True
-
-
-class TestShowMacosVolumeHelp:
-    """Tests for show_macos_volume_help."""
-
-    def test_output_includes_podman_commands(self, capsys: pytest.CaptureFixture[str]):
-        """show_macos_volume_help output includes podman commands."""
-        show_macos_volume_help(Path("/Volumes/External/project"))
-        captured = capsys.readouterr()
-        assert "podman machine stop" in captured.err
-        assert "podman machine start" in captured.err
 
 
 class TestGetPodmanMachineDns:

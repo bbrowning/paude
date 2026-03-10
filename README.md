@@ -133,21 +133,6 @@ pip install -e .
 - OpenShift CLI `oc` (for OpenShift backend)
 - Google Cloud SDK configured (`gcloud auth application-default login`)
 
-### macOS Setup
-
-On macOS, Podman runs in a Linux VM that only mounts `/Users` by default. If your working directory is outside `/Users` (e.g., on a separate volume), configure the Podman machine:
-
-```bash
-podman machine stop
-podman machine rm
-podman machine init \
-  --volume /Users:/Users \
-  --volume /private:/private \
-  --volume /var/folders:/var/folders \
-  --volume /Volumes/YourVolume:/Volumes/YourVolume
-podman machine start
-```
-
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and release instructions.
