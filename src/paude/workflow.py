@@ -346,6 +346,13 @@ def reset_session(
         )
         raise typer.Exit(1)
 
+    # Re-resolve origin from the host repo's branch tracking remote
+    from paude.git_remote import resolve_origin_cmd
+
+    set_origin_cmd = resolve_origin_cmd(branch, cwd=session.workspace)
+    if set_origin_cmd:
+        backend.exec_in_session(session_name, set_origin_cmd)
+
     if not force:
         _check_unmerged_work(backend, session_name, branch)
 
@@ -393,7 +400,9 @@ def reset_session(
         if agent_cfg.clear_command:
             clear_cmd += (
                 f"tmux send-keys -t {agent_cfg.session_name}"
-                f' "{agent_cfg.clear_command}" Enter'
+                f' -l "{agent_cfg.clear_command}"; '
+                f"sleep 0.1; "
+                f"tmux send-keys -t {agent_cfg.session_name} Enter"
             )
         backend.exec_in_session(session_name, clear_cmd)
 

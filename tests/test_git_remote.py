@@ -24,6 +24,7 @@ from paude.git_remote import (
     is_ext_protocol_allowed,
     is_git_repository,
     list_paude_remotes,
+    resolve_origin_cmd,
     set_origin_in_container_openshift,
     set_origin_in_container_podman,
     setup_precommit_in_container_openshift,
@@ -1223,3 +1224,45 @@ class TestGetBranchRemoteUrl:
             "branch.develop.remote",
         ]
         assert result == "https://github.com/user/repo.git"
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_cwd_passed_to_subprocess(self, mock_run) -> None:
+        """Pass cwd to subprocess.run calls."""
+        mock_run.side_effect = [
+            type("Result", (), {"returncode": 0, "stdout": "origin\n"})(),
+            type(
+                "Result",
+                (),
+                {"returncode": 0, "stdout": "https://github.com/user/repo.git\n"},
+            )(),
+        ]
+
+        get_branch_remote_url("main", cwd="/some/repo")
+
+        for call in mock_run.call_args_list:
+            assert call[1]["cwd"] == "/some/repo"
+
+
+class TestResolveOriginCmd:
+    """Tests for resolve_origin_cmd."""
+
+    @patch("paude.git_remote.get_branch_remote_url")
+    def test_returns_set_origin_cmd(self, mock_get_url) -> None:
+        """Return a set-origin command when URL is found."""
+        mock_get_url.return_value = "git@github.com:user/repo.git"
+
+        result = resolve_origin_cmd("main", cwd="/some/repo")
+
+        assert result is not None
+        assert "https://github.com/user/repo.git" in result
+        assert "git -C /pvc/workspace remote" in result
+        mock_get_url.assert_called_once_with("main", cwd="/some/repo")
+
+    @patch("paude.git_remote.get_branch_remote_url")
+    def test_returns_none_when_no_url(self, mock_get_url) -> None:
+        """Return None when no remote URL is found."""
+        mock_get_url.return_value = None
+
+        result = resolve_origin_cmd("main")
+
+        assert result is None

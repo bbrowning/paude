@@ -270,8 +270,8 @@ class TestGeminiAgentConfig:
     def test_yolo_flag(self) -> None:
         assert GeminiAgent().config.yolo_flag == "--yolo"
 
-    def test_clear_command_is_none(self) -> None:
-        assert GeminiAgent().config.clear_command is None
+    def test_clear_command(self) -> None:
+        assert GeminiAgent().config.clear_command == "/clear"
 
     def test_passthrough_vars(self) -> None:
         cfg = GeminiAgent().config

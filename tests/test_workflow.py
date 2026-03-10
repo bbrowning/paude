@@ -436,6 +436,7 @@ class TestResetSession:
         mock_session = MagicMock()
         mock_session.status = "running"
         mock_session.agent = "claude"
+        mock_session.workspace = Path("/fake/workspace")
         mock_backend.get_session.return_value = mock_session
         mock_backend.exec_in_session.return_value = (0, "", "")
         mock_find.return_value = ("podman", mock_backend)
@@ -445,17 +446,22 @@ class TestResetSession:
         """Return all commands passed to exec_in_session."""
         return [call[0][1] for call in mock_backend.exec_in_session.call_args_list]
 
+    @patch(
+        "paude.git_remote.resolve_origin_cmd",
+        return_value="git remote set-url origin https://github.com/user/repo.git",
+    )
     @patch("paude.cli.find_session_backend")
     def test_reset_success(
         self,
         mock_find: MagicMock,
+        mock_remote: MagicMock,
     ) -> None:
         mock_backend = self._setup_mocks(mock_find)
 
         reset_session("test", force=True)
 
-        # Should exec reset cmd (includes base ref update) and clear/cleanup cmd
-        assert mock_backend.exec_in_session.call_count == 2
+        # Should exec set-origin, reset cmd (includes base ref update), and clear/cleanup cmd
+        assert mock_backend.exec_in_session.call_count == 3
 
     @patch("paude.cli.find_session_backend")
     def test_reset_not_running(self, mock_find: MagicMock) -> None:
@@ -468,22 +474,32 @@ class TestResetSession:
         with pytest.raises(click.exceptions.Exit):
             reset_session("test")
 
+    @patch(
+        "paude.git_remote.resolve_origin_cmd",
+        return_value="git remote set-url origin https://github.com/user/repo.git",
+    )
     @patch("paude.cli.find_session_backend")
     def test_reset_keeps_conversation(
         self,
         mock_find: MagicMock,
+        mock_remote: MagicMock,
     ) -> None:
         mock_backend = self._setup_mocks(mock_find)
 
         reset_session("test", force=True, keep_conversation=True)
 
-        # Only reset cmd (includes base ref update), no clear cmd or /clear
-        assert mock_backend.exec_in_session.call_count == 1
+        # set-origin + reset cmd (includes base ref update), no clear cmd or /clear
+        assert mock_backend.exec_in_session.call_count == 2
 
+    @patch(
+        "paude.git_remote.resolve_origin_cmd",
+        return_value="git remote set-url origin https://github.com/user/repo.git",
+    )
     @patch("paude.cli.find_session_backend")
     def test_reset_sends_clear_to_claude(
         self,
         mock_find: MagicMock,
+        mock_remote: MagicMock,
     ) -> None:
         mock_backend = self._setup_mocks(mock_find)
 
@@ -493,11 +509,18 @@ class TestResetSession:
         clear_cmd = next(c for c in cmds if "tmux" in c)
         assert "tmux send-keys" in clear_cmd
         assert '"/clear"' in clear_cmd
+        assert "sleep 0.1" in clear_cmd
+        assert clear_cmd.endswith("Enter")
 
+    @patch(
+        "paude.git_remote.resolve_origin_cmd",
+        return_value="git remote set-url origin https://github.com/user/repo.git",
+    )
     @patch("paude.cli.find_session_backend")
     def test_reset_preserves_settings(
         self,
         mock_find: MagicMock,
+        mock_remote: MagicMock,
     ) -> None:
         mock_backend = self._setup_mocks(mock_find)
 
@@ -508,14 +531,20 @@ class TestResetSession:
         assert "settings.local.json" not in clear_cmd
         assert "rm -rf /home/paude/.claude/projects/" not in clear_cmd
 
+    @patch(
+        "paude.git_remote.resolve_origin_cmd",
+        return_value="git remote set-url origin https://github.com/user/repo.git",
+    )
     @patch("paude.cli.find_session_backend")
     def test_reset_unmerged_work_blocks(
         self,
         mock_find: MagicMock,
+        mock_remote: MagicMock,
     ) -> None:
         mock_backend = self._setup_mocks(mock_find)
-        # fetch+merge-base returns non-zero (diverged), log returns commit
+        # set-origin succeeds, fetch+merge-base returns non-zero (diverged), log returns commit
         mock_backend.exec_in_session.side_effect = [
+            (0, "", ""),  # set-origin
             (1, "", ""),  # git fetch && git merge-base --is-ancestor (diverged)
             (0, "abc1234 Some work\n", ""),  # git log --oneline -1 HEAD
         ]
@@ -523,15 +552,21 @@ class TestResetSession:
         with pytest.raises(click.exceptions.Exit):
             reset_session("test")
 
+    @patch(
+        "paude.git_remote.resolve_origin_cmd",
+        return_value="git remote set-url origin https://github.com/user/repo.git",
+    )
     @patch("paude.cli.find_session_backend")
     def test_reset_merged_work_passes(
         self,
         mock_find: MagicMock,
+        mock_remote: MagicMock,
     ) -> None:
         mock_backend = self._setup_mocks(mock_find)
-        # fetch+merge-base returns 0 (HEAD is ancestor of origin/main),
+        # set-origin, fetch+merge-base returns 0 (HEAD is ancestor of origin/main),
         # then the reset exec calls
         mock_backend.exec_in_session.side_effect = [
+            (0, "", ""),  # set-origin
             (0, "", ""),  # git fetch && git merge-base --is-ancestor (merged)
             (0, "", ""),  # git reset --hard + update-ref
             (0, "", ""),  # clear conversation + /clear
@@ -539,10 +574,15 @@ class TestResetSession:
 
         reset_session("test")
 
+    @patch(
+        "paude.git_remote.resolve_origin_cmd",
+        return_value="git remote set-url origin https://github.com/user/repo.git",
+    )
     @patch("paude.cli.find_session_backend")
     def test_reset_exec_failure(
         self,
         mock_find: MagicMock,
+        mock_remote: MagicMock,
     ) -> None:
         mock_backend = self._setup_mocks(mock_find)
         mock_backend.exec_in_session.return_value = (1, "", "error")

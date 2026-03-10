@@ -389,12 +389,19 @@ def ssh_url_to_https(url: str) -> str:
     return url
 
 
-def get_branch_remote_url(branch: str | None = None) -> str | None:
+def get_branch_remote_url(
+    branch: str | None = None,
+    cwd: str | Path | None = None,
+) -> str | None:
     """Get the remote URL for the current branch's tracking remote.
 
     Reads ``branch.<branch>.remote`` from git config to find the tracking
     remote, then returns that remote's URL. Falls back to "origin" if
     no tracking remote is configured.
+
+    Args:
+        branch: Branch name. Defaults to current branch or "main".
+        cwd: Working directory for git commands. Defaults to current directory.
     """
     branch = branch or get_current_branch() or "main"
 
@@ -403,6 +410,7 @@ def get_branch_remote_url(branch: str | None = None) -> str | None:
         ["git", "config", "--get", f"branch.{branch}.remote"],
         capture_output=True,
         text=True,
+        cwd=cwd,
     )
     remote_name = result.stdout.strip() if result.returncode == 0 else "origin"
 
@@ -411,6 +419,7 @@ def get_branch_remote_url(branch: str | None = None) -> str | None:
         ["git", "config", "--get", f"remote.{remote_name}.url"],
         capture_output=True,
         text=True,
+        cwd=cwd,
     )
     if result.returncode == 0:
         return result.stdout.strip()
@@ -431,6 +440,25 @@ def git_push_tags_to_remote(remote_name: str) -> bool:
         capture_output=False,
     )
     return result.returncode == 0
+
+
+def resolve_origin_cmd(
+    branch: str | None = None,
+    cwd: str | Path | None = None,
+) -> str | None:
+    """Resolve the branch's tracking remote URL and build a set-origin command.
+
+    Combines get_branch_remote_url, ssh_url_to_https, and the internal
+    set-origin command builder into a single public helper.
+
+    Returns:
+        A bash command string to set origin in the container, or None
+        if no remote URL could be resolved.
+    """
+    origin_url = get_branch_remote_url(branch, cwd=cwd)
+    if not origin_url:
+        return None
+    return _build_set_origin_cmd(ssh_url_to_https(origin_url))
 
 
 def set_origin_in_container_podman(container_name: str, origin_url: str) -> bool:

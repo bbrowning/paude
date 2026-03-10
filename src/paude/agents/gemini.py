@@ -38,7 +38,7 @@ class GeminiAgent:
             config_excludes=[],
             activity_files=[],
             yolo_flag="--yolo",
-            clear_command=None,
+            clear_command="/clear",
             extra_domain_aliases=["gemini", "nodejs"],
         )
 
