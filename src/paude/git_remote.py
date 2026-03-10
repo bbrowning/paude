@@ -379,14 +379,26 @@ def ssh_url_to_https(url: str) -> str:
     return url
 
 
-def get_local_origin_url() -> str | None:
-    """Get the URL of the local 'origin' remote.
+def get_branch_remote_url(branch: str | None = None) -> str | None:
+    """Get the remote URL for the current branch's tracking remote.
 
-    Returns:
-        Origin URL or None if not set.
+    Reads ``branch.<branch>.remote`` from git config to find the tracking
+    remote, then returns that remote's URL. Falls back to "origin" if
+    no tracking remote is configured.
     """
+    branch = branch or get_current_branch() or "main"
+
+    # Get tracking remote name for branch
     result = subprocess.run(
-        ["git", "config", "--get", "remote.origin.url"],
+        ["git", "config", "--get", f"branch.{branch}.remote"],
+        capture_output=True,
+        text=True,
+    )
+    remote_name = result.stdout.strip() if result.returncode == 0 else "origin"
+
+    # Get URL for that remote
+    result = subprocess.run(
+        ["git", "config", "--get", f"remote.{remote_name}.url"],
         capture_output=True,
         text=True,
     )

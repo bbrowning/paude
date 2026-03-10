@@ -177,8 +177,8 @@ def _setup_git_after_create(
     from paude.git_remote import (
         fetch_tags_in_container_openshift,
         fetch_tags_in_container_podman,
+        get_branch_remote_url,
         get_current_branch,
-        get_local_origin_url,
         git_push_tags_to_remote,
         git_push_to_remote,
         is_git_repository,
@@ -235,7 +235,7 @@ def _setup_git_after_create(
         # Non-fatal, continue
 
     # Step 4: Set origin in container if local origin exists
-    origin_url = get_local_origin_url()
+    origin_url = get_branch_remote_url(branch)
     if origin_url:
         # Convert SSH URLs to HTTPS since the container has no SSH keys
         origin_url = ssh_url_to_https(origin_url)

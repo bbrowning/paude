@@ -14,8 +14,8 @@ from paude.git_remote import (
     enable_ext_protocol,
     fetch_tags_in_container_openshift,
     fetch_tags_in_container_podman,
+    get_branch_remote_url,
     get_current_branch,
-    get_local_origin_url,
     git_diff_stat,
     git_fetch_from_remote,
     git_push_tags_to_remote,
@@ -638,29 +638,6 @@ class TestGitPushToRemote:
         assert result is False
 
 
-class TestGetLocalOriginUrl:
-    """Tests for get_local_origin_url."""
-
-    @patch("paude.git_remote.subprocess.run")
-    def test_returns_url(self, mock_run) -> None:
-        """Return origin URL when set."""
-        mock_run.return_value.returncode = 0
-        mock_run.return_value.stdout = "https://github.com/user/repo\n"
-
-        result = get_local_origin_url()
-
-        assert result == "https://github.com/user/repo"
-
-    @patch("paude.git_remote.subprocess.run")
-    def test_returns_none_when_not_set(self, mock_run) -> None:
-        """Return None when no origin remote."""
-        mock_run.return_value.returncode = 1
-
-        result = get_local_origin_url()
-
-        assert result is None
-
-
 class TestSshUrlToHttps:
     """Tests for ssh_url_to_https."""
 
@@ -1129,3 +1106,120 @@ class TestGitDiffStat:
         result = git_diff_stat("main", "nonexistent")
 
         assert result == ""
+
+
+class TestGetBranchRemoteUrl:
+    """Tests for get_branch_remote_url."""
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_branch_tracks_non_origin_remote(self, mock_run) -> None:
+        """Return upstream URL when branch tracks upstream."""
+        mock_run.side_effect = [
+            # get_current_branch
+            type("Result", (), {"returncode": 0, "stdout": "main\n"})(),
+            # branch.main.remote -> upstream
+            type("Result", (), {"returncode": 0, "stdout": "upstream\n"})(),
+            # remote.upstream.url
+            type(
+                "Result",
+                (),
+                {
+                    "returncode": 0,
+                    "stdout": "https://github.com/vllm-project/vllm.git\n",
+                },
+            )(),
+        ]
+
+        result = get_branch_remote_url()
+
+        assert result == "https://github.com/vllm-project/vllm.git"
+        # Verify it looked up upstream's URL, not origin's
+        assert mock_run.call_args_list[2][0][0] == [
+            "git",
+            "config",
+            "--get",
+            "remote.upstream.url",
+        ]
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_branch_tracks_origin(self, mock_run) -> None:
+        """Return origin URL when branch tracks origin."""
+        mock_run.side_effect = [
+            # branch.main.remote -> origin
+            type("Result", (), {"returncode": 0, "stdout": "origin\n"})(),
+            # remote.origin.url
+            type(
+                "Result",
+                (),
+                {"returncode": 0, "stdout": "https://github.com/user/repo.git\n"},
+            )(),
+        ]
+
+        result = get_branch_remote_url("main")
+
+        assert result == "https://github.com/user/repo.git"
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_no_tracking_remote_falls_back_to_origin(self, mock_run) -> None:
+        """Fall back to origin when no tracking remote is configured."""
+        mock_run.side_effect = [
+            # branch.feature.remote -> not set
+            type("Result", (), {"returncode": 1, "stdout": ""})(),
+            # remote.origin.url
+            type(
+                "Result",
+                (),
+                {"returncode": 0, "stdout": "https://github.com/user/repo.git\n"},
+            )(),
+        ]
+
+        result = get_branch_remote_url("feature")
+
+        assert result == "https://github.com/user/repo.git"
+        assert mock_run.call_args_list[1][0][0] == [
+            "git",
+            "config",
+            "--get",
+            "remote.origin.url",
+        ]
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_no_remote_url_found(self, mock_run) -> None:
+        """Return None when remote URL is not found."""
+        mock_run.side_effect = [
+            # branch.main.remote -> upstream
+            type("Result", (), {"returncode": 0, "stdout": "upstream\n"})(),
+            # remote.upstream.url -> not found
+            type("Result", (), {"returncode": 1, "stdout": ""})(),
+        ]
+
+        result = get_branch_remote_url("main")
+
+        assert result is None
+
+    @patch("paude.git_remote.get_current_branch")
+    @patch("paude.git_remote.subprocess.run")
+    def test_no_branch_uses_get_current_branch(self, mock_run, mock_branch) -> None:
+        """Use get_current_branch() when no branch is specified."""
+        mock_branch.return_value = "develop"
+        mock_run.side_effect = [
+            # branch.develop.remote -> origin
+            type("Result", (), {"returncode": 0, "stdout": "origin\n"})(),
+            # remote.origin.url
+            type(
+                "Result",
+                (),
+                {"returncode": 0, "stdout": "https://github.com/user/repo.git\n"},
+            )(),
+        ]
+
+        result = get_branch_remote_url()
+
+        mock_branch.assert_called_once()
+        assert mock_run.call_args_list[0][0][0] == [
+            "git",
+            "config",
+            "--get",
+            "branch.develop.remote",
+        ]
+        assert result == "https://github.com/user/repo.git"
