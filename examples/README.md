@@ -9,7 +9,7 @@ When you run `paude` in a directory containing `.devcontainer/devcontainer.json`
 1. Detects the configuration file
 2. Builds a custom container image based on the specified base image
 3. Runs any `postCreateCommand` to set up your environment
-4. Launches Claude Code inside that container
+4. Launches your chosen agent inside that container
 
 This means you can use paude with any language or toolchain while maintaining the security guarantees (network filtering, credential isolation, etc.).
 

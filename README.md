@@ -1,36 +1,52 @@
 # Paude
 
-Run Claude Code autonomously in a container. Claude makes commits, you pull them back.
+Run AI coding agents in secure containers. They make commits, you pull them back.
+
+## Supported Agents
+
+| Agent | Flag | Status |
+|-------|------|--------|
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `--agent claude` (default) | Supported |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `--agent gemini` | Supported |
+
+> **Note**: Your chosen agent must be installed and working on your local machine first.
 
 ## Why Paude?
 
-- **Isolated execution**: Claude Code runs in a container, not on your host machine
-- **Safe autonomous mode**: Enable `--yolo` without fear—Claude can't send your code anywhere
-- **Git-based workflow**: Claude commits inside the container, you `git pull` the changes
+- **Isolated execution**: Your agent runs in a container, not on your host machine
+- **Safe autonomous mode**: Enable `--yolo` without fear — the agent can't send your code anywhere
+- **Git-based workflow**: The agent commits inside the container, you `git pull` the changes
 - **Run anywhere**: Locally with Podman or remotely on OpenShift
 
 ## Demo
 
 [![asciicast](https://asciinema.org/a/7bh955pH5e8YPbyl.svg)](https://asciinema.org/a/7bh955pH5e8YPbyl)
 
+> The demo shows Claude Code, but the workflow is identical with other agents.
+
 ## Quick Start
 
 ### Prerequisites
 
-**For local (Podman)**:
-- [Podman](https://podman.io/getting-started/installation) installed
+**Your agent**: Claude Code or Gemini CLI installed and working locally.
 
-**For remote (OpenShift)**:
-- OpenShift CLI (`oc`) and cluster access
+**Podman**: [Install Podman](https://podman.io/getting-started/installation) (for local backend).
 
-**Both require**:
-- Google Cloud SDK with `gcloud auth application-default login`
-- Environment variables (find your project ID in [Google Cloud Console](https://console.cloud.google.com)):
-  ```bash
-  export CLAUDE_CODE_USE_VERTEX=1
-  export ANTHROPIC_VERTEX_PROJECT_ID=your-project-id
-  export GOOGLE_CLOUD_PROJECT=your-project-id
-  ```
+**Google Cloud SDK**: `gcloud auth application-default login`
+
+**Environment variables** (find your project ID in [Google Cloud Console](https://console.cloud.google.com)):
+
+Claude Code:
+```bash
+export CLAUDE_CODE_USE_VERTEX=1
+export ANTHROPIC_VERTEX_PROJECT_ID=your-project-id
+export GOOGLE_CLOUD_PROJECT=your-project-id
+```
+
+Gemini CLI:
+```bash
+export GOOGLE_CLOUD_PROJECT=your-project-id
+```
 
 ### Install
 
@@ -40,48 +56,32 @@ uv tool install paude
 
 > **First run**: Paude pulls container images on first use. This takes a few minutes; subsequent runs start immediately.
 
-### The Workflow (Podman)
+### Your First Session
 
 ```bash
-# Create session, push code, and set up origin — all in one step
+# Claude Code (default)
 cd your-project
 paude create --yolo --git my-project
 
-# Connect to the running session
-paude connect my-project        # Opens tmux with Claude Code
+# Gemini CLI
+paude create --agent gemini --yolo --git my-project
 
-# Claude works autonomously...
-# When ready, pull Claude's commits (use your branch name):
+# Connect to the running session
+paude connect my-project
+
+# Pull the agent's commits (use your branch name):
 git pull paude-my-project main
 ```
 
-**You'll know it's working when**: `paude connect` shows the Claude Code interface, and `git pull` brings back commits that Claude made.
+**You'll know it's working when**: `paude connect` shows the agent interface, and `git pull` brings back commits the agent made.
 
-### The Workflow (OpenShift)
-
-Same approach, but runs on your cluster instead of locally.
-
-```bash
-# Create on OpenShift with code push
-cd your-project
-paude create --yolo --backend=openshift --git my-project
-
-# Connect to the running session
-paude connect my-project        # Opens tmux with Claude Code
-
-# Pull Claude's commits (use your branch name):
-git pull paude-my-project main
-```
-
-### Passing a Task to Claude
-
-Give Claude a specific task using the `-a` flag:
+### Passing a Task
 
 ```bash
 paude create --yolo my-project -a '-p "refactor the auth module"'
 ```
 
-Or just start the session and type your request in the Claude Code interface.
+Or just start the session and type your request in the agent interface.
 
 ### Something Not Working?
 
@@ -93,27 +93,29 @@ Or just start the session and type your request in the Claude Code interface.
 
 ---
 
-**Next steps**:
-- Customize your environment → [Configuration](#configuration)
-- Understand the security model → [Security Model](#security-model)
-- Run on OpenShift → [OpenShift Backend](#openshift-backend)
+**Learn more**:
+- [Session Management](docs/SESSIONS.md) — commands, lifecycle, code sync
+- [Configuration](docs/CONFIGURATION.md) — network domains, GitHub CLI, custom environments
+- [Security Model](docs/SECURITY.md) — attack vectors, `--yolo` safety, residual risks
+- [Orchestration](docs/ORCHESTRATION.md) — fire-and-forget workflow, harvest, PRs
+- [OpenShift Backend](docs/OPENSHIFT.md) — remote execution on Kubernetes
 
 ## How It Works
 
 ```
 Your Machine                    Container
-    │                              │
-    ├── git push ────────────────▶ │  Claude works here
-    │                              │  (network-filtered)
-    ◀── git pull ─────────────────┤
-    │                              │
+    |                              |
+    |-- git push ----------------▶ |  Agent works here
+    |                              |  (network-filtered)
+    ◀-- git pull -----------------|
+    |                              |
 ```
 
-- **Git is the sync mechanism**—your local files stay untouched until you pull
-- **`--yolo` is safe** because network filtering blocks Claude from sending data to arbitrary URLs
-- Claude can only reach Vertex AI (for the API) and PyPI (for packages) by default
+- **Git is the sync mechanism** — your local files stay untouched until you pull
+- **`--yolo` is safe** because network filtering blocks the agent from sending data to arbitrary URLs
+- The agent can only reach its API (e.g., Vertex AI) and package registries (e.g., PyPI) by default
 
-## Install from source
+## Install from Source
 
 ```bash
 git clone https://github.com/bbrowning/paude
@@ -126,6 +128,7 @@ pip install -e .
 ### Requirements
 
 - Python 3.11+ (for the Python package)
+- Your chosen agent CLI installed locally (Claude Code or Gemini CLI)
 - [Podman](https://podman.io/getting-started/installation) (for local backend)
 - OpenShift CLI `oc` (for OpenShift backend)
 - Google Cloud SDK configured (`gcloud auth application-default login`)
@@ -145,457 +148,10 @@ podman machine init \
 podman machine start
 ```
 
-## Session Management
-
-Paude provides persistent sessions that survive container/pod restarts.
-
-```bash
-# Quick start: create session for current directory (uses directory name)
-paude create
-paude start
-
-# List all sessions (shorthand: just `paude`)
-paude list
-paude
-```
-
-### Commands
-
-| Command | What It Does |
-|---------|--------------|
-| `create` | Creates session resources (container/StatefulSet, volume/PVC) |
-| `start` | Starts container/pod and connects |
-| `stop` | Stops container/pod, preserves volume |
-| `connect` | Attaches to running session |
-| `remote` | Manages git remotes for code sync |
-| `delete` | Removes all resources including volume |
-| `list` | Shows all sessions |
-
-### Examples
-
-```bash
-# Create session and push code in one step
-paude create my-project --git
-
-# Create a named session (starts container automatically)
-paude create my-project
-
-# Connect to the running session
-paude connect my-project
-
-# Work in Claude... then detach with Ctrl+b d
-
-# Reconnect later
-paude connect my-project
-
-# Stop to save resources (preserves state)
-paude stop my-project
-
-# Restart - instant resume, no reinstall
-paude start my-project
-
-# Delete session completely
-paude delete my-project --confirm
-```
-
-### Backend Selection
-
-```bash
-# Explicit backend selection
-paude create my-project --backend=openshift
-paude list --backend=podman
-
-# Backend-specific options
-paude create my-project --backend=openshift \
-  --pvc-size=50Gi \
-  --storage-class=fast-ssd
-```
-
-## Code Synchronization
-
-Sessions use git for code synchronization. The easiest way is the `--git` flag on create:
-
-```bash
-# One-step: create session, push code+tags, set up origin
-paude create my-project --git
-paude connect my-project
-
-# In container: gh pr list, git describe, etc. all work
-```
-
-The `--git` flag:
-1. Creates the session and starts the container
-2. Adds a `paude-<name>` git remote locally
-3. Pushes the current branch and all tags to the container
-4. Sets the `origin` remote inside the container (from your local origin)
-5. Fetches tags from origin inside the container (for `git describe`)
-
-### Manual code sync
-
-You can also set up git remotes manually:
-
-```bash
-# Create session (container starts automatically)
-paude create my-project
-paude connect my-project         # Connect in one terminal
-
-# In another terminal: Set up remote and push code
-paude remote add --push my-project  # Init git in container + push
-
-# Later: Push more changes
-git push paude-my-project main
-
-# After Claude makes changes, pull them locally
-git pull paude-my-project main
-```
-
-## Orchestration Workflow
-
-Paude supports a fire-and-forget workflow: assign Claude a task, monitor progress, harvest the changes into a branch, and open a PR — all without connecting to the session.
-
-### Assign a Task
-
-Create a session with `--git` to push your code, then give Claude a task with `-a`:
-
-```bash
-cd your-project
-paude create --yolo --git my-project -a '-p "refactor the auth module"'
-```
-
-Claude works autonomously inside the container. You can disconnect and come back later.
-
-### Monitor Progress
-
-Check what Claude is doing with `paude status`:
-
-```bash
-paude status
-```
-
-```
-SESSION     PROJECT        BACKEND   STATUS    ACTIVITY              STATE
-my-project  your-project   podman    running   2026-03-08 14:32:01   Active
-```
-
-The `STATE` column shows `Active` when Claude is working or `Idle` when waiting.
-
-### Harvest Changes
-
-When Claude finishes (or you want to review progress), pull the changes into a local branch:
-
-```bash
-paude harvest my-project -b feature/auth-refactor
-```
-
-This creates a local `feature/auth-refactor` branch with all of Claude's commits. Review the diff, run tests, and iterate as needed.
-
-Protected branches (`main`, `master`, `release`) cannot be used as harvest targets.
-
-### Open a PR
-
-Once you're satisfied with the changes, harvest again with `--pr` to push the branch and create a pull request:
-
-```bash
-paude harvest my-project -b feature/auth-refactor --pr
-```
-
-This pushes `feature/auth-refactor` to origin and runs `gh pr create`.
-
-### Reset and Repeat
-
-After the PR merges, reset the remote session to prepare for the next task:
-
-```bash
-paude reset my-project
-```
-
-Reset performs a `git reset --hard` to `origin/main` and `git clean -fdx` inside the container, and clears conversation history. Use `--keep-conversation` to preserve history across tasks.
-
-If Claude has unmerged work, reset warns you. Use `--force` to proceed anyway.
-
-Then assign the next task — connect and type your prompt, or stop and recreate with `-a`:
-
-```bash
-paude connect my-project
-# Or, for a fully autonomous run:
-paude stop my-project
-paude create --yolo --git my-project -a '-p "add rate limiting to the API"'
-```
-
-## OpenShift Backend
-
-For remote execution on OpenShift/Kubernetes clusters:
-
-```bash
-paude create --backend=openshift --git
-paude connect
-```
-
-The OpenShift backend provides:
-- **Persistent sessions** using StatefulSets with PVC storage
-- **Survive network disconnects** via tmux attachment
-- **Git-based sync** via `paude remote` and git push/pull
-- **Full config sync** including plugins and CLAUDE.md from `~/.claude/`
-- **On-cluster image builds** via OpenShift Binary Build
-
-See [docs/OPENSHIFT.md](docs/OPENSHIFT.md) for detailed setup and usage.
-
-## Configuration
-
-### Network Domains
-
-By default, paude runs a proxy sidecar that filters network access to Vertex AI, Python packages, and GitHub only.
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  paude-internal network (no direct internet)            │
-│  ┌───────────┐        ┌───────────────────────────────┐ │
-│  │  Claude   │───────▶│  Proxy (squid allowlist)      │─┼──▶ *.googleapis.com
-│  │ Container │        │                               │ │    *.pypi.org
-│  └───────────┘        └───────────────────────────────┘ │
-└─────────────────────────────────────────────────────────┘
-```
-
-```bash
-# Add custom domain to defaults (must include 'default')
-paude create --allowed-domains default --allowed-domains .example.com
-
-# Full network access (unrestricted) - use with caution
-paude create --allowed-domains all
-
-# Use only vertexai (replaces default)
-paude create --allowed-domains vertexai
-
-# Add Go module proxy access
-paude create --allowed-domains default --allowed-domains golang
-```
-
-The default allowlist includes:
-- **vertexai**: Vertex AI and Google OAuth domains (`.googleapis.com`, `.google.com`)
-- **python**: Python package repositories (`.pypi.org`, `.pythonhosted.org`, `download.pytorch.org`)
-
-Opt-in language ecosystem aliases:
-- **golang**: Go modules (`go.dev`, `proxy.golang.org`, `sum.golang.org`, `dl.google.com`, `storage.googleapis.com`)
-- **nodejs**: npm/Yarn registries (`registry.npmjs.org`, `.npmjs.org`, `.yarnpkg.com`)
-- **rust**: Cargo/rustup (`crates.io`, `static.crates.io`, `static.rust-lang.org`)
-
-> **Note**: `pypi` is a backward-compatible alias for `python`.
-
-**Special values**: `all` (unrestricted), `default` (vertexai + python + github), `vertexai`, `python`, `golang`, `nodejs`, `rust`, `github`. Specifying domains without `default` replaces the allowlist entirely.
-
-### Diagnosing Blocked Domains
-
-When a tool or package install fails due to network filtering, check what the proxy blocked:
-
-```bash
-# 1. View blocked domains
-paude blocked-domains my-session
-
-# Output:
-#   Blocked domains for session 'my-session':
-#
-#     registry.npmjs.org     8 requests
-#     cdn.jsdelivr.net       3 requests
-#
-#   2 unique domain(s) blocked (11 total requests).
-
-# 2. Allow the domain you need
-paude allowed-domains my-session --add registry.npmjs.org
-
-# 3. Verify it was added
-paude allowed-domains my-session
-
-# 4. Retry the failed operation inside the session
-```
-
-Use `--raw` to see the full proxy log with timestamps:
-
-```bash
-paude blocked-domains my-session --raw
-```
-
-### GitHub CLI Access
-
-Paude installs the `gh` CLI in the container and includes GitHub domains in the default network allowlist. To use `gh` for read-only operations (e.g., fetching issues, PRs, or code), set a fine-grained personal access token before connecting:
-
-```bash
-# Set once in your shell profile, or export before running paude:
-export PAUDE_GITHUB_TOKEN=ghp_yourtoken
-
-paude start my-project
-# Inside the container, gh is authenticated automatically
-```
-
-Or pass it explicitly for a single session:
-
-```bash
-paude start --github-token ghp_yourtoken my-project
-paude connect --github-token ghp_yourtoken my-project
-```
-
-The token is injected at connect time only:
-- **Podman**: passed as `-e GH_TOKEN=...` to `podman exec` (not stored in the container definition)
-- **OpenShift**: written to `/credentials/github_token` in the pod's tmpfs, wiped by the credential watchdog on inactivity
-- `GH_CONFIG_DIR=/tmp/gh-config` ensures no cached host credentials are ever consulted
-
-**Security notes**:
-- The host's `GH_TOKEN` environment variable is **never** auto-propagated to the container
-- Use a **fine-grained PAT** scoped to read-only permissions on specific repositories
-- Do not use tokens with write access; they could allow Claude to push code to GitHub
-- The token is never written to host disk as a paude-managed file
-
-Create a fine-grained read-only PAT at:
-https://github.com/settings/tokens?type=beta
-
-Select only the repositories Claude should access, and grant only **Contents: Read-only** (plus **Metadata: Read-only** which is always required).
-
-### Workflow Modes
-
-**Execution mode** (default): `paude create`
-- Network filtered via proxy
-- Claude prompts for confirmation before edits and commands
-
-**Autonomous mode**: `paude create --yolo`
-- Same network filtering
-- Claude edits files and runs commands without confirmation prompts
-- Passes `--dangerously-skip-permissions` to Claude Code
-
-**Research mode**: `paude create --allowed-domains all`
-- Full network access for web searches, documentation
-- Treat outputs more carefully (prompt injection via web content is possible)
-
-### Custom Container Environments (BYOC)
-
-Paude supports custom container configurations via devcontainer.json or paude.json.
-
-**Using paude.json** (simpler):
-
-```json
-{
-    "base": "python:3.11-slim",
-    "packages": ["make", "gcc"],
-    "setup": "pip install -r requirements.txt"
-}
-```
-
-**Using devcontainer.json**:
-
-```json
-{
-    "image": "python:3.11-slim",
-    "postCreateCommand": "pip install -r requirements.txt"
-}
-```
-
-See [`examples/README.md`](examples/README.md) for more configurations (Python, Node.js, Go).
-
-**paude.json properties:**
-
-| Property | Description |
-|----------|-------------|
-| `base` | Base container image |
-| `build.dockerfile` | Path to custom Dockerfile |
-| `build.context` | Build context directory |
-| `build.args` | Build arguments for Dockerfile |
-| `packages` | Additional system packages to install |
-| `setup` | Run after first start |
-
-**devcontainer.json properties:**
-
-| Property | Description |
-|----------|-------------|
-| `image` | Base container image |
-| `build.dockerfile` | Path to custom Dockerfile |
-| `build.context` | Build context directory |
-| `build.args` | Build arguments for Dockerfile |
-| `features` | Dev container features (ghcr.io OCI artifacts) |
-| `postCreateCommand` | Run after first start |
-| `containerEnv` | Environment variables |
-
-### Verifying Configuration
-
-```bash
-# Verify configuration without building or running
-paude create --dry-run
-
-# Force rebuild after changing config
-paude create --rebuild
-```
-
-## Security Model
-
-The container intentionally restricts certain operations:
-
-| Resource | Access | Purpose |
-|----------|--------|---------|
-| Network | proxy-filtered (Vertex AI, PyPI, GitHub, Claude) | Prevents data exfiltration |
-| Current directory | read-write | Working files |
-| `~/.config/gcloud` | read-only | Vertex AI auth |
-| `~/.claude` | copied in, not mounted | Prevents host config poisoning |
-| `~/.gitconfig` | read-only | Git identity |
-| SSH keys | not mounted | Prevents git push via SSH |
-| GitHub CLI config | not mounted (uses /tmp/gh-config) | Prevents cached host credentials |
-| `GH_TOKEN` (host) | never propagated | Use `PAUDE_GITHUB_TOKEN` or `--github-token` on start/connect |
-| Git credentials | not mounted | Prevents HTTPS git push |
-
-### Verified Attack Vectors
-
-These exfiltration paths have been tested and confirmed blocked:
-
-| Attack Vector | Status | How |
-|--------------|--------|-----|
-| HTTP/HTTPS exfiltration | Blocked | Internal network has no external DNS; proxy allowlists only approved domains (Vertex AI, PyPI, GitHub, Claude) |
-| Git push via SSH | Blocked | No `~/.ssh` mounted; DNS resolution fails anyway |
-| Git push via HTTPS | Blocked | No credential helpers; no stored credentials; DNS blocked |
-| GitHub CLI write ops | Relies on token scope — use a read-only fine-grained PAT | Use read-only PAT via `PAUDE_GITHUB_TOKEN`; host `GH_TOKEN` never propagated |
-| Modify cloud credentials | Blocked | gcloud directory mounted read-only |
-| Escape container | Blocked | Non-root user; standard Podman isolation |
-
-### When is `--yolo` Safe?
-
-```bash
-# SAFE: Network filtered, cannot exfiltrate data
-paude create --yolo
-
-# DANGEROUS: Full network access, can send files anywhere
-paude create --yolo --allowed-domains all
-```
-
-The `--yolo` flag enables autonomous execution (no confirmation prompts). This is safe when network filtering is active because Claude cannot exfiltrate files or secrets even if it reads them.
-
-**Do not combine `--yolo` with `--allowed-domains all`** unless you fully trust the task.
-
-### Workspace Protection
-
-The container has full read-write access to your working directory. **Your protection is git itself.** Push important work to a remote before running in autonomous mode:
-
-```bash
-git push origin main
-```
-
-If something goes wrong, recovery is a clone away.
-
-### Residual Risks
-
-These risks are accepted by design:
-
-1. **Workspace destruction**: Claude can delete files including `.git`. Mitigation: push to remote before autonomous sessions.
-2. **Secrets readable**: `.env` files in workspace are readable. Mitigation: network filtering prevents exfiltration; don't use `--allowed-domains all` with sensitive workspaces.
-3. **No audit logging**: Commands executed aren't logged. This is a forensics gap, not a security breach vector.
-
-### Unsupported devcontainer Properties (Security)
-
-These properties are ignored for security reasons:
-- `mounts` - paude controls mounts
-- `runArgs` - paude controls run arguments
-- `privileged` - never allowed
-- `capAdd` - never allowed
-- `forwardPorts` - paude controls networking
-- `remoteUser` - paude controls user
-
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and release instructions.
+
 ## License
 
 MIT
