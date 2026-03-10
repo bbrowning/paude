@@ -8,8 +8,9 @@ from unittest.mock import patch
 import pytest
 
 from paude.agents import get_agent, list_agents
-from paude.agents.base import AgentConfig
+from paude.agents.base import AgentConfig, build_environment_from_config
 from paude.agents.claude import ClaudeAgent
+from paude.agents.gemini import GeminiAgent
 
 
 class TestRegistry:
@@ -28,13 +29,18 @@ class TestRegistry:
         with pytest.raises(ValueError, match="Unknown agent 'nonexistent'"):
             get_agent("nonexistent")
 
+    def test_get_agent_gemini(self) -> None:
+        agent = get_agent("gemini")
+        assert isinstance(agent, GeminiAgent)
+
     def test_get_agent_error_lists_available(self) -> None:
-        with pytest.raises(ValueError, match="Available: claude"):
+        with pytest.raises(ValueError, match="Available: claude, gemini"):
             get_agent("bad")
 
     def test_list_agents(self) -> None:
         agents = list_agents()
         assert "claude" in agents
+        assert "gemini" in agents
         assert agents == sorted(agents)
 
 
@@ -229,3 +235,196 @@ class TestClaudeAgentSandboxConfig:
             "/home/paude", "/workspace", "--dangerously-skip-permissions"
         )
         assert "skipDangerousModePermissionPrompt" in script
+
+
+class TestGeminiAgentConfig:
+    """Tests for GeminiAgent configuration values."""
+
+    def test_name(self) -> None:
+        assert GeminiAgent().config.name == "gemini"
+
+    def test_display_name(self) -> None:
+        assert GeminiAgent().config.display_name == "Gemini CLI"
+
+    def test_process_name(self) -> None:
+        assert GeminiAgent().config.process_name == "gemini"
+
+    def test_session_name(self) -> None:
+        assert GeminiAgent().config.session_name == "gemini"
+
+    def test_install_script(self) -> None:
+        cfg = GeminiAgent().config
+        assert "@google/gemini-cli" in cfg.install_script
+
+    def test_config_dir_name(self) -> None:
+        assert GeminiAgent().config.config_dir_name == ".gemini"
+
+    def test_config_file_name_is_none(self) -> None:
+        assert GeminiAgent().config.config_file_name is None
+
+    def test_yolo_flag_is_none(self) -> None:
+        assert GeminiAgent().config.yolo_flag is None
+
+    def test_clear_command_is_none(self) -> None:
+        assert GeminiAgent().config.clear_command is None
+
+    def test_passthrough_vars(self) -> None:
+        cfg = GeminiAgent().config
+        assert "GOOGLE_CLOUD_PROJECT" in cfg.passthrough_env_vars
+
+    def test_passthrough_prefixes(self) -> None:
+        cfg = GeminiAgent().config
+        assert "CLOUDSDK_AUTH_" in cfg.passthrough_env_prefixes
+
+    def test_env_vars_empty(self) -> None:
+        assert GeminiAgent().config.env_vars == {}
+
+    def test_config_excludes_empty(self) -> None:
+        assert GeminiAgent().config.config_excludes == []
+
+    def test_activity_files_empty(self) -> None:
+        assert GeminiAgent().config.activity_files == []
+
+
+class TestGeminiAgentDockerfile:
+    """Tests for GeminiAgent.dockerfile_install_lines."""
+
+    def test_contains_nodejs(self) -> None:
+        lines = GeminiAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "nodejs" in text
+
+    def test_contains_npm(self) -> None:
+        lines = GeminiAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "npm" in text
+
+    def test_contains_gemini_cli(self) -> None:
+        lines = GeminiAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "@google/gemini-cli" in text
+
+    def test_contains_chmod(self) -> None:
+        lines = GeminiAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "chmod -R g+rwX" in text
+
+
+class TestGeminiAgentLaunchCommand:
+    """Tests for GeminiAgent.launch_command."""
+
+    def test_no_args(self) -> None:
+        assert GeminiAgent().launch_command("") == "gemini"
+
+    def test_with_args(self) -> None:
+        assert GeminiAgent().launch_command("--flag") == "gemini --flag"
+
+
+class TestGeminiAgentHostConfigMounts:
+    """Tests for GeminiAgent.host_config_mounts."""
+
+    def test_empty_when_no_gemini_dir(self, tmp_path: Path) -> None:
+        mounts = GeminiAgent().host_config_mounts(tmp_path)
+        assert mounts == []
+
+    def test_mounts_gemini_dir(self, tmp_path: Path) -> None:
+        gemini_dir = tmp_path / ".gemini"
+        gemini_dir.mkdir()
+        mounts = GeminiAgent().host_config_mounts(tmp_path)
+        assert "-v" in mounts
+        assert any("/tmp/gemini.seed:ro" in m for m in mounts)
+
+    def test_no_config_file_mount(self, tmp_path: Path) -> None:
+        gemini_json = tmp_path / ".gemini.json"
+        gemini_json.write_text("{}")
+        mounts = GeminiAgent().host_config_mounts(tmp_path)
+        assert not any("gemini.json" in m for m in mounts)
+
+
+class TestGeminiAgentBuildEnvironment:
+    """Tests for GeminiAgent.build_environment."""
+
+    def test_empty_when_no_vars_set(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            env = GeminiAgent().build_environment()
+            assert env == {}
+
+    def test_passes_through_google_cloud_project(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"GOOGLE_CLOUD_PROJECT": "my-project", "UNRELATED": "x"},
+            clear=True,
+        ):
+            env = GeminiAgent().build_environment()
+            assert env == {"GOOGLE_CLOUD_PROJECT": "my-project"}
+
+    def test_passes_through_cloudsdk_auth_prefix(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"CLOUDSDK_AUTH_TOKEN": "abc", "OTHER": "x"},
+            clear=True,
+        ):
+            env = GeminiAgent().build_environment()
+            assert env == {"CLOUDSDK_AUTH_TOKEN": "abc"}
+
+
+class TestGeminiAgentSandboxConfig:
+    """Tests for GeminiAgent.apply_sandbox_config."""
+
+    def test_returns_bash_script(self) -> None:
+        script = GeminiAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert script.startswith("#!/bin/bash")
+
+    def test_contains_true(self) -> None:
+        script = GeminiAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert "true" in script
+
+
+class TestBuildEnvironmentFromConfig:
+    """Tests for the shared build_environment_from_config helper."""
+
+    def test_collects_passthrough_vars(self) -> None:
+        config = AgentConfig(
+            name="test",
+            display_name="Test",
+            process_name="test",
+            session_name="test",
+            install_script="echo hi",
+            passthrough_env_vars=["MY_VAR"],
+            passthrough_env_prefixes=[],
+        )
+        with patch.dict("os.environ", {"MY_VAR": "val", "OTHER": "x"}, clear=True):
+            env = build_environment_from_config(config)
+            assert env == {"MY_VAR": "val"}
+
+    def test_collects_prefix_vars(self) -> None:
+        config = AgentConfig(
+            name="test",
+            display_name="Test",
+            process_name="test",
+            session_name="test",
+            install_script="echo hi",
+            passthrough_env_vars=[],
+            passthrough_env_prefixes=["MY_PREFIX_"],
+        )
+        with patch.dict(
+            "os.environ",
+            {"MY_PREFIX_FOO": "a", "MY_PREFIX_BAR": "b", "OTHER": "x"},
+            clear=True,
+        ):
+            env = build_environment_from_config(config)
+            assert env == {"MY_PREFIX_FOO": "a", "MY_PREFIX_BAR": "b"}
+
+    def test_empty_when_no_matches(self) -> None:
+        config = AgentConfig(
+            name="test",
+            display_name="Test",
+            process_name="test",
+            session_name="test",
+            install_script="echo hi",
+            passthrough_env_vars=["MISSING"],
+            passthrough_env_prefixes=["NOPE_"],
+        )
+        with patch.dict("os.environ", {"OTHER": "x"}, clear=True):
+            env = build_environment_from_config(config)
+            assert env == {}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -49,6 +50,20 @@ class AgentConfig:
     yolo_flag: str | None = "--dangerously-skip-permissions"
     clear_command: str | None = "/clear"
     args_env_var: str = "PAUDE_AGENT_ARGS"
+
+
+def build_environment_from_config(config: AgentConfig) -> dict[str, str]:
+    """Build environment dict by collecting passthrough vars from os.environ."""
+    env: dict[str, str] = {}
+    for var in config.passthrough_env_vars:
+        value = os.environ.get(var)
+        if value:
+            env[var] = value
+    for prefix in config.passthrough_env_prefixes:
+        for key, value in os.environ.items():
+            if key.startswith(prefix):
+                env[key] = value
+    return env
 
 
 class Agent(Protocol):

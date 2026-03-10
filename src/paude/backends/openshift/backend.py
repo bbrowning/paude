@@ -693,7 +693,7 @@ class OpenShiftBackend:
             self._wait_for_pod_ready(pod_name)
 
             # Sync configuration and credentials
-            self._sync_config_to_pod(pod_name)
+            self._sync_config_to_pod(pod_name, agent_name=config.agent)
 
         session_status = "running" if config.wait_for_ready else "pending"
         print(f"Session '{session_name}' created.", file=sys.stderr)
@@ -811,10 +811,14 @@ class OpenShiftBackend:
         pod_name: str,
         verbose: bool = False,
         github_token: str | None = None,
+        agent_name: str = "claude",
     ) -> None:
         """Sync all configuration to pod (delegates to ConfigSyncer)."""
         self._syncer.sync_full_config(
-            pod_name, verbose=verbose, github_token=github_token
+            pod_name,
+            verbose=verbose,
+            github_token=github_token,
+            agent_name=agent_name,
         )
 
     def _rewrite_plugin_paths(self, pod_name: str, config_path: str) -> None:
@@ -952,8 +956,17 @@ class OpenShiftBackend:
                 pod_name, verbose=False, github_token=github_token
             )
         else:
-            # First connect: full config sync (gcloud + claude + git)
-            self._sync_config_to_pod(pod_name, verbose=False, github_token=github_token)
+            # First connect: full config sync (gcloud + agent + git)
+            # Determine agent name from statefulset labels
+            sts = self._get_statefulset(name)
+            sts_labels = sts.get("metadata", {}).get("labels", {}) if sts else {}
+            agent_name = sts_labels.get(PAUDE_LABEL_AGENT, "claude")
+            self._sync_config_to_pod(
+                pod_name,
+                verbose=False,
+                github_token=github_token,
+                agent_name=agent_name,
+            )
 
         # Check if workspace is empty (no .git directory)
         check_result = self._run_oc(

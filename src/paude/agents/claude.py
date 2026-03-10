@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-from paude.agents.base import AgentConfig
+from paude.agents.base import AgentConfig, build_environment_from_config
 from paude.mounts import resolve_path
 
 _CLAUDE_CONFIG_EXCLUDES = [
@@ -151,16 +150,4 @@ fi
         return mounts
 
     def build_environment(self) -> dict[str, str]:
-        env: dict[str, str] = {}
-
-        for var in self._config.passthrough_env_vars:
-            value = os.environ.get(var)
-            if value:
-                env[var] = value
-
-        for prefix in self._config.passthrough_env_prefixes:
-            for key, value in os.environ.items():
-                if key.startswith(prefix):
-                    env[key] = value
-
-        return env
+        return build_environment_from_config(self._config)

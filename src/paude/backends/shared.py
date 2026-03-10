@@ -13,6 +13,14 @@ PAUDE_LABEL_AGENT = "paude.io/agent"
 SQUID_BLOCKED_LOG_PATH = "/tmp/squid-blocked.log"  # noqa: S108
 
 
+def config_file_basename(config_file_name: str) -> str:
+    """Strip leading dot from config file name.
+
+    Example: '.claude.json' -> 'claude.json'
+    """
+    return config_file_name.lstrip(".")
+
+
 def build_agent_env(config: AgentConfig) -> dict[str, str]:
     """Build agent env vars for container entrypoint parameterization."""
     env: dict[str, str] = {
@@ -23,8 +31,13 @@ def build_agent_env(config: AgentConfig) -> dict[str, str]:
         "PAUDE_AGENT_SESSION_NAME": config.session_name,
         "PAUDE_AGENT_LAUNCH_CMD": config.process_name,
     }
+    env["PAUDE_AGENT_SEED_DIR"] = f"/tmp/{config.name}.seed"  # noqa: S108
     if config.config_file_name:
+        basename = config_file_basename(config.config_file_name)
         env["PAUDE_AGENT_CONFIG_FILE"] = config.config_file_name
+        env["PAUDE_AGENT_SEED_FILE"] = f"/tmp/{basename}.seed"  # noqa: S108
+    else:
+        env["PAUDE_AGENT_SEED_FILE"] = ""
     return env
 
 

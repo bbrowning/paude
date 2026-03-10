@@ -90,6 +90,7 @@ class TestEntrypointContract:
             "cp -a /tmp/claude.seed/." in content
             or 'cp -a "$SEED_DIR/."' in content
             or "cp -a /tmp/claude.seed/" in content
+            or 'cp -a "$AGENT_SEED_DIR/."' in content
         ), "entrypoint-session.sh must use 'cp -a' for recursive seed copy"
 
     def test_entrypoint_has_apply_sandbox_config(self) -> None:
@@ -116,15 +117,19 @@ class TestEntrypointContract:
         )
 
     def test_entrypoint_handles_claude_json_after_copy(self) -> None:
-        """claude.json must be moved (not copied separately) after cp -a."""
+        """Config file must be moved (not copied separately) after cp -a."""
         content = ENTRYPOINT_PATH.read_text()
-        # Scope to the Podman seed block (uses /tmp/claude.seed, not /credentials)
-        cp_pos = content.find("cp -a /tmp/claude.seed/.")
-        assert cp_pos != -1, "Missing cp -a command for /tmp/claude.seed"
+        # Scope to the Podman seed block (uses $AGENT_SEED_DIR or /tmp/claude.seed)
+        cp_pos = content.find('cp -a "$AGENT_SEED_DIR/."')
+        if cp_pos == -1:
+            cp_pos = content.find("cp -a /tmp/claude.seed/.")
+        assert cp_pos != -1, "Missing cp -a command for seed dir"
         # Find the mv that comes after this specific cp -a
-        # Uses parameterized paths via $AGENT_CONFIG_DIR and $AGENT_CONFIG_FILE
-        mv_pos = content.find("claude.json", cp_pos + 1)
-        assert mv_pos != -1, "Missing mv command for claude.json after cp -a"
+        mv_pos = max(
+            content.find("AGENT_CONFIG_FILE_BASENAME", cp_pos + 1),
+            content.find("claude.json", cp_pos + 1),
+        )
+        assert mv_pos != -1, "Missing mv command for config file after cp -a"
         assert mv_pos > cp_pos, "mv must come after cp -a"
 
 
