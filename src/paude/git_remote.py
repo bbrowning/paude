@@ -342,8 +342,6 @@ def _build_set_origin_cmd(origin_url: str) -> str:
     )
 
 
-_FETCH_TAGS_CMD = f"git -C {CONTAINER_WORKSPACE} fetch origin --tags"
-
 _PRECOMMIT_CMD = (
     f"test -f {CONTAINER_WORKSPACE}/.pre-commit-config.yaml && "
     f"cd {CONTAINER_WORKSPACE} && pre-commit install"
@@ -478,22 +476,6 @@ def set_origin_in_container_openshift(
     bash_cmd = _build_set_origin_cmd(origin_url)
     exec_cmd = _build_openshift_exec_cmd(pod_name, namespace, context, bash_cmd)
     return _exec_in_container(exec_cmd, error_msg="Failed to set origin in container")
-
-
-def fetch_tags_in_container_podman(container_name: str) -> bool:
-    """Fetch tags from origin in a Podman container's workspace."""
-    exec_cmd = _build_podman_exec_cmd(container_name, _FETCH_TAGS_CMD)
-    return _exec_in_container(exec_cmd)
-
-
-def fetch_tags_in_container_openshift(
-    pod_name: str,
-    namespace: str,
-    context: str | None = None,
-) -> bool:
-    """Fetch tags from origin in an OpenShift pod's workspace."""
-    exec_cmd = _build_openshift_exec_cmd(pod_name, namespace, context, _FETCH_TAGS_CMD)
-    return _exec_in_container(exec_cmd)
 
 
 _SET_BASE_REF_CMD = f"git -C {CONTAINER_WORKSPACE} update-ref {BASE_REF_NAME} HEAD"

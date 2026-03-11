@@ -12,8 +12,6 @@ from paude.git_remote import (
     build_openshift_remote_url,
     build_podman_remote_url,
     enable_ext_protocol,
-    fetch_tags_in_container_openshift,
-    fetch_tags_in_container_podman,
     get_branch_remote_url,
     get_current_branch,
     git_diff_stat,
@@ -773,68 +771,6 @@ class TestSetOriginInContainerOpenshift:
         result = set_origin_in_container_openshift(
             "pod-0", "ns", "https://github.com/user/repo"
         )
-
-        assert result is False
-
-
-class TestFetchTagsInContainerPodman:
-    """Tests for fetch_tags_in_container_podman."""
-
-    @patch("paude.git_remote.subprocess.run")
-    def test_returns_true_on_success(self, mock_run) -> None:
-        """Return True when fetch tags succeeds."""
-        mock_run.return_value.returncode = 0
-
-        result = fetch_tags_in_container_podman("paude-test")
-
-        assert result is True
-        call_args = mock_run.call_args[0][0]
-        assert call_args[0:2] == ["podman", "exec"]
-        assert "paude-test" in call_args
-
-    @patch("paude.git_remote.subprocess.run")
-    def test_returns_false_on_failure(self, mock_run) -> None:
-        """Return False when fetch tags fails."""
-        mock_run.return_value.returncode = 1
-
-        result = fetch_tags_in_container_podman("paude-test")
-
-        assert result is False
-
-
-class TestFetchTagsInContainerOpenshift:
-    """Tests for fetch_tags_in_container_openshift."""
-
-    @patch("paude.git_remote.subprocess.run")
-    def test_returns_true_on_success(self, mock_run) -> None:
-        """Return True when fetch tags succeeds."""
-        mock_run.return_value.returncode = 0
-
-        result = fetch_tags_in_container_openshift("pod-0", "namespace")
-
-        assert result is True
-        call_args = mock_run.call_args[0][0]
-        assert "oc" in call_args
-        assert "pod-0" in call_args
-
-    @patch("paude.git_remote.subprocess.run")
-    def test_with_context(self, mock_run) -> None:
-        """Include context when specified."""
-        mock_run.return_value.returncode = 0
-
-        result = fetch_tags_in_container_openshift("pod-0", "ns", context="my-ctx")
-
-        assert result is True
-        call_args = mock_run.call_args[0][0]
-        assert "--context" in call_args
-        assert "my-ctx" in call_args
-
-    @patch("paude.git_remote.subprocess.run")
-    def test_returns_false_on_failure(self, mock_run) -> None:
-        """Return False when fetch tags fails."""
-        mock_run.return_value.returncode = 1
-
-        result = fetch_tags_in_container_openshift("pod-0", "namespace")
 
         assert result is False
 
