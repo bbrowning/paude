@@ -106,6 +106,43 @@ class TestComputeConfigHash:
         hash2 = compute_config_hash(config, None, "python:3.11", entrypoint, "0.7.1")
         assert hash1 == hash2
 
+    def test_different_agent_names_different_hash(self, tmp_path: Path):
+        """Different agent names produce different hashes."""
+        entrypoint = tmp_path / "entrypoint.sh"
+        entrypoint.write_text("#!/bin/bash\nexec claude")
+
+        hash1 = compute_config_hash(
+            None, None, None, entrypoint, "0.7.0", agent_name="claude"
+        )
+        hash2 = compute_config_hash(
+            None, None, None, entrypoint, "0.7.0", agent_name="gemini"
+        )
+        assert hash1 != hash2
+
+    def test_none_agent_name_differs_from_named(self, tmp_path: Path):
+        """No agent name produces different hash from named agent."""
+        entrypoint = tmp_path / "entrypoint.sh"
+        entrypoint.write_text("#!/bin/bash\nexec claude")
+
+        hash_none = compute_config_hash(None, None, None, entrypoint, "0.7.0")
+        hash_named = compute_config_hash(
+            None, None, None, entrypoint, "0.7.0", agent_name="claude"
+        )
+        assert hash_none != hash_named
+
+    def test_same_agent_name_same_hash(self, tmp_path: Path):
+        """Same agent name produces same hash."""
+        entrypoint = tmp_path / "entrypoint.sh"
+        entrypoint.write_text("#!/bin/bash\nexec claude")
+
+        hash1 = compute_config_hash(
+            None, None, None, entrypoint, "0.7.0", agent_name="gemini"
+        )
+        hash2 = compute_config_hash(
+            None, None, None, entrypoint, "0.7.0", agent_name="gemini"
+        )
+        assert hash1 == hash2
+
 
 class TestComputeContentHash:
     """Tests for compute_content_hash."""

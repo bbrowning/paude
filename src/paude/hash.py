@@ -12,6 +12,7 @@ def compute_config_hash(
     base_image: str | None,
     entrypoint: Path,
     version: str,
+    agent_name: str | None = None,
 ) -> str:
     """Compute a deterministic hash of the configuration.
 
@@ -24,6 +25,7 @@ def compute_config_hash(
         base_image: Base image name if specified.
         entrypoint: Path to entrypoint.sh.
         version: The paude package version string.
+        agent_name: Name of the agent (e.g. "claude", "gemini").
 
     Returns:
         12-character hash string.
@@ -48,6 +50,10 @@ def compute_config_hash(
 
     # Include version to trigger rebuilds on upgrade
     hash_input += version
+
+    # Include agent name to differentiate images per agent type
+    if agent_name:
+        hash_input += agent_name
 
     hash_bytes = (hash_input + "\n").encode("utf-8")
     hash_hex = hashlib.sha256(hash_bytes).hexdigest()[:12]

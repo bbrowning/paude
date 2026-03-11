@@ -183,12 +183,14 @@ class ImageManager:
         import sys
 
         entrypoint = resolve_entrypoint(self.script_dir)
+        agent_name = self.agent.config.name if self.agent else None
         config_hash = compute_config_hash(
             config.config_file,
             config.dockerfile,
             config.base_image,
             entrypoint,
             self.version,
+            agent_name=agent_name,
         )
 
         if self.platform:

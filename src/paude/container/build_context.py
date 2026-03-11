@@ -293,12 +293,14 @@ def prepare_build_context(
     import sys
 
     entrypoint = resolve_entrypoint(script_dir)
+    agent_name = agent.config.name if agent else None
     config_hash = compute_config_hash(
         config.config_file,
         config.dockerfile,
         config.base_image,
         entrypoint,
         __version__,
+        agent_name=agent_name,
     )
 
     tmpdir = Path(tempfile.mkdtemp(prefix="paude-build-"))
