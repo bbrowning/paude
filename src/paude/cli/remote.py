@@ -226,14 +226,20 @@ def _setup_git_after_create(
     backend_type: str,
     openshift_context: str | None = None,
     openshift_namespace: str | None = None,
+    no_clone_origin: bool = False,
 ) -> bool:
     """Set up git remote, push code and tags, and configure origin after create.
+
+    When an origin URL exists and no_clone_origin is False, attempts to clone
+    from origin inside the container (fast datacenter bandwidth), then pushes
+    only local-only commits as a delta. Falls back to full push if clone fails.
 
     Args:
         session_name: Name of the created session.
         backend_type: "podman" or "openshift".
         openshift_context: OpenShift context (if applicable).
         openshift_namespace: OpenShift namespace (if applicable).
+        no_clone_origin: Skip clone-from-origin optimization.
 
     Returns:
         True if all steps succeeded, False if any step failed.
@@ -241,15 +247,7 @@ def _setup_git_after_create(
     from paude.git_remote import (
         get_branch_remote_url,
         get_current_branch,
-        git_push_tags_to_remote,
-        git_push_to_remote,
         is_git_repository,
-        set_base_ref_in_container_openshift,
-        set_base_ref_in_container_podman,
-        set_origin_in_container_openshift,
-        set_origin_in_container_podman,
-        setup_precommit_in_container_openshift,
-        setup_precommit_in_container_podman,
         ssh_url_to_https,
     )
 
@@ -263,7 +261,104 @@ def _setup_git_after_create(
     typer.echo("")
     typer.echo("Setting up git...")
 
-    # Step 1: Add remote and init git in container (without pushing)
+    branch = get_current_branch()
+    if branch == "HEAD":
+        # Detached HEAD — skip clone optimization
+        branch = None
+
+    # Resolve origin URL
+    origin_url = get_branch_remote_url(branch)
+    origin_https_url = ssh_url_to_https(origin_url) if origin_url else None
+
+    # Try clone-from-origin if conditions are met
+    cloned = False
+    if origin_https_url and branch and not no_clone_origin:
+        cloned = _try_clone_from_origin(
+            session_name=session_name,
+            backend_type=backend_type,
+            origin_https_url=origin_https_url,
+            openshift_context=openshift_context,
+            openshift_namespace=openshift_namespace,
+        )
+
+    if cloned:
+        _setup_after_clone(
+            session_name=session_name,
+            backend_type=backend_type,
+            branch=branch or "main",
+            openshift_context=openshift_context,
+            openshift_namespace=openshift_namespace,
+        )
+    else:
+        _setup_full_push(
+            session_name=session_name,
+            backend_type=backend_type,
+            branch=branch or "main",
+            origin_https_url=origin_https_url,
+            openshift_context=openshift_context,
+            openshift_namespace=openshift_namespace,
+        )
+
+    # Set up pre-commit hooks if config exists
+    _setup_precommit(
+        session_name=session_name,
+        backend_type=backend_type,
+        openshift_context=openshift_context,
+        openshift_namespace=openshift_namespace,
+    )
+
+    typer.echo("Git setup complete.")
+    return True
+
+
+def _try_clone_from_origin(
+    session_name: str,
+    backend_type: str,
+    origin_https_url: str,
+    openshift_context: str | None,
+    openshift_namespace: str | None,
+) -> bool:
+    """Try to clone from origin inside the container. Returns True on success."""
+    from paude.git_remote import (
+        clone_from_origin_openshift,
+        clone_from_origin_podman,
+    )
+
+    typer.echo(f"Cloning from origin in container ({origin_https_url})...")
+
+    if backend_type == "podman":
+        container_name = f"paude-{session_name}"
+        success = clone_from_origin_podman(container_name, origin_https_url)
+    else:
+        pod_name = f"paude-{session_name}-0"
+        namespace = openshift_namespace or "default"
+        success = clone_from_origin_openshift(
+            pod_name, namespace, origin_https_url, context=openshift_context
+        )
+
+    if not success:
+        typer.echo(
+            "Clone from origin failed (private repo or network issue). "
+            "Falling back to full push.",
+        )
+    return success
+
+
+def _setup_after_clone(
+    session_name: str,
+    backend_type: str,
+    branch: str,
+    openshift_context: str | None,
+    openshift_namespace: str | None,
+) -> None:
+    """Post-clone setup: add ext:: remote, push delta, set base ref."""
+    from paude.git_remote import (
+        git_push_to_remote,
+        set_base_ref_in_container_openshift,
+        set_base_ref_in_container_podman,
+    )
+
+    # Add ext:: remote (git init on existing repo is a no-op inside _remote_add)
     _remote_add(
         name=session_name,
         openshift_context=openshift_context,
@@ -271,15 +366,66 @@ def _setup_git_after_create(
         push=False,
     )
 
-    # Step 2: Push current branch
+    # Push delta (local-only commits). If local is behind or diverged from
+    # origin, this will fail — that's fine, the container already has origin's code.
     remote_name = f"paude-{session_name}"
-    branch = get_current_branch() or "main"
+    typer.echo("Pushing local commits to container...")
+    if not git_push_to_remote(remote_name, branch):
+        typer.echo(
+            "  Local branch is behind or diverged from origin. "
+            "Container has latest origin code.",
+        )
+
+    # Set base ref
+    if backend_type == "podman":
+        set_base_ref_in_container_podman(f"paude-{session_name}")
+    else:
+        pod_name = f"paude-{session_name}-0"
+        namespace = openshift_namespace or "default"
+        set_base_ref_in_container_openshift(
+            pod_name, namespace, context=openshift_context
+        )
+
+    # Tags are already present from clone — skip pushing
+    # (local tags would conflict with cloned tags from origin)
+
+    # Origin is already set by clone — skip set_origin_in_container
+
+
+def _setup_full_push(
+    session_name: str,
+    backend_type: str,
+    branch: str,
+    origin_https_url: str | None,
+    openshift_context: str | None,
+    openshift_namespace: str | None,
+) -> None:
+    """Original full-push flow: init, push all, set origin."""
+    from paude.git_remote import (
+        git_push_tags_to_remote,
+        git_push_to_remote,
+        set_base_ref_in_container_openshift,
+        set_base_ref_in_container_podman,
+        set_origin_in_container_openshift,
+        set_origin_in_container_podman,
+    )
+
+    # Add remote and init git in container (without pushing)
+    _remote_add(
+        name=session_name,
+        openshift_context=openshift_context,
+        openshift_namespace=openshift_namespace,
+        push=False,
+    )
+
+    # Push current branch
+    remote_name = f"paude-{session_name}"
     typer.echo(f"Pushing {branch} to container...")
     if not git_push_to_remote(remote_name, branch):
         typer.echo("Warning: Failed to push branch.", err=True)
-        return False
+        return
 
-    # Step 2b: Set base ref (marks initial push point for accurate commit counts)
+    # Set base ref
     if backend_type == "podman":
         container_name = f"paude-{session_name}"
         set_base_ref_in_container_podman(container_name)
@@ -290,25 +436,23 @@ def _setup_git_after_create(
             pod_name, namespace, context=openshift_context
         )
 
-    # Step 3: Push tags
+    # Push tags
     typer.echo("Pushing tags...")
     if not git_push_tags_to_remote(remote_name):
         typer.echo("Warning: Failed to push tags.", err=True)
-        # Non-fatal, continue
 
-    # Step 4: Set origin in container if local origin exists
-    origin_url = get_branch_remote_url(branch)
-    if origin_url:
-        # Convert SSH URLs to HTTPS since the container has no SSH keys
-        origin_url = ssh_url_to_https(origin_url)
-        typer.echo(f"Setting origin in container to {origin_url}...")
+    # Set origin in container if available
+    if origin_https_url:
+        typer.echo(f"Setting origin in container to {origin_https_url}...")
         if backend_type == "podman":
-            origin_set = set_origin_in_container_podman(container_name, origin_url)
+            origin_set = set_origin_in_container_podman(
+                f"paude-{session_name}", origin_https_url
+            )
         else:
             origin_set = set_origin_in_container_openshift(
-                pod_name,
-                namespace,
-                origin_url,
+                f"paude-{session_name}-0",
+                openshift_namespace or "default",
+                origin_https_url,
                 context=openshift_context,
             )
         if not origin_set:
@@ -316,25 +460,36 @@ def _setup_git_after_create(
     else:
         typer.echo("No local origin remote found. Skipping origin setup in container.")
 
-    # Step 5: Set up pre-commit hooks if config exists
-    if Path(".pre-commit-config.yaml").exists():
-        typer.echo("Setting up pre-commit hooks in container...")
-        if backend_type == "podman":
-            success = setup_precommit_in_container_podman(container_name)
-        else:
-            success = setup_precommit_in_container_openshift(
-                pod_name,
-                namespace,
-                context=openshift_context,
-            )
-        if not success:
-            typer.echo(
-                "Warning: Failed to install pre-commit hooks in container.",
-                err=True,
-            )
 
-    typer.echo("Git setup complete.")
-    return True
+def _setup_precommit(
+    session_name: str,
+    backend_type: str,
+    openshift_context: str | None,
+    openshift_namespace: str | None,
+) -> None:
+    """Set up pre-commit hooks if config exists."""
+    from paude.git_remote import (
+        setup_precommit_in_container_openshift,
+        setup_precommit_in_container_podman,
+    )
+
+    if not Path(".pre-commit-config.yaml").exists():
+        return
+
+    typer.echo("Setting up pre-commit hooks in container...")
+    if backend_type == "podman":
+        success = setup_precommit_in_container_podman(f"paude-{session_name}")
+    else:
+        success = setup_precommit_in_container_openshift(
+            f"paude-{session_name}-0",
+            openshift_namespace or "default",
+            context=openshift_context,
+        )
+    if not success:
+        typer.echo(
+            "Warning: Failed to install pre-commit hooks in container.",
+            err=True,
+        )
 
 
 def _remote_add(

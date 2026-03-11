@@ -152,6 +152,13 @@ def session_create(
             help="Set up git remote, push code+tags, configure origin.",
         ),
     ] = False,
+    no_clone_origin: Annotated[
+        bool,
+        typer.Option(
+            "--no-clone-origin",
+            help="Skip cloning from origin in container (force full push).",
+        ),
+    ] = False,
 ) -> None:
     """Create a new persistent session (does not start it)."""
     # Validate agent name
@@ -219,6 +226,7 @@ def session_create(
             parsed_args=parsed_args,
             yolo=yolo,
             git=git,
+            no_clone_origin=no_clone_origin,
             rebuild=rebuild,
             platform=platform,
             agent_name=agent,
@@ -234,6 +242,7 @@ def session_create(
             parsed_args=parsed_args,
             yolo=yolo,
             git=git,
+            no_clone_origin=no_clone_origin,
             rebuild=rebuild,
             pvc_size=pvc_size,
             storage_class=storage_class,
@@ -255,6 +264,7 @@ def _create_podman_session(
     parsed_args: list[str],
     yolo: bool,
     git: bool,
+    no_clone_origin: bool = False,
     rebuild: bool,
     platform: str | None,
     agent_name: str = "claude",
@@ -331,6 +341,7 @@ def _create_podman_session(
         expanded_domains=expanded_domains,
         yolo=yolo,
         git=git,
+        no_clone_origin=no_clone_origin,
     )
 
 
@@ -345,6 +356,7 @@ def _create_openshift_session(
     parsed_args: list[str],
     yolo: bool,
     git: bool,
+    no_clone_origin: bool = False,
     rebuild: bool,
     pvc_size: str,
     storage_class: str | None,
@@ -436,4 +448,5 @@ def _create_openshift_session(
         git=git,
         openshift_context=openshift_context,
         openshift_namespace=os_backend.namespace,
+        no_clone_origin=no_clone_origin,
     )

@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from paude.git_remote import (
+    _build_clone_from_origin_cmd,
     _build_openshift_exec_cmd,
     _build_podman_exec_cmd,
     _build_set_origin_cmd,
@@ -11,6 +12,8 @@ from paude.git_remote import (
     _exec_in_container,
     build_openshift_remote_url,
     build_podman_remote_url,
+    clone_from_origin_openshift,
+    clone_from_origin_podman,
     enable_ext_protocol,
     get_branch_remote_url,
     get_current_branch,
@@ -1202,3 +1205,140 @@ class TestResolveOriginCmd:
         result = resolve_origin_cmd("main")
 
         assert result is None
+
+
+class TestBuildCloneFromOriginCmd:
+    """Tests for _build_clone_from_origin_cmd."""
+
+    def test_builds_clone_command(self) -> None:
+        """Build clone command with HTTPS URL."""
+        cmd = _build_clone_from_origin_cmd("https://github.com/user/repo.git")
+        assert "git clone" in cmd
+        assert "https://github.com/user/repo.git" in cmd
+        assert "/pvc/workspace" in cmd
+        assert "receive.denyCurrentBranch updateInstead" in cmd
+
+    def test_quotes_url_with_special_chars(self) -> None:
+        """Quote URLs with special characters."""
+        cmd = _build_clone_from_origin_cmd("https://example.com/path with spaces")
+        # shlex.quote wraps in single quotes
+        assert "'" in cmd
+
+
+class TestCloneFromOriginPodman:
+    """Tests for clone_from_origin_podman."""
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_true_on_success(self, mock_run) -> None:
+        """Return True when clone succeeds."""
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        result = clone_from_origin_podman(
+            "paude-test", "https://github.com/user/repo.git"
+        )
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        assert call_args[0:2] == ["podman", "exec"]
+        assert "paude-test" in call_args
+        bash_cmd_idx = call_args.index("-c") + 1
+        assert "git clone" in call_args[bash_cmd_idx]
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_false_on_failure(self, mock_run) -> None:
+        """Return False when clone fails (private repo)."""
+        mock_run.return_value.returncode = 128
+        mock_run.return_value.stderr = "fatal: repository not found"
+
+        result = clone_from_origin_podman(
+            "paude-test", "https://github.com/user/private-repo.git"
+        )
+
+        assert result is False
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_false_on_timeout(self, mock_run) -> None:
+        """Return False when clone times out."""
+        import subprocess
+
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="git clone", timeout=600)
+
+        result = clone_from_origin_podman(
+            "paude-test", "https://github.com/user/repo.git"
+        )
+
+        assert result is False
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_uses_timeout(self, mock_run) -> None:
+        """Pass timeout to subprocess."""
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        clone_from_origin_podman("paude-test", "https://github.com/user/repo.git")
+
+        from paude.constants import CLONE_FROM_ORIGIN_TIMEOUT
+
+        assert mock_run.call_args[1]["timeout"] == CLONE_FROM_ORIGIN_TIMEOUT
+
+
+class TestCloneFromOriginOpenshift:
+    """Tests for clone_from_origin_openshift."""
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_true_on_success(self, mock_run) -> None:
+        """Return True when clone succeeds."""
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        result = clone_from_origin_openshift(
+            "pod-0", "namespace", "https://github.com/user/repo.git"
+        )
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        assert "oc" in call_args
+        assert "pod-0" in call_args
+        bash_cmd_idx = call_args.index("-c") + 1
+        assert "git clone" in call_args[bash_cmd_idx]
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_with_context(self, mock_run) -> None:
+        """Include context when specified."""
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        result = clone_from_origin_openshift(
+            "pod-0", "ns", "https://github.com/user/repo.git", context="my-ctx"
+        )
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        assert "--context" in call_args
+        assert "my-ctx" in call_args
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_false_on_failure(self, mock_run) -> None:
+        """Return False when clone fails."""
+        mock_run.return_value.returncode = 128
+        mock_run.return_value.stderr = "fatal: repository not found"
+
+        result = clone_from_origin_openshift(
+            "pod-0", "namespace", "https://github.com/user/private-repo.git"
+        )
+
+        assert result is False
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_false_on_timeout(self, mock_run) -> None:
+        """Return False when clone times out."""
+        import subprocess
+
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="git clone", timeout=600)
+
+        result = clone_from_origin_openshift(
+            "pod-0", "namespace", "https://github.com/user/repo.git"
+        )
+
+        assert result is False

@@ -11,7 +11,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from paude.constants import BASE_REF_NAME, CONTAINER_HOME, CONTAINER_WORKSPACE
+from paude.constants import (
+    BASE_REF_NAME,
+    CLONE_FROM_ORIGIN_TIMEOUT,
+    CONTAINER_HOME,
+    CONTAINER_WORKSPACE,
+)
 
 
 def build_openshift_remote_url(
@@ -315,9 +320,13 @@ def _build_openshift_exec_cmd(
     return cmd
 
 
-def _exec_in_container(exec_cmd: list[str], error_msg: str | None = None) -> bool:
+def _exec_in_container(
+    exec_cmd: list[str],
+    error_msg: str | None = None,
+    timeout: int | None = None,
+) -> bool:
     """Run a command in a container and return success status."""
-    result = subprocess.run(exec_cmd, capture_output=True, text=True)
+    result = subprocess.run(exec_cmd, capture_output=True, text=True, timeout=timeout)
     if result.returncode != 0 and error_msg:
         print(f"{error_msg}: {result.stderr}", file=sys.stderr)
     return result.returncode == 0
@@ -562,6 +571,55 @@ def git_diff_stat(ref_a: str, ref_b: str, cwd: Path | None = None) -> str:
     if result.returncode != 0:
         return ""
     return result.stdout
+
+
+def _build_clone_from_origin_cmd(origin_https_url: str) -> str:
+    """Build bash command to clone a repo from origin inside a container.
+
+    The clone is unauthenticated. Private repos will fail and the caller
+    should fall back to a full push.
+    """
+    quoted_url = shlex.quote(origin_https_url)
+    return (
+        f"git clone {quoted_url} {CONTAINER_WORKSPACE} && "
+        f"git -C {CONTAINER_WORKSPACE} config receive.denyCurrentBranch updateInstead"
+    )
+
+
+def clone_from_origin_podman(
+    container_name: str,
+    origin_https_url: str,
+) -> bool:
+    """Clone a repo from origin inside a Podman container.
+
+    Returns True if clone succeeded, False otherwise.
+    """
+    bash_cmd = _build_clone_from_origin_cmd(origin_https_url)
+    exec_cmd = _build_podman_exec_cmd(container_name, bash_cmd)
+    try:
+        return _exec_in_container(exec_cmd, timeout=CLONE_FROM_ORIGIN_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        print("Clone from origin timed out.", file=sys.stderr)
+        return False
+
+
+def clone_from_origin_openshift(
+    pod_name: str,
+    namespace: str,
+    origin_https_url: str,
+    context: str | None = None,
+) -> bool:
+    """Clone a repo from origin inside an OpenShift pod.
+
+    Returns True if clone succeeded, False otherwise.
+    """
+    bash_cmd = _build_clone_from_origin_cmd(origin_https_url)
+    exec_cmd = _build_openshift_exec_cmd(pod_name, namespace, context, bash_cmd)
+    try:
+        return _exec_in_container(exec_cmd, timeout=CLONE_FROM_ORIGIN_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        print("Clone from origin timed out.", file=sys.stderr)
+        return False
 
 
 def git_push_to_remote(remote_name: str, branch: str | None = None) -> bool:

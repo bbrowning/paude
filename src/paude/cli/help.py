@@ -36,6 +36,7 @@ OPTIONS (for 'create' command):
                                  'rust', 'github'
                         Custom domains REPLACE defaults; use with 'default' to add.
     --git               Set up git remote, push code+tags, configure origin
+    --no-clone-origin   Skip cloning from origin in container (force full push)
     --rebuild           Force rebuild of workspace container image
     --dry-run           Show configuration without creating session
     -a, --args          Arguments to pass to the agent (e.g., -a '-p "prompt"')

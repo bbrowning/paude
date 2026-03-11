@@ -234,6 +234,7 @@ def _finalize_session_create(
     git: bool,
     openshift_context: str | None = None,
     openshift_namespace: str | None = None,
+    no_clone_origin: bool = False,
 ) -> None:
     """Shared post-create output and git setup."""
     from paude.cli.remote import _setup_git_after_create
@@ -253,6 +254,7 @@ def _finalize_session_create(
             backend_type=bt,
             openshift_context=openshift_context,
             openshift_namespace=openshift_namespace,
+            no_clone_origin=no_clone_origin,
         )
 
     typer.echo("")
