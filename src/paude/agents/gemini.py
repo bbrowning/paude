@@ -59,10 +59,6 @@ class GeminiAgent:
             "# Set up home directory",
             "USER paude",
             f"WORKDIR {container_home}",
-            "",
-            "# Fix permissions for OpenShift arbitrary UID compatibility",
-            "USER root",
-            f"RUN chmod -R g+rwX {container_home}",
         ]
         return lines
 

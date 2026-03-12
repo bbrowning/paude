@@ -158,10 +158,10 @@ RUN if command -v apt-get >/dev/null 2>&1; then \\
 
     config_dir = agent.config.config_dir_name
     lines.append(
-        "RUN (id paude >/dev/null 2>&1 || useradd -m -s /bin/bash -g 0 paude 2>/dev/null || adduser -D -s /bin/bash -G root paude) && "
-        f"chmod -R g+rwX {CONTAINER_HOME} && "
+        "RUN (id paude >/dev/null 2>&1 || useradd -M -d /home/paude -s /bin/bash -g 0 paude 2>/dev/null || adduser -D -s /bin/bash -G root paude) && "
+        "umask 0002 && "
         f"mkdir -p {CONTAINER_HOME}/{config_dir} {CONTAINER_HOME}/.config && "
-        f"chmod -R g+rwX {CONTAINER_HOME}/{config_dir} {CONTAINER_HOME}/.config"
+        f"chown -R paude:0 {CONTAINER_HOME}"
     )
 
     lines.extend(agent.dockerfile_install_lines(CONTAINER_HOME))
@@ -169,19 +169,11 @@ RUN if command -v apt-get >/dev/null 2>&1; then \\
     lines.append("")
     lines.append("# Copy entrypoints and tmux config (requires root)")
     lines.append("USER root")
-    lines.append(f"COPY entrypoint.sh {CONTAINER_ENTRYPOINT}")
-    lines.append("COPY entrypoint-session.sh /usr/local/bin/entrypoint-session.sh")
-    lines.append(f"COPY --chmod=644 tmux.conf {CONTAINER_HOME}/.tmux.conf")
+    lines.append(f"COPY --chmod=755 entrypoint.sh {CONTAINER_ENTRYPOINT}")
     lines.append(
-        f"RUN chmod +x {CONTAINER_ENTRYPOINT} /usr/local/bin/entrypoint-session.sh"
+        "COPY --chmod=755 entrypoint-session.sh /usr/local/bin/entrypoint-session.sh"
     )
-
-    lines.append("")
-    lines.append("# Fix permissions on directories created by Claude install")
-    lines.append(
-        "# Must be done as root after Claude install, for OpenShift arbitrary UID"
-    )
-    lines.append(f"RUN chmod -R g+rwX {CONTAINER_HOME}")
+    lines.append(f"COPY --chmod=664 tmux.conf {CONTAINER_HOME}/.tmux.conf")
 
     lines.append("")
     lines.append("USER paude")

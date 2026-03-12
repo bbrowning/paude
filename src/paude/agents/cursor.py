@@ -50,7 +50,7 @@ class CursorAgent:
             "# Install Cursor CLI",
             "USER paude",
             f"WORKDIR {container_home}",
-            f"RUN {self._config.install_script}",
+            f"RUN umask 0002 && {self._config.install_script}",
             "",
             "# Allow AppImage to run without FUSE in containers",
             "ENV APPIMAGE_EXTRACT_AND_RUN=1",
@@ -60,10 +60,6 @@ class CursorAgent:
             "",
             "# Ensure agent is in PATH",
             f'ENV PATH="{container_home}/{self._config.install_dir}:$PATH"',
-            "",
-            "# Fix permissions for OpenShift arbitrary UID compatibility",
-            "USER root",
-            f"RUN chmod -R g+rwX {container_home}",
         ]
         return lines
 

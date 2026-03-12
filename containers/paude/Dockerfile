@@ -56,8 +56,8 @@ RUN curl -fsSL https://cli.github.com/packages/rpm/gh-cli.repo -o /etc/yum.repos
 
 # Create non-root user with GID 0 for OpenShift compatibility
 RUN useradd -M -d /home/paude -s /bin/bash -g 0 paude && \
+    umask 0002 && \
     mkdir -p /home/paude/.claude /home/paude/.config && \
-    chmod -R g+rwX /home/paude && \
     chown -R paude:0 /home/paude
 
 # NOTE: Claude Code is NOT installed here due to licensing restrictions.
@@ -69,9 +69,7 @@ USER root
 COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY --chmod=755 entrypoint-session.sh /usr/local/bin/entrypoint-session.sh
 COPY --chmod=755 credential-watchdog.sh /usr/local/bin/credential-watchdog.sh
-COPY --chmod=644 tmux.conf /home/paude/.tmux.conf
-
-RUN chmod -R g+rwX /home/paude
+COPY --chmod=664 tmux.conf /home/paude/.tmux.conf
 
 USER paude
 WORKDIR /home/paude

@@ -452,7 +452,7 @@ class TestGenerateWorkspaceDockerfile:
         config = PaudeConfig()
         dockerfile = generate_workspace_dockerfile(config)
 
-        assert "COPY --chmod=644 tmux.conf" in dockerfile
+        assert "COPY --chmod=664 tmux.conf" in dockerfile
         assert ".tmux.conf" in dockerfile
 
 
@@ -476,10 +476,11 @@ class TestGeneratePipInstallDockerfile:
             config, include_claude_install=True
         )
 
-        assert "curl -fsSL https://claude.ai/install.sh | bash" in dockerfile
+        assert (
+            "umask 0002 && curl -fsSL https://claude.ai/install.sh | bash" in dockerfile
+        )
         assert "DISABLE_AUTOUPDATER=1" in dockerfile
         assert "/home/paude/.local/bin" in dockerfile
-        assert "chmod -R g+rwX /home/paude" in dockerfile
 
     def test_ends_with_user_paude_when_claude_only(self):
         """Dockerfile with only Claude install ends with USER paude, not root."""
@@ -568,10 +569,11 @@ class TestGenerateClaudeLayerDockerfile:
 
         assert "ARG BASE_IMAGE" in dockerfile
         assert "FROM ${BASE_IMAGE}" in dockerfile
-        assert "curl -fsSL https://claude.ai/install.sh | bash" in dockerfile
+        assert (
+            "umask 0002 && curl -fsSL https://claude.ai/install.sh | bash" in dockerfile
+        )
         assert "DISABLE_AUTOUPDATER=1" in dockerfile
         assert "/home/paude/.local/bin" in dockerfile
-        assert "chmod -R g+rwX /home/paude" in dockerfile
         assert 'ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]' in dockerfile
 
     def test_claude_layer_runs_as_paude_user(self):

@@ -330,10 +330,10 @@ class TestGeminiAgentDockerfile:
         text = "\n".join(lines)
         assert "@google/gemini-cli" in text
 
-    def test_contains_chmod(self) -> None:
+    def test_no_chmod(self) -> None:
         lines = GeminiAgent().dockerfile_install_lines("/home/paude")
         text = "\n".join(lines)
-        assert "chmod -R g+rwX" in text
+        assert "chmod" not in text
 
 
 class TestGeminiAgentLaunchCommand:
@@ -505,10 +505,10 @@ class TestCursorAgentDockerfile:
         text = "\n".join(lines)
         assert "/home/paude/.local/bin" in text
 
-    def test_contains_chmod(self) -> None:
+    def test_contains_umask(self) -> None:
         lines = CursorAgent().dockerfile_install_lines("/home/paude")
         text = "\n".join(lines)
-        assert "chmod -R g+rwX" in text
+        assert "umask 0002" in text
 
     def test_uses_container_home(self) -> None:
         lines = CursorAgent().dockerfile_install_lines("/custom/home")

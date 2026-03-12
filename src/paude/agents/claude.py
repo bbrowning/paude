@@ -72,17 +72,13 @@ class ClaudeAgent:
             "# Install Claude Code (as paude user)",
             "USER paude",
             f"WORKDIR {container_home}",
-            f"RUN {self._config.install_script}",
+            f"RUN umask 0002 && {self._config.install_script}",
             "",
             "# Disable auto-updates (version controlled by image rebuild)",
             "ENV DISABLE_AUTOUPDATER=1",
             "",
             "# Ensure claude is in PATH",
             f'ENV PATH="{container_home}/{self._config.install_dir}:$PATH"',
-            "",
-            "# Fix permissions for OpenShift arbitrary UID compatibility",
-            "USER root",
-            f"RUN chmod -R g+rwX {container_home}",
         ]
         return lines
 
