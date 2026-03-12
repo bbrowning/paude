@@ -106,7 +106,7 @@ Or just start the session and type your request in the agent interface.
 
 **Learn more**:
 - [Session Management](docs/SESSIONS.md) — commands, lifecycle, code sync
-- [Configuration](docs/CONFIGURATION.md) — network domains, GitHub CLI, custom environments
+- [Configuration](docs/CONFIGURATION.md) — defaults, network domains, GitHub CLI, custom environments
 - [Security Model](docs/SECURITY.md) — attack vectors, `--yolo` safety, residual risks
 - [Orchestration](docs/ORCHESTRATION.md) — fire-and-forget workflow, harvest, PRs
 - [OpenShift Backend](docs/OPENSHIFT.md) — remote execution on Kubernetes
