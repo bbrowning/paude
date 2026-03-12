@@ -37,10 +37,9 @@ from paude.backends.openshift.sync import ConfigSyncer
 from paude.backends.shared import (
     PAUDE_LABEL_AGENT,
     SQUID_BLOCKED_LOG_PATH,
-    build_agent_env,
+    build_session_env,
     decode_path,
 )
-from paude.environment import build_proxy_environment
 
 
 class OpenShiftBackend:
@@ -644,23 +643,14 @@ class OpenShiftBackend:
 
         agent = get_agent(config.agent)
         secret_env = build_secret_environment_from_config(agent.config)
-        session_env = dict(config.env)
-        session_env.update(build_agent_env(agent.config))
-
-        agent_args = list(config.args)
-        if config.yolo and agent.config.yolo_flag:
-            agent_args = [agent.config.yolo_flag] + agent_args
-        if agent_args:
-            session_env[agent.config.args_env_var] = " ".join(agent_args)
-        # Backward compat: also set PAUDE_CLAUDE_ARGS for existing containers
-        if agent_args and agent.config.name == "claude":
-            session_env["PAUDE_CLAUDE_ARGS"] = " ".join(agent_args)
-
-        # Add proxy env vars and suppress prompts when egress filtering is active
-        if config.allowed_domains is not None:
-            session_env["PAUDE_SUPPRESS_PROMPTS"] = "1"
-            proxy_name = f"paude-proxy-{session_name}"
-            session_env.update(build_proxy_environment(proxy_name))
+        proxy_name = (
+            f"paude-proxy-{session_name}"
+            if config.allowed_domains is not None
+            else None
+        )
+        session_env, _agent_args = build_session_env(
+            config, agent, proxy_name=proxy_name
+        )
 
         # Add credential watchdog environment variables
         session_env["PAUDE_CREDENTIAL_TIMEOUT"] = str(config.credential_timeout)

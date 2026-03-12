@@ -9,21 +9,21 @@ import pytest
 
 from paude.backends.base import SessionConfig
 from paude.backends.podman import (
-    PAUDE_LABEL_DOMAINS,
-    PAUDE_LABEL_PROXY_IMAGE,
     PodmanBackend,
     SessionExistsError,
     SessionNotFoundError,
     _generate_session_name,
 )
-from paude.backends.shared import decode_path as _decode_path_raw
-from paude.backends.shared import encode_path as _encode_path_raw
-from paude.container.runner import (
+from paude.backends.shared import (
     PAUDE_LABEL_APP,
     PAUDE_LABEL_CREATED,
+    PAUDE_LABEL_DOMAINS,
+    PAUDE_LABEL_PROXY_IMAGE,
     PAUDE_LABEL_SESSION,
     PAUDE_LABEL_WORKSPACE,
 )
+from paude.backends.shared import decode_path as _decode_path_raw
+from paude.backends.shared import encode_path as _encode_path_raw
 
 
 def encode_path(path: Path) -> str:

@@ -7,9 +7,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from paude.agents.base import AgentConfig
+    from paude.agents.base import Agent, AgentConfig
+    from paude.backends.base import SessionConfig
 
+# Labels used to identify paude sessions
+PAUDE_LABEL_APP = "app=paude"
+PAUDE_LABEL_SESSION = "paude.io/session-name"
+PAUDE_LABEL_WORKSPACE = "paude.io/workspace"
+PAUDE_LABEL_CREATED = "paude.io/created-at"
 PAUDE_LABEL_AGENT = "paude.io/agent"
+PAUDE_LABEL_DOMAINS = "paude.io/allowed-domains"
+PAUDE_LABEL_PROXY_IMAGE = "paude.io/proxy-image"
+
 SQUID_BLOCKED_LOG_PATH = "/tmp/squid-blocked.log"  # noqa: S108
 
 
@@ -70,3 +79,44 @@ def decode_path(encoded: str, *, url_safe: bool = False) -> Path:
         return Path(decoder(encoded.encode()).decode())
     except Exception:
         return Path(encoded)
+
+
+def build_session_env(
+    config: SessionConfig,
+    agent: Agent,
+    proxy_name: str | None = None,
+) -> tuple[dict[str, str], list[str]]:
+    """Build environment variables and args for a session.
+
+    Consolidates the duplicated env-building logic from Podman and OpenShift
+    backends: agent env, YOLO flags, agent args, backward compat, proxy env,
+    and prompt suppression.
+
+    Args:
+        config: Session configuration.
+        agent: Resolved agent instance.
+        proxy_name: Proxy container/service name (None if no proxy).
+
+    Returns:
+        Tuple of (env_dict, agent_args).
+    """
+    from paude.environment import build_proxy_environment
+
+    env = dict(config.env)
+    env.update(build_agent_env(agent.config))
+
+    agent_args = list(config.args)
+    if config.yolo and agent.config.yolo_flag:
+        agent_args = [agent.config.yolo_flag] + agent_args
+
+    if agent_args:
+        env[agent.config.args_env_var] = " ".join(agent_args)
+    # Backward compat: also set PAUDE_CLAUDE_ARGS for existing containers
+    if agent_args and agent.config.name == "claude":
+        env["PAUDE_CLAUDE_ARGS"] = " ".join(agent_args)
+
+    if proxy_name is not None:
+        env.update(build_proxy_environment(proxy_name))
+        env["PAUDE_SUPPRESS_PROMPTS"] = "1"
+
+    return env, agent_args

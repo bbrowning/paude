@@ -12,8 +12,14 @@ from typing import Any
 from paude.backends.base import Session, SessionConfig
 from paude.backends.shared import (
     PAUDE_LABEL_AGENT,
+    PAUDE_LABEL_APP,
+    PAUDE_LABEL_CREATED,
+    PAUDE_LABEL_DOMAINS,
+    PAUDE_LABEL_PROXY_IMAGE,
+    PAUDE_LABEL_SESSION,
+    PAUDE_LABEL_WORKSPACE,
     SQUID_BLOCKED_LOG_PATH,
-    build_agent_env,
+    build_session_env,
     decode_path,
     encode_path,
 )
@@ -25,19 +31,9 @@ from paude.constants import (
     GCP_ADC_TARGET,
 )
 from paude.container.network import NetworkManager
-from paude.container.runner import (
-    PAUDE_LABEL_APP,
-    PAUDE_LABEL_CREATED,
-    PAUDE_LABEL_SESSION,
-    PAUDE_LABEL_WORKSPACE,
-    ContainerRunner,
-)
+from paude.container.runner import ContainerRunner
 from paude.container.volume import VolumeManager
-from paude.environment import build_proxy_environment
 from paude.platform import get_podman_machine_dns
-
-PAUDE_LABEL_DOMAINS = "paude.io/allowed-domains"
-PAUDE_LABEL_PROXY_IMAGE = "paude.io/proxy-image"
 
 
 class SessionExistsError(Exception):
@@ -354,30 +350,13 @@ class PodmanBackend:
         from paude.agents import get_agent
 
         agent = get_agent(config.agent)
-        env = dict(config.env)
+        proxy_name_for_env = (
+            self._proxy_container_name(session_name) if use_proxy else None
+        )
+        env, _agent_args = build_session_env(
+            config, agent, proxy_name=proxy_name_for_env
+        )
         env["PAUDE_WORKSPACE"] = CONTAINER_WORKSPACE
-        env.update(build_agent_env(agent.config))
-
-        # Add proxy environment variables
-        if use_proxy:
-            proxy_name = self._proxy_container_name(session_name)
-            env.update(build_proxy_environment(proxy_name))
-
-        # Suppress interactive prompts when egress filtering is active
-        if use_proxy:
-            env["PAUDE_SUPPRESS_PROMPTS"] = "1"
-
-        # Add YOLO flag to args if enabled
-        agent_args = list(config.args)
-        if config.yolo and agent.config.yolo_flag:
-            agent_args = [agent.config.yolo_flag] + agent_args
-
-        # Store args in environment for entrypoint
-        if agent_args:
-            env[agent.config.args_env_var] = " ".join(agent_args)
-        # Backward compat: also set PAUDE_CLAUDE_ARGS for existing containers
-        if agent_args and agent.config.name == "claude":
-            env["PAUDE_CLAUDE_ARGS"] = " ".join(agent_args)
 
         # Create GCP ADC secret (if credentials exist)
         secret_spec = self._ensure_gcp_adc_secret()

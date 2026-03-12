@@ -21,13 +21,6 @@ class ContainerNotFoundError(Exception):
     pass
 
 
-# Labels used to identify paude sessions
-PAUDE_LABEL_APP = "app=paude"
-PAUDE_LABEL_SESSION = "paude.io/session-name"
-PAUDE_LABEL_WORKSPACE = "paude.io/workspace"
-PAUDE_LABEL_CREATED = "paude.io/created-at"
-
-
 class ContainerRunner:
     """Runs paude containers."""
 
