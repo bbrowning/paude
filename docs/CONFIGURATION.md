@@ -1,5 +1,130 @@
 # Configuration
 
+## Defaults & Precedence
+
+Instead of typing long `paude create` commands every time, you can store defaults in configuration files. For example, this:
+
+```bash
+paude create --backend openshift --yolo --git --allowed-domains default --allowed-domains golang
+```
+
+becomes simply:
+
+```bash
+paude create
+```
+
+### Precedence Order
+
+Settings are resolved in layers (highest priority wins):
+
+1. **CLI flags** — explicit flags on `paude create`
+2. **Project config** — `paude.json` or `devcontainer.json` in the workspace
+3. **User defaults** — `~/.config/paude/defaults.json`
+4. **Built-in defaults** — hardcoded fallbacks
+
+### User Defaults
+
+User defaults apply to all your sessions across all projects. The file lives at `~/.config/paude/defaults.json` (or `$XDG_CONFIG_HOME/paude/defaults.json` if `XDG_CONFIG_HOME` is set).
+
+Create a starter file with all fields:
+
+```bash
+paude config init
+```
+
+Then edit it to set the values you want. Any field set to `null` or omitted uses the built-in default.
+
+**Full example:**
+
+```json
+{
+  "defaults": {
+    "backend": "openshift",
+    "agent": "claude",
+    "yolo": true,
+    "git": true,
+    "pvc-size": "10Gi",
+    "credential-timeout": 60,
+    "platform": "linux/amd64",
+    "allowed-domains": ["default", "golang"],
+    "openshift": {
+      "context": "my-cluster",
+      "namespace": "my-ns"
+    }
+  }
+}
+```
+
+### Project Hints
+
+Projects can declare defaults in their `paude.json` or `devcontainer.json` so that anyone cloning the repo gets the right settings automatically.
+
+**In paude.json** — add a `"create"` section:
+
+```json
+{
+  "base": "python:3.11-slim",
+  "packages": ["make"],
+  "create": {
+    "allowed-domains": ["default", "golang"],
+    "agent": "claude"
+  }
+}
+```
+
+**In devcontainer.json** — nest under `customizations.paude.create`:
+
+```json
+{
+  "image": "python:3.11-slim",
+  "customizations": {
+    "paude": {
+      "create": {
+        "allowed-domains": ["default", "nodejs"],
+        "agent": "gemini"
+      }
+    }
+  }
+}
+```
+
+Only `allowed-domains` and `agent` are supported as project-level create hints.
+
+### Domain Merging
+
+Domains from user defaults and project config are **merged** (union). For example, if your user defaults specify `["default", "golang"]` and the project config specifies `["nodejs"]`, the resolved list is `["default", "golang", "nodejs"]`.
+
+However, if you pass `--allowed-domains` on the CLI, it **overrides** entirely — no merging occurs.
+
+### Inspecting Resolved Configuration
+
+```bash
+# Show resolved defaults with provenance (which layer each value came from)
+paude config show
+
+# Print the user config file path
+paude config path
+
+# Preview the full resolved configuration for a create command
+paude create --dry-run
+```
+
+### Settings Reference
+
+| Setting | User defaults | Project config | CLI flag | Built-in default |
+|---------|:---:|:---:|:---:|---|
+| `backend` | yes | — | `--backend` | `podman` |
+| `agent` | yes | yes | `--agent` | `claude` |
+| `yolo` | yes | — | `--yolo` | `false` |
+| `git` | yes | — | `--git` | `false` |
+| `pvc-size` | yes | — | `--pvc-size` | `10Gi` |
+| `credential-timeout` | yes | — | `--credential-timeout` | `60` |
+| `platform` | yes | — | `--platform` | (none) |
+| `allowed-domains` | yes | yes | `--allowed-domains` | `["default"]` |
+| `openshift.context` | yes | — | `--openshift-context` | (none) |
+| `openshift.namespace` | yes | — | `--openshift-namespace` | (none) |
+
 ## Network Domains
 
 By default, paude runs a proxy sidecar that filters network access to Vertex AI, Python packages, and GitHub only.
