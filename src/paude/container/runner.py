@@ -523,6 +523,24 @@ class ContainerRunner:
 
         return name
 
+    def get_container_image(self, name: str) -> str | None:
+        """Get the image name of a container.
+
+        Args:
+            name: Container name.
+
+        Returns:
+            Image name string, or None if not found.
+        """
+        result = subprocess.run(
+            ["podman", "inspect", "-f", "{{.ImageName}}", name],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip() or None
+
     def get_container_env(self, name: str, var_name: str) -> str | None:
         """Get an environment variable from a container's config.
 

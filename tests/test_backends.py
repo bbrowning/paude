@@ -48,7 +48,7 @@ class TestPodmanBackend:
         backend = PodmanBackend()
         assert backend is not None
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_list_sessions_returns_empty(self, mock_runner_class: MagicMock) -> None:
         """list_sessions returns empty list for Podman when no sessions exist."""
         mock_runner = MagicMock()
@@ -57,11 +57,12 @@ class TestPodmanBackend:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
 
         sessions = backend.list_sessions()
         assert sessions == []
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_stop_container_delegates_to_runner(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -71,6 +72,7 @@ class TestPodmanBackend:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
 
         backend.stop_container("container-name")
 
@@ -84,6 +86,7 @@ class TestPodmanExecInSession:
         mock_runner = MagicMock()
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
         return backend, mock_runner
 
     def test_exec_in_session_success(self) -> None:

@@ -14,6 +14,10 @@ from paude.backends.podman import (
     SessionNotFoundError,
     _generate_session_name,
 )
+from paude.backends.podman.helpers import (
+    build_session_from_container,
+    find_container_by_session_name,
+)
 from paude.backends.shared import (
     PAUDE_LABEL_APP,
     PAUDE_LABEL_CREATED,
@@ -45,10 +49,16 @@ def _make_backend(
     backend = PodmanBackend()
     if mock_runner is not None:
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
     if mock_network_manager is not None:
         backend._network_manager = mock_network_manager
     # Always mock volume manager to prevent real podman calls
     backend._volume_manager = mock_volume_manager or MagicMock()
+    # Sync proxy manager dependencies with backend
+    if mock_runner is not None:
+        backend._proxy._runner = mock_runner
+    if mock_network_manager is not None:
+        backend._proxy._network_manager = mock_network_manager
     return backend
 
 
@@ -108,7 +118,7 @@ class TestHelperFunctions:
 class TestPodmanBackendCreateSession:
     """Tests for PodmanBackend.create_session."""
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_with_explicit_name(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -119,6 +129,7 @@ class TestPodmanBackendCreateSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
         backend._volume_manager = MagicMock()
 
         config = SessionConfig(
@@ -135,7 +146,7 @@ class TestPodmanBackendCreateSession:
         assert session.container_id == "paude-my-session"
         assert session.volume_name == "paude-my-session-workspace"
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_generates_name_when_not_provided(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -146,6 +157,7 @@ class TestPodmanBackendCreateSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
         backend._volume_manager = MagicMock()
 
         config = SessionConfig(
@@ -158,7 +170,7 @@ class TestPodmanBackendCreateSession:
         assert session.name.startswith("my-project-")
         assert len(session.name) > len("my-project-")
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_creates_volume(self, mock_runner_class: MagicMock) -> None:
         """Create session creates a named volume."""
         mock_runner = MagicMock()
@@ -168,6 +180,7 @@ class TestPodmanBackendCreateSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
         backend._volume_manager = mock_volume
 
         config = SessionConfig(
@@ -182,7 +195,7 @@ class TestPodmanBackendCreateSession:
         assert call_args[0][0] == "paude-test-session-workspace"
         assert "labels" in call_args[1]
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_creates_stopped_container(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -193,6 +206,7 @@ class TestPodmanBackendCreateSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
         backend._volume_manager = MagicMock()
 
         config = SessionConfig(
@@ -207,7 +221,7 @@ class TestPodmanBackendCreateSession:
         mock_runner.start_container.assert_not_called()
         assert session.status == "stopped"
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_raises_if_exists(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -218,6 +232,7 @@ class TestPodmanBackendCreateSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
         backend._volume_manager = MagicMock()
 
         config = SessionConfig(
@@ -230,7 +245,7 @@ class TestPodmanBackendCreateSession:
             backend.create_session(config)
         assert "existing-session" in str(excinfo.value)
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_cleans_up_on_container_failure(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -243,6 +258,7 @@ class TestPodmanBackendCreateSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
         backend._volume_manager = mock_volume
 
         config = SessionConfig(
@@ -257,7 +273,7 @@ class TestPodmanBackendCreateSession:
         # Volume should be cleaned up
         mock_volume.remove_volume.assert_called_once()
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_with_yolo_mode(self, mock_runner_class: MagicMock) -> None:
         """Create session with yolo=True adds permission skip flag."""
         mock_runner = MagicMock()
@@ -266,6 +282,7 @@ class TestPodmanBackendCreateSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
         backend._volume_manager = MagicMock()
 
         config = SessionConfig(
@@ -281,7 +298,7 @@ class TestPodmanBackendCreateSession:
         env = call_args[1]["env"]
         assert "--dangerously-skip-permissions" in env.get("PAUDE_CLAUDE_ARGS", "")
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_sets_suppress_prompts_with_domains(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -292,8 +309,11 @@ class TestPodmanBackendCreateSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
         backend._volume_manager = MagicMock()
-        backend._network_manager = MagicMock()
+        mock_network = MagicMock()
+        backend._network_manager = mock_network
+        backend._proxy._network_manager = mock_network
 
         config = SessionConfig(
             name="filtered-session",
@@ -308,7 +328,7 @@ class TestPodmanBackendCreateSession:
         env = call_args[1]["env"]
         assert env.get("PAUDE_SUPPRESS_PROMPTS") == "1"
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_no_suppress_prompts_without_domains(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -319,6 +339,7 @@ class TestPodmanBackendCreateSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
         backend._volume_manager = MagicMock()
 
         config = SessionConfig(
@@ -337,7 +358,7 @@ class TestPodmanBackendCreateSession:
 class TestPodmanBackendDeleteSession:
     """Tests for PodmanBackend.delete_session."""
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_delete_session_requires_confirmation(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -347,7 +368,7 @@ class TestPodmanBackendDeleteSession:
         with pytest.raises(ValueError, match="(?i)confirmation"):
             backend.delete_session("my-session", confirm=False)
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_delete_session_removes_container_and_volume(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -372,7 +393,7 @@ class TestPodmanBackendDeleteSession:
             "paude-my-session-workspace", force=True
         )
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_delete_session_stops_running_container(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -391,7 +412,7 @@ class TestPodmanBackendDeleteSession:
 
         mock_runner.stop_container_graceful.assert_called_once()
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_delete_session_raises_if_not_found(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -408,7 +429,7 @@ class TestPodmanBackendDeleteSession:
             backend.delete_session("nonexistent", confirm=True)
         assert "nonexistent" in str(excinfo.value)
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_delete_session_cleans_orphaned_volume(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -430,7 +451,7 @@ class TestPodmanBackendDeleteSession:
 class TestPodmanBackendStartSession:
     """Tests for PodmanBackend.start_session."""
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_starts_stopped_container(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -452,7 +473,7 @@ class TestPodmanBackendStartSession:
         mock_runner.attach_container.assert_called_once()
         assert exit_code == 0
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_connects_if_already_running(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -478,7 +499,7 @@ class TestPodmanBackendStartSession:
         mock_runner.attach_container.assert_called_once()
         assert exit_code == 0
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_raises_if_not_found(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -489,6 +510,7 @@ class TestPodmanBackendStartSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
 
         with pytest.raises(SessionNotFoundError) as excinfo:
             backend.start_session("nonexistent")
@@ -498,7 +520,7 @@ class TestPodmanBackendStartSession:
 class TestPodmanBackendStopSession:
     """Tests for PodmanBackend.stop_session."""
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_stop_session_stops_running_container(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -517,7 +539,7 @@ class TestPodmanBackendStopSession:
 
         mock_runner.stop_container_graceful.assert_called_once_with("paude-my-session")
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_stop_session_noop_if_already_stopped(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -535,7 +557,7 @@ class TestPodmanBackendStopSession:
 
         mock_runner.stop_container_graceful.assert_not_called()
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_stop_session_noop_if_not_found(self, mock_runner_class: MagicMock) -> None:
         """Stop session is no-op if session doesn't exist."""
         mock_runner = MagicMock()
@@ -553,7 +575,7 @@ class TestPodmanBackendStopSession:
 class TestPodmanBackendConnectSession:
     """Tests for PodmanBackend.connect_session."""
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_connect_session_attaches_to_running_container(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -568,13 +590,14 @@ class TestPodmanBackendConnectSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
 
         exit_code = backend.connect_session("my-session")
 
         mock_runner.attach_container.assert_called_once()
         assert exit_code == 0
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_connect_session_shows_empty_workspace_message(
         self, mock_runner_class: MagicMock, capsys
     ) -> None:
@@ -589,6 +612,7 @@ class TestPodmanBackendConnectSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
 
         exit_code = backend.connect_session("my-session")
 
@@ -598,7 +622,7 @@ class TestPodmanBackendConnectSession:
         assert "paude remote add my-session" in captured.err
         assert "git push paude-my-session main" in captured.err
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_connect_session_fails_if_not_running(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -610,13 +634,14 @@ class TestPodmanBackendConnectSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
 
         exit_code = backend.connect_session("stopped-session")
 
         mock_runner.attach_container.assert_not_called()
         assert exit_code == 1
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_connect_session_fails_if_not_found(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -627,6 +652,7 @@ class TestPodmanBackendConnectSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
 
         exit_code = backend.connect_session("nonexistent")
 
@@ -636,7 +662,7 @@ class TestPodmanBackendConnectSession:
 class TestPodmanBackendListSessions:
     """Tests for PodmanBackend.list_sessions."""
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_list_sessions_returns_paude_containers(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -658,6 +684,7 @@ class TestPodmanBackendListSessions:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
 
         sessions = backend.list_sessions()
 
@@ -666,7 +693,7 @@ class TestPodmanBackendListSessions:
         assert sessions[0].status == "running"
         assert sessions[0].workspace == Path("/home/user/project")
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_list_sessions_maps_container_states(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -696,6 +723,7 @@ class TestPodmanBackendListSessions:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
 
         sessions = backend.list_sessions()
 
@@ -703,7 +731,7 @@ class TestPodmanBackendListSessions:
         assert sessions[0].status == "stopped"  # exited -> stopped
         assert sessions[1].status == "error"  # dead -> error
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_list_sessions_returns_empty_when_no_containers(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -714,6 +742,7 @@ class TestPodmanBackendListSessions:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
 
         sessions = backend.list_sessions()
 
@@ -723,7 +752,7 @@ class TestPodmanBackendListSessions:
 class TestPodmanBackendGetSession:
     """Tests for PodmanBackend.get_session."""
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_get_session_returns_session_if_found(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -744,6 +773,7 @@ class TestPodmanBackendGetSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
 
         session = backend.get_session("my-session")
 
@@ -751,7 +781,7 @@ class TestPodmanBackendGetSession:
         assert session.name == "my-session"
         assert session.status == "running"
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_get_session_returns_none_if_not_found(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -762,6 +792,7 @@ class TestPodmanBackendGetSession:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
 
         session = backend.get_session("nonexistent")
 
@@ -771,7 +802,7 @@ class TestPodmanBackendGetSession:
 class TestPodmanBackendFindSessionForWorkspace:
     """Tests for PodmanBackend.find_session_for_workspace."""
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_find_session_returns_matching_session(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -793,6 +824,7 @@ class TestPodmanBackendFindSessionForWorkspace:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
 
         session = backend.find_session_for_workspace(workspace)
 
@@ -800,7 +832,7 @@ class TestPodmanBackendFindSessionForWorkspace:
         assert session.name == "project-session"
         assert session.workspace == workspace
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_find_session_returns_none_when_no_match(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -821,6 +853,7 @@ class TestPodmanBackendFindSessionForWorkspace:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
 
         session = backend.find_session_for_workspace(Path("/home/user/my-project"))
 
@@ -830,8 +863,8 @@ class TestPodmanBackendFindSessionForWorkspace:
 class TestPodmanBackendGcpAdcSecret:
     """Tests for GCP ADC secret handling."""
 
-    @patch("paude.backends.podman.Path")
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.Path")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_creates_secret_when_adc_exists(
         self, mock_runner_class: MagicMock, mock_path_class: MagicMock
     ) -> None:
@@ -855,6 +888,7 @@ class TestPodmanBackendGcpAdcSecret:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
         backend._volume_manager = MagicMock()
 
         config = SessionConfig(
@@ -867,8 +901,8 @@ class TestPodmanBackendGcpAdcSecret:
         mock_runner.create_secret.assert_called_once()
         assert mock_runner.create_secret.call_args[0][0] == "paude-gcp-adc"
 
-    @patch("paude.backends.podman.Path")
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.Path")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_passes_secret_to_create_container(
         self, mock_runner_class: MagicMock, mock_path_class: MagicMock
     ) -> None:
@@ -891,6 +925,7 @@ class TestPodmanBackendGcpAdcSecret:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
         backend._volume_manager = MagicMock()
 
         config = SessionConfig(
@@ -906,8 +941,8 @@ class TestPodmanBackendGcpAdcSecret:
         )
         assert call_kwargs["secrets"] == [f"paude-gcp-adc,target={expected_target}"]
 
-    @patch("paude.backends.podman.Path")
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.Path")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_skips_secret_when_adc_missing(
         self, mock_runner_class: MagicMock, mock_path_class: MagicMock
     ) -> None:
@@ -930,6 +965,7 @@ class TestPodmanBackendGcpAdcSecret:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
         backend._volume_manager = MagicMock()
 
         config = SessionConfig(
@@ -943,8 +979,8 @@ class TestPodmanBackendGcpAdcSecret:
         call_kwargs = mock_runner.create_container.call_args[1]
         assert call_kwargs["secrets"] is None
 
-    @patch("paude.backends.podman.Path")
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.Path")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_cleans_up_secret_on_failure(
         self, mock_runner_class: MagicMock, mock_path_class: MagicMock
     ) -> None:
@@ -968,6 +1004,7 @@ class TestPodmanBackendGcpAdcSecret:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
         backend._volume_manager = MagicMock()
 
         config = SessionConfig(
@@ -982,8 +1019,8 @@ class TestPodmanBackendGcpAdcSecret:
         # Secret should be cleaned up on failure
         mock_runner.remove_secret.assert_called_once_with("paude-gcp-adc")
 
-    @patch("paude.backends.podman.Path")
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.Path")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_recreates_secret(
         self, mock_runner_class: MagicMock, mock_path_class: MagicMock
     ) -> None:
@@ -1008,6 +1045,7 @@ class TestPodmanBackendGcpAdcSecret:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
 
         backend.start_session("my-session")
 
@@ -1023,8 +1061,8 @@ class TestPodmanBackendGcpAdcSecret:
 class TestPodmanBackendCreateSessionWithProxy:
     """Tests for create_session with domain filtering (proxy setup)."""
 
-    @patch("paude.backends.podman.get_podman_machine_dns")
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_creates_network_and_proxy(
         self, mock_runner_class: MagicMock, mock_dns: MagicMock
     ) -> None:
@@ -1071,8 +1109,8 @@ class TestPodmanBackendCreateSessionWithProxy:
 
         assert session.status == "stopped"
 
-    @patch("paude.backends.podman.get_podman_machine_dns")
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_stores_domains_in_labels(
         self, mock_runner_class: MagicMock, mock_dns: MagicMock
     ) -> None:
@@ -1099,7 +1137,7 @@ class TestPodmanBackendCreateSessionWithProxy:
         assert labels[PAUDE_LABEL_DOMAINS] == ".googleapis.com,.pypi.org"
         assert labels[PAUDE_LABEL_PROXY_IMAGE] == "proxy:latest"
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_without_domains_skips_proxy(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -1130,8 +1168,8 @@ class TestPodmanBackendCreateSessionWithProxy:
         assert "HTTPS_PROXY" not in env
         assert call_kwargs["network"] is None
 
-    @patch("paude.backends.podman.get_podman_machine_dns")
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_cleans_up_proxy_on_container_failure(
         self, mock_runner_class: MagicMock, mock_dns: MagicMock
     ) -> None:
@@ -1168,7 +1206,7 @@ class TestPodmanBackendCreateSessionWithProxy:
 class TestPodmanBackendStartSessionWithProxy:
     """Tests for start_session proxy lifecycle."""
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_starts_proxy_before_main(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -1191,7 +1229,7 @@ class TestPodmanBackendStartSessionWithProxy:
         )
         mock_runner.start_container.assert_called_once_with("paude-my-session")
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_skips_proxy_when_absent(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -1216,7 +1254,7 @@ class TestPodmanBackendStartSessionWithProxy:
 class TestPodmanBackendStopSessionWithProxy:
     """Tests for stop_session proxy lifecycle."""
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_stop_session_stops_proxy_after_main(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -1238,7 +1276,7 @@ class TestPodmanBackendStopSessionWithProxy:
 class TestPodmanBackendDeleteSessionWithProxy:
     """Tests for delete_session proxy cleanup."""
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_delete_session_removes_proxy_and_network(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -1267,7 +1305,7 @@ class TestPodmanBackendDeleteSessionWithProxy:
 class TestProxyHealthCheck:
     """Tests for _check_proxy_health and degraded status detection."""
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_list_sessions_shows_degraded_when_proxy_missing(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -1297,7 +1335,7 @@ class TestProxyHealthCheck:
         assert len(sessions) == 1
         assert sessions[0].status == "degraded"
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_list_sessions_shows_degraded_when_proxy_stopped(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -1328,7 +1366,7 @@ class TestProxyHealthCheck:
         assert len(sessions) == 1
         assert sessions[0].status == "degraded"
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_list_sessions_running_when_proxy_healthy(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -1357,7 +1395,7 @@ class TestProxyHealthCheck:
         assert len(sessions) == 1
         assert sessions[0].status == "running"
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_list_sessions_running_without_proxy_config(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -1382,7 +1420,7 @@ class TestProxyHealthCheck:
         assert len(sessions) == 1
         assert sessions[0].status == "running"
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_get_session_shows_degraded_when_proxy_missing(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -1415,8 +1453,8 @@ class TestProxyHealthCheck:
 class TestProxyRecreation:
     """Tests for proxy recreation when proxy is missing but expected."""
 
-    @patch("paude.backends.podman.get_podman_machine_dns")
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_recreates_missing_proxy(
         self, mock_runner_class: MagicMock, mock_dns: MagicMock
     ) -> None:
@@ -1459,7 +1497,7 @@ class TestProxyRecreation:
             "paude-proxy-my-session"
         )
 
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_skips_recreate_without_labels(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -1489,8 +1527,8 @@ class TestProxyRecreation:
         mock_runner.create_session_proxy.assert_not_called()
         mock_runner.start_session_proxy.assert_not_called()
 
-    @patch("paude.backends.podman.get_podman_machine_dns")
-    @patch("paude.backends.podman.ContainerRunner")
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_connect_session_recreates_missing_proxy(
         self, mock_runner_class: MagicMock, mock_dns: MagicMock
     ) -> None:
@@ -1531,7 +1569,7 @@ class TestProxyRecreation:
 
 
 class TestFindContainerBySessionName:
-    """Tests for PodmanBackend._find_container_by_session_name."""
+    """Tests for find_container_by_session_name helper."""
 
     def test_returns_matching_container(self) -> None:
         """Returns the container dict when session name matches."""
@@ -1549,8 +1587,7 @@ class TestFindContainerBySessionName:
         }
         mock_runner.list_containers.return_value = [container]
 
-        backend = _make_backend(mock_runner)
-        result = backend._find_container_by_session_name("my-session")
+        result = find_container_by_session_name(mock_runner, "my-session")
 
         assert result is container
         mock_runner.list_containers.assert_called_once_with(
@@ -1570,14 +1607,13 @@ class TestFindContainerBySessionName:
         }
         mock_runner.list_containers.return_value = [container]
 
-        backend = _make_backend(mock_runner)
-        result = backend._find_container_by_session_name("my-session")
+        result = find_container_by_session_name(mock_runner, "my-session")
 
         assert result is None
 
 
 class TestBuildSessionFromContainer:
-    """Tests for PodmanBackend._build_session_from_container."""
+    """Tests for build_session_from_container helper."""
 
     def test_constructs_session_correctly(self) -> None:
         """Builds a Session with correct fields from container dict."""
@@ -1595,8 +1631,7 @@ class TestBuildSessionFromContainer:
         }
         mock_runner.container_exists.return_value = False
 
-        backend = _make_backend(mock_runner)
-        session = backend._build_session_from_container("my-session", container)
+        session = build_session_from_container("my-session", container, mock_runner)
 
         assert session.name == "my-session"
         assert session.workspace == Path("/home/user/project")
@@ -1620,8 +1655,7 @@ class TestBuildSessionFromContainer:
         }
         mock_runner.container_exists.return_value = False
 
-        backend = _make_backend(mock_runner)
-        session = backend._build_session_from_container("my-session", container)
+        session = build_session_from_container("my-session", container, mock_runner)
 
         assert session.workspace == Path("/")
         assert session.status == "stopped"
@@ -1644,7 +1678,6 @@ class TestBuildSessionFromContainer:
         # Proxy container does not exist
         mock_runner.container_exists.return_value = False
 
-        backend = _make_backend(mock_runner)
-        session = backend._build_session_from_container("my-session", container)
+        session = build_session_from_container("my-session", container, mock_runner)
 
         assert session.status == "degraded"
