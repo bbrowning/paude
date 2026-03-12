@@ -1901,3 +1901,46 @@ def test_help_includes_blocked_domains() -> None:
     """Help output includes blocked-domains command."""
     result = runner.invoke(app, ["--help"])
     assert "blocked-domains" in result.stdout
+
+
+class TestDetectDevScriptDir:
+    """Tests for _detect_dev_script_dir()."""
+
+    def test_returns_project_root_in_src_layout(self, tmp_path: Path) -> None:
+        """Returns project root when containers/paude/Dockerfile exists (src layout)."""
+        from paude.cli.helpers import _detect_dev_script_dir
+
+        (tmp_path / "containers" / "paude").mkdir(parents=True)
+        (tmp_path / "containers" / "paude" / "Dockerfile").touch()
+
+        # Simulate src layout: project_root/src/paude/cli/helpers.py (4 levels)
+        fake_file = tmp_path / "src" / "paude" / "cli" / "helpers.py"
+
+        with patch("paude.cli.helpers.__file__", str(fake_file)):
+            result = _detect_dev_script_dir()
+        assert result == tmp_path
+
+    def test_returns_project_root_in_flat_layout(self, tmp_path: Path) -> None:
+        """Returns project root when containers/paude/Dockerfile exists (flat layout)."""
+        from paude.cli.helpers import _detect_dev_script_dir
+
+        (tmp_path / "containers" / "paude").mkdir(parents=True)
+        (tmp_path / "containers" / "paude" / "Dockerfile").touch()
+
+        # Simulate flat layout: project_root/paude/cli/helpers.py (3 levels)
+        fake_file = tmp_path / "paude" / "cli" / "helpers.py"
+
+        with patch("paude.cli.helpers.__file__", str(fake_file)):
+            result = _detect_dev_script_dir()
+        assert result == tmp_path
+
+    def test_returns_none_when_no_dockerfile(self, tmp_path: Path) -> None:
+        """Returns None when no containers/paude/Dockerfile found."""
+        from paude.cli.helpers import _detect_dev_script_dir
+
+        # No Dockerfile anywhere
+        fake_file = tmp_path / "src" / "paude" / "cli" / "helpers.py"
+
+        with patch("paude.cli.helpers.__file__", str(fake_file)):
+            result = _detect_dev_script_dir()
+        assert result is None

@@ -144,9 +144,13 @@ def _detect_dev_script_dir() -> Path | None:
     Returns the project root if a containers/paude/Dockerfile exists
     relative to the package location, otherwise None.
     """
-    dev_path = Path(__file__).parent.parent.parent
-    if (dev_path / "containers" / "paude" / "Dockerfile").exists():
-        return dev_path
+    # Support both src layout (src/paude/cli/helpers.py → 4 levels)
+    # and flat layout (paude/cli/helpers.py → 3 levels)
+    base = Path(__file__)
+    for depth in range(4, 2, -1):
+        dev_path = base.parents[depth - 1]
+        if (dev_path / "containers" / "paude" / "Dockerfile").exists():
+            return dev_path
     return None
 
 
