@@ -55,10 +55,10 @@ RUN curl -fsSL https://cli.github.com/packages/rpm/gh-cli.repo -o /etc/yum.repos
     dnf clean all
 
 # Create non-root user with GID 0 for OpenShift compatibility
-RUN useradd -m -s /bin/bash -g 0 paude && \
-    chmod -R g+rwX /home/paude && \
+RUN useradd -M -d /home/paude -s /bin/bash -g 0 paude && \
     mkdir -p /home/paude/.claude /home/paude/.config && \
-    chmod -R g+rwX /home/paude/.claude /home/paude/.config
+    chmod -R g+rwX /home/paude && \
+    chown -R paude:0 /home/paude
 
 # NOTE: Claude Code is NOT installed here due to licensing restrictions.
 # It gets installed at user-side build time via a runtime layer.
