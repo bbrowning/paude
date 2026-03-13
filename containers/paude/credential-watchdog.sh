@@ -30,20 +30,19 @@ fi
 INACTIVITY_THRESHOLD=$((TIMEOUT_MINUTES * 60))
 
 has_tmux_clients() {
-    # Check if a REMOTE client is attached to the agent session
-    # PID 1 is always attached (container's main process runs "tmux attach")
-    # Remote clients via "paude connect" / "oc exec" add additional clients
+    # The container's init process is sleep infinity (not tmux), so any
+    # tmux client means a real user is connected.
     local client_count
     local session_name="${PAUDE_AGENT_SESSION_NAME:-claude}"
 
     client_count=$(tmux list-clients -t "$session_name" 2>/dev/null | wc -l)
 
-    if [[ "$client_count" -gt 1 ]]; then
-        echo "[watchdog] Remote client connected ($client_count clients total)" >&2
+    if [[ "$client_count" -gt 0 ]]; then
+        echo "[watchdog] Client connected ($client_count clients)" >&2
         return 0
     fi
 
-    echo "[watchdog] No remote clients ($client_count client = container only)" >&2
+    echo "[watchdog] No tmux clients attached" >&2
     return 1
 }
 

@@ -8,6 +8,10 @@ from unittest.mock import MagicMock, patch
 
 from paude.backends.base import SessionConfig
 
+WATCHDOG_SCRIPT = (
+    Path(__file__).parent.parent / "containers" / "paude" / "credential-watchdog.sh"
+)
+
 
 class TestSessionConfigCredentialTimeout:
     """Tests for credential_timeout in SessionConfig."""
@@ -153,3 +157,30 @@ class TestCLICredentialTimeout:
         param = params["credential_timeout"]
         # The annotation should indicate it's an int with typer.Option
         assert param.annotation is not None
+
+
+class TestWatchdogScriptRegression:
+    """Static analysis tests to prevent regressions in credential-watchdog.sh."""
+
+    def _read_watchdog(self) -> str:
+        return WATCHDOG_SCRIPT.read_text()
+
+    def test_client_threshold_is_zero(self) -> None:
+        """The watchdog must use -gt 0 since PID 1 is sleep infinity, not tmux."""
+        content = self._read_watchdog()
+        assert "-gt 0" in content, (
+            "has_tmux_clients() must compare client_count -gt 0, "
+            "not -gt 1 (PID 1 is sleep infinity, not tmux)"
+        )
+        assert "-gt 1" not in content, (
+            "Found -gt 1 in watchdog script. With sleep infinity as PID 1, "
+            "any tmux client means a real user is connected."
+        )
+
+    def test_no_pid1_tmux_assumption(self) -> None:
+        """The watchdog must not assume PID 1 is a tmux client."""
+        content = self._read_watchdog()
+        assert "PID 1" not in content, (
+            "Watchdog script should not reference PID 1 — "
+            "PID 1 is sleep infinity, not tmux."
+        )
