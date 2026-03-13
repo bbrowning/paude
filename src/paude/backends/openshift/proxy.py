@@ -9,6 +9,7 @@ import time
 from typing import Any
 
 from paude.backends.openshift.oc import OcClient
+from paude.backends.shared import proxy_resource_name
 
 
 class ProxyManager:
@@ -224,7 +225,7 @@ class ProxyManager:
             proxy_image: Container image for the proxy.
             allowed_domains: List of domains to allow through the proxy.
         """
-        deployment_name = f"paude-proxy-{session_name}"
+        deployment_name = proxy_resource_name(session_name)
 
         print(
             f"Creating Deployment/{deployment_name} in namespace {self._namespace}...",
@@ -299,7 +300,7 @@ class ProxyManager:
         Returns:
             The service name (e.g., "paude-proxy-{session_name}").
         """
-        service_name = f"paude-proxy-{session_name}"
+        service_name = proxy_resource_name(session_name)
 
         print(
             f"Creating Service/{service_name} in namespace {self._namespace}...",
@@ -348,7 +349,7 @@ class ProxyManager:
             session_name: Session name.
             timeout: Timeout in seconds.
         """
-        deployment_name = f"paude-proxy-{session_name}"
+        deployment_name = proxy_resource_name(session_name)
 
         print(
             f"Waiting for Deployment/{deployment_name} to be ready...",
@@ -393,7 +394,7 @@ class ProxyManager:
         Returns:
             List of currently allowed domains.
         """
-        deployment_name = f"paude-proxy-{session_name}"
+        deployment_name = proxy_resource_name(session_name)
 
         result = self._oc.run(
             "get",
@@ -418,7 +419,7 @@ class ProxyManager:
             session_name: Session name.
             domains: New list of allowed domains.
         """
-        deployment_name = f"paude-proxy-{session_name}"
+        deployment_name = proxy_resource_name(session_name)
         domains_str = ",".join(domains)
 
         patch = json.dumps(
@@ -458,8 +459,8 @@ class ProxyManager:
         Args:
             session_name: Session name.
         """
-        deployment_name = f"paude-proxy-{session_name}"
-        service_name = f"paude-proxy-{session_name}"
+        deployment_name = proxy_resource_name(session_name)
+        service_name = proxy_resource_name(session_name)
 
         print(f"Deleting Deployment/{deployment_name}...", file=sys.stderr)
         self._oc.run(

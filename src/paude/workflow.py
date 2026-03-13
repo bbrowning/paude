@@ -11,6 +11,7 @@ from pathlib import Path
 import typer
 
 from paude.backends.base import Backend, Session
+from paude.backends.shared import pod_name, resource_name
 from paude.constants import BASE_REF_NAME, CONTAINER_HOME, CONTAINER_WORKSPACE
 
 _PROTECTED_BRANCH_PATTERNS = frozenset(
@@ -77,7 +78,7 @@ def _ensure_remote_exists(
         list_paude_remotes,
     )
 
-    remote_name = f"paude-{session_name}"
+    remote_name = resource_name(session_name)
 
     for name, _url in list_paude_remotes():
         if name == remote_name:
@@ -90,7 +91,7 @@ def _ensure_remote_exists(
             typer.echo("Error: Failed to enable git ext:: protocol.", err=True)
             raise typer.Exit(1)
 
-    container_name = f"paude-{session_name}"
+    cname = resource_name(session_name)
 
     if backend_type == "openshift":
         from paude.backends.openshift import OpenShiftBackend, OpenShiftConfig
@@ -105,16 +106,16 @@ def _ensure_remote_exists(
         except Exception:
             namespace = openshift_namespace or "default"
 
-        pod_name = f"paude-{session_name}-0"
+        pname = pod_name(session_name)
         initialize_container_workspace_openshift(
-            pod_name, namespace, context=openshift_context
+            pname, namespace, context=openshift_context
         )
         remote_url = build_openshift_remote_url(
-            pod_name, namespace, context=openshift_context
+            pname, namespace, context=openshift_context
         )
     else:
-        initialize_container_workspace_podman(container_name)
-        remote_url = build_podman_remote_url(container_name)
+        initialize_container_workspace_podman(cname)
+        remote_url = build_podman_remote_url(cname)
 
     if not git_remote_add(remote_name, remote_url):
         typer.echo(f"Error: Failed to add remote '{remote_name}'.", err=True)

@@ -10,6 +10,7 @@ import typer
 
 from paude.backends.base import Backend, Session
 from paude.backends.openshift import OpenShiftBackend, OpenShiftConfig
+from paude.backends.shared import pod_name, resource_name
 from paude.cli.app import app
 from paude.cli.helpers import find_session_backend
 from paude.session_discovery import find_workspace_session
@@ -103,9 +104,9 @@ def remote_command(
                 typer.echo("Error: Specify a session name to remove.", err=True)
                 raise typer.Exit(1)
 
-        remote_name = f"paude-{name}"
-        if git_remote_remove(remote_name):
-            typer.echo(f"Removed git remote '{remote_name}'.")
+        rname = resource_name(name)
+        if git_remote_remove(rname):
+            typer.echo(f"Removed git remote '{rname}'.")
         else:
             raise typer.Exit(1)
         return
@@ -147,7 +148,7 @@ def _cleanup_session_git_remote(
     """
     from paude.git_remote import is_git_repository
 
-    remote_name = f"paude-{session_name}"
+    remote_name = resource_name(session_name)
 
     # Try workspace directory first, then fall back to current directory
     cwd = None
@@ -327,13 +328,13 @@ def _try_clone_from_origin(
     typer.echo(f"Cloning from origin in container ({origin_https_url})...")
 
     if backend_type == "podman":
-        container_name = f"paude-{session_name}"
-        success = clone_from_origin_podman(container_name, origin_https_url)
+        cname = resource_name(session_name)
+        success = clone_from_origin_podman(cname, origin_https_url)
     else:
-        pod_name = f"paude-{session_name}-0"
+        pname = pod_name(session_name)
         namespace = openshift_namespace or "default"
         success = clone_from_origin_openshift(
-            pod_name, namespace, origin_https_url, context=openshift_context
+            pname, namespace, origin_https_url, context=openshift_context
         )
 
     if not success:
@@ -369,7 +370,7 @@ def _setup_after_clone(
 
     # Check if local has commits not in origin. If local is at or behind
     # origin, skip the push — the container already has the right code.
-    remote_name = f"paude-{session_name}"
+    rname = resource_name(session_name)
     local_count = count_local_only_commits(branch)
 
     if local_count is None or local_count > 0:
@@ -381,7 +382,7 @@ def _setup_after_clone(
         else:
             n_desc = "local commits"
         typer.echo(f"Pushing {n_desc} to container...")
-        if not git_push_to_remote(remote_name, branch, quiet=True):
+        if not git_push_to_remote(rname, branch, quiet=True):
             if local_count is not None:
                 typer.echo(
                     "  Note: Could not push local commits (branch has diverged "
@@ -390,13 +391,11 @@ def _setup_after_clone(
 
     # Set base ref
     if backend_type == "podman":
-        set_base_ref_in_container_podman(f"paude-{session_name}")
+        set_base_ref_in_container_podman(resource_name(session_name))
     else:
-        pod_name = f"paude-{session_name}-0"
+        pname = pod_name(session_name)
         namespace = openshift_namespace or "default"
-        set_base_ref_in_container_openshift(
-            pod_name, namespace, context=openshift_context
-        )
+        set_base_ref_in_container_openshift(pname, namespace, context=openshift_context)
 
     # Tags are already present from clone — skip pushing
     # (local tags would conflict with cloned tags from origin)
@@ -431,26 +430,23 @@ def _setup_full_push(
     )
 
     # Push current branch
-    remote_name = f"paude-{session_name}"
+    rname = resource_name(session_name)
     typer.echo(f"Pushing {branch} to container...")
-    if not git_push_to_remote(remote_name, branch):
+    if not git_push_to_remote(rname, branch):
         typer.echo("Warning: Failed to push branch.", err=True)
         return
 
     # Set base ref
     if backend_type == "podman":
-        container_name = f"paude-{session_name}"
-        set_base_ref_in_container_podman(container_name)
+        set_base_ref_in_container_podman(resource_name(session_name))
     else:
-        pod_name = f"paude-{session_name}-0"
+        pname = pod_name(session_name)
         namespace = openshift_namespace or "default"
-        set_base_ref_in_container_openshift(
-            pod_name, namespace, context=openshift_context
-        )
+        set_base_ref_in_container_openshift(pname, namespace, context=openshift_context)
 
     # Push tags
     typer.echo("Pushing tags...")
-    if not git_push_tags_to_remote(remote_name):
+    if not git_push_tags_to_remote(rname):
         typer.echo("Warning: Failed to push tags.", err=True)
 
     # Set origin in container if available
@@ -458,11 +454,11 @@ def _setup_full_push(
         typer.echo(f"Setting origin in container to {origin_https_url}...")
         if backend_type == "podman":
             origin_set = set_origin_in_container_podman(
-                f"paude-{session_name}", origin_https_url
+                resource_name(session_name), origin_https_url
             )
         else:
             origin_set = set_origin_in_container_openshift(
-                f"paude-{session_name}-0",
+                pod_name(session_name),
                 openshift_namespace or "default",
                 origin_https_url,
                 context=openshift_context,
@@ -490,10 +486,10 @@ def _setup_precommit(
 
     typer.echo("Setting up pre-commit hooks in container...")
     if backend_type == "podman":
-        success = setup_precommit_in_container_podman(f"paude-{session_name}")
+        success = setup_precommit_in_container_podman(resource_name(session_name))
     else:
         success = setup_precommit_in_container_openshift(
-            f"paude-{session_name}-0",
+            pod_name(session_name),
             openshift_namespace or "default",
             context=openshift_context,
         )
@@ -566,7 +562,7 @@ def _remote_add(
         raise typer.Exit(1)
 
     # Build the remote URL based on backend type
-    remote_name = f"paude-{session.name}"
+    rname = resource_name(session.name)
     branch = get_current_branch() or "main"
 
     if session.backend_type == "openshift":
@@ -585,11 +581,11 @@ def _remote_add(
             except Exception:
                 namespace = "default"
 
-        pod_name = f"paude-{session.name}-0"
+        pname = pod_name(session.name)
 
         # Check if pod is running (live check, not cached status)
         if not is_pod_running_openshift(
-            pod_name=pod_name,
+            pod_name=pname,
             namespace=namespace,
             context=openshift_context,
         ):
@@ -601,7 +597,7 @@ def _remote_add(
         # Initialize git repository in container
         typer.echo("Initializing git repository in container...")
         if not initialize_container_workspace_openshift(
-            pod_name=pod_name,
+            pod_name=pname,
             namespace=namespace,
             context=openshift_context,
             branch=branch,
@@ -609,15 +605,15 @@ def _remote_add(
             raise typer.Exit(1)
 
         remote_url = build_openshift_remote_url(
-            pod_name=pod_name,
+            pod_name=pname,
             namespace=namespace,
             context=openshift_context,
         )
     else:
-        container_name = f"paude-{session.name}"
+        cname = resource_name(session.name)
 
         # Check if container is running
-        if not is_container_running_podman(container_name):
+        if not is_container_running_podman(cname):
             typer.echo("Error: Container not running.", err=True)
             typer.echo("Start it first:", err=True)
             typer.echo(f"  paude start {session.name}", err=True)
@@ -625,34 +621,34 @@ def _remote_add(
 
         # Initialize git repository in container
         typer.echo("Initializing git repository in container...")
-        if not initialize_container_workspace_podman(container_name, branch=branch):
+        if not initialize_container_workspace_podman(cname, branch=branch):
             raise typer.Exit(1)
 
-        remote_url = build_podman_remote_url(container_name=container_name)
+        remote_url = build_podman_remote_url(container_name=cname)
 
     # Add the remote
-    if git_remote_add(remote_name, remote_url):
-        typer.echo(f"Added git remote '{remote_name}'.")
+    if git_remote_add(rname, remote_url):
+        typer.echo(f"Added git remote '{rname}'.")
 
         if push:
             typer.echo("")
             typer.echo(f"Pushing {branch} to container...")
-            if not git_push_to_remote(remote_name, branch):
+            if not git_push_to_remote(rname, branch):
                 typer.echo("Push failed.", err=True)
                 raise typer.Exit(1)
             # Set base ref to mark initial push point
             if session.backend_type == "openshift":
                 set_base_ref_in_container_openshift(
-                    pod_name, namespace, context=openshift_context
+                    pname, namespace, context=openshift_context
                 )
             else:
-                set_base_ref_in_container_podman(container_name)
+                set_base_ref_in_container_podman(cname)
             typer.echo("Push complete.")
         else:
             typer.echo("")
             typer.echo("Usage:")
-            typer.echo(f"  git push {remote_name} {branch}  # Push code to container")
-            typer.echo(f"  git pull {remote_name} {branch}  # Pull changes")
-            typer.echo(f"  git fetch {remote_name}          # Fetch without merging")
+            typer.echo(f"  git push {rname} {branch}  # Push code to container")
+            typer.echo(f"  git pull {rname} {branch}  # Pull changes")
+            typer.echo(f"  git fetch {rname}          # Fetch without merging")
     else:
         raise typer.Exit(1)

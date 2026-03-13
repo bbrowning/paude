@@ -39,6 +39,10 @@ from paude.backends.shared import (
     SQUID_BLOCKED_LOG_PATH,
     build_session_env,
     decode_path,
+    pod_name,
+    proxy_resource_name,
+    pvc_name,
+    resource_name,
 )
 
 
@@ -161,7 +165,7 @@ class OpenShiftBackend:
         Returns:
             StatefulSet data or None if not found.
         """
-        sts_name = f"paude-{session_name}"
+        sts_name = resource_name(session_name)
 
         result = self._oc.run(
             "get",
@@ -211,12 +215,12 @@ class OpenShiftBackend:
         Returns:
             Pod name or None if not found.
         """
-        pod_name = f"paude-{session_name}-0"
+        pname = pod_name(session_name)
 
         result = self._oc.run(
             "get",
             "pod",
-            pod_name,
+            pname,
             "-n",
             self.namespace,
             "-o",
@@ -227,7 +231,7 @@ class OpenShiftBackend:
         if result.returncode != 0:
             return None
 
-        return pod_name
+        return pname
 
     def _require_running_pod(self, name: str) -> str:
         """Get pod name for a session, raising if not found or not running.
@@ -243,13 +247,13 @@ class OpenShiftBackend:
             ValueError: If session is not running.
         """
         self._require_session(name)
-        pod_name = self._get_pod_for_session(name)
-        if pod_name is None:
+        pname = self._get_pod_for_session(name)
+        if pname is None:
             raise ValueError(
                 f"Session '{name}' is not running. "
                 f"Use 'paude start {name}' to start it."
             )
-        return pod_name
+        return pname
 
     def _has_proxy_deployment(self, session_name: str) -> bool:
         """Check if a proxy deployment exists for a session.
@@ -263,7 +267,7 @@ class OpenShiftBackend:
         result = self._oc.run(
             "get",
             "deployment",
-            f"paude-proxy-{session_name}",
+            proxy_resource_name(session_name),
             "-n",
             self.namespace,
             check=False,
@@ -275,7 +279,7 @@ class OpenShiftBackend:
         self._oc.run(
             "scale",
             "statefulset",
-            f"paude-{session_name}",
+            resource_name(session_name),
             "-n",
             self.namespace,
             f"--replicas={replicas}",
@@ -369,8 +373,8 @@ class OpenShiftBackend:
             workspace=workspace,
             created_at=created_at,
             backend_type="openshift",
-            container_id=f"paude-{session_name}-0",
-            volume_name=f"workspace-paude-{session_name}-0",
+            container_id=pod_name(session_name),
+            volume_name=pvc_name(session_name),
             agent=labels.get(PAUDE_LABEL_AGENT, "claude"),
         )
 
@@ -443,7 +447,7 @@ class OpenShiftBackend:
         agent = get_agent(config.agent)
         secret_env = build_secret_environment_from_config(agent.config)
         proxy_name = (
-            f"paude-proxy-{session_name}"
+            proxy_resource_name(session_name)
             if config.allowed_domains is not None
             else None
         )
@@ -470,7 +474,7 @@ class OpenShiftBackend:
         )
 
         print(
-            f"Creating StatefulSet/paude-{session_name} in namespace {ns}...",
+            f"Creating StatefulSet/{resource_name(session_name)} in namespace {ns}...",
             file=sys.stderr,
         )
         self._oc.run(
@@ -486,13 +490,13 @@ class OpenShiftBackend:
                 self._proxy.wait_for_ready(session_name)
 
             # Wait for pod to be ready
-            pod_name = f"paude-{session_name}-0"
-            print(f"Waiting for pod {pod_name} to be ready...", file=sys.stderr)
-            self._pod_waiter.wait_for_ready(pod_name)
+            pname = pod_name(session_name)
+            print(f"Waiting for pod {pname} to be ready...", file=sys.stderr)
+            self._pod_waiter.wait_for_ready(pname)
 
             # Sync configuration and credentials
             self._syncer.sync_full_config(
-                pod_name, agent_name=config.agent, secret_env=secret_env
+                pname, agent_name=config.agent, secret_env=secret_env
             )
 
         session_status = "running" if config.wait_for_ready else "pending"
@@ -504,8 +508,8 @@ class OpenShiftBackend:
             workspace=config.workspace,
             created_at=created_at,
             backend_type="openshift",
-            container_id=f"paude-{session_name}-0",
-            volume_name=f"workspace-paude-{session_name}-0",
+            container_id=pod_name(session_name),
+            volume_name=pvc_name(session_name),
             agent=config.agent,
         )
 
@@ -526,8 +530,8 @@ class OpenShiftBackend:
         self._require_session(name)
 
         ns = self.namespace
-        sts_name = f"paude-{name}"
-        pvc_name = f"workspace-{sts_name}-0"
+        sts_name = resource_name(name)
+        pvc = pvc_name(name)
 
         print(f"Deleting session '{name}'...", file=sys.stderr)
 
@@ -557,11 +561,11 @@ class OpenShiftBackend:
 
         # Delete PVC (volumeClaimTemplates don't delete PVCs automatically)
         # Use longer timeout since PVC deletion waits for pod termination
-        print(f"Deleting PVC/{pvc_name}...", file=sys.stderr)
+        print(f"Deleting PVC/{pvc}...", file=sys.stderr)
         self._oc.run(
             "delete",
             "pvc",
-            pvc_name,
+            pvc,
             "-n",
             ns,
             check=False,
@@ -607,7 +611,7 @@ class OpenShiftBackend:
         """
         self._require_session(name)
 
-        pod_name = f"paude-{name}-0"
+        pname = pod_name(name)
 
         # Scale to 1
         print(f"Starting session '{name}'...", file=sys.stderr)
@@ -615,14 +619,13 @@ class OpenShiftBackend:
 
         # Scale proxy up if it exists
         if self._has_proxy_deployment(name):
-            proxy_deployment = f"paude-proxy-{name}"
-            self._scale_deployment(proxy_deployment, 1)
+            self._scale_deployment(proxy_resource_name(name), 1)
             self._proxy.wait_for_ready(name)
 
         # Wait for pod to be ready
-        print(f"Waiting for Pod/{pod_name} to be ready...", file=sys.stderr)
+        print(f"Waiting for Pod/{pname} to be ready...", file=sys.stderr)
         try:
-            self._pod_waiter.wait_for_ready(pod_name)
+            self._pod_waiter.wait_for_ready(pname)
         except PodNotReadyError as e:
             print(f"Pod failed to start: {e}", file=sys.stderr)
             return 1
@@ -649,9 +652,9 @@ class OpenShiftBackend:
 
         # Scale proxy to 0 if it exists
         if self._has_proxy_deployment(name):
-            proxy_deployment = f"paude-proxy-{name}"
-            print(f"Stopping proxy '{proxy_deployment}'...", file=sys.stderr)
-            self._scale_deployment(proxy_deployment, 0)
+            proxy_dep = proxy_resource_name(name)
+            print(f"Stopping proxy '{proxy_dep}'...", file=sys.stderr)
+            self._scale_deployment(proxy_dep, 0)
 
         print(f"Session '{name}' stopped.", file=sys.stderr)
 
@@ -669,8 +672,8 @@ class OpenShiftBackend:
         Returns:
             Exit code from the attached session.
         """
-        pod_name = self._get_pod_for_session(name)
-        if pod_name is None:
+        pname = self._get_pod_for_session(name)
+        if pname is None:
             print(f"Session '{name}' is not running.", file=sys.stderr)
             return 1
 
@@ -680,7 +683,7 @@ class OpenShiftBackend:
         result = self._oc.run(
             "get",
             "pod",
-            pod_name,
+            pname,
             "-n",
             ns,
             "-o",
@@ -705,10 +708,10 @@ class OpenShiftBackend:
         secret_env = build_secret_environment_from_config(agent.config)
 
         # Check if this is first connect or reconnect
-        if self._syncer.is_config_synced(pod_name):
+        if self._syncer.is_config_synced(pname):
             # Reconnect: only refresh gcloud credentials (fast)
             self._syncer.sync_credentials(
-                pod_name,
+                pname,
                 verbose=False,
                 github_token=github_token,
                 secret_env=secret_env,
@@ -717,7 +720,7 @@ class OpenShiftBackend:
         else:
             # First connect: full config sync (gcloud + agent + git)
             self._syncer.sync_full_config(
-                pod_name,
+                pname,
                 verbose=False,
                 github_token=github_token,
                 agent_name=agent_name,
@@ -727,7 +730,7 @@ class OpenShiftBackend:
         # Check if workspace is empty (no .git directory)
         check_result = self._oc.run(
             "exec",
-            pod_name,
+            pname,
             "-n",
             ns,
             "--",
@@ -741,11 +744,11 @@ class OpenShiftBackend:
             print("", file=sys.stderr)
             print("Workspace is empty. To sync code:", file=sys.stderr)
             print(f"  paude remote add {name}", file=sys.stderr)
-            print(f"  git push paude-{name} main", file=sys.stderr)
+            print(f"  git push {resource_name(name)} main", file=sys.stderr)
             print("", file=sys.stderr)
 
         # Attach using oc exec with interactive TTY
-        exec_cmd = ["oc", "exec", "-it", "-n", ns, pod_name, "--"]
+        exec_cmd = ["oc", "exec", "-it", "-n", ns, pname, "--"]
 
         if self._config.context:
             exec_cmd = [
@@ -756,7 +759,7 @@ class OpenShiftBackend:
                 "-it",
                 "-n",
                 ns,
-                pod_name,
+                pname,
                 "--",
             ]
 
@@ -852,10 +855,10 @@ class OpenShiftBackend:
         if pod_result.returncode != 0 or not pod_result.stdout.strip():
             raise ValueError(f"Proxy for session '{name}' is not running.")
 
-        pod_name = pod_result.stdout.strip()
+        proxy_pod = pod_result.stdout.strip()
         log_result = self._oc.run(
             "exec",
-            pod_name,
+            proxy_pod,
             "-n",
             self.namespace,
             "--",
@@ -902,11 +905,11 @@ class OpenShiftBackend:
             SessionNotFoundError: If session not found.
             ValueError: If session is not running.
         """
-        pod_name = self._require_running_pod(name)
+        pname = self._require_running_pod(name)
 
         result = self._oc.run(
             "exec",
-            pod_name,
+            pname,
             "-n",
             self.namespace,
             "--",
@@ -930,12 +933,12 @@ class OpenShiftBackend:
             SessionNotFoundError: If session not found.
             ValueError: If session is not running.
         """
-        pod_name = self._require_running_pod(name)
+        pname = self._require_running_pod(name)
 
         self._oc.run(
             "cp",
             local_path,
-            f"{pod_name}:{remote_path}",
+            f"{pname}:{remote_path}",
             "-n",
             self.namespace,
             timeout=RSYNC_TIMEOUT,
@@ -953,11 +956,11 @@ class OpenShiftBackend:
             SessionNotFoundError: If session not found.
             ValueError: If session is not running.
         """
-        pod_name = self._require_running_pod(name)
+        pname = self._require_running_pod(name)
 
         self._oc.run(
             "cp",
-            f"{pod_name}:{remote_path}",
+            f"{pname}:{remote_path}",
             local_path,
             "-n",
             self.namespace,

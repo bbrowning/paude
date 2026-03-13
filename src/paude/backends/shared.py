@@ -122,3 +122,38 @@ def build_session_env(
         env.update(build_proxy_environment(proxy_name))
 
     return env, agent_args
+
+
+# ---------------------------------------------------------------------------
+# Resource naming helpers
+# ---------------------------------------------------------------------------
+
+
+def resource_name(session_name: str) -> str:
+    """Get the resource name for a session (container, StatefulSet, git remote)."""
+    return f"paude-{session_name}"
+
+
+def proxy_resource_name(session_name: str) -> str:
+    """Get the proxy resource name for a session (deployment, container, service)."""
+    return f"paude-proxy-{session_name}"
+
+
+def pod_name(session_name: str) -> str:
+    """Get the pod name for a session (OpenShift StatefulSet pod)."""
+    return f"paude-{session_name}-0"
+
+
+def pvc_name(session_name: str) -> str:
+    """Get the PVC name for a session (OpenShift workspace PVC)."""
+    return f"workspace-paude-{session_name}-0"
+
+
+def volume_name(session_name: str) -> str:
+    """Get the volume name for a session (Podman volume)."""
+    return f"paude-{session_name}-workspace"
+
+
+def network_name(session_name: str) -> str:
+    """Get the network name for a session (Podman network)."""
+    return f"paude-net-{session_name}"
