@@ -104,6 +104,7 @@ def build_session_env(
 
     env = dict(config.env)
     env.update(build_agent_env(agent.config))
+    env["PAUDE_HOST_WORKSPACE"] = str(config.workspace)
 
     agent_args = list(config.args)
     if config.yolo and agent.config.yolo_flag:
@@ -115,8 +116,9 @@ def build_session_env(
     if agent_args and agent.config.name == "claude":
         env["PAUDE_CLAUDE_ARGS"] = " ".join(agent_args)
 
+    env["PAUDE_SUPPRESS_PROMPTS"] = "1"
+
     if proxy_name is not None:
         env.update(build_proxy_environment(proxy_name))
-        env["PAUDE_SUPPRESS_PROMPTS"] = "1"
 
     return env, agent_args

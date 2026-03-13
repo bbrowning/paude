@@ -96,6 +96,7 @@ class OcClient:
                 capture_output=capture,
                 text=True,
                 input=input_data,
+                stdin=subprocess.DEVNULL if (capture and input_data is None) else None,
                 timeout=timeout_value,
             )
         except subprocess.TimeoutExpired:

@@ -329,10 +329,10 @@ class TestPodmanBackendCreateSession:
         assert env.get("PAUDE_SUPPRESS_PROMPTS") == "1"
 
     @patch("paude.backends.podman.backend.ContainerRunner")
-    def test_create_session_no_suppress_prompts_without_domains(
+    def test_create_session_sets_suppress_prompts_without_domains(
         self, mock_runner_class: MagicMock
     ) -> None:
-        """PAUDE_SUPPRESS_PROMPTS absent when allowed_domains is None."""
+        """PAUDE_SUPPRESS_PROMPTS is always set, even without allowed_domains."""
         mock_runner = MagicMock()
         mock_runner.container_exists.return_value = False
         mock_runner_class.return_value = mock_runner
@@ -352,7 +352,7 @@ class TestPodmanBackendCreateSession:
 
         call_args = mock_runner.create_container.call_args
         env = call_args[1]["env"]
-        assert "PAUDE_SUPPRESS_PROMPTS" not in env
+        assert env.get("PAUDE_SUPPRESS_PROMPTS") == "1"
 
 
 class TestPodmanBackendDeleteSession:

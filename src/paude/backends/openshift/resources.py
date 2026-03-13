@@ -166,7 +166,7 @@ class StatefulSetBuilder:
             "name": "paude",
             "image": self._image,
             "imagePullPolicy": image_pull_policy,
-            "command": ["/usr/local/bin/entrypoint-session.sh"],
+            "command": ["sleep", "infinity"],
             "stdin": True,
             "tty": True,
             "env": env_list,

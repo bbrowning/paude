@@ -72,7 +72,8 @@ class ClaudeAgent:
             "# Install Claude Code (as paude user)",
             "USER paude",
             f"WORKDIR {container_home}",
-            f"RUN umask 0002 && {self._config.install_script}",
+            f"RUN umask 0002 && {self._config.install_script}"
+            f" && rm -f {container_home}/.claude.json",
             "",
             "# Disable auto-updates (version controlled by image rebuild)",
             "ENV DISABLE_AUTOUPDATER=1",

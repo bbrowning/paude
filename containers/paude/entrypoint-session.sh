@@ -96,6 +96,35 @@ wait_for_git() {
     wait_for_path "/pvc/workspace/.git" "git repository" 120 "continue"
 }
 
+# Copy agent config from a source directory into $HOME.
+# Handles: recursive copy, config file relocation, plugin permissions, OpenShift ownership.
+# Args: source_path (directory containing agent config files)
+copy_agent_config() {
+    local source_path="$1"
+
+    mkdir -p "$HOME/$AGENT_CONFIG_DIR"
+    chmod g+rwX "$HOME/$AGENT_CONFIG_DIR" 2>/dev/null || true
+
+    # Copy entire directory structure (--no-preserve=ownership for OpenShift arbitrary UID)
+    cp -a --no-preserve=ownership "$source_path/." "$HOME/$AGENT_CONFIG_DIR/" 2>/dev/null || true
+
+    # Handle config file specially - goes to ~/.<config_file>
+    # Remove any image-baked config file first (may have wrong ownership on OpenShift)
+    if [[ -n "$AGENT_CONFIG_FILE" ]] && [[ -n "$AGENT_CONFIG_FILE_BASENAME" ]] && [[ -f "$HOME/$AGENT_CONFIG_DIR/$AGENT_CONFIG_FILE_BASENAME" ]]; then
+        rm -f "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
+        mv "$HOME/$AGENT_CONFIG_DIR/$AGENT_CONFIG_FILE_BASENAME" "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
+        chmod g+rw "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
+    fi
+
+    # Ensure plugins directory is writable (agent may update metadata)
+    if [[ -d "$HOME/$AGENT_CONFIG_DIR/plugins" ]]; then
+        chmod -R g+rwX "$HOME/$AGENT_CONFIG_DIR/plugins" 2>/dev/null || true
+    fi
+
+    # g+rwX sets read/write and execute on directories (X = execute only if dir)
+    chmod -R g+rwX "$HOME/$AGENT_CONFIG_DIR" 2>/dev/null || true
+}
+
 # Set up credentials from tmpfs-based storage (/credentials)
 setup_credentials() {
     local config_path="/credentials"
@@ -114,25 +143,7 @@ setup_credentials() {
 
     # Copy agent config (need to be writable, so copy instead of symlink)
     if [[ -d "$config_path/$AGENT_NAME" ]]; then
-        mkdir -p "$HOME/$AGENT_CONFIG_DIR"
-        chmod g+rwX "$HOME/$AGENT_CONFIG_DIR" 2>/dev/null || true
-
-        # Copy entire synced directory structure
-        cp -a "$config_path/$AGENT_NAME/." "$HOME/$AGENT_CONFIG_DIR/" 2>/dev/null || true
-
-        # Handle config file specially - goes to ~/.<config_file>
-        if [[ -n "$AGENT_CONFIG_FILE" ]] && [[ -n "$AGENT_CONFIG_FILE_BASENAME" ]] && [[ -f "$HOME/$AGENT_CONFIG_DIR/$AGENT_CONFIG_FILE_BASENAME" ]]; then
-            mv "$HOME/$AGENT_CONFIG_DIR/$AGENT_CONFIG_FILE_BASENAME" "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
-            chmod g+rw "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
-        fi
-
-        # Ensure plugins directory is writable (agent may update metadata)
-        if [[ -d "$HOME/$AGENT_CONFIG_DIR/plugins" ]]; then
-            chmod -R g+rwX "$HOME/$AGENT_CONFIG_DIR/plugins" 2>/dev/null || true
-        fi
-
-        # g+rwX sets read/write and execute on directories (X = execute only if dir)
-        chmod -R g+rwX "$HOME/$AGENT_CONFIG_DIR" 2>/dev/null || true
+        copy_agent_config "$config_path/$AGENT_NAME"
     fi
 
     # Set up gitconfig via symlink
@@ -233,24 +244,7 @@ fi
 
 # Legacy: Copy seed files if provided via Secret mount (Podman backend fallback)
 if [[ -d "$AGENT_SEED_DIR" ]] && [[ ! -d /credentials ]]; then
-    mkdir -p "$HOME/$AGENT_CONFIG_DIR"
-    chmod g+rwX "$HOME/$AGENT_CONFIG_DIR" 2>/dev/null || true
-
-    # Copy entire seed directory structure (includes commands/, plugins/, etc.)
-    cp -a "$AGENT_SEED_DIR/." "$HOME/$AGENT_CONFIG_DIR/" 2>/dev/null || true
-
-    # Handle config file specially - goes to ~/.<config_file>
-    if [[ -n "$AGENT_CONFIG_FILE_BASENAME" ]] && [[ -f "$HOME/$AGENT_CONFIG_DIR/$AGENT_CONFIG_FILE_BASENAME" ]]; then
-        mv "$HOME/$AGENT_CONFIG_DIR/$AGENT_CONFIG_FILE_BASENAME" "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
-        chmod g+rw "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
-    fi
-
-    # Ensure plugins directory is writable (agent may update metadata)
-    if [[ -d "$HOME/$AGENT_CONFIG_DIR/plugins" ]]; then
-        chmod -R g+rwX "$HOME/$AGENT_CONFIG_DIR/plugins" 2>/dev/null || true
-    fi
-
-    chmod -R g+rwX "$HOME/$AGENT_CONFIG_DIR" 2>/dev/null || true
+    copy_agent_config "$AGENT_SEED_DIR"
 fi
 
 # Also check for separate config file seed mount (Podman backend)
@@ -289,6 +283,7 @@ apply_sandbox_config() {
             else
                 jq -n --arg ws "$workspace" '{($ws): "TRUST_FOLDER"}' > "$trusted_json"
             fi
+            chmod g+rw "$trusted_json" 2>/dev/null || true
             ;;
         cursor)
             # Cursor CLI sandbox config
@@ -310,6 +305,7 @@ apply_sandbox_config() {
             else
                 jq -n '{"version": 1, "network": {"useHttp1ForAgent": true}}' > "$cli_config"
             fi
+            chmod g+rw "$cli_config" 2>/dev/null || true
 
             # Sync Cursor auth.json (accessToken/refreshToken) from host
             mkdir -p "$HOME/.config/cursor" 2>/dev/null || true
@@ -341,13 +337,16 @@ TRUST
             # Claude Code sandbox config
             local config_file="$HOME/$AGENT_CONFIG_FILE"
             local settings_json="$HOME/$AGENT_CONFIG_DIR/settings.json"
+            local host_ws="${PAUDE_HOST_WORKSPACE:-}"
 
-            # Suppress trust prompt and onboarding
+            # Suppress trust prompt and onboarding, rewriting host project entry
             if [[ -f "$config_file" ]]; then
-                jq --arg ws "$workspace" '. * {
-                    hasCompletedOnboarding: true,
-                    projects: {($ws): {hasTrustDialogAccepted: true}}
-                }' "$config_file" > "${config_file}.tmp" \
+                jq --arg ws "$workspace" --arg host_ws "$host_ws" '
+                    (.projects[$host_ws] // {}) as $host_data |
+                    ($host_data * {hasTrustDialogAccepted: true}) as $ws_entry |
+                    .hasCompletedOnboarding = true |
+                    .projects = {($ws): $ws_entry}
+                ' "$config_file" > "${config_file}.tmp" \
                     && mv "${config_file}.tmp" "$config_file"
             else
                 jq -n --arg ws "$workspace" '{
@@ -355,6 +354,7 @@ TRUST
                     projects: {($ws): {hasTrustDialogAccepted: true}}
                 }' > "$config_file"
             fi
+            chmod g+rw "$config_file" 2>/dev/null || true
 
             # Suppress bypass permissions warning when yolo flag is in args
             if [[ "${AGENT_ARGS:-}" == *"--dangerously-skip-permissions"* ]]; then
@@ -366,12 +366,13 @@ TRUST
                 else
                     echo "$skip_patch" > "$settings_json"
                 fi
+                chmod g+rw "$settings_json" 2>/dev/null || true
             fi
             ;;
     esac
 }
 
-apply_sandbox_config 2>/dev/null || true
+apply_sandbox_config 2>>/tmp/sandbox-config.log || echo "apply_sandbox_config failed: $?" >> /tmp/sandbox-config.log
 
 # Session workspace setup
 # For persistent sessions, workspace is at /workspace (mounted volume)

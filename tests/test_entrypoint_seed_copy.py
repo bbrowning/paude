@@ -50,7 +50,7 @@ def _build_script(home_dir: str, seed_dir: str, credentials_dir: str | None) -> 
             mkdir -p "$HOME/.claude"
             chmod g+rwX "$HOME/.claude" 2>/dev/null || true
 
-            cp -a "$SEED_DIR/." "$HOME/.claude/" 2>/dev/null || true
+            cp -a --no-preserve=ownership "$SEED_DIR/." "$HOME/.claude/" 2>/dev/null || true
 
             if [[ -f "$HOME/.claude/claude.json" ]]; then
                 mv "$HOME/.claude/claude.json" "$HOME/.claude.json" 2>/dev/null || true
@@ -86,12 +86,12 @@ class TestEntrypointContract:
     def test_entrypoint_uses_cp_archive(self) -> None:
         """The entrypoint must use 'cp -a' for seed copy, not a file loop."""
         content = ENTRYPOINT_PATH.read_text()
-        assert (
-            "cp -a /tmp/claude.seed/." in content
-            or 'cp -a "$SEED_DIR/."' in content
-            or "cp -a /tmp/claude.seed/" in content
-            or 'cp -a "$AGENT_SEED_DIR/."' in content
-        ), "entrypoint-session.sh must use 'cp -a' for recursive seed copy"
+        assert "cp -a" in content, (
+            "entrypoint-session.sh must use 'cp -a' for recursive seed copy"
+        )
+        assert "$AGENT_SEED_DIR" in content or "/tmp/claude.seed" in content, (
+            "entrypoint-session.sh must reference seed directory variable"
+        )
 
     def test_entrypoint_has_apply_sandbox_config(self) -> None:
         """The entrypoint must contain the apply_sandbox_config function."""
@@ -120,7 +120,10 @@ class TestEntrypointContract:
         """Config file must be moved (not copied separately) after cp -a."""
         content = ENTRYPOINT_PATH.read_text()
         # Scope to the Podman seed block (uses $AGENT_SEED_DIR or /tmp/claude.seed)
-        cp_pos = content.find('cp -a "$AGENT_SEED_DIR/."')
+        # Find the cp -a in copy_agent_config function (source_path variable)
+        cp_pos = content.find("cp -a --no-preserve=ownership")
+        if cp_pos == -1:
+            cp_pos = content.find('cp -a "$AGENT_SEED_DIR/."')
         if cp_pos == -1:
             cp_pos = content.find("cp -a /tmp/claude.seed/.")
         assert cp_pos != -1, "Missing cp -a command for seed dir"
@@ -406,10 +409,12 @@ def _build_sandbox_script(
     workspace: str,
     suppress_prompts: bool,
     claude_args: str = "",
+    host_workspace: str = "",
 ) -> str:
     """Build a script that replicates the apply_sandbox_config logic."""
     env_lines = f'export HOME="{home_dir}"\n'
     env_lines += f'export PAUDE_WORKSPACE="{workspace}"\n'
+    env_lines += f'export PAUDE_HOST_WORKSPACE="{host_workspace}"\n'
     if suppress_prompts:
         env_lines += 'export PAUDE_SUPPRESS_PROMPTS="1"\n'
     else:
@@ -431,12 +436,15 @@ def _build_sandbox_script(
             local workspace="${{PAUDE_WORKSPACE:-/workspace}}"
             local claude_json="$HOME/.claude.json"
             local settings_json="$HOME/.claude/settings.json"
+            local host_ws="${{PAUDE_HOST_WORKSPACE:-}}"
 
             if [[ -f "$claude_json" ]]; then
-                jq --arg ws "$workspace" '. * {{
-                    hasCompletedOnboarding: true,
-                    projects: {{($ws): {{hasTrustDialogAccepted: true}}}}
-                }}' "$claude_json" > "${{claude_json}}.tmp" \\
+                jq --arg ws "$workspace" --arg host_ws "$host_ws" '
+                    (.projects[$host_ws] // {{}}) as $host_data |
+                    ($host_data * {{hasTrustDialogAccepted: true}}) as $ws_entry |
+                    .hasCompletedOnboarding = true |
+                    .projects = {{($ws): $ws_entry}}
+                ' "$claude_json" > "${{claude_json}}.tmp" \\
                     && mv "${{claude_json}}.tmp" "$claude_json"
             else
                 jq -n --arg ws "$workspace" '{{
@@ -631,3 +639,159 @@ class TestGeminiSandboxConfig:
         assert "TRUST_FOLDER" in content, (
             "entrypoint-session.sh must set TRUST_FOLDER for Gemini"
         )
+
+
+class TestProjectRewriting:
+    """Tests for rewriting host project entries to container workspace path."""
+
+    def test_rewrites_host_project_to_container_path(self, tmp_path: Path) -> None:
+        """Host project data is copied to the container workspace key."""
+        home = tmp_path / "home"
+        home.mkdir()
+        workspace = "/pvc/workspace"
+        host_ws = "/Volumes/SourceCode/paude"
+
+        existing = {
+            "hasCompletedOnboarding": True,
+            "projects": {
+                host_ws: {
+                    "hasTrustDialogAccepted": True,
+                    "projectOnboardingSeenCount": 3,
+                    "hasCompletedProjectOnboarding": True,
+                    "allowedTools": ["Bash", "Read"],
+                }
+            },
+        }
+        (home / ".claude.json").write_text(json.dumps(existing))
+
+        script = _build_sandbox_script(
+            str(home), workspace, suppress_prompts=True, host_workspace=host_ws
+        )
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        claude_json = json.loads((home / ".claude.json").read_text())
+        ws_entry = claude_json["projects"][workspace]
+        assert ws_entry["hasTrustDialogAccepted"] is True
+        assert ws_entry["projectOnboardingSeenCount"] == 3
+        assert ws_entry["hasCompletedProjectOnboarding"] is True
+        assert ws_entry["allowedTools"] == ["Bash", "Read"]
+
+    def test_removes_other_project_entries(self, tmp_path: Path) -> None:
+        """Only the container workspace key survives after rewriting."""
+        home = tmp_path / "home"
+        home.mkdir()
+        workspace = "/pvc/workspace"
+        host_ws = "/Volumes/SourceCode/paude"
+
+        existing = {
+            "projects": {
+                host_ws: {"hasTrustDialogAccepted": True},
+                "/other/project": {"hasTrustDialogAccepted": True},
+            }
+        }
+        (home / ".claude.json").write_text(json.dumps(existing))
+
+        script = _build_sandbox_script(
+            str(home), workspace, suppress_prompts=True, host_workspace=host_ws
+        )
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        claude_json = json.loads((home / ".claude.json").read_text())
+        assert list(claude_json["projects"].keys()) == [workspace]
+
+    def test_preserves_root_level_keys(self, tmp_path: Path) -> None:
+        """Top-level .claude.json keys are preserved during rewrite."""
+        home = tmp_path / "home"
+        home.mkdir()
+        workspace = "/pvc/workspace"
+        host_ws = "/Volumes/SourceCode/paude"
+
+        existing = {
+            "customKey": "preserved",
+            "numericField": 42,
+            "projects": {host_ws: {"hasTrustDialogAccepted": True}},
+        }
+        (home / ".claude.json").write_text(json.dumps(existing))
+
+        script = _build_sandbox_script(
+            str(home), workspace, suppress_prompts=True, host_workspace=host_ws
+        )
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        claude_json = json.loads((home / ".claude.json").read_text())
+        assert claude_json["customKey"] == "preserved"
+        assert claude_json["numericField"] == 42
+
+    def test_no_host_workspace_falls_back(self, tmp_path: Path) -> None:
+        """Without host workspace env var, creates minimal entry."""
+        home = tmp_path / "home"
+        home.mkdir()
+        workspace = "/pvc/workspace"
+
+        existing = {"someKey": "value"}
+        (home / ".claude.json").write_text(json.dumps(existing))
+
+        script = _build_sandbox_script(
+            str(home), workspace, suppress_prompts=True, host_workspace=""
+        )
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        claude_json = json.loads((home / ".claude.json").read_text())
+        assert claude_json["projects"][workspace]["hasTrustDialogAccepted"] is True
+        assert claude_json["someKey"] == "value"
+
+    def test_host_project_not_found_falls_back(self, tmp_path: Path) -> None:
+        """Unknown host path produces minimal entry with just trust flag."""
+        home = tmp_path / "home"
+        home.mkdir()
+        workspace = "/pvc/workspace"
+        host_ws = "/nonexistent/path"
+
+        existing = {
+            "projects": {
+                "/some/other/project": {"someData": True},
+            }
+        }
+        (home / ".claude.json").write_text(json.dumps(existing))
+
+        script = _build_sandbox_script(
+            str(home), workspace, suppress_prompts=True, host_workspace=host_ws
+        )
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        claude_json = json.loads((home / ".claude.json").read_text())
+        ws_entry = claude_json["projects"][workspace]
+        assert ws_entry == {"hasTrustDialogAccepted": True}
+
+    def test_trust_flag_always_set(self, tmp_path: Path) -> None:
+        """hasTrustDialogAccepted is true even if host had it false."""
+        home = tmp_path / "home"
+        home.mkdir()
+        workspace = "/pvc/workspace"
+        host_ws = "/Volumes/SourceCode/paude"
+
+        existing = {
+            "projects": {
+                host_ws: {
+                    "hasTrustDialogAccepted": False,
+                    "hasCompletedProjectOnboarding": True,
+                }
+            }
+        }
+        (home / ".claude.json").write_text(json.dumps(existing))
+
+        script = _build_sandbox_script(
+            str(home), workspace, suppress_prompts=True, host_workspace=host_ws
+        )
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        claude_json = json.loads((home / ".claude.json").read_text())
+        ws_entry = claude_json["projects"][workspace]
+        assert ws_entry["hasTrustDialogAccepted"] is True
+        assert ws_entry["hasCompletedProjectOnboarding"] is True
