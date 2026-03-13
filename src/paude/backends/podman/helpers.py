@@ -18,6 +18,10 @@ from paude.backends.shared import (
     PAUDE_LABEL_SESSION,
     PAUDE_LABEL_WORKSPACE,
     decode_path,
+    network_name,
+    proxy_resource_name,
+    resource_name,
+    volume_name,
 )
 from paude.container.runner import ContainerRunner
 
@@ -77,24 +81,17 @@ def _generate_session_name(workspace: Path) -> str:
     return f"{project_name}-{suffix}"
 
 
-def container_name(session_name: str) -> str:
-    """Get container name for a session."""
-    return f"paude-{session_name}"
+# Re-export shared naming helpers with Podman-specific aliases
+container_name = resource_name
+proxy_container_name = proxy_resource_name
 
-
-def volume_name(session_name: str) -> str:
-    """Get volume name for a session."""
-    return f"paude-{session_name}-workspace"
-
-
-def proxy_container_name(session_name: str) -> str:
-    """Get proxy container name for a session."""
-    return f"paude-proxy-{session_name}"
-
-
-def network_name(session_name: str) -> str:
-    """Get internal network name for a session."""
-    return f"paude-net-{session_name}"
+# Explicit re-exports for mypy
+__all__ = [
+    "container_name",
+    "proxy_container_name",
+    "volume_name",
+    "network_name",
+]
 
 
 def find_container_by_session_name(

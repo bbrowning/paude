@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from paude.backends.shared import PAUDE_LABEL_AGENT, encode_path
+from paude.backends.shared import PAUDE_LABEL_AGENT, encode_path, resource_name
 from paude.constants import CONTAINER_WORKSPACE
 
 
@@ -111,7 +111,7 @@ class StatefulSetBuilder:
 
     def _build_metadata(self, created_at: str) -> dict[str, Any]:
         """Build the metadata section of the StatefulSet spec."""
-        sts_name = f"paude-{self._session_name}"
+        sts_name = resource_name(self._session_name)
         metadata: dict[str, Any] = {
             "name": sts_name,
             "namespace": self._namespace,
@@ -194,7 +194,7 @@ class StatefulSetBuilder:
         Returns:
             StatefulSet spec as a dictionary.
         """
-        sts_name = f"paude-{self._session_name}"
+        sts_name = resource_name(self._session_name)
         created_at = datetime.now(UTC).isoformat()
 
         return {
