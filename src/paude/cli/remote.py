@@ -353,6 +353,7 @@ def _setup_after_clone(
 ) -> None:
     """Post-clone setup: add ext:: remote, push delta, set base ref."""
     from paude.git_remote import (
+        count_local_only_commits,
         git_push_to_remote,
         set_base_ref_in_container_openshift,
         set_base_ref_in_container_podman,
@@ -366,15 +367,26 @@ def _setup_after_clone(
         push=False,
     )
 
-    # Push delta (local-only commits). If local is behind or diverged from
-    # origin, this will fail — that's fine, the container already has origin's code.
+    # Check if local has commits not in origin. If local is at or behind
+    # origin, skip the push — the container already has the right code.
     remote_name = f"paude-{session_name}"
-    typer.echo("Pushing local commits to container...")
-    if not git_push_to_remote(remote_name, branch):
-        typer.echo(
-            "  Local branch is behind or diverged from origin. "
-            "Container has latest origin code.",
-        )
+    local_count = count_local_only_commits(branch)
+
+    if local_count is None or local_count > 0:
+        # Either we can't tell (no tracking ref) or there are local commits.
+        # Push quietly — if it fails, the container still has origin's code.
+        if local_count is not None:
+            plural = "commit" if local_count == 1 else "commits"
+            n_desc = f"{local_count} local {plural}"
+        else:
+            n_desc = "local commits"
+        typer.echo(f"Pushing {n_desc} to container...")
+        if not git_push_to_remote(remote_name, branch, quiet=True):
+            if local_count is not None:
+                typer.echo(
+                    "  Note: Could not push local commits (branch has diverged "
+                    "from origin). Container has latest origin code.",
+                )
 
     # Set base ref
     if backend_type == "podman":

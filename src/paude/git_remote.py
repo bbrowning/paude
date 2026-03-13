@@ -622,12 +622,15 @@ def clone_from_origin_openshift(
         return False
 
 
-def git_push_to_remote(remote_name: str, branch: str | None = None) -> bool:
+def git_push_to_remote(
+    remote_name: str, branch: str | None = None, *, quiet: bool = False
+) -> bool:
     """Push to a git remote.
 
     Args:
         remote_name: Name of the remote to push to.
         branch: Branch to push (uses current branch if None).
+        quiet: If True, capture output instead of showing it.
 
     Returns:
         True if successful, False if failed.
@@ -635,6 +638,26 @@ def git_push_to_remote(remote_name: str, branch: str | None = None) -> bool:
     branch = branch or get_current_branch() or "main"
     result = subprocess.run(
         ["git", "push", remote_name, branch],
-        capture_output=False,  # Show output to user
+        capture_output=quiet,
     )
     return result.returncode == 0
+
+
+def count_local_only_commits(branch: str) -> int | None:
+    """Count commits in HEAD that are not in origin/<branch>.
+
+    Returns:
+        Number of local-only commits, or None if comparison is not possible
+        (e.g., no origin remote, tracking ref not fetched).
+    """
+    result = subprocess.run(
+        ["git", "rev-list", "--count", f"origin/{branch}..HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        return int(result.stdout.strip())
+    except ValueError:
+        return None

@@ -1342,3 +1342,91 @@ class TestCloneFromOriginOpenshift:
         )
 
         assert result is False
+
+
+class TestCountLocalOnlyCommits:
+    """Tests for count_local_only_commits."""
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_count_when_ahead(self, mock_run) -> None:
+        """Return commit count when local is ahead of origin."""
+        from paude.git_remote import count_local_only_commits
+
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "3\n"
+
+        result = count_local_only_commits("main")
+
+        assert result == 3
+        mock_run.assert_called_once_with(
+            ["git", "rev-list", "--count", "origin/main..HEAD"],
+            capture_output=True,
+            text=True,
+        )
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_zero_when_at_origin(self, mock_run) -> None:
+        """Return 0 when local is at or behind origin."""
+        from paude.git_remote import count_local_only_commits
+
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "0\n"
+
+        result = count_local_only_commits("main")
+
+        assert result == 0
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_none_when_no_tracking(self, mock_run) -> None:
+        """Return None when origin ref doesn't exist."""
+        from paude.git_remote import count_local_only_commits
+
+        mock_run.return_value.returncode = 128
+
+        result = count_local_only_commits("main")
+
+        assert result is None
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_none_on_invalid_output(self, mock_run) -> None:
+        """Return None when output is not a number."""
+        from paude.git_remote import count_local_only_commits
+
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "not-a-number\n"
+
+        result = count_local_only_commits("main")
+
+        assert result is None
+
+
+class TestGitPushToRemoteQuiet:
+    """Tests for git_push_to_remote quiet parameter."""
+
+    @patch("paude.git_remote.get_current_branch")
+    @patch("paude.git_remote.subprocess.run")
+    def test_quiet_captures_output(self, mock_run, mock_branch) -> None:
+        """When quiet=True, capture_output should be True."""
+        from paude.git_remote import git_push_to_remote
+
+        mock_branch.return_value = "main"
+        mock_run.return_value.returncode = 0
+
+        git_push_to_remote("paude-test", quiet=True)
+
+        _, kwargs = mock_run.call_args
+        assert kwargs["capture_output"] is True
+
+    @patch("paude.git_remote.get_current_branch")
+    @patch("paude.git_remote.subprocess.run")
+    def test_default_shows_output(self, mock_run, mock_branch) -> None:
+        """By default, capture_output should be False."""
+        from paude.git_remote import git_push_to_remote
+
+        mock_branch.return_value = "main"
+        mock_run.return_value.returncode = 0
+
+        git_push_to_remote("paude-test")
+
+        _, kwargs = mock_run.call_args
+        assert kwargs["capture_output"] is False
