@@ -5,9 +5,12 @@ CONFIG_FILE=/tmp/squid.conf
 # Copy base config to writable location
 cp /etc/squid/squid.conf "$CONFIG_FILE"
 
-# Inject DNS server if provided
+# Inject DNS server if provided, always include public fallbacks
+FALLBACK_DNS="8.8.8.8 1.1.1.1"
 if [[ -n "$SQUID_DNS" ]]; then
-    echo "dns_nameservers $SQUID_DNS" >> "$CONFIG_FILE"
+    echo "dns_nameservers $SQUID_DNS $FALLBACK_DNS" >> "$CONFIG_FILE"
+else
+    echo "dns_nameservers $FALLBACK_DNS" >> "$CONFIG_FILE"
 fi
 
 # If ALLOWED_DOMAINS is set, replace the default allowed_domains ACL
