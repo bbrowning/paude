@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import platform
 import subprocess
+import sys
 
 
 def is_macos() -> bool:
@@ -35,6 +36,10 @@ def get_podman_machine_dns() -> str | None:
             text=True,
         )
         if inspect_result.returncode != 0:
+            print(
+                "Warning: No Podman machine found. Proxy will use fallback DNS.",
+                file=sys.stderr,
+            )
             return None
 
         # Get DNS IP from inside the podman VM's resolv.conf
@@ -50,6 +55,16 @@ def get_podman_machine_dns() -> str | None:
                 if len(parts) >= 2 and parts[0] == "nameserver":
                     return parts[1]
     except subprocess.SubprocessError:
-        pass
+        print(
+            "Warning: Failed to extract DNS from Podman VM. "
+            "Proxy will use fallback DNS.",
+            file=sys.stderr,
+        )
+        return None
 
+    print(
+        "Warning: No nameserver found in Podman VM resolv.conf. "
+        "Proxy will use fallback DNS.",
+        file=sys.stderr,
+    )
     return None
