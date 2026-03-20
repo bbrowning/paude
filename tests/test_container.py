@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -506,6 +507,60 @@ class TestContainerRunner:
         assert "-t" in call_args
         assert "1" in call_args
         assert "test-container" in call_args
+
+    @patch("paude.container.runner.subprocess.run")
+    def test_create_secret_succeeds_on_clean_install(self, mock_run):
+        """create_secret works on clean install (no prior secret)."""
+        mock_run.return_value = MagicMock(returncode=0)
+        from paude.container.runner import ContainerRunner
+
+        runner = ContainerRunner()
+        runner.create_secret("my-secret", Path("/tmp/creds.json"))
+
+        # Only one call needed when secret doesn't already exist
+        mock_run.assert_called_once_with(
+            ["podman", "secret", "create", "my-secret", "/tmp/creds.json"],
+            capture_output=True,
+            check=True,
+        )
+
+    @patch("paude.container.runner.subprocess.run")
+    def test_create_secret_replaces_existing_secret(self, mock_run):
+        """create_secret removes and retries when secret already exists."""
+        mock_run.side_effect = [
+            subprocess.CalledProcessError(1, "podman"),  # create fails (exists)
+            MagicMock(returncode=0),  # secret rm succeeds
+            MagicMock(returncode=0),  # secret create succeeds on retry
+        ]
+        from paude.container.runner import ContainerRunner
+
+        runner = ContainerRunner()
+        runner.create_secret("my-secret", Path("/tmp/creds.json"))
+
+        assert mock_run.call_count == 3
+        # First call: create attempt
+        assert mock_run.call_args_list[0][0][0] == [
+            "podman",
+            "secret",
+            "create",
+            "my-secret",
+            "/tmp/creds.json",
+        ]
+        # Second call: remove existing secret
+        assert mock_run.call_args_list[1][0][0] == [
+            "podman",
+            "secret",
+            "rm",
+            "my-secret",
+        ]
+        # Third call: retry create
+        assert mock_run.call_args_list[2][0][0] == [
+            "podman",
+            "secret",
+            "create",
+            "my-secret",
+            "/tmp/creds.json",
+        ]
 
 
 class TestNetworkManager:

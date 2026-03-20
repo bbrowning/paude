@@ -29,6 +29,10 @@ class ContainerRunner:
     def create_secret(self, name: str, source_file: Path) -> None:
         """(Re)Create a Podman secret from a file.
 
+        Tries to create the secret directly. If it already exists, removes
+        it and retries. This avoids using ``--replace=true`` which fails on
+        some Podman versions when the secret does not already exist.
+
         Args:
             name: Secret name.
             source_file: Path to the source file.
@@ -36,11 +40,19 @@ class ContainerRunner:
         Raises:
             subprocess.CalledProcessError: If secret creation fails.
         """
-        subprocess.run(
-            ["podman", "secret", "create", "--replace=true", name, str(source_file)],
-            capture_output=True,
-            check=True,
-        )
+        try:
+            subprocess.run(
+                ["podman", "secret", "create", name, str(source_file)],
+                capture_output=True,
+                check=True,
+            )
+        except subprocess.CalledProcessError:
+            self.remove_secret(name)
+            subprocess.run(
+                ["podman", "secret", "create", name, str(source_file)],
+                capture_output=True,
+                check=True,
+            )
 
     def remove_secret(self, name: str) -> None:
         """Remove a Podman secret, ignoring errors.
