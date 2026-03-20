@@ -178,21 +178,16 @@ fi
 # Install agent if not already installed
 # This allows the base image to work without the agent pre-installed
 # The agent gets installed to the PVC so it persists across restarts
+# Check if the agent binary is available in any known location
+agent_binary_exists() {
+    [[ -x "/pvc/.local/bin/$AGENT_PROCESS" ]] \
+        || [[ -x "$HOME/.local/bin/$AGENT_PROCESS" ]] \
+        || command -v "$AGENT_PROCESS" >/dev/null 2>&1
+}
+
 install_agent() {
-    local agent_bin="/pvc/.local/bin/$AGENT_PROCESS"
-
     # Check if agent is already installed and executable
-    if [[ -x "$agent_bin" ]]; then
-        return 0
-    fi
-
-    # Also check if it's in the home directory (from image build)
-    if [[ -x "$HOME/.local/bin/$AGENT_PROCESS" ]]; then
-        return 0
-    fi
-
-    # Check if agent is available in system PATH (e.g., npm global install)
-    if command -v "$AGENT_PROCESS" >/dev/null 2>&1; then
+    if agent_binary_exists; then
         return 0
     fi
 
@@ -203,12 +198,23 @@ install_agent() {
     export CLAUDE_INSTALL_DIR=/pvc/.local
 
     # Install using the agent's install script
+    # Enable pipefail so curl|bash failures propagate (restore after)
+    set -o pipefail
     if eval "$AGENT_INSTALL_SCRIPT" 2>&1; then
         echo "$AGENT_NAME installed successfully." >&2
     else
-        echo "Warning: Failed to install $AGENT_NAME. You may need to install it manually." >&2
+        echo "ERROR: Failed to install $AGENT_NAME. You may need to install it manually." >&2
+        set +o pipefail
         return 1
     fi
+    set +o pipefail
+
+    # Verify the agent binary actually exists (defense against silent install failures)
+    if agent_binary_exists; then
+        return 0
+    fi
+    echo "ERROR: $AGENT_NAME installation failed — binary not found after install." >&2
+    return 1
 }
 
 # Add PVC local bin to PATH (for agent and other tools installed to PVC)

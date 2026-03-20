@@ -12,6 +12,7 @@ from paude.agents.base import (
     AgentConfig,
     build_environment_from_config,
     build_secret_environment_from_config,
+    pipefail_install_lines,
 )
 from paude.agents.claude import ClaudeAgent
 from paude.agents.cursor import CursorAgent
@@ -164,6 +165,26 @@ class TestClaudeAgentDockerfile:
         lines = ClaudeAgent().dockerfile_install_lines("/custom/home")
         text = "\n".join(lines)
         assert "/custom/home" in text
+
+    def test_pipefail_shell(self) -> None:
+        lines = ClaudeAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "pipefail" in text
+
+    def test_binary_verification(self) -> None:
+        lines = ClaudeAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "test -x /home/paude/.local/bin/claude" in text
+
+    def test_shell_reset(self) -> None:
+        lines = ClaudeAgent().dockerfile_install_lines("/home/paude")
+        assert 'SHELL ["/bin/sh", "-c"]' in lines
+
+    def test_error_message(self) -> None:
+        lines = ClaudeAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "ERROR" in text
+        assert "installation failed" in text
 
 
 class TestClaudeAgentLaunchCommand:
@@ -334,6 +355,11 @@ class TestGeminiAgentDockerfile:
         lines = GeminiAgent().dockerfile_install_lines("/home/paude")
         text = "\n".join(lines)
         assert "chmod" not in text
+
+    def test_no_pipefail(self) -> None:
+        lines = GeminiAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "pipefail" not in text
 
 
 class TestGeminiAgentLaunchCommand:
@@ -515,6 +541,26 @@ class TestCursorAgentDockerfile:
         text = "\n".join(lines)
         assert "/custom/home" in text
 
+    def test_pipefail_shell(self) -> None:
+        lines = CursorAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "pipefail" in text
+
+    def test_binary_verification(self) -> None:
+        lines = CursorAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "test -x /home/paude/.local/bin/agent" in text
+
+    def test_shell_reset(self) -> None:
+        lines = CursorAgent().dockerfile_install_lines("/home/paude")
+        assert 'SHELL ["/bin/sh", "-c"]' in lines
+
+    def test_error_message(self) -> None:
+        lines = CursorAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "ERROR" in text
+        assert "installation failed" in text
+
 
 class TestCursorAgentLaunchCommand:
     """Tests for CursorAgent.launch_command."""
@@ -653,6 +699,48 @@ class TestCursorAgentSandboxConfig:
         script = CursorAgent().apply_sandbox_config("/home/paude", "/pvc/workspace", "")
         assert "/pvc/workspace" in script
         assert "workspacePath" in script
+
+
+class TestPipefailInstallLines:
+    """Tests for the shared pipefail_install_lines helper."""
+
+    def _config(self) -> AgentConfig:
+        return AgentConfig(
+            name="test",
+            display_name="Test Agent",
+            process_name="testagent",
+            session_name="test",
+            install_script="curl -fsSL https://example.com/install.sh | bash",
+        )
+
+    def test_sets_pipefail_shell(self) -> None:
+        lines = pipefail_install_lines(self._config(), "/home/paude")
+        assert 'SHELL ["/bin/bash", "-o", "pipefail", "-c"]' in lines
+
+    def test_resets_shell(self) -> None:
+        lines = pipefail_install_lines(self._config(), "/home/paude")
+        assert 'SHELL ["/bin/sh", "-c"]' in lines
+
+    def test_verifies_binary(self) -> None:
+        lines = pipefail_install_lines(self._config(), "/home/paude")
+        text = "\n".join(lines)
+        assert "test -x /home/paude/.local/bin/testagent" in text
+
+    def test_error_message(self) -> None:
+        lines = pipefail_install_lines(self._config(), "/home/paude")
+        text = "\n".join(lines)
+        assert "ERROR" in text
+        assert "installation failed" in text
+
+    def test_uses_display_name_in_error(self) -> None:
+        lines = pipefail_install_lines(self._config(), "/home/paude")
+        text = "\n".join(lines)
+        assert "Test Agent" in text
+
+    def test_uses_container_home(self) -> None:
+        lines = pipefail_install_lines(self._config(), "/custom/home")
+        text = "\n".join(lines)
+        assert "/custom/home/.local/bin/testagent" in text
 
 
 class TestBuildEnvironmentFromConfig:

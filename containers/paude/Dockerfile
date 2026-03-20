@@ -44,7 +44,10 @@ ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
 # Install uv package manager system-wide (available to root for pip_install builds)
-RUN curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh \
+    && uv --version
+SHELL ["/bin/sh", "-c"]
 
 # Install pre-commit for automatic hook support in git-synced repos
 RUN pip3.12 install pre-commit

@@ -89,6 +89,22 @@ def build_secret_environment_from_config(config: AgentConfig) -> dict[str, str]:
     return env
 
 
+def pipefail_install_lines(config: AgentConfig, container_home: str) -> list[str]:
+    """Generate Dockerfile lines for a curl|bash install with pipefail and verification.
+
+    Wraps the install in a bash pipefail SHELL so curl failures propagate,
+    then verifies the binary exists. Resets SHELL afterward.
+    """
+    binary = f"{container_home}/{config.install_dir}/{config.process_name}"
+    return [
+        'SHELL ["/bin/bash", "-o", "pipefail", "-c"]',
+        f"RUN umask 0002 && {config.install_script}"
+        f' && test -x {binary} || (echo "ERROR: {config.display_name}'
+        f' installation failed — binary not found at {binary}" && exit 1)',
+        'SHELL ["/bin/sh", "-c"]',
+    ]
+
+
 class Agent(Protocol):
     """Protocol for CLI coding agent implementations."""
 

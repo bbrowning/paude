@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from paude.agents.base import AgentConfig, build_environment_from_config
+from paude.agents.base import (
+    AgentConfig,
+    build_environment_from_config,
+    pipefail_install_lines,
+)
 from paude.mounts import resolve_path
 
 _CURSOR_SECRET_VARS = [
@@ -50,7 +54,7 @@ class CursorAgent:
             "# Install Cursor CLI",
             "USER paude",
             f"WORKDIR {container_home}",
-            f"RUN umask 0002 && {self._config.install_script}",
+            *pipefail_install_lines(self._config, container_home),
             "",
             "# Allow AppImage to run without FUSE in containers",
             "ENV APPIMAGE_EXTRACT_AND_RUN=1",

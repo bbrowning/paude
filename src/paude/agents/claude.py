@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from paude.agents.base import AgentConfig, build_environment_from_config
+from paude.agents.base import (
+    AgentConfig,
+    build_environment_from_config,
+    pipefail_install_lines,
+)
 from paude.mounts import resolve_path
 
 _CLAUDE_CONFIG_EXCLUDES = [
@@ -67,13 +71,15 @@ class ClaudeAgent:
         return self._config
 
     def dockerfile_install_lines(self, container_home: str) -> list[str]:
+        install_lines = pipefail_install_lines(self._config, container_home)
+        # Remove the generated .claude.json after install
+        install_lines[1] += f" && rm -f {container_home}/.claude.json"
         lines = [
             "",
             "# Install Claude Code (as paude user)",
             "USER paude",
             f"WORKDIR {container_home}",
-            f"RUN umask 0002 && {self._config.install_script}"
-            f" && rm -f {container_home}/.claude.json",
+            *install_lines,
             "",
             "# Disable auto-updates (version controlled by image rebuild)",
             "ENV DISABLE_AUTOUPDATER=1",
