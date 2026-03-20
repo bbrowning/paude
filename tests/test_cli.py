@@ -25,7 +25,7 @@ def test_help_shows_help(flag):
     """Help flag shows help and exits 0."""
     result = runner.invoke(app, [flag])
     assert result.exit_code == 0
-    assert "paude - Run AI coding agents" in result.stdout
+    assert "Run AI coding agents in isolated containers" in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -381,12 +381,25 @@ def test_help_shows_commands():
     """Help shows commands section."""
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "COMMANDS:" in result.stdout
     assert "create" in result.stdout
     assert "start" in result.stdout
     assert "stop" in result.stdout
     assert "list" in result.stdout
-    assert "sync" in result.stdout
+
+
+def test_help_shows_extra_sections():
+    """Help includes extra reference sections as Rich panels."""
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    output = result.stdout
+    assert "Workflow" in output
+    assert "Syncing Code" in output
+    assert "Copying Files" in output
+    assert "Egress Filtering" in output
+    assert "Examples" in output
+    assert "Configuration" in output
+    assert "Security" in output
+    assert "Agents" in output
 
 
 @pytest.mark.parametrize(
