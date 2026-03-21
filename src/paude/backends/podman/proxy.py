@@ -19,6 +19,14 @@ from paude.container.runner import ContainerRunner
 from paude.platform import get_podman_machine_dns
 
 
+def _get_and_log_dns() -> str | None:
+    """Get Podman VM DNS and log if available."""
+    dns = get_podman_machine_dns()
+    if dns:
+        print(f"Using Podman VM DNS: {dns}", file=sys.stderr)
+    return dns
+
+
 class PodmanProxyManager:
     """Manages proxy containers for Podman sessions."""
 
@@ -86,7 +94,7 @@ class PodmanProxyManager:
         # Ensure network exists (create_internal_network is idempotent)
         self._network_manager.create_internal_network(nname)
 
-        dns = get_podman_machine_dns()
+        dns = _get_and_log_dns()
         print(f"Recreating missing proxy {pname}...", file=sys.stderr)
         self._runner.create_session_proxy(
             name=pname,
@@ -136,7 +144,7 @@ class PodmanProxyManager:
         self._network_manager.create_internal_network(nname)
 
         pname = proxy_container_name(session_name)
-        dns = get_podman_machine_dns()
+        dns = _get_and_log_dns()
         print(f"Creating proxy {pname}...", file=sys.stderr)
         try:
             self._runner.create_session_proxy(
@@ -212,7 +220,7 @@ class PodmanProxyManager:
             raise ValueError(f"Cannot inspect proxy container: {pname}")
 
         nname = network_name(session_name)
-        dns = get_podman_machine_dns()
+        dns = _get_and_log_dns()
 
         print(
             f"Updating proxy domains for session '{session_name}'...",
