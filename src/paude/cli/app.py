@@ -26,6 +26,7 @@ class BackendType(StrEnum):
     """Container backend types."""
 
     podman = "podman"
+    docker = "docker"
     openshift = "openshift"
 
 

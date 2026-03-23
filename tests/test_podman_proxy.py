@@ -7,6 +7,16 @@ from unittest.mock import MagicMock, patch
 from paude.backends.podman.proxy import PodmanProxyManager
 
 
+def _make_mock_runner() -> MagicMock:
+    """Create a mock ContainerRunner with a proper engine."""
+    mock_runner = MagicMock()
+    mock_runner.engine.binary = "podman"
+    mock_runner.engine.supports_multi_network_create = True
+    mock_runner.engine.default_bridge_network = "podman"
+    mock_runner.engine.run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+    return mock_runner
+
+
 class TestPodmanProxyManagerDnsLogging:
     """Tests for DNS logging in PodmanProxyManager."""
 
@@ -16,7 +26,7 @@ class TestPodmanProxyManagerDnsLogging:
     ) -> None:
         """create_proxy logs the DNS IP when extraction succeeds."""
         mock_dns.return_value = "192.168.127.1"
-        mock_runner = MagicMock()
+        mock_runner = _make_mock_runner()
         mock_runner.container_exists.return_value = False
         mock_network = MagicMock()
 
@@ -36,7 +46,7 @@ class TestPodmanProxyManagerDnsLogging:
     ) -> None:
         """create_proxy does not log DNS when extraction returns None."""
         mock_dns.return_value = None
-        mock_runner = MagicMock()
+        mock_runner = _make_mock_runner()
         mock_runner.container_exists.return_value = False
         mock_network = MagicMock()
 
@@ -56,7 +66,7 @@ class TestPodmanProxyManagerDnsLogging:
     ) -> None:
         """update_domains logs the DNS IP when extraction succeeds."""
         mock_dns.return_value = "10.0.2.3"
-        mock_runner = MagicMock()
+        mock_runner = _make_mock_runner()
         mock_runner.container_exists.return_value = True
         mock_runner.get_container_image.return_value = "proxy:latest"
         mock_network = MagicMock()
@@ -76,10 +86,10 @@ class TestPodmanProxyManagerDnsLogging:
     ) -> None:
         """start_if_needed logs DNS when recreating a missing proxy."""
         mock_dns.return_value = "192.168.127.1"
-        mock_runner = MagicMock()
+        mock_runner = _make_mock_runner()
         # Proxy container does not exist
         mock_runner.container_exists.return_value = False
-        # But main container has proxy labels (use correct label keys)
+        # But main container has proxy labels
         mock_runner.list_containers.return_value = [
             {
                 "Names": ["paude-test-session"],

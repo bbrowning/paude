@@ -584,7 +584,9 @@ class TestRemoteCommand:
         assert "Added git remote" in output
         assert "Pushing main to container" in output
         assert "Push complete" in output
-        mock_init.assert_called_once_with("paude-test-session", branch="main")
+        mock_init.assert_called_once_with(
+            "paude-test-session", branch="main", engine="podman"
+        )
         mock_push.assert_called_once_with("paude-test-session", "main")
 
     @patch("paude.cli.remote.find_session_backend")
@@ -626,7 +628,9 @@ class TestRemoteCommand:
         assert result.exit_code == 0
         output = result.stdout + (result.stderr or "")
         assert "Initializing git repository in container" in output
-        mock_init.assert_called_once_with("paude-test-session", branch="main")
+        mock_init.assert_called_once_with(
+            "paude-test-session", branch="main", engine="podman"
+        )
 
 
 def test_subcommand_runs_without_main_execution():
@@ -664,6 +668,15 @@ class TestConnectMultiBackend:
     @pytest.fixture(autouse=True)
     def _clear_github_token(self, monkeypatch):
         monkeypatch.delenv("PAUDE_GITHUB_TOKEN", raising=False)
+
+    @pytest.fixture(autouse=True)
+    def _mock_docker_engine(self):
+        """Block Docker backend creation in collect_all_sessions."""
+        with patch(
+            "paude.session_discovery.ContainerEngine",
+            side_effect=Exception("docker not available"),
+        ):
+            yield
 
     @patch("paude.session_discovery.PodmanBackend")
     @patch("paude.session_discovery.OpenShiftBackend")
@@ -942,6 +955,15 @@ class TestConnectMultiBackend:
 class TestStartMultiBackend:
     """Tests for start command searching multiple backends."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_docker_engine(self):
+        """Block Docker backend creation in collect_all_sessions."""
+        with patch(
+            "paude.session_discovery.ContainerEngine",
+            side_effect=Exception("docker not available"),
+        ):
+            yield
+
     @patch("paude.session_discovery.PodmanBackend")
     @patch("paude.session_discovery.OpenShiftBackend")
     @patch("paude.session_discovery.OpenShiftConfig")
@@ -1088,6 +1110,15 @@ class TestStartMultiBackend:
 
 class TestStopMultiBackend:
     """Tests for stop command searching multiple backends."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_docker_engine(self):
+        """Block Docker backend creation in collect_all_sessions."""
+        with patch(
+            "paude.session_discovery.ContainerEngine",
+            side_effect=Exception("docker not available"),
+        ):
+            yield
 
     @patch("paude.session_discovery.PodmanBackend")
     @patch("paude.session_discovery.OpenShiftBackend")

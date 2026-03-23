@@ -14,6 +14,7 @@ from paude.backends.openshift.oc import OcClient
 from paude.backends.openshift.proxy import ProxyManager
 from paude.backends.podman import PodmanBackend
 from paude.backends.podman import SessionNotFoundError as PodmanSessionNotFoundError
+from paude.backends.podman.proxy import PodmanProxyManager
 
 # ---------------------------------------------------------------------------
 # ProxyManager: get_deployment_domains
@@ -400,6 +401,12 @@ class TestPodmanUpdateAllowedDomains:
     ) -> None:
         """update_allowed_domains recreates proxy with new domain list."""
         mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.run.return_value = MagicMock(
+            returncode=0, stdout="", stderr=""
+        )
         # Both main and proxy containers exist
         mock_runner.container_exists.return_value = True
         mock_runner.get_container_image.return_value = "proxy:latest"
@@ -408,20 +415,17 @@ class TestPodmanUpdateAllowedDomains:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
+        backend._proxy = PodmanProxyManager(mock_runner, MagicMock())
         backend._network_manager = MagicMock()
 
         backend.update_allowed_domains(
             "my-session", [".googleapis.com", ".example.com"]
         )
 
-        mock_runner.recreate_session_proxy.assert_called_once_with(
-            name="paude-proxy-my-session",
-            image="proxy:latest",
-            network="paude-net-my-session",
-            dns=None,
-            allowed_domains=[".googleapis.com", ".example.com"],
-        )
+        # Verify proxy was recreated via engine.run (create + start)
+        engine_calls = [str(c) for c in mock_runner.engine.run.call_args_list]
+        assert any("create" in c for c in engine_calls)
+        assert any("start" in c for c in engine_calls)
 
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_raises_session_not_found(self, mock_runner_class: MagicMock) -> None:

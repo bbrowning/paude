@@ -118,6 +118,7 @@ def build_session_from_container(
     name: str,
     container: dict[str, Any],
     runner: ContainerRunner,
+    backend_type: str = "podman",
 ) -> Session:
     """Build a Session object from a container dict.
 
@@ -125,6 +126,7 @@ def build_session_from_container(
         name: Session name.
         container: Raw container dict from list_containers.
         runner: Container runner for proxy health checks.
+        backend_type: Backend type string ("podman" or "docker").
 
     Returns:
         Fully-constructed Session object.
@@ -149,7 +151,7 @@ def build_session_from_container(
         status=status,
         workspace=workspace,
         created_at=created_at,
-        backend_type="podman",
+        backend_type=backend_type,
         container_id=container.get("Id", ""),
         volume_name=volume_name(name),
         agent=agent_name,

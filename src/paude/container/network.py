@@ -4,38 +4,26 @@ from __future__ import annotations
 
 import sys
 
-from paude.container.podman import network_exists, run_podman
+from paude.container.engine import ContainerEngine
 
 
 class NetworkManager:
-    """Manages podman networks for paude."""
+    """Manages container networks for paude."""
+
+    def __init__(self, engine: ContainerEngine | None = None) -> None:
+        self._engine = engine or ContainerEngine()
 
     def create_internal_network(self, name: str) -> None:
-        """Create an internal (no external access) network.
-
-        Args:
-            name: Network name.
-        """
-        if not network_exists(name):
+        """Create an internal (no external access) network."""
+        if not self._engine.network_exists(name):
             print(f"Creating {name} network...", file=sys.stderr)
-            run_podman("network", "create", "--internal", name)
+            self._engine.run("network", "create", "--internal", name)
 
     def remove_network(self, name: str) -> None:
-        """Remove a network.
-
-        Args:
-            name: Network name.
-        """
-        if network_exists(name):
-            run_podman("network", "rm", name, check=False)
+        """Remove a network."""
+        if self._engine.network_exists(name):
+            self._engine.run("network", "rm", name, check=False)
 
     def network_exists(self, name: str) -> bool:
-        """Check if a network exists.
-
-        Args:
-            name: Network name.
-
-        Returns:
-            True if network exists.
-        """
-        return network_exists(name)
+        """Check if a network exists."""
+        return self._engine.network_exists(name)

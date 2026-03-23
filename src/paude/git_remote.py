@@ -53,19 +53,21 @@ def build_openshift_remote_url(
 def build_podman_remote_url(
     container_name: str,
     workspace_path: str = CONTAINER_WORKSPACE,
+    engine: str = "podman",
 ) -> str:
-    """Build a git ext:: remote URL for a Podman container.
+    """Build a git ext:: remote URL for a local container.
 
     Args:
         container_name: Name of the container (e.g., "paude-my-session").
         workspace_path: Path to workspace inside the container.
+        engine: Container engine binary ("podman" or "docker").
 
     Returns:
         Git remote URL in ext:: format.
     """
     # -i keeps stdin open for git protocol communication
     # %S expands to git-upload-pack/git-receive-pack (the executable name)
-    return f"ext::podman exec -i {container_name} %S {workspace_path}"
+    return f"ext::{engine} exec -i {container_name} %S {workspace_path}"
 
 
 def is_ext_protocol_allowed() -> bool:
@@ -235,10 +237,11 @@ def get_current_branch() -> str | None:
 def initialize_container_workspace_podman(
     container_name: str,
     branch: str = "main",
+    engine: str = "podman",
 ) -> bool:
-    """Initialize git repository in a Podman container's workspace."""
+    """Initialize git repository in a local container's workspace."""
     bash_cmd = _build_workspace_init_cmd(branch)
-    exec_cmd = _build_podman_exec_cmd(container_name, bash_cmd)
+    exec_cmd = _build_podman_exec_cmd(container_name, bash_cmd, engine=engine)
     return _exec_in_container(exec_cmd, error_msg="Failed to init workspace")
 
 
@@ -254,17 +257,21 @@ def initialize_container_workspace_openshift(
     return _exec_in_container(exec_cmd, error_msg="Failed to init workspace")
 
 
-def is_container_running_podman(container_name: str) -> bool:
-    """Check if a Podman container is running.
+def is_container_running_podman(
+    container_name: str,
+    engine: str = "podman",
+) -> bool:
+    """Check if a local container is running.
 
     Args:
         container_name: Name of the container.
+        engine: Container engine binary ("podman" or "docker").
 
     Returns:
         True if running, False otherwise.
     """
     result = subprocess.run(
-        ["podman", "inspect", "--format", "{{.State.Running}}", container_name],
+        [engine, "inspect", "--format", "{{.State.Running}}", container_name],
         capture_output=True,
         text=True,
     )
@@ -305,9 +312,13 @@ def is_pod_running_openshift(
     return False
 
 
-def _build_podman_exec_cmd(container_name: str, bash_cmd: str) -> list[str]:
-    """Build a podman exec command to run a bash command in a container."""
-    return ["podman", "exec", container_name, "bash", "-c", bash_cmd]
+def _build_podman_exec_cmd(
+    container_name: str,
+    bash_cmd: str,
+    engine: str = "podman",
+) -> list[str]:
+    """Build a container exec command to run a bash command in a container."""
+    return [engine, "exec", container_name, "bash", "-c", bash_cmd]
 
 
 def _build_openshift_exec_cmd(
@@ -492,10 +503,14 @@ def resolve_origin_cmd(
     return _build_set_origin_cmd(ssh_url_to_https(origin_url))
 
 
-def set_origin_in_container_podman(container_name: str, origin_url: str) -> bool:
-    """Set the origin remote URL in a Podman container's workspace."""
+def set_origin_in_container_podman(
+    container_name: str,
+    origin_url: str,
+    engine: str = "podman",
+) -> bool:
+    """Set the origin remote URL in a local container's workspace."""
     bash_cmd = _build_set_origin_cmd(origin_url)
-    exec_cmd = _build_podman_exec_cmd(container_name, bash_cmd)
+    exec_cmd = _build_podman_exec_cmd(container_name, bash_cmd, engine=engine)
     return _exec_in_container(exec_cmd, error_msg="Failed to set origin in container")
 
 
@@ -514,9 +529,12 @@ def set_origin_in_container_openshift(
 _SET_BASE_REF_CMD = f"git -C {CONTAINER_WORKSPACE} update-ref {BASE_REF_NAME} HEAD"
 
 
-def set_base_ref_in_container_podman(container_name: str) -> bool:
-    """Set refs/paude/base to HEAD in a Podman container's workspace."""
-    exec_cmd = _build_podman_exec_cmd(container_name, _SET_BASE_REF_CMD)
+def set_base_ref_in_container_podman(
+    container_name: str,
+    engine: str = "podman",
+) -> bool:
+    """Set refs/paude/base to HEAD in a local container's workspace."""
+    exec_cmd = _build_podman_exec_cmd(container_name, _SET_BASE_REF_CMD, engine=engine)
     return _exec_in_container(exec_cmd, error_msg="Failed to set base ref")
 
 
@@ -532,9 +550,12 @@ def set_base_ref_in_container_openshift(
     return _exec_in_container(exec_cmd, error_msg="Failed to set base ref")
 
 
-def setup_precommit_in_container_podman(container_name: str) -> bool:
-    """Install pre-commit hooks in a Podman container's workspace."""
-    exec_cmd = _build_podman_exec_cmd(container_name, _PRECOMMIT_CMD)
+def setup_precommit_in_container_podman(
+    container_name: str,
+    engine: str = "podman",
+) -> bool:
+    """Install pre-commit hooks in a local container's workspace."""
+    exec_cmd = _build_podman_exec_cmd(container_name, _PRECOMMIT_CMD, engine=engine)
     return _exec_in_container(exec_cmd)
 
 
@@ -613,13 +634,14 @@ def _build_clone_from_origin_cmd(origin_https_url: str) -> str:
 def clone_from_origin_podman(
     container_name: str,
     origin_https_url: str,
+    engine: str = "podman",
 ) -> bool:
-    """Clone a repo from origin inside a Podman container.
+    """Clone a repo from origin inside a local container.
 
     Returns True if clone succeeded, False otherwise.
     """
     bash_cmd = _build_clone_from_origin_cmd(origin_https_url)
-    exec_cmd = _build_podman_exec_cmd(container_name, bash_cmd)
+    exec_cmd = _build_podman_exec_cmd(container_name, bash_cmd, engine=engine)
     try:
         return _exec_in_container(exec_cmd, timeout=CLONE_FROM_ORIGIN_TIMEOUT)
     except subprocess.TimeoutExpired:

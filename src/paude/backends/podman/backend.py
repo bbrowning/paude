@@ -1,4 +1,4 @@
-"""Podman backend implementation."""
+"""Podman/Docker backend implementation."""
 
 from __future__ import annotations
 
@@ -40,47 +40,54 @@ from paude.constants import (
     GCP_ADC_SECRET_NAME,
     GCP_ADC_TARGET,
 )
+from paude.container.engine import ContainerEngine
 from paude.container.network import NetworkManager
 from paude.container.runner import ContainerRunner
 from paude.container.volume import VolumeManager
 
 
 class PodmanBackend:
-    """Podman container backend with persistent sessions.
+    """Local container backend (Podman or Docker) with persistent sessions.
 
-    This backend runs containers locally using Podman. Sessions use named
-    volumes for persistence and can be started/stopped/resumed.
+    This backend runs containers locally using Podman or Docker. Sessions use
+    named volumes for persistence and can be started/stopped/resumed.
 
     Session resources:
         - Container: paude-{session-name}
         - Volume: paude-{session-name}-workspace
     """
 
-    def __init__(self) -> None:
-        """Initialize the Podman backend."""
-        self._runner = ContainerRunner()
-        self._network_manager = NetworkManager()
-        self._volume_manager = VolumeManager()
+    def __init__(self, engine: ContainerEngine | None = None) -> None:
+        """Initialize the backend.
+
+        Args:
+            engine: Container engine to use. Defaults to Podman.
+        """
+        self._engine = engine or ContainerEngine()
+        self._runner = ContainerRunner(self._engine)
+        self._network_manager = NetworkManager(self._engine)
+        self._volume_manager = VolumeManager(self._engine)
         self._proxy = PodmanProxyManager(self._runner, self._network_manager)
 
-    def _require_session(self, name: str) -> str:
-        """Validate session exists and return its container name.
+    @property
+    def engine(self) -> ContainerEngine:
+        """Access the underlying container engine."""
+        return self._engine
 
-        Raises:
-            SessionNotFoundError: If session not found.
-        """
+    @property
+    def backend_type(self) -> str:
+        """Backend type string for Session objects."""
+        return self._engine.binary
+
+    def _require_session(self, name: str) -> str:
+        """Validate session exists and return its container name."""
         cname = container_name(name)
         if not self._runner.container_exists(cname):
             raise SessionNotFoundError(f"Session '{name}' not found")
         return cname
 
     def _require_running_session(self, name: str) -> str:
-        """Validate session exists and is running, return its container name.
-
-        Raises:
-            SessionNotFoundError: If session not found.
-            ValueError: If session is not running.
-        """
+        """Validate session exists and is running, return its container name."""
         cname = self._require_session(name)
         if not self._runner.container_running(cname):
             raise ValueError(
@@ -108,25 +115,55 @@ class PodmanBackend:
         extra_env.update(secret_env)
         return extra_env or None
 
-    def _ensure_gcp_adc_secret(self) -> str | None:
-        """Create or replace the GCP ADC Podman secret.
+    @staticmethod
+    def _local_adc_path() -> Path | None:
+        """Return the local GCP ADC file path, or None if it doesn't exist."""
+        path = Path.home() / ".config" / "gcloud" / GCP_ADC_FILENAME
+        return path if path.is_file() else None
+
+    def _ensure_gcp_credentials(self) -> list[str] | None:
+        """Ensure GCP ADC credentials are available via Podman secret.
+
+        For Podman: creates a podman secret and returns a secret spec.
+        For Docker: credentials are injected via ``_inject_credentials``
+        after the container is started.
 
         Returns:
-            Secret spec string for --secret, or None if ADC file missing.
+            List of secret specs for --secret, or None.
         """
-        adc_path = Path.home() / ".config" / "gcloud" / GCP_ADC_FILENAME
-        if not adc_path.is_file():
+        if not self._engine.supports_secrets:
+            return None
+
+        adc_path = self._local_adc_path()
+        if adc_path is None:
             return None
 
         self._runner.create_secret(GCP_ADC_SECRET_NAME, adc_path)
+        secret_spec = f"{GCP_ADC_SECRET_NAME},target={GCP_ADC_TARGET}"
+        return [secret_spec]
 
-        return f"{GCP_ADC_SECRET_NAME},target={GCP_ADC_TARGET}"
+    def _inject_credentials(self, cname: str) -> None:
+        """Inject GCP ADC credentials into a running container.
+
+        For Docker (no standalone secrets): reads the local ADC file and
+        pipes it into the container via ``exec``.  Nothing is written to
+        the host filesystem, which is critical for SSH remotes where
+        other users share the host.
+
+        For Podman: no-op (secrets are handled at create time).
+        """
+        if self._engine.supports_secrets:
+            return
+
+        adc_path = self._local_adc_path()
+        if adc_path is None:
+            return
+
+        content = adc_path.read_text()
+        self._runner.inject_file(cname, content, GCP_ADC_TARGET, owner="paude:0")
 
     def create_session(self, config: SessionConfig) -> Session:
         """Create a new session (does not start it).
-
-        Creates the container, volume, and (if domain filtering is active)
-        an internal network and proxy container. All resources are left stopped.
 
         Raises:
             SessionExistsError: If session with this name already exists.
@@ -186,9 +223,8 @@ class PodmanBackend:
         )
         env["PAUDE_WORKSPACE"] = CONTAINER_WORKSPACE
 
-        # Create GCP ADC secret (if credentials exist)
-        secret_spec = self._ensure_gcp_adc_secret()
-        secrets = [secret_spec] if secret_spec else None
+        # Ensure GCP credentials (Podman secrets; Docker injects after start)
+        secrets = self._ensure_gcp_credentials()
 
         # Create container (stopped)
         print(f"Creating container {cname}...", file=sys.stderr)
@@ -222,10 +258,30 @@ class PodmanBackend:
             status="stopped",
             workspace=config.workspace,
             created_at=created_at,
-            backend_type="podman",
+            backend_type=self.backend_type,
             container_id=cname,
             volume_name=vname,
             agent=config.agent,
+        )
+
+    def _fix_volume_permissions(self, container_name: str) -> None:
+        """Fix /pvc volume ownership for Docker.
+
+        Docker volumes are root-owned by default, unlike Podman which uses
+        user namespaces. Run chown as root so the paude user can write.
+        """
+        if self._engine.supports_secrets:
+            return  # Podman handles this via user namespaces
+
+        self._engine.run(
+            "exec",
+            "--user",
+            "root",
+            container_name,
+            "chown",
+            "paude:0",
+            "/pvc",
+            check=False,
         )
 
     def start_session_no_attach(self, name: str) -> None:
@@ -233,17 +289,14 @@ class PodmanBackend:
         cname = self._require_session(name)
         if self._runner.container_running(cname):
             return
-        self._ensure_gcp_adc_secret()
+        self._ensure_gcp_credentials()
         self._proxy.start_if_needed(name)
         self._runner.start_container(cname)
+        self._fix_volume_permissions(cname)
+        self._inject_credentials(cname)
 
     def delete_session(self, name: str, confirm: bool = False) -> None:
-        """Delete a session and all its resources.
-
-        Raises:
-            SessionNotFoundError: If session not found.
-            ValueError: If confirm=False.
-        """
+        """Delete a session and all its resources."""
         if not confirm:
             raise ValueError(
                 "Deletion requires confirmation. Pass confirm=True or use --confirm."
@@ -288,11 +341,7 @@ class PodmanBackend:
         print(f"Session '{name}' deleted.", file=sys.stderr)
 
     def start_session(self, name: str, github_token: str | None = None) -> int:
-        """Start a session and connect to it.
-
-        Returns:
-            Exit code from the connected session.
-        """
+        """Start a session and connect to it."""
         cname = self._require_session(name)
 
         state = self._runner.get_container_state(cname)
@@ -306,9 +355,11 @@ class PodmanBackend:
 
         print(f"Starting session '{name}'...", file=sys.stderr)
 
-        self._ensure_gcp_adc_secret()
+        self._ensure_gcp_credentials()
         self._proxy.start_if_needed(name)
         self._runner.start_container(cname)
+        self._fix_volume_permissions(cname)
+        self._inject_credentials(cname)
 
         return self._runner.attach_container(
             cname,
@@ -336,11 +387,7 @@ class PodmanBackend:
         print(f"Session '{name}' stopped.", file=sys.stderr)
 
     def connect_session(self, name: str, github_token: str | None = None) -> int:
-        """Attach to a running session.
-
-        Returns:
-            Exit code from the attached session.
-        """
+        """Attach to a running session."""
         cname = container_name(name)
 
         if not self._runner.container_exists(cname):
@@ -389,7 +436,11 @@ class PodmanBackend:
             if not session_name:
                 continue
 
-            sessions.append(build_session_from_container(session_name, c, self._runner))
+            sessions.append(
+                build_session_from_container(
+                    session_name, c, self._runner, backend_type=self.backend_type
+                )
+            )
 
         return sessions
 
@@ -399,7 +450,9 @@ class PodmanBackend:
         if container is None:
             return None
 
-        return build_session_from_container(name, container, self._runner)
+        return build_session_from_container(
+            name, container, self._runner, backend_type=self.backend_type
+        )
 
     def find_session_for_workspace(self, workspace: Path) -> Session | None:
         """Find an existing session for a workspace."""
@@ -413,41 +466,22 @@ class PodmanBackend:
         return None
 
     def get_allowed_domains(self, name: str) -> list[str] | None:
-        """Get current allowed domains for a session.
-
-        Raises:
-            SessionNotFoundError: If session not found.
-        """
+        """Get current allowed domains for a session."""
         self._require_session(name)
         return self._proxy.get_allowed_domains(name)
 
     def get_proxy_blocked_log(self, name: str) -> str | None:
-        """Get raw squid blocked log from the proxy container.
-
-        Raises:
-            SessionNotFoundError: If session not found.
-            ValueError: If proxy is not running.
-        """
+        """Get raw squid blocked log from the proxy container."""
         self._require_session(name)
         return self._proxy.get_blocked_log(name)
 
     def update_allowed_domains(self, name: str, domains: list[str]) -> None:
-        """Update allowed domains for a session.
-
-        Raises:
-            SessionNotFoundError: If session not found.
-            ValueError: If session has no proxy deployment.
-        """
+        """Update allowed domains for a session."""
         self._require_session(name)
         self._proxy.update_domains(name, domains)
 
     def exec_in_session(self, name: str, command: str) -> tuple[int, str, str]:
-        """Execute a command inside a running session's container.
-
-        Raises:
-            SessionNotFoundError: If session not found.
-            ValueError: If session is not running.
-        """
+        """Execute a command inside a running session's container."""
         cname = self._require_running_session(name)
 
         result = self._runner.exec_in_container(
@@ -456,30 +490,20 @@ class PodmanBackend:
         return (result.returncode, result.stdout, result.stderr)
 
     def copy_to_session(self, name: str, local_path: str, remote_path: str) -> None:
-        """Copy a file or directory from local to a running session.
-
-        Raises:
-            SessionNotFoundError: If session not found.
-            ValueError: If session is not running.
-        """
+        """Copy a file or directory from local to a running session."""
         cname = self._require_running_session(name)
 
         subprocess.run(
-            ["podman", "cp", local_path, f"{cname}:{remote_path}"],
+            [self._engine.binary, "cp", local_path, f"{cname}:{remote_path}"],
             check=True,
         )
 
     def copy_from_session(self, name: str, remote_path: str, local_path: str) -> None:
-        """Copy a file or directory from a running session to local.
-
-        Raises:
-            SessionNotFoundError: If session not found.
-            ValueError: If session is not running.
-        """
+        """Copy a file or directory from a running session to local."""
         cname = self._require_running_session(name)
 
         subprocess.run(
-            ["podman", "cp", f"{cname}:{remote_path}", local_path],
+            [self._engine.binary, "cp", f"{cname}:{remote_path}", local_path],
             check=True,
         )
 

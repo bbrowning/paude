@@ -4,15 +4,10 @@ from __future__ import annotations
 
 import json
 import subprocess
-import time
 from pathlib import Path
 from typing import Any
 
-
-class ProxyStartError(Exception):
-    """Error starting the proxy container."""
-
-    pass
+from paude.container.engine import ContainerEngine
 
 
 class ContainerNotFoundError(Exception):
@@ -24,44 +19,51 @@ class ContainerNotFoundError(Exception):
 class ContainerRunner:
     """Runs paude containers."""
 
-    _proxy_counter = 0
+    def __init__(self, engine: ContainerEngine | None = None) -> None:
+        self._engine = engine or ContainerEngine()
+
+    @property
+    def engine(self) -> ContainerEngine:
+        """Access the underlying container engine."""
+        return self._engine
 
     def create_secret(self, name: str, source_file: Path) -> None:
-        """(Re)Create a Podman secret from a file.
+        """(Re)Create a container secret from a file.
 
-        Tries to create the secret directly. If it already exists, removes
-        it and retries. This avoids using ``--replace=true`` which fails on
-        some Podman versions when the secret does not already exist.
+        Skips silently when the engine does not support standalone secrets
+        (e.g. Docker without Swarm).
 
         Args:
             name: Secret name.
             source_file: Path to the source file.
-
-        Raises:
-            subprocess.CalledProcessError: If secret creation fails.
         """
+        if not self._engine.supports_secrets:
+            return
+
         try:
             subprocess.run(
-                ["podman", "secret", "create", name, str(source_file)],
+                [self._engine.binary, "secret", "create", name, str(source_file)],
                 capture_output=True,
                 check=True,
             )
         except subprocess.CalledProcessError:
             self.remove_secret(name)
             subprocess.run(
-                ["podman", "secret", "create", name, str(source_file)],
+                [self._engine.binary, "secret", "create", name, str(source_file)],
                 capture_output=True,
                 check=True,
             )
 
     def remove_secret(self, name: str) -> None:
-        """Remove a Podman secret, ignoring errors.
+        """Remove a container secret, ignoring errors.
 
-        Args:
-            name: Secret name.
+        Skips silently when the engine does not support standalone secrets.
         """
+        if not self._engine.supports_secrets:
+            return
+
         subprocess.run(
-            ["podman", "secret", "rm", name],
+            [self._engine.binary, "secret", "rm", name],
             capture_output=True,
         )
 
@@ -80,27 +82,11 @@ class ContainerRunner:
     ) -> str:
         """Create a container without starting it.
 
-        Args:
-            name: Container name.
-            image: Container image to run.
-            mounts: Volume mount arguments.
-            env: Environment variables.
-            workdir: Working directory inside the container.
-            network: Optional network to attach to.
-            labels: Labels to attach to the container.
-            entrypoint: Optional entrypoint override.
-            command: Optional command to run (after image in podman create).
-            secrets: Optional list of secret specs (e.g.,
-                ["name,target=/path"]).
-
         Returns:
             Container ID.
-
-        Raises:
-            subprocess.CalledProcessError: If container creation fails.
         """
         cmd = [
-            "podman",
+            self._engine.binary,
             "create",
             "--name",
             name,
@@ -146,14 +132,11 @@ class ContainerRunner:
     def start_container(self, name: str) -> None:
         """Start an existing container.
 
-        Args:
-            name: Container name.
-
         Raises:
             ContainerNotFoundError: If container doesn't exist.
         """
         result = subprocess.run(
-            ["podman", "start", name],
+            [self._engine.binary, "start", name],
             capture_output=True,
             text=True,
         )
@@ -162,46 +145,28 @@ class ContainerRunner:
                 raise ContainerNotFoundError(f"Container not found: {name}")
             raise subprocess.CalledProcessError(
                 result.returncode,
-                ["podman", "start", name],
+                [self._engine.binary, "start", name],
                 result.stdout,
                 result.stderr,
             )
 
     def stop_container(self, name: str) -> None:
-        """Stop a container gracefully with SIGTERM.
-
-        Uses 'podman stop' with a 1-second timeout. The proxy container
-        is configured with shutdown_lifetime=0 so squid exits immediately
-        on SIGTERM. The timeout is a fallback in case of issues.
-
-        Args:
-            name: Container name.
-        """
+        """Stop a container gracefully with SIGTERM (1-second timeout)."""
         subprocess.run(
-            ["podman", "stop", "-t", "1", name],
+            [self._engine.binary, "stop", "-t", "1", name],
             capture_output=True,
         )
 
     def stop_container_graceful(self, name: str, timeout: int = 10) -> None:
-        """Stop a container gracefully with timeout.
-
-        Args:
-            name: Container name.
-            timeout: Seconds to wait before SIGKILL.
-        """
+        """Stop a container gracefully with timeout."""
         subprocess.run(
-            ["podman", "stop", "-t", str(timeout), name],
+            [self._engine.binary, "stop", "-t", str(timeout), name],
             capture_output=True,
         )
 
     def remove_container(self, name: str, force: bool = False) -> None:
-        """Remove a container.
-
-        Args:
-            name: Container name.
-            force: Force removal even if running.
-        """
-        cmd = ["podman", "rm"]
+        """Remove a container."""
+        cmd = [self._engine.binary, "rm"]
         if force:
             cmd.append("-f")
         cmd.append(name)
@@ -216,24 +181,17 @@ class ContainerRunner:
     ) -> int:
         """Attach to a running container.
 
-        Args:
-            name: Container name.
-            entrypoint: Optional command to exec into.
-            extra_env: Optional extra environment variables to pass to exec.
-                Only applies when entrypoint is provided (podman exec mode).
-                These env vars are NOT stored in the container definition.
-
         Returns:
             Exit code from the attached session.
         """
         if entrypoint:
-            cmd = ["podman", "exec", "-it"]
+            cmd = [self._engine.binary, "exec", "-it"]
             if extra_env:
                 for key, value in extra_env.items():
                     cmd.extend(["-e", f"{key}={value}"])
             cmd.extend([name, entrypoint])
         else:
-            cmd = ["podman", "attach", name]
+            cmd = [self._engine.binary, "attach", name]
 
         result = subprocess.run(cmd)
         return result.returncode
@@ -247,16 +205,10 @@ class ContainerRunner:
     ) -> int:
         """Execute a command in a running container.
 
-        Args:
-            name: Container name.
-            command: Command to execute.
-            interactive: Enable interactive mode.
-            tty: Allocate a TTY.
-
         Returns:
             Exit code from the command.
         """
-        cmd = ["podman", "exec"]
+        cmd = [self._engine.binary, "exec"]
         if interactive:
             cmd.append("-i")
         if tty:
@@ -273,17 +225,8 @@ class ContainerRunner:
         command: list[str],
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        """Execute a command in a running container and capture output.
-
-        Args:
-            name: Container name.
-            command: Command to execute.
-            check: Raise exception on non-zero exit code.
-
-        Returns:
-            CompletedProcess with stdout, stderr, and returncode.
-        """
-        cmd = ["podman", "exec", name, *command]
+        """Execute a command in a running container and capture output."""
+        cmd = [self._engine.binary, "exec", name, *command]
         return subprocess.run(
             cmd,
             capture_output=True,
@@ -291,48 +234,56 @@ class ContainerRunner:
             check=check,
         )
 
-    def container_exists(self, name: str) -> bool:
-        """Check if a container exists.
+    def inject_file(
+        self,
+        name: str,
+        content: str,
+        target: str,
+        user: str = "root",
+        owner: str | None = None,
+    ) -> None:
+        """Write file content into a running container via exec.
 
-        Args:
-            name: Container name.
-
-        Returns:
-            True if container exists.
+        Pipes content through ``docker/podman exec`` so that nothing
+        is written to the host filesystem — safe for credentials over SSH.
         """
-        result = subprocess.run(
-            ["podman", "container", "exists", name],
-            capture_output=True,
+        import shlex
+
+        parent = shlex.quote(str(Path(target).parent))
+        quoted_target = shlex.quote(target)
+        parts = [f"mkdir -p {parent}", f"cat > {quoted_target}"]
+        if owner:
+            parts.append(f"chown {shlex.quote(owner)} {quoted_target}")
+        parts.append(f"chmod 600 {quoted_target}")
+        self._engine.run(
+            "exec",
+            "-i",
+            "--user",
+            user,
+            name,
+            "sh",
+            "-c",
+            " && ".join(parts),
+            input=content,
         )
-        return result.returncode == 0
+
+    def container_exists(self, name: str) -> bool:
+        """Check if a container exists."""
+        return self._engine.container_exists(name)
 
     def container_running(self, name: str) -> bool:
-        """Check if a container is running.
-
-        Args:
-            name: Container name.
-
-        Returns:
-            True if container is running.
-        """
+        """Check if a container is running."""
         result = subprocess.run(
-            ["podman", "inspect", "-f", "{{.State.Running}}", name],
+            [self._engine.binary, "inspect", "-f", "{{.State.Running}}", name],
             capture_output=True,
             text=True,
         )
         return result.returncode == 0 and result.stdout.strip() == "true"
 
     def get_container_state(self, name: str) -> str | None:
-        """Get the state of a container.
-
-        Args:
-            name: Container name.
-
-        Returns:
-            Container state string or None if not found.
-        """
+        """Get the state of a container."""
         result = subprocess.run(
-            ["podman", "inspect", "-f", "{{.State.Status}}", name],
+            [self._engine.binary, "inspect", "-f", "{{.State.Status}}", name],
             capture_output=True,
             text=True,
         )
@@ -345,16 +296,8 @@ class ContainerRunner:
         label_filter: str | None = None,
         all_containers: bool = True,
     ) -> list[dict[str, Any]]:
-        """List containers with optional label filter.
-
-        Args:
-            label_filter: Label filter (e.g., "app=paude").
-            all_containers: Include stopped containers.
-
-        Returns:
-            List of container info dictionaries.
-        """
-        cmd = ["podman", "ps", "--format", "json"]
+        """List containers with optional label filter."""
+        cmd = [self._engine.binary, "ps", "--format", "json"]
         if all_containers:
             cmd.append("-a")
         if label_filter:
@@ -365,187 +308,43 @@ class ContainerRunner:
             return []
 
         try:
-            return json.loads(result.stdout) if result.stdout.strip() else []
+            parsed = json.loads(result.stdout) if result.stdout.strip() else []
         except json.JSONDecodeError:
-            return []
+            # Docker outputs NDJSON (one JSON object per line), not an array
+            lines = [ln for ln in result.stdout.strip().splitlines() if ln.strip()]
+            if not lines:
+                return []
+            try:
+                parsed = [json.loads(line) for line in lines]
+            except json.JSONDecodeError:
+                return []
 
-    def run_proxy(
-        self,
-        image: str,
-        network: str,
-        dns: str | None = None,
-        allowed_domains: list[str] | None = None,
-    ) -> str:
-        """Start the proxy container.
+        # Podman returns a list, Docker may return a single dict
+        if isinstance(parsed, dict):
+            parsed = [parsed]
 
-        Args:
-            image: Proxy image to run.
-            network: Network to attach to.
-            dns: Optional DNS IP for squid to use (passed as SQUID_DNS env var).
-            allowed_domains: List of domains to allow. If provided, passed as
-                ALLOWED_DOMAINS env var (comma-separated).
+        # Docker returns Labels as "k=v,k2=v2" string; normalize to dict
+        for container in parsed:
+            labels = container.get("Labels")
+            if isinstance(labels, str):
+                label_dict: dict[str, str] = {}
+                if labels:
+                    for pair in labels.split(","):
+                        k, _, v = pair.partition("=")
+                        label_dict[k] = v
+                container["Labels"] = label_dict
 
-        Returns:
-            Container name.
-
-        Raises:
-            ProxyStartError: If the proxy container fails to start.
-        """
-        # Generate unique container name using timestamp and counter
-        ContainerRunner._proxy_counter += 1
-        session_id = f"{int(time.time())}-{ContainerRunner._proxy_counter}"
-        container_name = f"paude-proxy-{session_id}"
-
-        # Connect to both internal network and podman network for external access
-        cmd = [
-            "podman",
-            "run",
-            "-d",
-            "--rm",
-            "--name",
-            container_name,
-            "--network",
-            f"{network},podman",
-        ]
-
-        # Pass DNS IP as environment variable for squid to use
-        if dns:
-            cmd.extend(["-e", f"SQUID_DNS={dns}"])
-
-        # Pass allowed domains as comma-separated list
-        if allowed_domains:
-            domains_str = ",".join(allowed_domains)
-            cmd.extend(["-e", f"ALLOWED_DOMAINS={domains_str}"])
-
-        cmd.append(image)
-
-        result = subprocess.run(cmd, capture_output=True)
-        if result.returncode != 0:
-            stderr = result.stderr.decode("utf-8", errors="replace")
-            raise ProxyStartError(f"Failed to start proxy: {stderr}")
-
-        # Give proxy time to initialize (matches bash sleep 1)
-        time.sleep(1)
-
-        return container_name
-
-    def create_session_proxy(
-        self,
-        name: str,
-        image: str,
-        network: str,
-        dns: str | None = None,
-        allowed_domains: list[str] | None = None,
-    ) -> str:
-        """Create a proxy container for a session (does not start it).
-
-        Unlike run_proxy() which uses --rm, this creates a persistent proxy
-        container that can be started/stopped with the session.
-
-        Args:
-            name: Deterministic container name (e.g., "paude-proxy-my-session").
-            image: Proxy image to run.
-            network: Internal network name. Proxy joins both this and "podman".
-            dns: Optional DNS IP for squid (passed as SQUID_DNS env var).
-            allowed_domains: Domains to allow (passed as ALLOWED_DOMAINS env var).
-
-        Returns:
-            Container name.
-        """
-        cmd = [
-            "podman",
-            "create",
-            "--pull=never",
-            "--name",
-            name,
-            "--network",
-            f"{network},podman",
-        ]
-
-        if dns:
-            cmd.extend(["-e", f"SQUID_DNS={dns}"])
-
-        if allowed_domains:
-            domains_str = ",".join(allowed_domains)
-            cmd.extend(["-e", f"ALLOWED_DOMAINS={domains_str}"])
-
-        cmd.append(image)
-
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise ProxyStartError(f"Failed to create proxy: {result.stderr}")
-
-        return name
-
-    def start_session_proxy(self, name: str) -> None:
-        """Start a session proxy container and wait for it to initialize.
-
-        Args:
-            name: Proxy container name.
-
-        Raises:
-            ProxyStartError: If the proxy fails to start.
-        """
-        result = subprocess.run(
-            ["podman", "start", name],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise ProxyStartError(f"Failed to start proxy: {result.stderr}")
-
-        # Give proxy time to initialize
-        time.sleep(1)
-
-    def recreate_session_proxy(
-        self,
-        name: str,
-        image: str,
-        network: str,
-        dns: str | None = None,
-        allowed_domains: list[str] | None = None,
-    ) -> str:
-        """Recreate a session proxy with new configuration.
-
-        Stops and removes the old proxy, then creates and starts a new one.
-
-        Args:
-            name: Proxy container name.
-            image: Proxy image.
-            network: Internal network name.
-            dns: Optional DNS IP.
-            allowed_domains: New list of allowed domains.
-
-        Returns:
-            Container name.
-        """
-        # Stop and remove old proxy
-        self.stop_container(name)
-        self.remove_container(name, force=True)
-
-        # Create and start new proxy
-        self.create_session_proxy(
-            name=name,
-            image=image,
-            network=network,
-            dns=dns,
-            allowed_domains=allowed_domains,
-        )
-        self.start_session_proxy(name)
-
-        return name
+        return parsed
 
     def get_container_image(self, name: str) -> str | None:
-        """Get the image name of a container.
-
-        Args:
-            name: Container name.
-
-        Returns:
-            Image name string, or None if not found.
-        """
+        """Get the image name of a container."""
+        # Docker uses .Config.Image; Podman uses .ImageName
+        if self._engine.binary == "podman":
+            fmt = "{{.ImageName}}"
+        else:
+            fmt = "{{.Config.Image}}"
         result = subprocess.run(
-            ["podman", "inspect", "-f", "{{.ImageName}}", name],
+            [self._engine.binary, "inspect", "-f", fmt, name],
             capture_output=True,
             text=True,
         )
@@ -554,17 +353,9 @@ class ContainerRunner:
         return result.stdout.strip() or None
 
     def get_container_env(self, name: str, var_name: str) -> str | None:
-        """Get an environment variable from a container's config.
-
-        Args:
-            name: Container name.
-            var_name: Environment variable name.
-
-        Returns:
-            Value of the variable, or None if not found.
-        """
+        """Get an environment variable from a container's config."""
         result = subprocess.run(
-            ["podman", "inspect", "-f", "{{json .Config.Env}}", name],
+            [self._engine.binary, "inspect", "-f", "{{json .Config.Env}}", name],
             capture_output=True,
             text=True,
         )
@@ -593,19 +384,11 @@ class ContainerRunner:
     ) -> bool:
         """Run the postCreateCommand.
 
-        Args:
-            image: Container image to use.
-            mounts: Volume mount arguments.
-            env: Environment variables.
-            command: Command to run.
-            workdir: Working directory for the command.
-            network: Optional network.
-
         Returns:
             True if successful.
         """
         cmd = [
-            "podman",
+            self._engine.binary,
             "run",
             "--rm",
             "-w",
@@ -620,7 +403,6 @@ class ContainerRunner:
         for key, value in env.items():
             cmd.extend(["-e", f"{key}={value}"])
 
-        # Use /bin/bash to match bash implementation
         cmd.extend([image, "/bin/bash", "-c", command])
 
         result = subprocess.run(cmd)

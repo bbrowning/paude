@@ -1,8 +1,16 @@
-"""Podman subprocess wrapper."""
+"""Podman subprocess wrapper (deprecated — use ContainerEngine).
+
+This module is kept for backward compatibility. New code should use
+``ContainerEngine`` directly.
+"""
 
 from __future__ import annotations
 
 import subprocess
+
+from paude.container.engine import ContainerEngine
+
+_default_engine = ContainerEngine("podman")
 
 
 def run_podman(
@@ -12,47 +20,25 @@ def run_podman(
 ) -> subprocess.CompletedProcess[str]:
     """Run a podman command.
 
-    Args:
-        *args: Arguments to pass to podman.
-        check: Raise on non-zero exit code.
-        capture: Capture stdout/stderr.
-
-    Returns:
-        CompletedProcess result.
-
-    Raises:
-        subprocess.CalledProcessError: If check=True and command fails.
+    .. deprecated::
+        Use ``ContainerEngine.run()`` instead.
     """
-    cmd = ["podman", *args]
-    return subprocess.run(
-        cmd,
-        check=check,
-        capture_output=capture,
-        text=True,
-    )
+    return _default_engine.run(*args, check=check, capture=capture)
 
 
 def image_exists(tag: str) -> bool:
     """Check if a container image exists locally.
 
-    Args:
-        tag: Image tag to check.
-
-    Returns:
-        True if image exists, False otherwise.
+    .. deprecated::
+        Use ``ContainerEngine.image_exists()`` instead.
     """
-    result = run_podman("image", "exists", tag, check=False)
-    return result.returncode == 0
+    return _default_engine.image_exists(tag)
 
 
 def network_exists(name: str) -> bool:
     """Check if a podman network exists.
 
-    Args:
-        name: Network name to check.
-
-    Returns:
-        True if network exists, False otherwise.
+    .. deprecated::
+        Use ``ContainerEngine.network_exists()`` instead.
     """
-    result = run_podman("network", "exists", name, check=False)
-    return result.returncode == 0
+    return _default_engine.network_exists(name)

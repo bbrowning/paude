@@ -9,6 +9,7 @@ import typer
 from paude.backends import PodmanBackend, Session
 from paude.backends.base import Backend
 from paude.backends.openshift import OpenShiftBackend, OpenShiftConfig
+from paude.container.engine import ContainerEngine
 
 
 def create_openshift_backend(
@@ -74,6 +75,15 @@ def find_workspace_session(
     except Exception:  # noqa: S110 - Podman may not be available
         pass
 
+    # Check Docker
+    try:
+        docker = PodmanBackend(engine=ContainerEngine("docker"))
+        session = docker.find_session_for_workspace(workspace)
+        if session and (_status_matches(session.status, status_filter)):
+            return (session, docker)
+    except Exception:  # noqa: S110 - Docker may not be available
+        pass
+
     # Check OpenShift
     os_backend = create_openshift_backend(openshift_context, openshift_namespace)
     if os_backend is not None:
@@ -132,6 +142,16 @@ def collect_all_sessions(
                 reachable_backends.add("podman")
             except Exception:  # noqa: S110
                 pass
+
+        # Also try Docker
+        try:
+            docker_backend = PodmanBackend(engine=ContainerEngine("docker"))
+            for s in docker_backend.list_sessions():
+                if _status_matches(s.status, status_filter):
+                    all_sessions.append((s, docker_backend))
+            reachable_backends.add("docker")
+        except Exception:  # noqa: S110
+            pass
 
     # Try OpenShift
     if not skip_openshift:
@@ -209,6 +229,8 @@ def _print_no_sessions_message(
         backend_flag = ""
         if isinstance(backend, OpenShiftBackend):
             backend_flag = " --backend=openshift"
+        elif isinstance(backend, PodmanBackend) and backend.engine.binary == "docker":
+            backend_flag = " --backend=docker"
         typer.echo("No sessions found for this workspace.", err=True)
         typer.echo("", err=True)
         typer.echo("To create and start a session:", err=True)

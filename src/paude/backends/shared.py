@@ -157,3 +157,24 @@ def volume_name(session_name: str) -> str:
 def network_name(session_name: str) -> str:
     """Get the network name for a session (Podman network)."""
     return f"paude-net-{session_name}"
+
+
+# Backend type helpers
+
+LOCAL_BACKEND_TYPES = frozenset({"podman", "docker"})
+
+
+def is_local_backend(backend_type: str) -> bool:
+    """Check if a backend type is a local container engine (podman or docker)."""
+    return backend_type in LOCAL_BACKEND_TYPES
+
+
+def engine_binary_for_backend(backend_type: str) -> str:
+    """Get the container engine binary for a backend type.
+
+    Returns "podman" for "podman", "docker" for "docker".
+    Raises ValueError for non-local backend types.
+    """
+    if backend_type in LOCAL_BACKEND_TYPES:
+        return backend_type
+    raise ValueError(f"No engine binary for backend type: {backend_type}")

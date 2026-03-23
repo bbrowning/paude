@@ -11,6 +11,7 @@ from paude.backends.base import Backend, Session
 from paude.backends.openshift import OpenShiftBackend, OpenShiftConfig
 from paude.cli.app import BackendType
 from paude.config.models import PaudeConfig
+from paude.container.engine import ContainerEngine
 from paude.session_discovery import (
     collect_all_sessions,
     create_openshift_backend,
@@ -42,6 +43,14 @@ def find_session_backend(
     except Exception:  # noqa: S110 - Podman may not be available
         pass
 
+    # Try Docker
+    try:
+        docker = PodmanBackend(engine=ContainerEngine("docker"))
+        if docker.get_session(session_name) is not None:
+            return (BackendType.docker, docker)
+    except Exception:  # noqa: S110 - Docker may not be available
+        pass
+
     # Try OpenShift
     os_backend = create_openshift_backend(openshift_context, openshift_namespace)
     if os_backend is not None:
@@ -71,6 +80,8 @@ def _get_backend_instance(
     """
     if backend == BackendType.podman:
         return PodmanBackend()
+    if backend == BackendType.docker:
+        return PodmanBackend(engine=ContainerEngine("docker"))
     openshift_config = OpenShiftConfig(
         context=openshift_context,
         namespace=openshift_namespace,
@@ -247,8 +258,10 @@ def _finalize_session_create(
 
     SessionRegistry().register(session, openshift_context, openshift_namespace)
 
+    from paude.backends.shared import is_local_backend
+
     bt = session.backend_type
-    status_msg = "created and running" if bt == "podman" else "created"
+    status_msg = "created and running" if is_local_backend(bt) else "created"
     typer.echo(f"Session '{session.name}' {status_msg}.")
     domains_display = format_domains_for_display(expanded_domains)
     typer.echo(f"  Network: {domains_display}")
@@ -265,7 +278,7 @@ def _finalize_session_create(
         )
 
     typer.echo("")
-    if bt == "podman":
+    if is_local_backend(bt):
         connect_hint = "To start working:"
     else:
         connect_hint = "Session is running. Connect with:"

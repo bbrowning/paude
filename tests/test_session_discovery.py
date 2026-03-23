@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from paude.backends.base import Session
 from paude.session_discovery import _status_matches
 
@@ -286,6 +288,15 @@ class TestFindWorkspaceSession:
 
 class TestCollectAllSessions:
     """Tests for collect_all_sessions."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_docker_engine(self):
+        """Block Docker backend creation in collect_all_sessions."""
+        with patch(
+            "paude.session_discovery.ContainerEngine",
+            side_effect=Exception("docker not available"),
+        ):
+            yield
 
     @patch("paude.session_discovery.OpenShiftConfig")
     @patch("paude.session_discovery.OpenShiftBackend")

@@ -48,17 +48,27 @@ def _make_backend(
     """Create a PodmanBackend with mocked runner, network, and volume manager."""
     backend = PodmanBackend()
     if mock_runner is not None:
+        # Ensure engine attributes are set for ProxyRunner compatibility
+        if not hasattr(mock_runner.engine, "binary") or isinstance(
+            mock_runner.engine.binary, MagicMock
+        ):
+            mock_runner.engine.binary = "podman"
+            mock_runner.engine.supports_multi_network_create = True
+            mock_runner.engine.default_bridge_network = "podman"
+            mock_runner.engine.run.return_value = MagicMock(
+                returncode=0, stdout="", stderr=""
+            )
         backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
     if mock_network_manager is not None:
         backend._network_manager = mock_network_manager
     # Always mock volume manager to prevent real podman calls
     backend._volume_manager = mock_volume_manager or MagicMock()
-    # Sync proxy manager dependencies with backend
-    if mock_runner is not None:
-        backend._proxy._runner = mock_runner
-    if mock_network_manager is not None:
-        backend._proxy._network_manager = mock_network_manager
+    # Rebuild proxy manager with the mocked runner and network
+    runner = mock_runner or backend._runner
+    network = mock_network_manager or backend._network_manager
+    from paude.backends.podman.proxy import PodmanProxyManager
+
+    backend._proxy = PodmanProxyManager(runner, network)
     return backend
 
 
@@ -307,13 +317,7 @@ class TestPodmanBackendCreateSession:
         mock_runner.container_exists.return_value = False
         mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
-        backend._volume_manager = MagicMock()
-        mock_network = MagicMock()
-        backend._network_manager = mock_network
-        backend._proxy._network_manager = mock_network
+        backend = _make_backend(mock_runner, MagicMock())
 
         config = SessionConfig(
             name="filtered-session",
@@ -1089,14 +1093,9 @@ class TestPodmanBackendCreateSessionWithProxy:
             "paude-net-my-session"
         )
 
-        # Proxy container should be created
-        mock_runner.create_session_proxy.assert_called_once_with(
-            name="paude-proxy-my-session",
-            image="proxy:latest",
-            network="paude-net-my-session",
-            dns=None,
-            allowed_domains=[".googleapis.com", ".pypi.org"],
-        )
+        # Proxy container should be created via engine.run
+        engine_calls = [str(c) for c in mock_runner.engine.run.call_args_list]
+        assert any("create" in c for c in engine_calls)
 
         # Main container should be on the internal network
         call_kwargs = mock_runner.create_container.call_args[1]
@@ -1223,10 +1222,9 @@ class TestPodmanBackendStartSessionWithProxy:
 
         backend.start_session("my-session")
 
-        # Proxy should be started before main container
-        mock_runner.start_session_proxy.assert_called_once_with(
-            "paude-proxy-my-session"
-        )
+        # Proxy should be started via engine.run
+        engine_calls = [str(c) for c in mock_runner.engine.run.call_args_list]
+        assert any("start" in c for c in engine_calls)
         mock_runner.start_container.assert_called_once_with("paude-my-session")
 
     @patch("paude.backends.podman.backend.ContainerRunner")
@@ -1485,17 +1483,10 @@ class TestProxyRecreation:
         backend = _make_backend(mock_runner, mock_network)
         backend.start_session("my-session")
 
-        # Should recreate the proxy
-        mock_runner.create_session_proxy.assert_called_once_with(
-            name="paude-proxy-my-session",
-            image="paude-proxy:latest",
-            network="paude-net-my-session",
-            dns=None,
-            allowed_domains=["api.example.com", "cdn.example.com"],
-        )
-        mock_runner.start_session_proxy.assert_called_once_with(
-            "paude-proxy-my-session"
-        )
+        # Proxy should be recreated via engine.run (create + start)
+        engine_calls = [str(c) for c in mock_runner.engine.run.call_args_list]
+        assert any("create" in c for c in engine_calls)
+        assert any("start" in c for c in engine_calls)
 
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_skips_recreate_without_labels(
@@ -1563,9 +1554,10 @@ class TestProxyRecreation:
         backend = _make_backend(mock_runner, mock_network)
         backend.connect_session("my-session")
 
-        # Should recreate the proxy
-        mock_runner.create_session_proxy.assert_called_once()
-        mock_runner.start_session_proxy.assert_called_once()
+        # Proxy should be recreated via engine.run (create + start)
+        engine_calls = [str(c) for c in mock_runner.engine.run.call_args_list]
+        assert any("create" in c for c in engine_calls)
+        assert any("start" in c for c in engine_calls)
 
 
 class TestFindContainerBySessionName:

@@ -10,7 +10,12 @@ import typer
 
 from paude.backends.base import Backend, Session
 from paude.backends.openshift import OpenShiftBackend, OpenShiftConfig
-from paude.backends.shared import pod_name, resource_name
+from paude.backends.shared import (
+    engine_binary_for_backend,
+    is_local_backend,
+    pod_name,
+    resource_name,
+)
 from paude.cli.app import app
 from paude.cli.helpers import find_session_backend
 from paude.session_discovery import find_workspace_session
@@ -328,9 +333,10 @@ def _try_clone_from_origin(
 
     typer.echo(f"Cloning from origin in container ({origin_https_url})...")
 
-    if backend_type == "podman":
+    if is_local_backend(backend_type):
         cname = resource_name(session_name)
-        success = clone_from_origin_podman(cname, origin_https_url)
+        engine = engine_binary_for_backend(backend_type)
+        success = clone_from_origin_podman(cname, origin_https_url, engine=engine)
     else:
         pname = pod_name(session_name)
         namespace = openshift_namespace or "default"
@@ -391,8 +397,9 @@ def _setup_after_clone(
                 )
 
     # Set base ref
-    if backend_type == "podman":
-        set_base_ref_in_container_podman(resource_name(session_name))
+    if is_local_backend(backend_type):
+        engine = engine_binary_for_backend(backend_type)
+        set_base_ref_in_container_podman(resource_name(session_name), engine=engine)
     else:
         pname = pod_name(session_name)
         namespace = openshift_namespace or "default"
@@ -438,8 +445,9 @@ def _setup_full_push(
         return
 
     # Set base ref
-    if backend_type == "podman":
-        set_base_ref_in_container_podman(resource_name(session_name))
+    if is_local_backend(backend_type):
+        engine = engine_binary_for_backend(backend_type)
+        set_base_ref_in_container_podman(resource_name(session_name), engine=engine)
     else:
         pname = pod_name(session_name)
         namespace = openshift_namespace or "default"
@@ -453,9 +461,10 @@ def _setup_full_push(
     # Set origin in container if available
     if origin_https_url:
         typer.echo(f"Setting origin in container to {origin_https_url}...")
-        if backend_type == "podman":
+        if is_local_backend(backend_type):
+            engine = engine_binary_for_backend(backend_type)
             origin_set = set_origin_in_container_podman(
-                resource_name(session_name), origin_https_url
+                resource_name(session_name), origin_https_url, engine=engine
             )
         else:
             origin_set = set_origin_in_container_openshift(
@@ -486,8 +495,11 @@ def _setup_precommit(
         return
 
     typer.echo("Setting up pre-commit hooks in container...")
-    if backend_type == "podman":
-        success = setup_precommit_in_container_podman(resource_name(session_name))
+    if is_local_backend(backend_type):
+        engine = engine_binary_for_backend(backend_type)
+        success = setup_precommit_in_container_podman(
+            resource_name(session_name), engine=engine
+        )
     else:
         success = setup_precommit_in_container_openshift(
             pod_name(session_name),
@@ -566,7 +578,7 @@ def _remote_add(
     rname = resource_name(session.name)
     branch = get_current_branch() or "main"
 
-    if session.backend_type == "openshift":
+    if not is_local_backend(session.backend_type):
         os_config = OpenShiftConfig(
             context=openshift_context,
             namespace=openshift_namespace,
@@ -612,9 +624,10 @@ def _remote_add(
         )
     else:
         cname = resource_name(session.name)
+        engine = engine_binary_for_backend(session.backend_type)
 
         # Check if container is running
-        if not is_container_running_podman(cname):
+        if not is_container_running_podman(cname, engine=engine):
             typer.echo("Error: Container not running.", err=True)
             typer.echo("Start it first:", err=True)
             typer.echo(f"  paude start {session.name}", err=True)
@@ -622,10 +635,12 @@ def _remote_add(
 
         # Initialize git repository in container
         typer.echo("Initializing git repository in container...")
-        if not initialize_container_workspace_podman(cname, branch=branch):
+        if not initialize_container_workspace_podman(
+            cname, branch=branch, engine=engine
+        ):
             raise typer.Exit(1)
 
-        remote_url = build_podman_remote_url(container_name=cname)
+        remote_url = build_podman_remote_url(container_name=cname, engine=engine)
 
     # Add the remote
     if git_remote_add(rname, remote_url):
@@ -643,7 +658,7 @@ def _remote_add(
                     pname, namespace, context=openshift_context
                 )
             else:
-                set_base_ref_in_container_podman(cname)
+                set_base_ref_in_container_podman(cname, engine=engine)
             typer.echo("Push complete.")
         else:
             typer.echo("")

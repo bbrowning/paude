@@ -253,7 +253,7 @@ def session_create(
         agent_name=r_agent,
     )
 
-    if r_backend == BackendType.podman:
+    if r_backend in (BackendType.podman, BackendType.docker):
         _create_podman_session(
             name=name,
             workspace=workspace,
@@ -268,6 +268,7 @@ def session_create(
             rebuild=rebuild,
             platform=r_platform,
             agent_name=r_agent,
+            engine_binary=r_backend.value,
         )
     else:
         _create_openshift_session(
@@ -306,15 +307,21 @@ def _create_podman_session(
     rebuild: bool,
     platform: str | None,
     agent_name: str = "claude",
+    engine_binary: str = "podman",
 ) -> None:
-    """Podman-specific session creation logic."""
+    """Local container session creation logic (Podman or Docker)."""
     from paude.container import ImageManager
+    from paude.container.engine import ContainerEngine
     from paude.mounts import build_mounts
 
+    engine = ContainerEngine(engine_binary)
     home = Path.home()
     agent_instance = get_agent(agent_name)
     image_manager = ImageManager(
-        script_dir=_detect_dev_script_dir(), platform=platform, agent=agent_instance
+        script_dir=_detect_dev_script_dir(),
+        platform=platform,
+        agent=agent_instance,
+        engine=engine,
     )
 
     # Ensure image
@@ -358,7 +365,7 @@ def _create_podman_session(
     )
 
     try:
-        backend_instance = PodmanBackend()
+        backend_instance = PodmanBackend(engine=engine)
         session = backend_instance.create_session(session_config)
 
         # Auto-start the container (entrypoint is sleep infinity)
