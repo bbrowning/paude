@@ -149,9 +149,8 @@ def _download_with_curl(feature_url: str, feature_dir: Path) -> None:
         import tarfile
 
         with urllib.request.urlopen(req) as response:
-            # Response is a tar.gz - use tarfile's built-in gzip support
             data = response.read()
-            with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+            with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as tar:
                 tar.extractall(feature_dir)
     except Exception as e:
         raise RuntimeError(f"Failed to extract feature {feature_url}: {e}") from e
