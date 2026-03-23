@@ -16,6 +16,7 @@ from paude.constants import (
     CLONE_FROM_ORIGIN_TIMEOUT,
     CONTAINER_HOME,
     CONTAINER_WORKSPACE,
+    DEFAULT_BRANCHES,
 )
 
 
@@ -449,20 +450,43 @@ def git_push_tags_to_remote(remote_name: str) -> bool:
     return result.returncode == 0
 
 
+def get_upstream_url(cwd: str | Path | None = None) -> str | None:
+    """Get the canonical upstream remote URL for the repository.
+
+    Tries the main branch's tracking remote first (handles fork workflows
+    where ``main`` tracks ``upstream`` while feature branches track
+    ``origin``).  Falls back to the current branch's tracking remote,
+    then to the ``origin`` remote URL.
+
+    Args:
+        cwd: Working directory for git commands.
+
+    Returns:
+        Remote URL string, or None if no remote could be resolved.
+    """
+    # Try main/master branch tracking remotes first
+    for default_branch in DEFAULT_BRANCHES:
+        url = get_branch_remote_url(default_branch, cwd=cwd)
+        if url:
+            return url
+
+    # Fall back to current branch's tracking remote
+    return get_branch_remote_url(None, cwd=cwd)
+
+
 def resolve_origin_cmd(
-    branch: str | None = None,
     cwd: str | Path | None = None,
 ) -> str | None:
-    """Resolve the branch's tracking remote URL and build a set-origin command.
+    """Resolve the upstream remote URL and build a set-origin command.
 
-    Combines get_branch_remote_url, ssh_url_to_https, and the internal
-    set-origin command builder into a single public helper.
+    Uses get_upstream_url to find the canonical upstream URL (preferring
+    the main branch's tracking remote over the current branch's).
 
     Returns:
         A bash command string to set origin in the container, or None
         if no remote URL could be resolved.
     """
-    origin_url = get_branch_remote_url(branch, cwd=cwd)
+    origin_url = get_upstream_url(cwd=cwd)
     if not origin_url:
         return None
     return _build_set_origin_cmd(ssh_url_to_https(origin_url))

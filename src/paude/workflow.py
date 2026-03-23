@@ -350,7 +350,7 @@ def reset_session(
     # Re-resolve origin from the host repo's branch tracking remote
     from paude.git_remote import resolve_origin_cmd
 
-    set_origin_cmd = resolve_origin_cmd(branch, cwd=session.workspace)
+    set_origin_cmd = resolve_origin_cmd(cwd=session.workspace)
     if set_origin_cmd:
         backend.exec_in_session(session_name, set_origin_cmd)
 

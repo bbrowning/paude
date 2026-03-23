@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass, field
 
 from paude.backends.base import Backend
-from paude.constants import BASE_REF_NAME, CONTAINER_WORKSPACE
+from paude.constants import BASE_REF_NAME, CONTAINER_WORKSPACE, DEFAULT_BRANCHES
 
 
 @dataclass
@@ -125,7 +125,7 @@ def format_work_summary(summary: WorkSummary | None, max_width: int = 40) -> str
     if summary.branch == "HEAD":
         return "detached"
 
-    is_default = summary.branch in ("main", "master")
+    is_default = summary.branch in DEFAULT_BRANCHES
 
     # Case 1: commits ahead — show branch + subject + count
     if summary.commits_ahead > 0 or summary.latest_subject:

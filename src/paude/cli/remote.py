@@ -246,8 +246,8 @@ def _setup_git_after_create(
         True if all steps succeeded, False if any step failed.
     """
     from paude.git_remote import (
-        get_branch_remote_url,
         get_current_branch,
+        get_upstream_url,
         is_git_repository,
         ssh_url_to_https,
     )
@@ -267,8 +267,8 @@ def _setup_git_after_create(
         # Detached HEAD — skip clone optimization
         branch = None
 
-    # Resolve origin URL
-    origin_url = get_branch_remote_url(branch)
+    # Resolve origin URL (prefers main branch's tracking remote for forks)
+    origin_url = get_upstream_url()
     origin_https_url = ssh_url_to_https(origin_url) if origin_url else None
 
     # Try clone-from-origin if conditions are met

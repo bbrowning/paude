@@ -17,6 +17,7 @@ from paude.git_remote import (
     enable_ext_protocol,
     get_branch_remote_url,
     get_current_branch,
+    get_upstream_url,
     git_diff_stat,
     git_fetch_from_remote,
     git_push_tags_to_remote,
@@ -1182,27 +1183,100 @@ class TestGetBranchRemoteUrl:
             assert call[1]["cwd"] == "/some/repo"
 
 
+class TestGetUpstreamUrl:
+    """Tests for get_upstream_url."""
+
+    @patch("paude.git_remote.get_branch_remote_url")
+    def test_prefers_main_branch_remote(self, mock_get_url) -> None:
+        """Use main branch's tracking remote when available."""
+        mock_get_url.return_value = "https://github.com/upstream/repo.git"
+
+        result = get_upstream_url()
+
+        assert result == "https://github.com/upstream/repo.git"
+        mock_get_url.assert_called_once_with("main", cwd=None)
+
+    @patch("paude.git_remote.get_branch_remote_url")
+    def test_falls_back_to_master(self, mock_get_url) -> None:
+        """Fall back to master branch when main has no remote."""
+        mock_get_url.side_effect = [None, "https://github.com/upstream/repo.git"]
+
+        result = get_upstream_url()
+
+        assert result == "https://github.com/upstream/repo.git"
+        assert mock_get_url.call_count == 2
+        mock_get_url.assert_any_call("main", cwd=None)
+        mock_get_url.assert_any_call("master", cwd=None)
+
+    @patch("paude.git_remote.get_branch_remote_url")
+    def test_falls_back_to_current_branch(self, mock_get_url) -> None:
+        """Fall back to current branch when main/master have no remotes."""
+        mock_get_url.side_effect = [
+            None,  # main
+            None,  # master
+            "https://github.com/fork/repo.git",  # current branch
+        ]
+
+        result = get_upstream_url()
+
+        assert result == "https://github.com/fork/repo.git"
+        assert mock_get_url.call_count == 3
+        mock_get_url.assert_any_call(None, cwd=None)
+
+    @patch("paude.git_remote.get_branch_remote_url")
+    def test_returns_none_when_no_remotes(self, mock_get_url) -> None:
+        """Return None when no remotes can be resolved."""
+        mock_get_url.return_value = None
+
+        result = get_upstream_url()
+
+        assert result is None
+
+    @patch("paude.git_remote.get_branch_remote_url")
+    def test_passes_cwd(self, mock_get_url) -> None:
+        """Pass cwd to get_branch_remote_url."""
+        mock_get_url.return_value = "https://github.com/upstream/repo.git"
+
+        get_upstream_url(cwd="/some/repo")
+
+        mock_get_url.assert_called_once_with("main", cwd="/some/repo")
+
+    @patch("paude.git_remote.get_branch_remote_url")
+    def test_fork_workflow_uses_upstream_not_fork(self, mock_get_url) -> None:
+        """In a fork workflow, prefer main's upstream remote over current branch's origin."""
+        # Simulate: main tracks upstream (vllm-project/vllm),
+        # feature branch tracks origin (bbrowning/vllm)
+        mock_get_url.side_effect = lambda branch, cwd=None: {
+            "main": "https://github.com/vllm-project/vllm.git",
+            "feature-branch": "https://github.com/bbrowning/vllm.git",
+        }.get(branch)
+
+        result = get_upstream_url()
+
+        assert result == "https://github.com/vllm-project/vllm.git"
+
+
 class TestResolveOriginCmd:
     """Tests for resolve_origin_cmd."""
 
-    @patch("paude.git_remote.get_branch_remote_url")
+    @patch("paude.git_remote.get_upstream_url")
     def test_returns_set_origin_cmd(self, mock_get_url) -> None:
         """Return a set-origin command when URL is found."""
         mock_get_url.return_value = "git@github.com:user/repo.git"
 
-        result = resolve_origin_cmd("main", cwd="/some/repo")
+        result = resolve_origin_cmd(cwd="/some/repo")
 
         assert result is not None
         assert "https://github.com/user/repo.git" in result
         assert "git -C /pvc/workspace remote" in result
-        mock_get_url.assert_called_once_with("main", cwd="/some/repo")
+        mock_get_url.assert_called_once_with(cwd="/some/repo")
 
-    @patch("paude.git_remote.get_branch_remote_url")
+    @patch("paude.git_remote.get_upstream_url")
     def test_returns_none_when_no_url(self, mock_get_url) -> None:
         """Return None when no remote URL is found."""
         mock_get_url.return_value = None
 
-        result = resolve_origin_cmd("main")
+        result = resolve_origin_cmd()
 
         assert result is None
 
