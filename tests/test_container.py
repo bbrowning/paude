@@ -12,7 +12,7 @@ import pytest
 class TestImageExists:
     """Tests for image_exists."""
 
-    @patch("paude.container.podman.subprocess.run")
+    @patch("paude.transport.local.subprocess.run")
     def test_returns_true_for_existing_image(self, mock_run):
         """image_exists returns True for existing image."""
         mock_run.return_value = subprocess.CompletedProcess(
@@ -26,7 +26,7 @@ class TestImageExists:
         result = image_exists("test:tag")
         assert result is True
 
-    @patch("paude.container.podman.subprocess.run")
+    @patch("paude.transport.local.subprocess.run")
     def test_returns_false_for_missing_image(self, mock_run):
         """image_exists returns False for missing image."""
         mock_run.return_value = subprocess.CompletedProcess(
@@ -44,32 +44,31 @@ class TestImageExists:
 class TestImageManager:
     """Tests for ImageManager."""
 
-    @patch("paude.container.image.run_podman")
-    @patch("paude.container.image.image_exists")
-    def test_build_image_calls_podman_build(self, mock_exists, mock_run, tmp_path):
+    def test_build_image_calls_podman_build(self, tmp_path):
         """build_image calls podman build with correct args."""
-        mock_exists.return_value = False
+        from paude.container.engine import ContainerEngine
         from paude.container.image import ImageManager
 
-        manager = ImageManager(script_dir=tmp_path)
-        dockerfile = tmp_path / "Dockerfile"
-        dockerfile.write_text("FROM alpine")
+        engine = ContainerEngine()
+        with patch.object(engine, "run") as mock_run:
+            manager = ImageManager(script_dir=tmp_path, engine=engine)
+            dockerfile = tmp_path / "Dockerfile"
+            dockerfile.write_text("FROM alpine")
 
-        manager.build_image(dockerfile, "test:tag", tmp_path)
+            manager.build_image(dockerfile, "test:tag", tmp_path)
 
-        mock_run.assert_called_once()
-        call_args = mock_run.call_args[0]
-        assert "build" in call_args
-        assert "-t" in call_args
-        assert "test:tag" in call_args
+            mock_run.assert_called_once()
+            call_args = mock_run.call_args[0]
+            assert "build" in call_args
+            assert "-t" in call_args
+            assert "test:tag" in call_args
 
-    @patch("paude.container.image.run_podman")
-    @patch("paude.container.image.image_exists")
-    def test_ensure_default_image_builds_runtime_layer(
-        self, mock_exists, mock_run, tmp_path
-    ):
+    def test_ensure_default_image_builds_runtime_layer(self, tmp_path):
         """ensure_default_image builds a runtime layer with Claude."""
         import os
+
+        from paude.container.engine import ContainerEngine
+        from paude.container.image import ImageManager
 
         # Create test containers directory structure
         containers_dir = tmp_path / "containers" / "paude"
@@ -78,31 +77,34 @@ class TestImageManager:
         (containers_dir / "entrypoint.sh").write_text("#!/bin/bash\nexec $@")
         (containers_dir / "entrypoint-session.sh").write_text("#!/bin/bash\nexec $@")
 
-        # First call: base image doesn't exist, second: runtime doesn't exist
-        mock_exists.side_effect = [False, False]
+        engine = ContainerEngine()
 
-        with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
-            from paude.container.image import ImageManager
+        with (
+            patch.object(engine, "image_exists") as mock_exists,
+            patch.object(engine, "run") as mock_run,
+        ):
+            # First call: base image doesn't exist, second: runtime doesn't exist
+            mock_exists.side_effect = [False, False]
 
-            manager = ImageManager(script_dir=tmp_path)
-            result = manager.ensure_default_image()
+            with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
+                manager = ImageManager(script_dir=tmp_path, engine=engine)
+                result = manager.ensure_default_image()
 
-        # Should build base image then runtime layer
-        assert mock_run.call_count == 2
-        # First call builds base, second builds runtime
-        first_call = mock_run.call_args_list[0][0]
-        assert "paude-base-centos10" in str(first_call)
-        second_call = mock_run.call_args_list[1][0]
-        assert "paude-runtime:" in str(second_call)
-        assert "paude-runtime:" in result
+            # Should build base image then runtime layer
+            assert mock_run.call_count == 2
+            # First call builds base, second builds runtime
+            first_call = mock_run.call_args_list[0][0]
+            assert "paude-base-centos10" in str(first_call)
+            second_call = mock_run.call_args_list[1][0]
+            assert "paude-runtime:" in str(second_call)
+            assert "paude-runtime:" in result
 
-    @patch("paude.container.image.run_podman")
-    @patch("paude.container.image.image_exists")
-    def test_ensure_default_image_uses_cached_runtime(
-        self, mock_exists, mock_run, tmp_path
-    ):
+    def test_ensure_default_image_uses_cached_runtime(self, tmp_path):
         """ensure_default_image skips build if runtime image is cached."""
         import os
+
+        from paude.container.engine import ContainerEngine
+        from paude.container.image import ImageManager
 
         containers_dir = tmp_path / "containers" / "paude"
         containers_dir.mkdir(parents=True)
@@ -110,91 +112,110 @@ class TestImageManager:
         (containers_dir / "entrypoint.sh").write_text("#!/bin/bash\nexec $@")
         (containers_dir / "entrypoint-session.sh").write_text("#!/bin/bash\nexec $@")
 
-        # Base exists, runtime exists
-        mock_exists.return_value = True
+        engine = ContainerEngine()
 
-        with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
-            from paude.container.image import ImageManager
+        with (
+            patch.object(engine, "image_exists") as mock_exists,
+            patch.object(engine, "run") as mock_run,
+        ):
+            # Base exists, runtime exists
+            mock_exists.return_value = True
 
-            manager = ImageManager(script_dir=tmp_path)
-            result = manager.ensure_default_image()
+            with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
+                manager = ImageManager(script_dir=tmp_path, engine=engine)
+                result = manager.ensure_default_image()
 
-        # No builds should happen
-        mock_run.assert_not_called()
-        assert "paude-runtime:" in result
+            # No builds should happen
+            mock_run.assert_not_called()
+            assert "paude-runtime:" in result
 
-    @patch("paude.container.image.run_podman")
-    @patch("paude.container.image.image_exists")
-    def test_ensure_proxy_image_builds_when_missing(
-        self, mock_exists, mock_run, tmp_path
-    ):
+    def test_ensure_proxy_image_builds_when_missing(self, tmp_path):
         """ensure_proxy_image builds proxy image when it doesn't exist."""
         import os
 
+        from paude.container.engine import ContainerEngine
+        from paude.container.image import ImageManager
+
         proxy_dir = tmp_path / "containers" / "proxy"
         proxy_dir.mkdir(parents=True)
         (proxy_dir / "Dockerfile").write_text("FROM centos:stream9")
 
-        mock_exists.return_value = False
+        engine = ContainerEngine()
 
-        with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
-            from paude.container.image import ImageManager
+        with (
+            patch.object(engine, "image_exists") as mock_exists,
+            patch.object(engine, "run") as mock_run,
+        ):
+            mock_exists.return_value = False
 
-            manager = ImageManager(script_dir=tmp_path, platform="linux/amd64")
-            result = manager.ensure_proxy_image()
+            with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
+                manager = ImageManager(
+                    script_dir=tmp_path, platform="linux/amd64", engine=engine
+                )
+                result = manager.ensure_proxy_image()
 
-        assert result == "paude-proxy-centos10:latest-amd64"
-        mock_run.assert_called_once()
-        call_args = mock_run.call_args[0]
-        assert "build" in call_args
+            assert result == "paude-proxy-centos10:latest-amd64"
+            mock_run.assert_called_once()
+            call_args = mock_run.call_args[0]
+            assert "build" in call_args
 
-    @patch("paude.container.image.run_podman")
-    @patch("paude.container.image.image_exists")
-    def test_ensure_proxy_image_skips_build_when_cached(
-        self, mock_exists, mock_run, tmp_path
-    ):
+    def test_ensure_proxy_image_skips_build_when_cached(self, tmp_path):
         """ensure_proxy_image skips build when image already exists."""
         import os
 
+        from paude.container.engine import ContainerEngine
+        from paude.container.image import ImageManager
+
         proxy_dir = tmp_path / "containers" / "proxy"
         proxy_dir.mkdir(parents=True)
         (proxy_dir / "Dockerfile").write_text("FROM centos:stream9")
 
-        mock_exists.return_value = True
+        engine = ContainerEngine()
 
-        with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
-            from paude.container.image import ImageManager
+        with (
+            patch.object(engine, "image_exists") as mock_exists,
+            patch.object(engine, "run") as mock_run,
+        ):
+            mock_exists.return_value = True
 
-            manager = ImageManager(script_dir=tmp_path, platform="linux/amd64")
-            result = manager.ensure_proxy_image()
+            with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
+                manager = ImageManager(
+                    script_dir=tmp_path, platform="linux/amd64", engine=engine
+                )
+                result = manager.ensure_proxy_image()
 
-        assert result == "paude-proxy-centos10:latest-amd64"
-        mock_run.assert_not_called()
+            assert result == "paude-proxy-centos10:latest-amd64"
+            mock_run.assert_not_called()
 
-    @patch("paude.container.image.run_podman")
-    @patch("paude.container.image.image_exists")
-    def test_ensure_proxy_image_force_rebuild_ignores_cache(
-        self, mock_exists, mock_run, tmp_path
-    ):
+    def test_ensure_proxy_image_force_rebuild_ignores_cache(self, tmp_path):
         """ensure_proxy_image rebuilds when force_rebuild=True even if cached."""
         import os
 
+        from paude.container.engine import ContainerEngine
+        from paude.container.image import ImageManager
+
         proxy_dir = tmp_path / "containers" / "proxy"
         proxy_dir.mkdir(parents=True)
         (proxy_dir / "Dockerfile").write_text("FROM centos:stream9")
 
-        mock_exists.return_value = True  # Image exists
+        engine = ContainerEngine()
 
-        with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
-            from paude.container.image import ImageManager
+        with (
+            patch.object(engine, "image_exists") as mock_exists,
+            patch.object(engine, "run") as mock_run,
+        ):
+            mock_exists.return_value = True  # Image exists
 
-            manager = ImageManager(script_dir=tmp_path, platform="linux/amd64")
-            result = manager.ensure_proxy_image(force_rebuild=True)
+            with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
+                manager = ImageManager(
+                    script_dir=tmp_path, platform="linux/amd64", engine=engine
+                )
+                result = manager.ensure_proxy_image(force_rebuild=True)
 
-        assert result == "paude-proxy-centos10:latest-amd64"
-        mock_run.assert_called_once()
-        call_args = mock_run.call_args[0]
-        assert "build" in call_args
+            assert result == "paude-proxy-centos10:latest-amd64"
+            mock_run.assert_called_once()
+            call_args = mock_run.call_args[0]
+            assert "build" in call_args
 
 
 class TestPrepareBuiltContext:
@@ -257,6 +278,7 @@ class TestPrepareBuiltContext:
         import shutil
 
         from paude.config.models import PaudeConfig
+        from paude.container.engine import ContainerEngine
         from paude.container.image import prepare_build_context
 
         config = PaudeConfig()
@@ -267,8 +289,9 @@ class TestPrepareBuiltContext:
         (containers_dir / "entrypoint.sh").write_text("#!/bin/bash\nexec $@")
         (containers_dir / "entrypoint-session.sh").write_text("#!/bin/bash\nexec $@")
 
-        with patch("paude.container.image.image_exists", return_value=True):
-            with patch("paude.container.image.run_podman"):
+        engine = ContainerEngine()
+        with patch.object(engine, "image_exists", return_value=True):
+            with patch.object(engine, "run"):
                 with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
                     ctx = prepare_build_context(
                         config,
@@ -288,6 +311,7 @@ class TestPrepareBuiltContext:
         import shutil
 
         from paude.config.models import FeatureSpec, PaudeConfig
+        from paude.container.engine import ContainerEngine
         from paude.container.image import prepare_build_context
 
         # Create a config with features
@@ -313,8 +337,9 @@ class TestPrepareBuiltContext:
                 "#!/bin/bash\nexec $@"
             )
 
-            with patch("paude.container.image.image_exists", return_value=True):
-                with patch("paude.container.image.run_podman"):
+            engine = ContainerEngine()
+            with patch.object(engine, "image_exists", return_value=True):
+                with patch.object(engine, "run"):
                     with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
                         ctx = prepare_build_context(
                             config,
@@ -341,6 +366,7 @@ class TestPrepareBuiltContext:
         import shutil
 
         from paude.config.models import FeatureSpec, PaudeConfig
+        from paude.container.engine import ContainerEngine
         from paude.container.image import prepare_build_context
 
         # Create a config with features
@@ -367,8 +393,9 @@ class TestPrepareBuiltContext:
                 "#!/bin/bash\nexec $@"
             )
 
-            with patch("paude.container.image.image_exists", return_value=True):
-                with patch("paude.container.image.run_podman"):
+            engine = ContainerEngine()
+            with patch.object(engine, "image_exists", return_value=True):
+                with patch.object(engine, "run"):
                     with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
                         ctx = prepare_build_context(
                             config,
@@ -389,52 +416,59 @@ class TestPrepareBuiltContext:
 class TestContainerRunner:
     """Tests for ContainerRunner."""
 
-    @patch("paude.container.runner.subprocess.run")
-    def test_run_proxy_creates_container_with_network(self, mock_run):
+    def test_run_proxy_creates_container_with_network(self):
         """run_proxy creates container with correct network including podman."""
-        mock_run.return_value = MagicMock(returncode=0)
-        from paude.container.runner import ContainerRunner
+        from paude.container.proxy_runner import ProxyRunner
 
-        runner = ContainerRunner()
-        runner.run_proxy("test:proxy", "test-network")
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.run.return_value = MagicMock(returncode=0)
 
-        call_args = mock_run.call_args[0][0]
+        proxy = ProxyRunner(mock_runner)
+        proxy.run_proxy("test:proxy", "test-network")
+
+        call_args = mock_runner.engine.run.call_args[0]
         assert "--network" in call_args
-        # Should connect to both internal network and podman network
         network_idx = call_args.index("--network")
         assert call_args[network_idx + 1] == "test-network,podman"
 
-    @patch("paude.container.runner.subprocess.run")
-    def test_run_proxy_passes_dns_as_squid_env_var(self, mock_run):
+    def test_run_proxy_passes_dns_as_squid_env_var(self):
         """run_proxy passes DNS as SQUID_DNS env var, not --dns flag."""
-        mock_run.return_value = MagicMock(returncode=0)
-        from paude.container.runner import ContainerRunner
+        from paude.container.proxy_runner import ProxyRunner
 
-        runner = ContainerRunner()
-        runner.run_proxy("test:proxy", "test-network", dns="192.168.127.1")
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.run.return_value = MagicMock(returncode=0)
 
-        call_args = mock_run.call_args[0][0]
-        # Should NOT use --dns flag (which requires IP, not hostname)
+        proxy = ProxyRunner(mock_runner)
+        proxy.run_proxy("test:proxy", "test-network", dns="192.168.127.1")
+
+        call_args = mock_runner.engine.run.call_args[0]
         assert "--dns" not in call_args
-        # Should use -e SQUID_DNS=... for the squid proxy
         assert "-e" in call_args
         env_idx = call_args.index("-e")
         assert call_args[env_idx + 1] == "SQUID_DNS=192.168.127.1"
 
-    @patch("paude.container.runner.subprocess.run")
-    def test_run_proxy_passes_allowed_domains_as_env_var(self, mock_run):
+    def test_run_proxy_passes_allowed_domains_as_env_var(self):
         """run_proxy passes allowed_domains as ALLOWED_DOMAINS env var."""
-        mock_run.return_value = MagicMock(returncode=0)
-        from paude.container.runner import ContainerRunner
+        from paude.container.proxy_runner import ProxyRunner
 
-        runner = ContainerRunner()
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.run.return_value = MagicMock(returncode=0)
+
+        proxy = ProxyRunner(mock_runner)
         allowed_domains = [".googleapis.com", ".pypi.org", "api.example.com"]
-        runner.run_proxy("test:proxy", "test-network", allowed_domains=allowed_domains)
+        proxy.run_proxy("test:proxy", "test-network", allowed_domains=allowed_domains)
 
-        call_args = mock_run.call_args[0][0]
-        # Should use -e ALLOWED_DOMAINS=...
+        call_args = mock_runner.engine.run.call_args[0]
         assert "-e" in call_args
-        # Find the ALLOWED_DOMAINS env var
         env_indices = [i for i, x in enumerate(call_args) if x == "-e"]
         found_domains = False
         for idx in env_indices:
@@ -445,53 +479,60 @@ class TestContainerRunner:
                 break
         assert found_domains, "ALLOWED_DOMAINS env var not found in command"
 
-    @patch("paude.container.runner.subprocess.run")
-    def test_run_proxy_omits_allowed_domains_when_none(self, mock_run):
+    def test_run_proxy_omits_allowed_domains_when_none(self):
         """run_proxy omits ALLOWED_DOMAINS env var when not provided."""
-        mock_run.return_value = MagicMock(returncode=0)
-        from paude.container.runner import ContainerRunner
+        from paude.container.proxy_runner import ProxyRunner
 
-        runner = ContainerRunner()
-        runner.run_proxy("test:proxy", "test-network")
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.run.return_value = MagicMock(returncode=0)
 
-        call_args = mock_run.call_args[0][0]
-        # Should not have ALLOWED_DOMAINS
+        proxy = ProxyRunner(mock_runner)
+        proxy.run_proxy("test:proxy", "test-network")
+
+        call_args = mock_runner.engine.run.call_args[0]
         env_indices = [i for i, x in enumerate(call_args) if x == "-e"]
         for idx in env_indices:
             assert not call_args[idx + 1].startswith("ALLOWED_DOMAINS="), (
                 "ALLOWED_DOMAINS should not be set when not provided"
             )
 
-    @patch("paude.container.runner.subprocess.run")
-    def test_run_proxy_uses_unique_container_name(self, mock_run):
+    def test_run_proxy_uses_unique_container_name(self):
         """run_proxy uses unique container name to avoid conflicts."""
-        mock_run.return_value = MagicMock(returncode=0)
-        from paude.container.runner import ContainerRunner
+        from paude.container.proxy_runner import ProxyRunner
 
-        runner = ContainerRunner()
-        name1 = runner.run_proxy("test:proxy", "net1")
-        name2 = runner.run_proxy("test:proxy", "net2")
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.run.return_value = MagicMock(returncode=0)
 
-        # Names should be unique (not both "paude-proxy")
+        proxy = ProxyRunner(mock_runner)
+        name1 = proxy.run_proxy("test:proxy", "net1")
+        name2 = proxy.run_proxy("test:proxy", "net2")
+
         assert name1 != name2
 
-    @patch("paude.container.runner.subprocess.run")
-    def test_run_proxy_failure_includes_error_message(self, mock_run):
+    def test_run_proxy_failure_includes_error_message(self):
         """run_proxy raises error with stderr on failure."""
-        from paude.container.runner import ContainerRunner, ProxyStartError
+        from paude.container.proxy_runner import ProxyRunner, ProxyStartError
 
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=["podman", "run"],
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.run.return_value = MagicMock(
             returncode=125,
-            stdout=b"",
-            stderr=b"Error: container name already in use",
+            stderr="Error: container name already in use",
         )
 
-        runner = ContainerRunner()
+        proxy = ProxyRunner(mock_runner)
         with pytest.raises(ProxyStartError, match="container name already in use"):
-            runner.run_proxy("test:proxy", "test-network")
+            proxy.run_proxy("test:proxy", "test-network")
 
-    @patch("paude.container.runner.subprocess.run")
+    @patch("paude.transport.local.subprocess.run")
     def test_stop_container_uses_stop_with_short_timeout(self, mock_run):
         """stop_container uses podman stop with short timeout for graceful exit."""
         mock_run.return_value = MagicMock(returncode=0)
@@ -508,7 +549,7 @@ class TestContainerRunner:
         assert "1" in call_args
         assert "test-container" in call_args
 
-    @patch("paude.container.runner.subprocess.run")
+    @patch("paude.transport.local.subprocess.run")
     def test_create_secret_succeeds_on_clean_install(self, mock_run):
         """create_secret works on clean install (no prior secret)."""
         mock_run.return_value = MagicMock(returncode=0)
@@ -518,13 +559,17 @@ class TestContainerRunner:
         runner.create_secret("my-secret", Path("/tmp/creds.json"))
 
         # Only one call needed when secret doesn't already exist
-        mock_run.assert_called_once_with(
-            ["podman", "secret", "create", "my-secret", "/tmp/creds.json"],
-            capture_output=True,
-            check=True,
-        )
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert call_args == [
+            "podman",
+            "secret",
+            "create",
+            "my-secret",
+            "/tmp/creds.json",
+        ]
 
-    @patch("paude.container.runner.subprocess.run")
+    @patch("paude.transport.local.subprocess.run")
     def test_create_secret_replaces_existing_secret(self, mock_run):
         """create_secret removes and retries when secret already exists."""
         mock_run.side_effect = [
@@ -562,90 +607,127 @@ class TestContainerRunner:
             "/tmp/creds.json",
         ]
 
+    @patch("paude.transport.local.subprocess.run")
+    def test_create_container_error_includes_stderr(self, mock_run):
+        """create_container raises CalledProcessError with stderr from engine."""
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stdout="",
+            stderr="Error: network not found: bad-net",
+        )
+        from paude.container.runner import ContainerRunner
+
+        runner = ContainerRunner()
+        with pytest.raises(subprocess.CalledProcessError) as exc_info:
+            runner.create_container(
+                name="test-container",
+                image="test-image:latest",
+                mounts=[],
+                env={},
+                workdir="/pvc",
+                network="bad-net",
+            )
+        assert exc_info.value.stderr == "Error: network not found: bad-net"
+        assert exc_info.value.returncode == 1
+
 
 class TestNetworkManager:
     """Tests for NetworkManager."""
 
-    @patch("paude.container.network.network_exists")
-    @patch("paude.container.network.run_podman")
-    def test_create_internal_network_only_if_not_exists(self, mock_run, mock_exists):
+    def test_create_internal_network_only_if_not_exists(self):
         """create_internal_network only creates if network doesn't exist."""
-        mock_exists.return_value = True
+        from paude.container.engine import ContainerEngine
         from paude.container.network import NetworkManager
 
-        manager = NetworkManager()
-        manager.create_internal_network("paude-internal")
+        engine = ContainerEngine()
+        with (
+            patch.object(engine, "network_exists", return_value=True),
+            patch.object(engine, "run") as mock_run,
+        ):
+            manager = NetworkManager(engine)
+            manager.create_internal_network("paude-internal")
 
-        # Should not call run_podman since network already exists
-        mock_run.assert_not_called()
+            # Should not call run since network already exists
+            mock_run.assert_not_called()
 
-    @patch("paude.container.network.network_exists")
-    @patch("paude.container.network.run_podman")
-    def test_create_internal_network_creates_when_missing(self, mock_run, mock_exists):
+    def test_create_internal_network_creates_when_missing(self):
         """create_internal_network creates network when it doesn't exist."""
-        mock_exists.return_value = False
+        from paude.container.engine import ContainerEngine
         from paude.container.network import NetworkManager
 
-        manager = NetworkManager()
-        manager.create_internal_network("paude-internal")
+        engine = ContainerEngine()
+        with (
+            patch.object(engine, "network_exists", return_value=False),
+            patch.object(engine, "run") as mock_run,
+        ):
+            manager = NetworkManager(engine)
+            manager.create_internal_network("paude-internal")
 
-        # Should create network with --internal flag
-        mock_run.assert_called_once()
-        call_args = mock_run.call_args[0]
-        assert "network" in call_args
-        assert "create" in call_args
-        assert "--internal" in call_args
-        assert "paude-internal" in call_args
+            # Should create network with --internal flag
+            mock_run.assert_called_once()
+            call_args = mock_run.call_args[0]
+            assert "network" in call_args
+            assert "create" in call_args
+            assert "--internal" in call_args
+            assert "paude-internal" in call_args
 
-    @patch("paude.container.network.network_exists")
-    @patch("paude.container.network.run_podman")
-    def test_remove_network_calls_podman_when_exists(self, mock_run, mock_exists):
-        """remove_network calls run_podman when network exists."""
-        mock_exists.return_value = True
+    def test_remove_network_calls_engine_when_exists(self):
+        """remove_network calls engine when network exists."""
+        from paude.container.engine import ContainerEngine
         from paude.container.network import NetworkManager
 
-        manager = NetworkManager()
-        manager.remove_network("paude-internal")
+        engine = ContainerEngine()
+        with (
+            patch.object(engine, "network_exists", return_value=True),
+            patch.object(engine, "run") as mock_run,
+        ):
+            manager = NetworkManager(engine)
+            manager.remove_network("paude-internal")
 
-        mock_run.assert_called_once()
-        call_args = mock_run.call_args[0]
-        assert "network" in call_args
-        assert "rm" in call_args
-        assert "paude-internal" in call_args
+            mock_run.assert_called_once()
+            call_args = mock_run.call_args[0]
+            assert "network" in call_args
+            assert "rm" in call_args
+            assert "paude-internal" in call_args
 
-    @patch("paude.container.network.network_exists")
-    @patch("paude.container.network.run_podman")
-    def test_remove_network_does_nothing_when_not_exists(self, mock_run, mock_exists):
+    def test_remove_network_does_nothing_when_not_exists(self):
         """remove_network does nothing when network doesn't exist."""
-        mock_exists.return_value = False
+        from paude.container.engine import ContainerEngine
         from paude.container.network import NetworkManager
 
-        manager = NetworkManager()
-        manager.remove_network("paude-internal")
+        engine = ContainerEngine()
+        with (
+            patch.object(engine, "network_exists", return_value=False),
+            patch.object(engine, "run") as mock_run,
+        ):
+            manager = NetworkManager(engine)
+            manager.remove_network("paude-internal")
 
-        mock_run.assert_not_called()
+            mock_run.assert_not_called()
 
-    @patch("paude.container.network.network_exists")
-    def test_network_exists_returns_true(self, mock_exists):
-        """network_exists returns True when underlying function returns True."""
-        mock_exists.return_value = True
+    def test_network_exists_returns_true(self):
+        """network_exists returns True when underlying engine returns True."""
+        from paude.container.engine import ContainerEngine
         from paude.container.network import NetworkManager
 
-        manager = NetworkManager()
-        result = manager.network_exists("paude-internal")
+        engine = ContainerEngine()
+        with patch.object(engine, "network_exists", return_value=True):
+            manager = NetworkManager(engine)
+            result = manager.network_exists("paude-internal")
 
-        assert result is True
+            assert result is True
 
-    @patch("paude.container.network.network_exists")
-    def test_network_exists_returns_false(self, mock_exists):
-        """network_exists returns False when underlying function returns False."""
-        mock_exists.return_value = False
+    def test_network_exists_returns_false(self):
+        """network_exists returns False when underlying engine returns False."""
+        from paude.container.engine import ContainerEngine
         from paude.container.network import NetworkManager
 
-        manager = NetworkManager()
-        result = manager.network_exists("paude-internal")
+        engine = ContainerEngine()
+        with patch.object(engine, "network_exists", return_value=False):
+            manager = NetworkManager(engine)
+            result = manager.network_exists("paude-internal")
 
-        assert result is False
+            assert result is False
 
 
 class TestProxyDockerfileCopyFiles:
@@ -684,71 +766,73 @@ class TestProxyDockerfileCopyFiles:
 class TestVolumeManager:
     """Tests for VolumeManager."""
 
-    @patch("paude.container.volume.subprocess.run")
-    def test_create_volume_calls_podman(self, mock_run):
-        """create_volume calls podman volume create with correct args."""
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=["podman", "volume", "create", "test-vol"],
-            returncode=0,
-            stdout="test-vol\n",
-            stderr="",
-        )
+    def test_create_volume_calls_engine(self):
+        """create_volume calls engine with correct args."""
+        from paude.container.engine import ContainerEngine
         from paude.container.volume import VolumeManager
 
-        manager = VolumeManager()
-        result = manager.create_volume("test-vol")
+        engine = ContainerEngine()
+        with patch.object(engine, "run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="test-vol\n")
+            manager = VolumeManager(engine)
+            result = manager.create_volume("test-vol")
 
-        mock_run.assert_called_once()
-        call_args = mock_run.call_args[0][0]
-        assert call_args == ["podman", "volume", "create", "test-vol"]
-        assert result == "test-vol"
+            mock_run.assert_called_once()
+            call_args = mock_run.call_args[0]
+            assert "volume" in call_args
+            assert "create" in call_args
+            assert "test-vol" in call_args
+            assert result == "test-vol"
 
-    @patch("paude.container.volume.subprocess.run")
-    def test_create_volume_with_labels(self, mock_run):
+    def test_create_volume_with_labels(self):
         """create_volume passes labels as --label key=value."""
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="test-vol\n", stderr=""
-        )
+        from paude.container.engine import ContainerEngine
         from paude.container.volume import VolumeManager
 
-        manager = VolumeManager()
-        manager.create_volume("test-vol", labels={"app": "paude", "env": "test"})
+        engine = ContainerEngine()
+        with patch.object(engine, "run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="test-vol\n")
+            manager = VolumeManager(engine)
+            manager.create_volume("test-vol", labels={"app": "paude", "env": "test"})
 
-        call_args = mock_run.call_args[0][0]
-        assert "--label" in call_args
-        assert "app=paude" in call_args
-        assert "env=test" in call_args
+            call_args = mock_run.call_args[0]
+            assert "--label" in call_args
+            assert "app=paude" in call_args
+            assert "env=test" in call_args
 
-    @patch("paude.container.volume.subprocess.run")
-    def test_remove_volume_calls_podman(self, mock_run):
-        """remove_volume calls podman volume rm."""
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="", stderr=""
-        )
+    def test_remove_volume_calls_engine(self):
+        """remove_volume calls engine volume rm."""
+        from paude.container.engine import ContainerEngine
         from paude.container.volume import VolumeManager
 
-        manager = VolumeManager()
-        manager.remove_volume("test-vol")
+        engine = ContainerEngine()
+        with patch.object(engine, "run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            manager = VolumeManager(engine)
+            manager.remove_volume("test-vol")
 
-        call_args = mock_run.call_args[0][0]
-        assert call_args == ["podman", "volume", "rm", "test-vol"]
+            call_args = mock_run.call_args[0]
+            assert "volume" in call_args
+            assert "rm" in call_args
+            assert "test-vol" in call_args
 
-    @patch("paude.container.volume.subprocess.run")
-    def test_remove_volume_with_force(self, mock_run):
+    def test_remove_volume_with_force(self):
         """remove_volume passes -f flag when force=True."""
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="", stderr=""
-        )
+        from paude.container.engine import ContainerEngine
         from paude.container.volume import VolumeManager
 
-        manager = VolumeManager()
-        manager.remove_volume("test-vol", force=True)
+        engine = ContainerEngine()
+        with patch.object(engine, "run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            manager = VolumeManager(engine)
+            manager.remove_volume("test-vol", force=True)
 
-        call_args = mock_run.call_args[0][0]
-        assert "-f" in call_args
-        assert call_args == ["podman", "volume", "rm", "-f", "test-vol"]
+            call_args = mock_run.call_args[0]
+            assert "-f" in call_args
+            assert "volume" in call_args
+            assert "rm" in call_args
 
-    @patch("paude.container.volume.subprocess.run")
+    @patch("paude.transport.local.subprocess.run")
     def test_volume_exists_returns_true(self, mock_run):
         """volume_exists returns True when podman returns 0."""
         mock_run.return_value = subprocess.CompletedProcess(
@@ -760,10 +844,8 @@ class TestVolumeManager:
         result = manager.volume_exists("test-vol")
 
         assert result is True
-        call_args = mock_run.call_args[0][0]
-        assert call_args == ["podman", "volume", "exists", "test-vol"]
 
-    @patch("paude.container.volume.subprocess.run")
+    @patch("paude.transport.local.subprocess.run")
     def test_volume_exists_returns_false(self, mock_run):
         """volume_exists returns False when podman returns non-zero."""
         mock_run.return_value = subprocess.CompletedProcess(
@@ -776,61 +858,185 @@ class TestVolumeManager:
 
         assert result is False
 
-    @patch("paude.container.volume.subprocess.run")
-    def test_get_volume_labels_returns_parsed_json(self, mock_run):
+    def test_get_volume_labels_returns_parsed_json(self):
         """get_volume_labels returns parsed JSON labels."""
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout='{"app": "paude", "workspace": "/test"}',
-            stderr="",
-        )
+        from paude.container.engine import ContainerEngine
         from paude.container.volume import VolumeManager
 
-        manager = VolumeManager()
-        result = manager.get_volume_labels("test-vol")
+        engine = ContainerEngine()
+        with patch.object(engine, "run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout='{"app": "paude", "workspace": "/test"}',
+            )
+            manager = VolumeManager(engine)
+            result = manager.get_volume_labels("test-vol")
 
         assert result == {"app": "paude", "workspace": "/test"}
 
-    @patch("paude.container.volume.subprocess.run")
-    def test_get_volume_labels_returns_empty_on_error(self, mock_run):
+    def test_get_volume_labels_returns_empty_on_error(self):
         """get_volume_labels returns empty dict on error."""
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=1, stdout="", stderr="no such volume"
-        )
+        from paude.container.engine import ContainerEngine
         from paude.container.volume import VolumeManager
 
-        manager = VolumeManager()
-        result = manager.get_volume_labels("nonexistent-vol")
+        engine = ContainerEngine()
+        with patch.object(engine, "run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=1, stdout="", stderr="no such volume"
+            )
+            manager = VolumeManager(engine)
+            result = manager.get_volume_labels("nonexistent-vol")
 
         assert result == {}
 
-    @patch("paude.container.volume.subprocess.run")
-    def test_list_volumes_returns_parsed_json(self, mock_run):
+    def test_list_volumes_returns_parsed_json(self):
         """list_volumes returns parsed JSON list."""
-        volumes_json = '[{"Name": "vol1"}, {"Name": "vol2"}]'
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout=volumes_json, stderr=""
-        )
+        from paude.container.engine import ContainerEngine
         from paude.container.volume import VolumeManager
 
-        manager = VolumeManager()
-        result = manager.list_volumes(label_filter="app=paude")
+        engine = ContainerEngine()
+        with patch.object(engine, "run") as mock_run:
+            volumes_json = '[{"Name": "vol1"}, {"Name": "vol2"}]'
+            mock_run.return_value = MagicMock(returncode=0, stdout=volumes_json)
+            manager = VolumeManager(engine)
+            result = manager.list_volumes(label_filter="app=paude")
 
         assert result == [{"Name": "vol1"}, {"Name": "vol2"}]
-        call_args = mock_run.call_args[0][0]
+        call_args = mock_run.call_args[0]
         assert "--filter" in call_args
         assert "label=app=paude" in call_args
 
-    @patch("paude.container.volume.subprocess.run")
-    def test_list_volumes_returns_empty_on_error(self, mock_run):
+    def test_list_volumes_returns_empty_on_error(self):
         """list_volumes returns empty list on error."""
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=1, stdout="", stderr="error"
-        )
+        from paude.container.engine import ContainerEngine
         from paude.container.volume import VolumeManager
 
-        manager = VolumeManager()
-        result = manager.list_volumes()
+        engine = ContainerEngine()
+        with patch.object(engine, "run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
+            manager = VolumeManager(engine)
+            result = manager.list_volumes()
 
         assert result == []
+
+
+class TestContainerRunnerGpu:
+    """Tests for GPU passthrough in ContainerRunner.create_container."""
+
+    @patch("paude.transport.local.subprocess.run")
+    def test_docker_gpu_all(self, mock_run):
+        """Docker uses --gpus all for gpu='all'."""
+        from paude.container.engine import ContainerEngine
+        from paude.container.runner import ContainerRunner
+
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="container-id", stderr=""
+        )
+        engine = ContainerEngine("docker")
+        runner = ContainerRunner(engine)
+        runner.create_container(
+            name="test",
+            image="test:latest",
+            mounts=[],
+            env={},
+            workdir="/pvc",
+            gpu="all",
+        )
+        call_args = mock_run.call_args[0][0]
+        assert "--gpus" in call_args
+        gpus_idx = call_args.index("--gpus")
+        assert call_args[gpus_idx + 1] == "all"
+
+    @patch("paude.transport.local.subprocess.run")
+    def test_docker_gpu_specific_devices(self, mock_run):
+        """Docker uses --gpus 'device=0,1' for specific devices."""
+        from paude.container.engine import ContainerEngine
+        from paude.container.runner import ContainerRunner
+
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="container-id", stderr=""
+        )
+        engine = ContainerEngine("docker")
+        runner = ContainerRunner(engine)
+        runner.create_container(
+            name="test",
+            image="test:latest",
+            mounts=[],
+            env={},
+            workdir="/pvc",
+            gpu="device=0,1",
+        )
+        call_args = mock_run.call_args[0][0]
+        assert "--gpus" in call_args
+        gpus_idx = call_args.index("--gpus")
+        assert call_args[gpus_idx + 1] == "device=0,1"
+
+    @patch("paude.transport.local.subprocess.run")
+    def test_podman_gpu_all(self, mock_run):
+        """Podman uses --device nvidia.com/gpu=all for gpu='all'."""
+        from paude.container.engine import ContainerEngine
+        from paude.container.runner import ContainerRunner
+
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="container-id", stderr=""
+        )
+        engine = ContainerEngine("podman")
+        runner = ContainerRunner(engine)
+        runner.create_container(
+            name="test",
+            image="test:latest",
+            mounts=[],
+            env={},
+            workdir="/pvc",
+            gpu="all",
+        )
+        call_args = mock_run.call_args[0][0]
+        assert "--device" in call_args
+        device_idx = call_args.index("--device")
+        assert call_args[device_idx + 1] == "nvidia.com/gpu=all"
+
+    @patch("paude.transport.local.subprocess.run")
+    def test_podman_gpu_specific_devices(self, mock_run):
+        """Podman uses CDI syntax for specific devices."""
+        from paude.container.engine import ContainerEngine
+        from paude.container.runner import ContainerRunner
+
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="container-id", stderr=""
+        )
+        engine = ContainerEngine("podman")
+        runner = ContainerRunner(engine)
+        runner.create_container(
+            name="test",
+            image="test:latest",
+            mounts=[],
+            env={},
+            workdir="/pvc",
+            gpu="device=0,1",
+        )
+        call_args = mock_run.call_args[0][0]
+        assert "--device" in call_args
+        device_idx = call_args.index("--device")
+        assert call_args[device_idx + 1] == "nvidia.com/gpu=device=0,1"
+
+    @patch("paude.transport.local.subprocess.run")
+    def test_no_gpu_flags_when_none(self, mock_run):
+        """No GPU flags added when gpu is None."""
+        from paude.container.engine import ContainerEngine
+        from paude.container.runner import ContainerRunner
+
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="container-id", stderr=""
+        )
+        engine = ContainerEngine("docker")
+        runner = ContainerRunner(engine)
+        runner.create_container(
+            name="test",
+            image="test:latest",
+            mounts=[],
+            env={},
+            workdir="/pvc",
+        )
+        call_args = mock_run.call_args[0][0]
+        assert "--gpus" not in call_args
+        assert "--device" not in call_args

@@ -45,6 +45,7 @@ def config_show() -> None:
         cli_platform=None,
         cli_openshift_context=None,
         cli_openshift_namespace=None,
+        cli_gpu=None,
         cli_allowed_domains=None,
         project_config=project_config,
         user_defaults=user_defaults,

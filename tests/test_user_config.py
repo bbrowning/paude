@@ -125,6 +125,7 @@ class TestResolveCreateOptions:
             "cli_platform": None,
             "cli_openshift_context": None,
             "cli_openshift_namespace": None,
+            "cli_gpu": None,
             "cli_allowed_domains": None,
             "project_config": None,
             "user_defaults": UserDefaults(),
@@ -239,3 +240,58 @@ class TestResolveCreateOptions:
         assert result.openshift_context.value == "my-cluster"
         assert result.openshift_context.source == "user defaults"
         assert result.openshift_namespace.value == "my-ns"
+
+    def test_gpu_defaults_to_none(self):
+        """GPU defaults to None when not configured."""
+        result = self._resolve()
+        assert result.gpu.value is None
+        assert result.gpu.source == "built-in"
+
+    def test_gpu_from_user_defaults(self):
+        """GPU resolves from user defaults."""
+        user = UserDefaults(gpu="all")
+        result = self._resolve(user_defaults=user)
+        assert result.gpu.value == "all"
+        assert result.gpu.source == "user defaults"
+
+    def test_gpu_cli_overrides_user(self):
+        """CLI --gpu overrides user defaults."""
+        user = UserDefaults(gpu="all")
+        result = self._resolve(cli_gpu="device=0", user_defaults=user)
+        assert result.gpu.value == "device=0"
+        assert result.gpu.source == "cli"
+
+    def test_gpu_no_gpu_overrides_user(self):
+        """--no-gpu (empty string) overrides user default."""
+        user = UserDefaults(gpu="all")
+        result = self._resolve(cli_gpu="", user_defaults=user)
+        assert result.gpu.value == ""
+        assert result.gpu.source == "cli"
+
+
+class TestUserDefaultsGpu:
+    """Tests for GPU field in user defaults."""
+
+    def test_gpu_field_loads_from_json(self, tmp_path: Path):
+        """GPU field loads from JSON config."""
+        config = tmp_path / "defaults.json"
+        config.write_text(json.dumps({"defaults": {"gpu": "all"}}))
+
+        result = load_user_defaults(config)
+        assert result.gpu == "all"
+
+    def test_gpu_device_spec_loads(self, tmp_path: Path):
+        """GPU device spec loads correctly."""
+        config = tmp_path / "defaults.json"
+        config.write_text(json.dumps({"defaults": {"gpu": "device=0,1"}}))
+
+        result = load_user_defaults(config)
+        assert result.gpu == "device=0,1"
+
+    def test_gpu_defaults_to_none(self, tmp_path: Path):
+        """GPU defaults to None when not in config."""
+        config = tmp_path / "defaults.json"
+        config.write_text(json.dumps({"defaults": {"backend": "podman"}}))
+
+        result = load_user_defaults(config)
+        assert result.gpu is None

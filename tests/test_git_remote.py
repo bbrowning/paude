@@ -12,6 +12,7 @@ from paude.git_remote import (
     _exec_in_container,
     build_openshift_remote_url,
     build_podman_remote_url,
+    build_ssh_remote_url,
     clone_from_origin_openshift,
     clone_from_origin_podman,
     enable_ext_protocol,
@@ -1504,3 +1505,59 @@ class TestGitPushToRemoteQuiet:
 
         _, kwargs = mock_run.call_args
         assert kwargs["capture_output"] is False
+
+
+class TestBuildSshRemoteUrl:
+    """Tests for build_ssh_remote_url."""
+
+    def test_basic_ssh_url(self) -> None:
+        url = build_ssh_remote_url(
+            container_name="paude-my-session",
+            ssh_host="user@gpu-server",
+        )
+        assert url == (
+            "ext::ssh user@gpu-server docker exec -i paude-my-session %S /pvc/workspace"
+        )
+
+    def test_with_ssh_key(self) -> None:
+        url = build_ssh_remote_url(
+            container_name="paude-test",
+            ssh_host="user@host",
+            ssh_key="/home/user/.ssh/id_rsa",
+        )
+        assert "-i /home/user/.ssh/id_rsa" in url
+        assert "user@host" in url
+
+    def test_with_ssh_port(self) -> None:
+        url = build_ssh_remote_url(
+            container_name="paude-test",
+            ssh_host="user@host",
+            ssh_port=2222,
+        )
+        assert "-p 2222" in url
+
+    def test_with_key_and_port(self) -> None:
+        url = build_ssh_remote_url(
+            container_name="paude-test",
+            ssh_host="user@host",
+            ssh_key="/key",
+            ssh_port=2222,
+        )
+        assert "-i /key" in url
+        assert "-p 2222" in url
+
+    def test_custom_engine(self) -> None:
+        url = build_ssh_remote_url(
+            container_name="paude-test",
+            ssh_host="user@host",
+            engine="podman",
+        )
+        assert "podman exec -i" in url
+
+    def test_custom_workspace(self) -> None:
+        url = build_ssh_remote_url(
+            container_name="paude-test",
+            ssh_host="user@host",
+            workspace_path="/custom/path",
+        )
+        assert url.endswith("/custom/path")

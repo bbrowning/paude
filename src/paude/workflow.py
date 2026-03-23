@@ -11,7 +11,12 @@ from pathlib import Path
 import typer
 
 from paude.backends.base import Backend, Session
-from paude.backends.shared import pod_name, resource_name
+from paude.backends.shared import (
+    engine_binary_for_backend,
+    is_local_backend,
+    pod_name,
+    resource_name,
+)
 from paude.constants import BASE_REF_NAME, CONTAINER_HOME, CONTAINER_WORKSPACE
 
 _PROTECTED_BRANCH_PATTERNS = frozenset(
@@ -93,7 +98,7 @@ def _ensure_remote_exists(
 
     cname = resource_name(session_name)
 
-    if backend_type == "openshift":
+    if not is_local_backend(backend_type):
         from paude.backends.openshift import OpenShiftBackend, OpenShiftConfig
 
         os_config = OpenShiftConfig(
@@ -114,8 +119,9 @@ def _ensure_remote_exists(
             pname, namespace, context=openshift_context
         )
     else:
-        initialize_container_workspace_podman(cname)
-        remote_url = build_podman_remote_url(cname)
+        engine = engine_binary_for_backend(backend_type)
+        initialize_container_workspace_podman(cname, engine=engine)
+        remote_url = build_podman_remote_url(cname, engine=engine)
 
     if not git_remote_add(remote_name, remote_url):
         typer.echo(f"Error: Failed to add remote '{remote_name}'.", err=True)

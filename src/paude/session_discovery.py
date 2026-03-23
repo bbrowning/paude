@@ -9,6 +9,7 @@ import typer
 from paude.backends import PodmanBackend, Session
 from paude.backends.base import Backend
 from paude.backends.openshift import OpenShiftBackend, OpenShiftConfig
+from paude.container.engine import ContainerEngine
 
 
 def create_openshift_backend(
@@ -74,6 +75,15 @@ def find_workspace_session(
     except Exception:  # noqa: S110 - Podman may not be available
         pass
 
+    # Check Docker
+    try:
+        docker = PodmanBackend(engine=ContainerEngine("docker"))
+        session = docker.find_session_for_workspace(workspace)
+        if session and (_status_matches(session.status, status_filter)):
+            return (session, docker)
+    except Exception:  # noqa: S110 - Docker may not be available
+        pass
+
     # Check OpenShift
     os_backend = create_openshift_backend(openshift_context, openshift_namespace)
     if os_backend is not None:
@@ -84,7 +94,67 @@ def find_workspace_session(
         except Exception:  # noqa: S110
             pass
 
+    # Check SSH sessions from registry
+    result = _find_ssh_workspace_session(workspace, status_filter)
+    if result is not None:
+        return result
+
     return None
+
+
+def _build_ssh_backend(entry: object) -> PodmanBackend | None:
+    """Reconstruct a PodmanBackend with SSH transport from a registry entry."""
+    from paude.backends.shared import build_ssh_backend
+
+    return build_ssh_backend(entry)
+
+
+def _find_ssh_workspace_session(
+    workspace: Path,
+    status_filter: str | None = None,
+) -> tuple[Session, Backend] | None:
+    """Find SSH sessions for the given workspace via the local registry."""
+    from paude.registry import SessionRegistry
+
+    registry = SessionRegistry()
+    for entry in registry.list_entries():
+        if not entry.ssh_host:
+            continue
+        if entry.workspace and Path(entry.workspace) != workspace:
+            continue
+        backend = _build_ssh_backend(entry)
+        if backend is None:
+            continue
+        try:
+            session = backend.get_session(entry.name)
+            if session and _status_matches(session.status, status_filter):
+                return (session, backend)
+        except Exception:  # noqa: S110 - remote may be unreachable
+            pass
+    return None
+
+
+def _collect_ssh_sessions(
+    status_filter: str | None = None,
+) -> list[tuple[Session, Backend]]:
+    """Collect sessions from SSH remotes registered in the local registry."""
+    from paude.registry import SessionRegistry
+
+    results: list[tuple[Session, Backend]] = []
+    registry = SessionRegistry()
+    for entry in registry.list_entries():
+        if not entry.ssh_host:
+            continue
+        backend = _build_ssh_backend(entry)
+        if backend is None:
+            continue
+        try:
+            session = backend.get_session(entry.name)
+            if session and _status_matches(session.status, status_filter):
+                results.append((session, backend))
+        except Exception:  # noqa: S110 - remote may be unreachable
+            pass
+    return results
 
 
 def collect_all_sessions(
@@ -133,6 +203,16 @@ def collect_all_sessions(
             except Exception:  # noqa: S110
                 pass
 
+        # Also try Docker
+        try:
+            docker_backend = PodmanBackend(engine=ContainerEngine("docker"))
+            for s in docker_backend.list_sessions():
+                if _status_matches(s.status, status_filter):
+                    all_sessions.append((s, docker_backend))
+            reachable_backends.add("docker")
+        except Exception:  # noqa: S110
+            pass
+
     # Try OpenShift
     if not skip_openshift:
         if os_backend is None:
@@ -148,6 +228,16 @@ def collect_all_sessions(
                 reachable_backends.add("openshift")
             except Exception:  # noqa: S110
                 pass
+
+    # Try SSH sessions from registry
+    ssh_sessions = _collect_ssh_sessions(status_filter)
+    if ssh_sessions:
+        # Deduplicate: skip SSH sessions already found locally
+        known_names = {s.name for s, _ in all_sessions}
+        for s, b in ssh_sessions:
+            if s.name not in known_names:
+                all_sessions.append((s, b))
+        reachable_backends.add("ssh")
 
     return all_sessions, reachable_backends
 
@@ -209,6 +299,8 @@ def _print_no_sessions_message(
         backend_flag = ""
         if isinstance(backend, OpenShiftBackend):
             backend_flag = " --backend=openshift"
+        elif isinstance(backend, PodmanBackend) and backend.engine.binary == "docker":
+            backend_flag = " --backend=docker"
         typer.echo("No sessions found for this workspace.", err=True)
         typer.echo("", err=True)
         typer.echo("To create and start a session:", err=True)

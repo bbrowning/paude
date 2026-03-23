@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from paude.backends.base import Session
 from paude.session_discovery import _status_matches
 
@@ -286,6 +288,15 @@ class TestFindWorkspaceSession:
 
 class TestCollectAllSessions:
     """Tests for collect_all_sessions."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_docker_engine(self):
+        """Block Docker backend creation in collect_all_sessions."""
+        with patch(
+            "paude.session_discovery.ContainerEngine",
+            side_effect=Exception("docker not available"),
+        ):
+            yield
 
     @patch("paude.session_discovery.OpenShiftConfig")
     @patch("paude.session_discovery.OpenShiftBackend")
@@ -664,3 +675,127 @@ class TestCreateOpenshiftBackend:
             context="my-context",
             namespace="my-namespace",
         )
+
+
+class TestSshSessionDiscovery:
+    """Tests for SSH session discovery from the local registry."""
+
+    @patch(
+        "paude.session_discovery.ContainerEngine", side_effect=Exception("no engine")
+    )
+    @patch("paude.session_discovery.PodmanBackend", side_effect=Exception("no podman"))
+    @patch("paude.session_discovery.create_openshift_backend", return_value=None)
+    @patch("paude.registry.SessionRegistry")
+    def test_find_workspace_session_checks_ssh_registry(
+        self,
+        mock_registry_cls,
+        mock_os,
+        mock_podman,
+        mock_engine,
+    ):
+        """find_workspace_session checks SSH sessions from registry."""
+        from paude.session_discovery import find_workspace_session
+
+        mock_entry = MagicMock()
+        mock_entry.ssh_host = "user@remote"
+        mock_entry.ssh_key = None
+        mock_entry.engine = "docker"
+        mock_entry.name = "ssh-session"
+        mock_entry.workspace = str(Path.cwd())
+
+        mock_registry = MagicMock()
+        mock_registry.list_entries.return_value = [mock_entry]
+        mock_registry_cls.return_value = mock_registry
+
+        with patch("paude.session_discovery._build_ssh_backend") as mock_build:
+            mock_backend = MagicMock()
+            mock_session = MagicMock()
+            mock_session.status = "running"
+            mock_backend.get_session.return_value = mock_session
+            mock_build.return_value = mock_backend
+
+            result = find_workspace_session()
+
+        assert result is not None
+        assert result == (mock_session, mock_backend)
+
+    @patch(
+        "paude.session_discovery.ContainerEngine", side_effect=Exception("no engine")
+    )
+    @patch("paude.session_discovery.PodmanBackend", side_effect=Exception("no podman"))
+    @patch("paude.session_discovery.create_openshift_backend", return_value=None)
+    @patch("paude.registry.SessionRegistry")
+    def test_find_workspace_session_skips_non_ssh_entries(
+        self,
+        mock_registry_cls,
+        mock_os,
+        mock_podman,
+        mock_engine,
+    ):
+        """find_workspace_session skips registry entries without ssh_host."""
+        from paude.session_discovery import find_workspace_session
+
+        mock_entry = MagicMock()
+        mock_entry.ssh_host = None  # Not an SSH session
+        mock_entry.name = "local-session"
+
+        mock_registry = MagicMock()
+        mock_registry.list_entries.return_value = [mock_entry]
+        mock_registry_cls.return_value = mock_registry
+
+        result = find_workspace_session()
+        assert result is None
+
+    @patch(
+        "paude.session_discovery.ContainerEngine", side_effect=Exception("no engine")
+    )
+    @patch("paude.session_discovery.PodmanBackend", side_effect=Exception("no podman"))
+    @patch("paude.session_discovery.create_openshift_backend", return_value=None)
+    @patch("paude.registry.SessionRegistry")
+    def test_collect_all_sessions_includes_ssh(
+        self,
+        mock_registry_cls,
+        mock_os,
+        mock_podman,
+        mock_engine,
+    ):
+        """collect_all_sessions includes SSH sessions from registry."""
+        from paude.session_discovery import collect_all_sessions
+
+        mock_entry = MagicMock()
+        mock_entry.ssh_host = "user@remote"
+        mock_entry.ssh_key = None
+        mock_entry.engine = "docker"
+        mock_entry.name = "ssh-session"
+
+        mock_registry = MagicMock()
+        mock_registry.list_entries.return_value = [mock_entry]
+        mock_registry_cls.return_value = mock_registry
+
+        with patch("paude.session_discovery._build_ssh_backend") as mock_build:
+            mock_backend = MagicMock()
+            mock_session = MagicMock()
+            mock_session.name = "ssh-session"
+            mock_session.status = "running"
+            mock_backend.get_session.return_value = mock_session
+            mock_build.return_value = mock_backend
+
+            sessions, reachable = collect_all_sessions()
+
+        assert len(sessions) == 1
+        assert sessions[0] == (mock_session, mock_backend)
+        assert "ssh" in reachable
+
+    def test_build_ssh_backend_returns_none_for_no_ssh_host(self):
+        """_build_ssh_backend returns None for entries without ssh_host."""
+        from paude.registry import RegistryEntry
+        from paude.session_discovery import _build_ssh_backend
+
+        entry = RegistryEntry(
+            name="local",
+            backend_type="podman",
+            workspace="/tmp/test",
+            agent="claude",
+            created_at="2024-01-01T00:00:00",
+        )
+        assert _build_ssh_backend(entry) is None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -96,6 +97,27 @@ def test_dry_run_shows_flag_states():
     assert result.exit_code == 0
     assert "yolo: True" in result.stdout
     assert "allowed-domains: unrestricted" in result.stdout
+
+
+def test_dry_run_shows_gpu():
+    """--dry-run shows gpu when --gpu is specified."""
+    result = runner.invoke(app, ["create", "--gpu", "all", "--dry-run"])
+    assert result.exit_code == 0
+    assert "gpu: all" in result.stdout
+
+
+def test_dry_run_gpu_device_spec():
+    """--dry-run shows gpu device spec."""
+    result = runner.invoke(app, ["create", "--gpu", "device=0,1", "--dry-run"])
+    assert result.exit_code == 0
+    assert "gpu: device=0,1" in result.stdout
+
+
+def test_dry_run_no_gpu_hides_gpu():
+    """--dry-run does not show gpu when --no-gpu is specified."""
+    result = runner.invoke(app, ["create", "--no-gpu", "--dry-run"])
+    assert result.exit_code == 0
+    assert "gpu:" not in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -337,6 +359,74 @@ def test_create_does_not_accept_github_token():
     result = runner.invoke(app, ["create", "--dry-run", "--github-token", "ghp_test"])
     assert result.exit_code != 0
     assert "No such option" in result.output or "Error" in result.output
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
+class TestCreateHostFlag:
+    """Tests for --host and --ssh-key CLI flags."""
+
+    def test_host_flag_recognized(self):
+        """--host flag is accepted by the create command."""
+        result = runner.invoke(app, ["create", "--help"])
+        assert "--host" in _strip_ansi(result.stdout)
+
+    def test_ssh_key_flag_recognized(self):
+        """--ssh-key flag is accepted by the create command."""
+        result = runner.invoke(app, ["create", "--help"])
+        assert "--ssh-key" in _strip_ansi(result.stdout)
+
+    def test_host_with_openshift_rejected(self):
+        """--host is not supported with --backend openshift."""
+        result = runner.invoke(
+            app, ["create", "--backend=openshift", "--host", "user@host"]
+        )
+        output = result.stdout + (result.stderr or "")
+        assert result.exit_code == 1
+        assert "--host is not supported with --backend openshift" in output
+
+    def test_ssh_key_without_host_rejected(self):
+        """--ssh-key requires --host."""
+        result = runner.invoke(app, ["create", "--ssh-key", "/path/to/key"])
+        output = result.stdout + (result.stderr or "")
+        assert result.exit_code == 1
+        assert "--ssh-key requires --host" in output
+
+    @patch("paude.transport.ssh.SshTransport")
+    def test_host_validates_ssh_connection(self, mock_ssh_class):
+        """--host validates SSH connectivity before proceeding."""
+        mock_transport = MagicMock()
+        mock_transport.validate.side_effect = RuntimeError(
+            "SSH connection to badhost failed"
+        )
+        mock_ssh_class.return_value = mock_transport
+
+        result = runner.invoke(
+            app, ["create", "--backend=docker", "--host", "user@badhost"]
+        )
+        output = result.stdout + (result.stderr or "")
+        assert result.exit_code == 1
+        assert "SSH connection to badhost failed" in output
+
+    @patch("paude.transport.ssh.SshTransport")
+    def test_host_validates_engine_on_remote(self, mock_ssh_class):
+        """--host validates that the engine binary exists on the remote."""
+        mock_transport = MagicMock()
+        mock_transport.validate.return_value = None
+        mock_transport.validate_engine.side_effect = RuntimeError(
+            "'docker' not found on user@host"
+        )
+        mock_ssh_class.return_value = mock_transport
+
+        result = runner.invoke(
+            app, ["create", "--backend=docker", "--host", "user@host"]
+        )
+        output = result.stdout + (result.stderr or "")
+        assert result.exit_code == 1
+        assert "'docker' not found on user@host" in output
 
 
 def test_bare_paude_shows_list():
@@ -584,7 +674,9 @@ class TestRemoteCommand:
         assert "Added git remote" in output
         assert "Pushing main to container" in output
         assert "Push complete" in output
-        mock_init.assert_called_once_with("paude-test-session", branch="main")
+        mock_init.assert_called_once_with(
+            "paude-test-session", branch="main", engine="podman", transport=None
+        )
         mock_push.assert_called_once_with("paude-test-session", "main")
 
     @patch("paude.cli.remote.find_session_backend")
@@ -626,7 +718,9 @@ class TestRemoteCommand:
         assert result.exit_code == 0
         output = result.stdout + (result.stderr or "")
         assert "Initializing git repository in container" in output
-        mock_init.assert_called_once_with("paude-test-session", branch="main")
+        mock_init.assert_called_once_with(
+            "paude-test-session", branch="main", engine="podman", transport=None
+        )
 
 
 def test_subcommand_runs_without_main_execution():
@@ -664,6 +758,15 @@ class TestConnectMultiBackend:
     @pytest.fixture(autouse=True)
     def _clear_github_token(self, monkeypatch):
         monkeypatch.delenv("PAUDE_GITHUB_TOKEN", raising=False)
+
+    @pytest.fixture(autouse=True)
+    def _mock_docker_engine(self):
+        """Block Docker backend creation in collect_all_sessions."""
+        with patch(
+            "paude.session_discovery.ContainerEngine",
+            side_effect=Exception("docker not available"),
+        ):
+            yield
 
     @patch("paude.session_discovery.PodmanBackend")
     @patch("paude.session_discovery.OpenShiftBackend")
@@ -942,6 +1045,15 @@ class TestConnectMultiBackend:
 class TestStartMultiBackend:
     """Tests for start command searching multiple backends."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_docker_engine(self):
+        """Block Docker backend creation in collect_all_sessions."""
+        with patch(
+            "paude.session_discovery.ContainerEngine",
+            side_effect=Exception("docker not available"),
+        ):
+            yield
+
     @patch("paude.session_discovery.PodmanBackend")
     @patch("paude.session_discovery.OpenShiftBackend")
     @patch("paude.session_discovery.OpenShiftConfig")
@@ -1088,6 +1200,15 @@ class TestStartMultiBackend:
 
 class TestStopMultiBackend:
     """Tests for stop command searching multiple backends."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_docker_engine(self):
+        """Block Docker backend creation in collect_all_sessions."""
+        with patch(
+            "paude.session_discovery.ContainerEngine",
+            side_effect=Exception("docker not available"),
+        ):
+            yield
 
     @patch("paude.session_discovery.PodmanBackend")
     @patch("paude.session_discovery.OpenShiftBackend")

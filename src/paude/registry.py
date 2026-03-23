@@ -22,12 +22,13 @@ class RegistryEntry:
 
     Attributes:
         name: Session name.
-        backend_type: Backend type ("podman" or "openshift").
+        backend_type: Backend type ("podman", "docker", or "openshift").
         workspace: Resolved absolute path as string.
         agent: Agent name (e.g. "claude", "gemini").
         created_at: ISO timestamp of session creation.
         openshift_context: OpenShift kubeconfig context, if applicable.
         openshift_namespace: OpenShift namespace, if applicable.
+        engine: Container engine binary ("podman" or "docker").
     """
 
     name: str
@@ -37,6 +38,10 @@ class RegistryEntry:
     created_at: str
     openshift_context: str | None = None
     openshift_namespace: str | None = None
+    engine: str = "podman"
+    ssh_host: str | None = None
+    ssh_key: str | None = None
+    remote_config_dir: str | None = None
 
     def to_session(self, status: str = "unknown") -> Session:
         """Convert this entry to a Session object."""
@@ -100,9 +105,18 @@ class SessionRegistry:
         session: Session,
         openshift_context: str | None = None,
         openshift_namespace: str | None = None,
+        ssh_host: str | None = None,
+        ssh_key: str | None = None,
+        remote_config_dir: str | None = None,
     ) -> None:
         """Add or update a session in the registry."""
+        from paude.backends.shared import is_local_backend
+
         entries = self.load()
+        # For local backends, engine == backend_type
+        engine = (
+            session.backend_type if is_local_backend(session.backend_type) else "podman"
+        )
         entries[session.name] = RegistryEntry(
             name=session.name,
             backend_type=session.backend_type,
@@ -111,6 +125,10 @@ class SessionRegistry:
             created_at=session.created_at or datetime.now(UTC).isoformat(),
             openshift_context=openshift_context,
             openshift_namespace=openshift_namespace,
+            engine=engine,
+            ssh_host=ssh_host,
+            ssh_key=ssh_key,
+            remote_config_dir=remote_config_dir,
         )
         self._save(entries)
 

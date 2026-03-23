@@ -21,9 +21,25 @@ from paude.cli.helpers import (
     _parse_copy_path,
     find_session_backend,
 )
+from paude.registry import RegistryEntry
 from paude.session_discovery import (
     resolve_session_for_backend,
 )
+
+
+def _cleanup_remote_config_dir(entry: RegistryEntry | None) -> None:
+    """Best-effort cleanup of remote config temp dir from registry entry."""
+    if not entry or not entry.remote_config_dir or not entry.ssh_host:
+        return
+    try:
+        from paude.cli.remote import _build_transport
+        from paude.transport.config_sync import cleanup_remote_configs
+
+        transport = _build_transport(entry.ssh_host, entry.ssh_key)
+        if transport:
+            cleanup_remote_configs(transport, entry.remote_config_dir)
+    except Exception:  # noqa: S110 - best-effort cleanup
+        pass
 
 
 @app.command("delete")
@@ -83,6 +99,8 @@ def session_delete(
             backend, backend_obj = result
             workspace = _get_session_workspace(backend_obj, name)
             try:
+                reg_entry = registry.get(name)
+                _cleanup_remote_config_dir(reg_entry)
                 backend_obj.delete_session(name, confirm=True)
                 registry.unregister(name)
                 typer.echo(f"Session '{name}' deleted.")
@@ -100,6 +118,8 @@ def session_delete(
     )
     workspace = _get_session_workspace(backend_instance, name)
     try:
+        reg_entry = registry.get(name)
+        _cleanup_remote_config_dir(reg_entry)
         backend_instance.delete_session(name, confirm=True)
         registry.unregister(name)
         typer.echo(f"Session '{name}' deleted.")

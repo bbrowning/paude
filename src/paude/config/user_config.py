@@ -33,6 +33,7 @@ class UserDefaults:
     pvc_size: str | None = None
     credential_timeout: int | None = None
     platform: str | None = None
+    gpu: str | None = None
     allowed_domains: list[str] = field(default_factory=list)
     openshift: OpenShiftDefaults = field(default_factory=OpenShiftDefaults)
 
@@ -46,6 +47,7 @@ _KNOWN_KEYS = {
     "pvc-size",
     "credential-timeout",
     "platform",
+    "gpu",
     "allowed-domains",
     "openshift",
 }
@@ -142,6 +144,7 @@ def _parse_defaults(data: dict[str, Any], path: Path) -> UserDefaults:
         pvc_size=data.get("pvc-size"),
         credential_timeout=data.get("credential-timeout"),
         platform=data.get("platform"),
+        gpu=data.get("gpu"),
         allowed_domains=allowed_domains,
         openshift=openshift,
     )

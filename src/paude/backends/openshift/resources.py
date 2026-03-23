@@ -47,6 +47,7 @@ class StatefulSetBuilder:
         image: str,
         resources: dict[str, dict[str, str]],
         agent: str = "claude",
+        gpu: str | None = None,
     ) -> None:
         """Initialize the StatefulSet builder.
 
@@ -56,12 +57,14 @@ class StatefulSetBuilder:
             image: Container image to use.
             resources: Resource requests/limits for the container.
             agent: Agent name (e.g., "claude").
+            gpu: GPU spec (e.g., "all", "device=0,1", "2").
         """
         self._session_name = session_name
         self._namespace = namespace
         self._image = image
         self._resources = resources
         self._agent = agent
+        self._gpu = gpu
         self._env: dict[str, str] = {}
         self._workspace: Path | None = None
         self._pvc_size = "10Gi"
@@ -154,6 +157,22 @@ class StatefulSetBuilder:
             },
         ]
 
+    def _parse_gpu_count(self) -> str | None:
+        """Parse GPU spec into a resource count for Kubernetes.
+
+        Returns:
+            GPU count string (e.g., "1", "2") or None if no GPU.
+        """
+        if not self._gpu:
+            return None
+        if self._gpu == "all":
+            return "1"
+        if self._gpu.startswith("device="):
+            devices = self._gpu[len("device=") :]
+            return str(len(devices.split(",")))
+        # Treat as a plain numeric count
+        return self._gpu
+
     def _build_container_spec(self) -> dict[str, Any]:
         """Build the container spec for the pod template."""
         env_list = [{"name": k, "value": v} for k, v in self._env.items()]
@@ -161,6 +180,13 @@ class StatefulSetBuilder:
 
         # Allow override for testing with locally-loaded images in Kind
         image_pull_policy = os.environ.get("PAUDE_IMAGE_PULL_POLICY", "Always")
+
+        resources = dict(self._resources)
+        gpu_count = self._parse_gpu_count()
+        if gpu_count:
+            resources = {
+                k: {**v, "nvidia.com/gpu": gpu_count} for k, v in resources.items()
+            }
 
         return {
             "name": "paude",
@@ -170,7 +196,7 @@ class StatefulSetBuilder:
             "stdin": True,
             "tty": True,
             "env": env_list,
-            "resources": self._resources,
+            "resources": resources,
             "volumeMounts": self._build_volume_mounts(),
         }
 

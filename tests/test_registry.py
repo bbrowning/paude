@@ -59,6 +59,35 @@ class TestSessionRegistry:
         assert entry.workspace == str(session.workspace)
         assert entry.agent == "claude"
 
+    def test_register_with_remote_config_dir(self, tmp_path: Path) -> None:
+        path = tmp_path / "sessions.json"
+        registry = SessionRegistry(path=path)
+        session = _make_session("ssh-session", backend_type="docker")
+
+        registry.register(
+            session,
+            ssh_host="remote-host",
+            ssh_key="/path/to/key",
+            remote_config_dir="/tmp/paude-config-XXXX",
+        )
+
+        entry = registry.get("ssh-session")
+        assert entry is not None
+        assert entry.remote_config_dir == "/tmp/paude-config-XXXX"
+        assert entry.ssh_host == "remote-host"
+        assert entry.ssh_key == "/path/to/key"
+
+    def test_remote_config_dir_defaults_to_none(self, tmp_path: Path) -> None:
+        path = tmp_path / "sessions.json"
+        registry = SessionRegistry(path=path)
+        session = _make_session("local-session")
+
+        registry.register(session)
+
+        entry = registry.get("local-session")
+        assert entry is not None
+        assert entry.remote_config_dir is None
+
     def test_register_with_openshift_metadata(self, tmp_path: Path) -> None:
         path = tmp_path / "sessions.json"
         registry = SessionRegistry(path=path)
@@ -121,6 +150,23 @@ class TestSessionRegistry:
         registry = SessionRegistry(path=path)
         registry.register(_make_session("s1"))
         assert path.exists()
+
+    def test_remote_config_dir_survives_serialization(self, tmp_path: Path) -> None:
+        """remote_config_dir is persisted to JSON and loaded back."""
+        path = tmp_path / "sessions.json"
+        registry = SessionRegistry(path=path)
+        session = _make_session("ssh-s", backend_type="docker")
+        registry.register(
+            session,
+            ssh_host="host",
+            remote_config_dir="/tmp/paude-config-abcd",
+        )
+
+        # Reload from disk
+        registry2 = SessionRegistry(path=path)
+        entry = registry2.get("ssh-s")
+        assert entry is not None
+        assert entry.remote_config_dir == "/tmp/paude-config-abcd"
 
     def test_load_handles_missing_fields_gracefully(self, tmp_path: Path) -> None:
         path = tmp_path / "sessions.json"

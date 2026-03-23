@@ -53,6 +53,9 @@ class ResolvedCreateOptions:
     platform: SettingValue[str | None] = field(
         default_factory=lambda: SettingValue(None, "built-in")
     )
+    gpu: SettingValue[str | None] = field(
+        default_factory=lambda: SettingValue(None, "built-in")
+    )
     openshift_context: SettingValue[str | None] = field(
         default_factory=lambda: SettingValue(None, "built-in")
     )
@@ -76,6 +79,7 @@ def resolve_create_options(
     cli_platform: str | None,
     cli_openshift_context: str | None,
     cli_openshift_namespace: str | None,
+    cli_gpu: str | None,
     cli_allowed_domains: list[str] | None,
     project_config: PaudeConfig | None,
     user_defaults: UserDefaults,
@@ -140,6 +144,13 @@ def resolve_create_options(
         cli=cli_platform,
         project=None,
         user=user_defaults.platform,
+        builtin=None,
+    )
+
+    result.gpu = _resolve_scalar(
+        cli=cli_gpu,
+        project=None,
+        user=user_defaults.gpu,
         builtin=None,
     )
 

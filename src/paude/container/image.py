@@ -18,8 +18,9 @@ from paude.container.build_context import (
     prepare_build_context,
     resolve_entrypoint,
 )
-from paude.container.podman import image_exists, run_podman
+from paude.container.engine import ContainerEngine
 from paude.hash import compute_config_hash, compute_content_hash
+from paude.platform import is_macos
 
 # Re-export for backward compatibility
 __all__ = ["BuildContext", "ImageManager", "prepare_build_context"]
@@ -43,14 +44,8 @@ class ImageManager:
         script_dir: Path | None = None,
         platform: str | None = None,
         agent: Agent | None = None,
+        engine: ContainerEngine | None = None,
     ):
-        """Initialize the image manager.
-
-        Args:
-            script_dir: Path to the paude script directory (for dev mode).
-            platform: Target platform (e.g., "linux/amd64"). If None, uses native arch.
-            agent: Agent instance for CLI installation. If None, uses Claude defaults.
-        """
         self.script_dir = script_dir
         self.dev_mode = os.environ.get("PAUDE_DEV", "0") == "1"
         self.registry = os.environ.get("PAUDE_REGISTRY", "quay.io/bbrowning")
@@ -61,29 +56,19 @@ class ImageManager:
 
             agent = get_agent("claude")
         self.agent = agent
+        self._engine = engine or ContainerEngine()
 
     def ensure_default_image(self) -> str:
         """Ensure the default paude image is available.
 
-        This builds a two-layer image:
-        1. Base image (no Claude) - built locally in dev mode or pulled from registry
-        2. Runtime image (with Claude) - always built locally
-
-        Claude Code is installed at user-side build time (not in the published
-        image) due to licensing restrictions that prohibit redistribution.
-
         Returns:
-            Image tag to use (the runtime image with Claude installed).
+            Image tag to use (the runtime image with agent installed).
         """
         base_tag = self._ensure_base_image()
         return self._ensure_runtime_image(base_tag)
 
     def _ensure_base_image(self) -> str:
-        """Ensure the base paude image (without Claude Code) is available.
-
-        Returns:
-            Base image tag.
-        """
+        """Ensure the base paude image (without agent) is available."""
         import sys
 
         if self.dev_mode and self.script_dir:
@@ -92,7 +77,7 @@ class ImageManager:
                 tag = f"paude-base-centos10:latest-{arch}"
             else:
                 tag = "paude-base-centos10:latest"
-            if not image_exists(tag):
+            if not self._engine.image_exists(tag):
                 print(f"Building {tag} image...", file=sys.stderr)
                 dockerfile = self.script_dir / "containers" / "paude" / "Dockerfile"
                 context = self.script_dir / "containers" / "paude"
@@ -100,13 +85,16 @@ class ImageManager:
             return tag
         else:
             tag = f"{self.registry}/paude-base-centos10:{self.version}"
-            if not image_exists(tag):
+            if not self._engine.image_exists(tag):
                 print(f"Pulling {tag}...", file=sys.stderr)
                 try:
-                    run_podman("pull", "--platform", self.platform, tag, capture=False)
+                    self._engine.run(
+                        "pull", "--platform", self.platform, tag, capture=False
+                    )
                 except Exception:
+                    engine_name = self._engine.binary
                     print(
-                        "Check your network connection or run 'podman login' "
+                        f"Check your network connection or run '{engine_name} login' "
                         "if authentication is required.",
                         file=sys.stderr,
                     )
@@ -114,14 +102,7 @@ class ImageManager:
             return tag
 
     def _ensure_runtime_image(self, base_image: str) -> str:
-        """Ensure the runtime image (with Claude Code installed) is available.
-
-        Args:
-            base_image: The base image tag to build on top of.
-
-        Returns:
-            Runtime image tag with Claude Code installed.
-        """
+        """Ensure the runtime image (with agent installed) is available."""
         import sys
 
         layer_content = generate_claude_layer_dockerfile(agent=self.agent)
@@ -137,7 +118,7 @@ class ImageManager:
         else:
             runtime_tag = f"paude-runtime:{layer_hash[:12]}"
 
-        if image_exists(runtime_tag):
+        if self._engine.image_exists(runtime_tag):
             print(f"Using cached runtime image: {runtime_tag}", file=sys.stderr)
             return runtime_tag
 
@@ -152,10 +133,12 @@ class ImageManager:
             try:
                 self.build_image(dockerfile_path, runtime_tag, Path(tmpdir), build_args)
             except Exception:
+                engine_name = self._engine.binary
                 print(
                     f"\n{agent_display} installation failed. This usually means:\n"
                     "  - Network connectivity issues (check your connection)\n"
-                    "  - Podman machine not running (run 'podman machine start')\n"
+                    f"  - {engine_name.capitalize()} not running "
+                    f"(run '{engine_name} machine start' if applicable)\n"
                     "  - Disk space issues\n",
                     file=sys.stderr,
                 )
@@ -171,11 +154,6 @@ class ImageManager:
         workspace: Path | None = None,
     ) -> str:
         """Ensure a custom workspace image is available.
-
-        Args:
-            config: Parsed paude configuration.
-            force_rebuild: Force rebuild even if image exists.
-            workspace: Deprecated, ignored. Code sync is done via git push.
 
         Returns:
             Image tag to use.
@@ -199,7 +177,7 @@ class ImageManager:
         else:
             tag = f"paude-workspace:{config_hash}"
 
-        if not force_rebuild and image_exists(tag):
+        if not force_rebuild and self._engine.image_exists(tag):
             print(f"Using cached workspace image: {tag}", file=sys.stderr)
             return tag
 
@@ -227,11 +205,7 @@ class ImageManager:
     def _resolve_custom_base(
         self, config: PaudeConfig, config_hash: str
     ) -> tuple[str, bool]:
-        """Resolve the base image for custom workspace builds.
-
-        Returns:
-            Tuple of (base_image, using_default_paude_image).
-        """
+        """Resolve the base image for custom workspace builds."""
         import sys
 
         if config.dockerfile:
@@ -257,9 +231,6 @@ class ImageManager:
     def ensure_proxy_image(self, force_rebuild: bool = False) -> str:
         """Ensure the proxy image is available.
 
-        Args:
-            force_rebuild: Force rebuild even if image exists.
-
         Returns:
             Image tag to use.
         """
@@ -271,7 +242,7 @@ class ImageManager:
                 tag = f"paude-proxy-centos10:latest-{arch}"
             else:
                 tag = "paude-proxy-centos10:latest"
-            if force_rebuild or not image_exists(tag):
+            if force_rebuild or not self._engine.image_exists(tag):
                 print(f"Building {tag} image...", file=sys.stderr)
                 dockerfile = self.script_dir / "containers" / "proxy" / "Dockerfile"
                 context = self.script_dir / "containers" / "proxy"
@@ -279,13 +250,16 @@ class ImageManager:
             return tag
         else:
             tag = f"{self.registry}/paude-proxy-centos10:{self.version}"
-            if not image_exists(tag):
+            if not self._engine.image_exists(tag):
                 print(f"Pulling {tag}...", file=sys.stderr)
                 try:
-                    run_podman("pull", "--platform", self.platform, tag, capture=False)
+                    self._engine.run(
+                        "pull", "--platform", self.platform, tag, capture=False
+                    )
                 except Exception:
+                    engine_name = self._engine.binary
                     print(
-                        "Check your network connection or run 'podman login' "
+                        f"Check your network connection or run '{engine_name} login' "
                         "if authentication is required.",
                         file=sys.stderr,
                     )
@@ -301,12 +275,13 @@ class ImageManager:
     ) -> None:
         """Build a container image.
 
-        Args:
-            dockerfile: Path to Dockerfile.
-            tag: Image tag.
-            context: Build context directory.
-            build_args: Optional build arguments.
+        When the engine is remote, the build context is transferred to the
+        remote host via tar pipe before building.
         """
+        if self._engine.is_remote:
+            self._build_image_remote(dockerfile, tag, context, build_args)
+            return
+
         cmd = ["build", "-f", str(dockerfile), "-t", tag]
 
         if self.platform:
@@ -315,4 +290,82 @@ class ImageManager:
             for key, value in build_args.items():
                 cmd.extend(["--build-arg", f"{key}={value}"])
         cmd.append(str(context))
-        run_podman(*cmd, capture=False)
+        self._engine.run(*cmd, capture=False)
+
+    def _build_image_remote(
+        self,
+        dockerfile: Path,
+        tag: str,
+        context: Path,
+        build_args: dict[str, str] | None = None,
+    ) -> None:
+        """Build an image on a remote host by transferring the build context."""
+        import subprocess
+
+        from paude.transport.ssh import SshTransport
+
+        transport = self._engine.transport
+        if not isinstance(transport, SshTransport):
+            raise RuntimeError("Remote build requires SshTransport")
+
+        # Create temp dir on remote for the build context
+        result = transport.run(
+            ["mktemp", "-d", "/tmp/paude-build-XXXX"],  # noqa: S108
+            check=True,
+        )
+        remote_dir = result.stdout.strip()
+
+        try:
+            # Transfer build context via tar pipe
+            tar_cmd = ["tar"]
+            if is_macos():
+                tar_cmd.append("--no-mac-metadata")
+            tar_cmd.extend(["-cf", "-", "-C", str(context), "."])
+            untar_cmd = [
+                *transport.ssh_base(),
+                "--",
+                "tar",
+                "--warning=no-unknown-keyword",
+                "-xf",
+                "-",
+                "-C",
+                remote_dir,
+            ]
+            tar_proc = subprocess.Popen(tar_cmd, stdout=subprocess.PIPE)
+            try:
+                untar_proc = subprocess.Popen(untar_cmd, stdin=tar_proc.stdout)
+                if tar_proc.stdout:
+                    tar_proc.stdout.close()
+                untar_proc.wait()
+            finally:
+                tar_proc.wait()
+
+            if untar_proc.returncode != 0:
+                raise RuntimeError("Failed to transfer build context to remote")
+
+            # If dockerfile is inside context, use relative path on remote
+            try:
+                rel_dockerfile = dockerfile.relative_to(context)
+                remote_dockerfile = f"{remote_dir}/{rel_dockerfile}"
+            except ValueError:
+                # Dockerfile outside context — transfer it separately
+                remote_dockerfile = f"{remote_dir}/Dockerfile.paude"
+                with open(dockerfile, "rb") as f:
+                    transport.run(
+                        ["tee", remote_dockerfile],
+                        input=f.read().decode(),
+                        check=True,
+                    )
+
+            # Build on remote
+            cmd = ["build", "-f", remote_dockerfile, "-t", tag]
+            if self.platform:
+                cmd.extend(["--platform", self.platform])
+            if build_args:
+                for key, value in build_args.items():
+                    cmd.extend(["--build-arg", f"{key}={value}"])
+            cmd.append(remote_dir)
+            self._engine.run(*cmd, capture=False)
+        finally:
+            # Clean up remote temp dir
+            transport.run(["rm", "-rf", remote_dir], check=False)

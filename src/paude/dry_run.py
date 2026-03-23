@@ -112,6 +112,9 @@ def _show_resolved_flags(
         typer.echo(format_setting("pvc-size", resolved.pvc_size))
         typer.echo(format_setting("credential-timeout", resolved.credential_timeout))
 
+    if resolved.gpu.value:
+        typer.echo(format_setting("gpu", resolved.gpu))
+
     if resolved.platform.value is not None:
         typer.echo(format_setting("platform", resolved.platform))
 

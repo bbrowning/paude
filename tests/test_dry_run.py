@@ -157,3 +157,36 @@ class TestShowDryRun:
         assert "paude.json" in captured.out
         assert "default, golang" in captured.out
         assert ".vllm.ai" in captured.out
+
+    def test_shows_gpu_when_set(self, capsys: pytest.CaptureFixture[str]):
+        """Shows gpu in resolved output when set."""
+        from paude.config.resolver import ResolvedCreateOptions, SettingValue
+
+        resolved = ResolvedCreateOptions(
+            gpu=SettingValue("all", "cli"),
+        )
+
+        with patch("paude.dry_run.Path.cwd") as mock_cwd:
+            mock_cwd.return_value = Path("/test")
+            with patch("paude.dry_run.detect_config") as mock_detect:
+                mock_detect.return_value = None
+                show_dry_run({}, resolved=resolved)
+
+        captured = capsys.readouterr()
+        assert "gpu: all" in captured.out
+        assert "(cli)" in captured.out
+
+    def test_hides_gpu_when_none(self, capsys: pytest.CaptureFixture[str]):
+        """Does not show gpu line when gpu is None."""
+        from paude.config.resolver import ResolvedCreateOptions
+
+        resolved = ResolvedCreateOptions()
+
+        with patch("paude.dry_run.Path.cwd") as mock_cwd:
+            mock_cwd.return_value = Path("/test")
+            with patch("paude.dry_run.detect_config") as mock_detect:
+                mock_detect.return_value = None
+                show_dry_run({}, resolved=resolved)
+
+        captured = capsys.readouterr()
+        assert "gpu:" not in captured.out

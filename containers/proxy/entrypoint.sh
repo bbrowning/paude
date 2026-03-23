@@ -100,5 +100,8 @@ if ! /usr/sbin/squid -k parse -f "$CONFIG_FILE" 2>&1; then
     exit 1
 fi
 
+# Clean up stale PID file from previous run (container restart)
+rm -f /tmp/squid.pid
+
 # Run squid with the generated config
 exec /usr/sbin/squid -f "$CONFIG_FILE" "$@"

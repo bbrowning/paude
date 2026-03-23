@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from paude.agents.base import Agent, AgentConfig
     from paude.backends.base import SessionConfig
+    from paude.backends.podman.backend import PodmanBackend
 
 # Labels used to identify paude sessions
 PAUDE_LABEL_APP = "app=paude"
@@ -157,3 +158,51 @@ def volume_name(session_name: str) -> str:
 def network_name(session_name: str) -> str:
     """Get the network name for a session (Podman network)."""
     return f"paude-net-{session_name}"
+
+
+# Backend type helpers
+
+LOCAL_BACKEND_TYPES = frozenset({"podman", "docker"})
+
+
+def is_local_backend(backend_type: str) -> bool:
+    """Check if a backend type is a local container engine (podman or docker)."""
+    return backend_type in LOCAL_BACKEND_TYPES
+
+
+def engine_binary_for_backend(backend_type: str) -> str:
+    """Get the container engine binary for a backend type.
+
+    Returns "podman" for "podman", "docker" for "docker".
+    Raises ValueError for non-local backend types.
+    """
+    if backend_type in LOCAL_BACKEND_TYPES:
+        return backend_type
+    raise ValueError(f"No engine binary for backend type: {backend_type}")
+
+
+def build_ssh_backend(entry: object) -> PodmanBackend | None:
+    """Reconstruct a PodmanBackend with SSH transport from a registry entry.
+
+    Args:
+        entry: A RegistryEntry (or any object) to inspect.
+
+    Returns:
+        PodmanBackend configured with SSH transport, or None on failure.
+    """
+    from paude.container.engine import ContainerEngine
+    from paude.registry import RegistryEntry
+    from paude.transport.ssh import SshTransport, parse_ssh_host
+
+    if not isinstance(entry, RegistryEntry) or not entry.ssh_host:
+        return None
+
+    host, port = parse_ssh_host(entry.ssh_host)
+    transport = SshTransport(host, key=entry.ssh_key, port=port)
+    engine = ContainerEngine(entry.engine, transport=transport)
+    try:
+        from paude.backends import PodmanBackend
+
+        return PodmanBackend(engine=engine)
+    except Exception:  # noqa: S110
+        return None
