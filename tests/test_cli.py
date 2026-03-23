@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -360,18 +361,23 @@ def test_create_does_not_accept_github_token():
     assert "No such option" in result.output or "Error" in result.output
 
 
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
 class TestCreateHostFlag:
     """Tests for --host and --ssh-key CLI flags."""
 
     def test_host_flag_recognized(self):
         """--host flag is accepted by the create command."""
         result = runner.invoke(app, ["create", "--help"])
-        assert "--host" in result.stdout
+        assert "--host" in _strip_ansi(result.stdout)
 
     def test_ssh_key_flag_recognized(self):
         """--ssh-key flag is accepted by the create command."""
         result = runner.invoke(app, ["create", "--help"])
-        assert "--ssh-key" in result.stdout
+        assert "--ssh-key" in _strip_ansi(result.stdout)
 
     def test_host_with_openshift_rejected(self):
         """--host is not supported with --backend openshift."""
