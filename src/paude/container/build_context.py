@@ -200,7 +200,7 @@ def _build_user_image_locally(
     """Build user's Dockerfile locally and return the intermediate image tag."""
     import sys
 
-    user_image = f"paude-user-base:{config_hash}"
+    user_image = f"localhost/paude-user-base:{config_hash}"
     dockerfile = config.dockerfile
     if dockerfile is None:
         raise ValueError("config.dockerfile must be set for local image builds")

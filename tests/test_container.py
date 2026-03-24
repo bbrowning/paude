@@ -154,7 +154,7 @@ class TestImageManager:
                 )
                 result = manager.ensure_proxy_image()
 
-            assert result == "paude-proxy-centos10:latest-amd64"
+            assert result == "localhost/paude-proxy-centos10:latest-amd64"
             mock_run.assert_called_once()
             call_args = mock_run.call_args[0]
             assert "build" in call_args
@@ -184,7 +184,7 @@ class TestImageManager:
                 )
                 result = manager.ensure_proxy_image()
 
-            assert result == "paude-proxy-centos10:latest-amd64"
+            assert result == "localhost/paude-proxy-centos10:latest-amd64"
             mock_run.assert_not_called()
 
     def test_ensure_proxy_image_force_rebuild_ignores_cache(self, tmp_path):
@@ -212,7 +212,7 @@ class TestImageManager:
                 )
                 result = manager.ensure_proxy_image(force_rebuild=True)
 
-            assert result == "paude-proxy-centos10:latest-amd64"
+            assert result == "localhost/paude-proxy-centos10:latest-amd64"
             mock_run.assert_called_once()
             call_args = mock_run.call_args[0]
             assert "build" in call_args

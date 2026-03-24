@@ -74,9 +74,9 @@ class ImageManager:
         if self.dev_mode and self.script_dir:
             if self.platform:
                 arch = self.platform.split("/")[-1]
-                tag = f"paude-base-centos10:latest-{arch}"
+                tag = f"localhost/paude-base-centos10:latest-{arch}"
             else:
-                tag = "paude-base-centos10:latest"
+                tag = "localhost/paude-base-centos10:latest"
             if not self._engine.image_exists(tag):
                 print(f"Building {tag} image...", file=sys.stderr)
                 dockerfile = self.script_dir / "containers" / "paude" / "Dockerfile"
@@ -114,9 +114,9 @@ class ImageManager:
 
         if self.platform:
             arch = self.platform.split("/")[-1]
-            runtime_tag = f"paude-runtime:{layer_hash[:12]}-{arch}"
+            runtime_tag = f"localhost/paude-runtime:{layer_hash[:12]}-{arch}"
         else:
-            runtime_tag = f"paude-runtime:{layer_hash[:12]}"
+            runtime_tag = f"localhost/paude-runtime:{layer_hash[:12]}"
 
         if self._engine.image_exists(runtime_tag):
             print(f"Using cached runtime image: {runtime_tag}", file=sys.stderr)
@@ -173,9 +173,9 @@ class ImageManager:
 
         if self.platform:
             arch = self.platform.split("/")[-1]
-            tag = f"paude-workspace:{config_hash}-{arch}"
+            tag = f"localhost/paude-workspace:{config_hash}-{arch}"
         else:
-            tag = f"paude-workspace:{config_hash}"
+            tag = f"localhost/paude-workspace:{config_hash}"
 
         if not force_rebuild and self._engine.image_exists(tag):
             print(f"Using cached workspace image: {tag}", file=sys.stderr)
@@ -211,7 +211,7 @@ class ImageManager:
         if config.dockerfile:
             if not config.dockerfile.exists():
                 raise FileNotFoundError(f"Dockerfile not found: {config.dockerfile}")
-            user_image = f"paude-user-base:{config_hash}"
+            user_image = f"localhost/paude-user-base:{config_hash}"
             build_context = config.build_context or config.dockerfile.parent
             print(f"  → Building from: {config.dockerfile}", file=sys.stderr)
             user_build_args = dict(config.build_args)
@@ -239,9 +239,9 @@ class ImageManager:
         if self.dev_mode and self.script_dir:
             if self.platform:
                 arch = self.platform.split("/")[-1]
-                tag = f"paude-proxy-centos10:latest-{arch}"
+                tag = f"localhost/paude-proxy-centos10:latest-{arch}"
             else:
-                tag = "paude-proxy-centos10:latest"
+                tag = "localhost/paude-proxy-centos10:latest"
             if force_rebuild or not self._engine.image_exists(tag):
                 print(f"Building {tag} image...", file=sys.stderr)
                 dockerfile = self.script_dir / "containers" / "proxy" / "Dockerfile"
