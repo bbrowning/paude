@@ -17,7 +17,7 @@ Run AI coding agents in secure containers. They make commits, you pull them back
 - **Isolated execution**: Your agent runs in a container, not on your host machine
 - **Safe autonomous mode**: Enable `--yolo` without fear — the agent can't send your code anywhere
 - **Git-based workflow**: The agent commits inside the container, you `git pull` the changes
-- **Run anywhere**: Locally with Podman or remotely on OpenShift
+- **Run anywhere**: Locally with Podman or Docker, remotely via SSH, or on OpenShift
 
 ## Demo
 
@@ -31,7 +31,7 @@ Run AI coding agents in secure containers. They make commits, you pull them back
 
 **Your agent**: Claude Code, Cursor CLI, or Gemini CLI installed and working locally.
 
-**Podman**: [Install Podman](https://podman.io/getting-started/installation) (for local backend).
+**Podman or Docker**: [Install Podman](https://podman.io/getting-started/installation) or [Docker](https://docs.docker.com/get-docker/) (for local backend).
 
 **Google Cloud SDK**: `gcloud auth application-default login`
 
@@ -109,6 +109,7 @@ Or just start the session and type your request in the agent interface.
 - [Configuration](docs/CONFIGURATION.md) — defaults, network domains, GitHub CLI, custom environments
 - [Security Model](docs/SECURITY.md) — attack vectors, `--yolo` safety, residual risks
 - [Orchestration](docs/ORCHESTRATION.md) — fire-and-forget workflow, harvest, PRs
+- [Remote Hosts & Docker](docs/REMOTE.md) — SSH remotes, Docker backend, GPU passthrough
 - [OpenShift Backend](docs/OPENSHIFT.md) — remote execution on Kubernetes
 
 ## How It Works
@@ -140,7 +141,7 @@ pip install -e .
 
 - Python 3.11+ (for the Python package)
 - Your chosen agent CLI installed locally (Claude Code, Cursor CLI, or Gemini CLI)
-- [Podman](https://podman.io/getting-started/installation) (for local backend)
+- [Podman](https://podman.io/getting-started/installation) or [Docker](https://docs.docker.com/get-docker/) (for local backend)
 - OpenShift CLI `oc` (for OpenShift backend)
 - Google Cloud SDK configured (`gcloud auth application-default login`)
 

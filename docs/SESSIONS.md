@@ -55,6 +55,8 @@ paude delete my-project --confirm
 
 ```bash
 # Explicit backend selection
+paude create my-project --backend=podman
+paude create my-project --backend=docker
 paude create my-project --backend=openshift
 paude list --backend=podman
 

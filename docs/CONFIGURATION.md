@@ -47,6 +47,7 @@ Then edit it to set the values you want. Any field set to `null` or omitted uses
     "pvc-size": "10Gi",
     "credential-timeout": 60,
     "platform": "linux/amd64",
+    "gpu": "all",
     "allowed-domains": ["default", "golang"],
     "openshift": {
       "context": "my-cluster",
@@ -122,8 +123,11 @@ paude create --dry-run
 | `credential-timeout` | yes | — | `--credential-timeout` | `60` |
 | `platform` | yes | — | `--platform` | (none) |
 | `allowed-domains` | yes | yes | `--allowed-domains` | `["default"]` |
+| `gpu` | yes | — | `--gpu` / `--no-gpu` | (none) |
 | `openshift.context` | yes | — | `--openshift-context` | (none) |
 | `openshift.namespace` | yes | — | `--openshift-namespace` | (none) |
+
+> **Backend values**: `podman` (default), `docker`, or `openshift`.
 
 ## Network Domains
 
@@ -299,6 +303,33 @@ See [`examples/README.md`](../examples/README.md) for more configurations (Pytho
 | `features` | Dev container features (ghcr.io OCI artifacts) |
 | `postCreateCommand` | Run after first start |
 | `containerEnv` | Environment variables |
+
+## GPU Passthrough
+
+Pass GPU devices to the container for GPU-accelerated workloads. This works with both local and [remote host](REMOTE.md) sessions.
+
+```bash
+# All GPUs
+paude create my-project --gpu all
+
+# Specific devices
+paude create my-project --gpu=device=0,1
+
+# Explicitly disable (overrides user defaults)
+paude create my-project --no-gpu
+```
+
+Set GPU passthrough as a default in `~/.config/paude/defaults.json`:
+
+```json
+{
+  "defaults": {
+    "gpu": "all"
+  }
+}
+```
+
+Use `--no-gpu` on the CLI to override the default for a specific session.
 
 ## Verifying Configuration
 
