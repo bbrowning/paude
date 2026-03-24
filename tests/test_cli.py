@@ -1900,8 +1900,8 @@ class TestCreateGitEnvVar:
         ids=["with-git", "without-git"],
     )
     @patch("paude.cli.remote_git_setup._setup_git_after_create")
-    @patch("paude.cli.create.OpenShiftBackend")
-    @patch("paude.cli.create.OpenShiftConfig")
+    @patch("paude.cli.create_openshift.OpenShiftBackend")
+    @patch("paude.cli.create_openshift.OpenShiftConfig")
     @patch("paude.config.detect_config", return_value=None)
     @patch("paude.environment.build_environment")
     def test_openshift_create_git_wait_env(
