@@ -16,53 +16,88 @@ The project consists of a Python implementation with container definitions:
 src/paude/
 ├── __init__.py            # Package with version
 ├── __main__.py            # Entry point: python -m paude
-├── cli.py                 # Typer CLI
+├── agents/                # Agent definitions
+│   ├── __init__.py        # Agent registry (get_agent, list_agents)
+│   ├── base.py            # Agent protocol and AgentConfig
+│   ├── claude.py          # Claude Code agent
+│   ├── cursor.py          # Cursor CLI agent
+│   └── gemini.py          # Gemini CLI agent
 ├── backends/              # Backend implementations
 │   ├── base.py            # Backend protocol
-│   ├── podman.py          # Podman backend
 │   ├── shared.py          # Shared backend utilities
+│   ├── podman/            # Podman/Docker backend
+│   │   ├── backend.py     # PodmanBackend implementation
+│   │   ├── exceptions.py  # Podman-specific exceptions
+│   │   ├── helpers.py     # Helper functions
+│   │   └── proxy.py       # Proxy management
 │   └── openshift/         # OpenShift backend
-│       ├── backend.py     # OpenShift backend implementation
+│       ├── backend.py     # OpenShiftBackend implementation
 │       ├── build.py       # Image building on OpenShift
 │       ├── config.py      # OpenShift configuration
 │       ├── exceptions.py  # OpenShift-specific exceptions
 │       ├── oc.py          # oc CLI wrapper
+│       ├── pods.py        # Pod query helpers
 │       ├── proxy.py       # Proxy pod management
 │       ├── resources.py   # K8s resource builders
+│       ├── session_connection.py  # Session connection management
+│       ├── session_domains.py     # Domain management
+│       ├── session_lifecycle.py   # Session create/delete/start/stop
+│       ├── session_lookup.py      # Session queries and discovery
 │       └── sync.py        # File synchronization
+├── cli/                   # CLI implementation
+│   ├── app.py             # Typer app definition
+│   ├── commands.py        # Session commands (delete, start, stop, etc.)
+│   ├── config_cmd.py      # Configuration commands
+│   ├── create.py          # Session create command
+│   ├── create_openshift.py # OpenShift-specific create options
+│   ├── create_podman.py   # Podman-specific create options
+│   ├── domains.py         # Domain CLI helpers
+│   ├── helpers.py         # Shared CLI helpers
+│   ├── help.py            # Custom help and reference sections
+│   ├── remote.py          # Git remote commands
+│   ├── remote_git_setup.py # Git remote setup
+│   └── status.py          # Status, reset, and harvest commands
 ├── config/                # Configuration parsing
-│   ├── claude_layer.py    # Claude config layering
+│   ├── claude_layer.py    # Agent config layering
 │   ├── detector.py        # Config file detection
-│   ├── parser.py          # Config file parsing
+│   ├── dockerfile.py      # Dockerfile generation
 │   ├── models.py          # Data models (PaudeConfig, FeatureSpec)
-│   └── dockerfile.py      # Dockerfile generation
+│   ├── parser.py          # Config file parsing
+│   ├── resolver.py        # Config resolution with provenance
+│   └── user_config.py     # User config defaults and persistence
 ├── container/             # Container management
-│   ├── podman.py          # Podman subprocess wrapper
 │   ├── build_context.py   # Build context preparation
+│   ├── engine.py          # Container engine abstraction
 │   ├── image.py           # Image building and pulling
 │   ├── network.py         # Network management
+│   ├── podman.py          # Podman subprocess wrapper
+│   ├── proxy_runner.py    # Proxy container execution
 │   ├── runner.py          # Container execution
 │   └── volume.py          # Volume management
 ├── features/              # Dev container features
 │   ├── downloader.py      # Feature downloading
 │   └── installer.py       # Feature installation
-├── agents/                # Agent definitions
-│   ├── __init__.py        # Agent registry (get_agent, list_agents)
-│   ├── base.py            # Agent protocol
-│   ├── claude.py          # Claude Code agent
-│   └── gemini.py          # Gemini CLI agent
+├── git_remote/            # Git remote management
+│   ├── container_ops.py   # Container workspace git setup
+│   ├── exec_cmd.py        # Execution command builders
+│   └── utils.py           # Git remote URL utilities
+├── transport/             # Command transport (local/SSH)
+│   ├── base.py            # Transport protocol
+│   ├── config_sync.py     # Config file sync over SSH
+│   ├── local.py           # Local transport via subprocess
+│   └── ssh.py             # SSH transport for remote execution
 ├── constants.py           # Shared constants
 ├── domains.py             # Domain aliases and expansion
-├── mounts.py              # Volume mount builder
+├── dry_run.py             # Dry-run output
 ├── environment.py         # Environment variables
-├── git_remote.py          # Git remote management
 ├── hash.py                # Config hashing for caching
+├── mounts.py              # Volume mount builder
 ├── platform.py            # Platform-specific code (macOS)
 ├── proxy_log.py           # Proxy log parsing
+├── registry.py            # Local session registry
 ├── session_discovery.py   # Session discovery
 ├── session_status.py      # Session status tracking
-├── workflow.py            # Orchestration workflow (harvest, reset)
-└── dry_run.py             # Dry-run output
+└── workflow.py            # Orchestration workflow (harvest, reset)
 ```
 
 ### Container Definitions
