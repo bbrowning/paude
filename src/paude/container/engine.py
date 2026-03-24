@@ -84,49 +84,47 @@ class ContainerEngine:
         """Access the underlying transport."""
         return self._transport
 
-    def image_exists(self, tag: str) -> bool:
-        """Check if a container image exists locally.
+    def _exists(self, resource_type: str, name: str) -> bool:
+        """Check if a resource exists.
 
-        Podman has ``image exists``; Docker requires ``image inspect``.
+        Podman has ``<type> exists``; Docker requires ``<type> inspect``.
         """
-        if self.binary == "podman":
-            result = self.run("image", "exists", tag, check=False)
-        else:
-            result = self.run("image", "inspect", tag, check=False)
+        subcmd = "exists" if self.binary == "podman" else "inspect"
+        result = self.run(resource_type, subcmd, name, check=False)
         return result.returncode == 0
+
+    def image_exists(self, tag: str) -> bool:
+        """Check if a container image exists locally."""
+        return self._exists("image", tag)
 
     def network_exists(self, name: str) -> bool:
-        """Check if a container network exists.
-
-        Podman has ``network exists``; Docker requires ``network inspect``.
-        """
-        if self.binary == "podman":
-            result = self.run("network", "exists", name, check=False)
-        else:
-            result = self.run("network", "inspect", name, check=False)
-        return result.returncode == 0
+        """Check if a container network exists."""
+        return self._exists("network", name)
 
     def volume_exists(self, name: str) -> bool:
-        """Check if a volume exists.
-
-        Podman has ``volume exists``; Docker requires ``volume inspect``.
-        """
-        if self.binary == "podman":
-            result = self.run("volume", "exists", name, check=False)
-        else:
-            result = self.run("volume", "inspect", name, check=False)
-        return result.returncode == 0
+        """Check if a volume exists."""
+        return self._exists("volume", name)
 
     def container_exists(self, name: str) -> bool:
-        """Check if a container exists.
+        """Check if a container exists."""
+        return self._exists("container", name)
 
-        Podman has ``container exists``; Docker requires ``container inspect``.
+    def gpu_args(self, gpu_value: str) -> list[str]:
+        """Build GPU passthrough arguments.
+
+        Docker uses ``--gpus``; Podman uses CDI device syntax.
         """
-        if self.binary == "podman":
-            result = self.run("container", "exists", name, check=False)
-        else:
-            result = self.run("container", "inspect", name, check=False)
-        return result.returncode == 0
+        if self.binary == "docker":
+            return ["--gpus", gpu_value]
+        return ["--device", f"nvidia.com/gpu={gpu_value}"]
+
+    @property
+    def image_name_format(self) -> str:
+        """Go template for extracting image name from container inspect.
+
+        Docker uses ``.Config.Image``; Podman uses ``.ImageName``.
+        """
+        return "{{.ImageName}}" if self.binary == "podman" else "{{.Config.Image}}"
 
     @property
     def supports_secrets(self) -> bool:

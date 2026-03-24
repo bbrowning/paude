@@ -354,24 +354,23 @@ def _try_clone_from_origin(
 ) -> bool:
     """Try to clone from origin inside the container. Returns True on success."""
     from paude.git_remote import (
-        clone_from_origin_openshift,
-        clone_from_origin_podman,
+        clone_from_origin,
+        openshift_exec_builder,
+        podman_exec_builder,
     )
 
     typer.echo(f"Cloning from origin in container ({origin_https_url})...")
 
     if is_local_backend(backend_type):
-        cname = resource_name(session_name)
-        engine = engine_binary_for_backend(backend_type)
-        success = clone_from_origin_podman(
-            cname, origin_https_url, engine=engine, transport=transport
+        exec_builder = podman_exec_builder(
+            resource_name(session_name), engine_binary_for_backend(backend_type)
         )
+        success = clone_from_origin(exec_builder, origin_https_url, transport=transport)
     else:
-        pname = pod_name(session_name)
-        namespace = openshift_namespace or "default"
-        success = clone_from_origin_openshift(
-            pname, namespace, origin_https_url, context=openshift_context
+        exec_builder = openshift_exec_builder(
+            pod_name(session_name), openshift_namespace or "default", openshift_context
         )
+        success = clone_from_origin(exec_builder, origin_https_url)
 
     if not success:
         typer.echo(
@@ -393,8 +392,9 @@ def _setup_after_clone(
     from paude.git_remote import (
         count_local_only_commits,
         git_push_to_remote,
-        set_base_ref_in_container_openshift,
-        set_base_ref_in_container_podman,
+        openshift_exec_builder,
+        podman_exec_builder,
+        set_base_ref_in_container,
     )
 
     # Add ext:: remote (git init on existing repo is a no-op inside _remote_add)
@@ -429,14 +429,15 @@ def _setup_after_clone(
 
     # Set base ref
     if is_local_backend(backend_type):
-        engine = engine_binary_for_backend(backend_type)
-        set_base_ref_in_container_podman(
-            resource_name(session_name), engine=engine, transport=transport
+        exec_builder = podman_exec_builder(
+            resource_name(session_name), engine_binary_for_backend(backend_type)
         )
+        set_base_ref_in_container(exec_builder, transport=transport)
     else:
-        pname = pod_name(session_name)
-        namespace = openshift_namespace or "default"
-        set_base_ref_in_container_openshift(pname, namespace, context=openshift_context)
+        exec_builder = openshift_exec_builder(
+            pod_name(session_name), openshift_namespace or "default", openshift_context
+        )
+        set_base_ref_in_container(exec_builder)
 
     # Tags are already present from clone — skip pushing
     # (local tags would conflict with cloned tags from origin)
@@ -457,10 +458,10 @@ def _setup_full_push(
     from paude.git_remote import (
         git_push_tags_to_remote,
         git_push_to_remote,
-        set_base_ref_in_container_openshift,
-        set_base_ref_in_container_podman,
-        set_origin_in_container_openshift,
-        set_origin_in_container_podman,
+        openshift_exec_builder,
+        podman_exec_builder,
+        set_base_ref_in_container,
+        set_origin_in_container,
     )
 
     # Add remote and init git in container (without pushing)
@@ -481,14 +482,15 @@ def _setup_full_push(
 
     # Set base ref
     if is_local_backend(backend_type):
-        engine = engine_binary_for_backend(backend_type)
-        set_base_ref_in_container_podman(
-            resource_name(session_name), engine=engine, transport=transport
+        exec_builder = podman_exec_builder(
+            resource_name(session_name), engine_binary_for_backend(backend_type)
         )
+        set_base_ref_in_container(exec_builder, transport=transport)
     else:
-        pname = pod_name(session_name)
-        namespace = openshift_namespace or "default"
-        set_base_ref_in_container_openshift(pname, namespace, context=openshift_context)
+        exec_builder = openshift_exec_builder(
+            pod_name(session_name), openshift_namespace or "default", openshift_context
+        )
+        set_base_ref_in_container(exec_builder)
 
     # Push tags
     typer.echo("Pushing tags...")
@@ -499,20 +501,19 @@ def _setup_full_push(
     if origin_https_url:
         typer.echo(f"Setting origin in container to {origin_https_url}...")
         if is_local_backend(backend_type):
-            engine = engine_binary_for_backend(backend_type)
-            origin_set = set_origin_in_container_podman(
-                resource_name(session_name),
-                origin_https_url,
-                engine=engine,
-                transport=transport,
+            exec_builder = podman_exec_builder(
+                resource_name(session_name), engine_binary_for_backend(backend_type)
+            )
+            origin_set = set_origin_in_container(
+                exec_builder, origin_https_url, transport=transport
             )
         else:
-            origin_set = set_origin_in_container_openshift(
+            exec_builder = openshift_exec_builder(
                 pod_name(session_name),
                 openshift_namespace or "default",
-                origin_https_url,
-                context=openshift_context,
+                openshift_context,
             )
+            origin_set = set_origin_in_container(exec_builder, origin_https_url)
         if not origin_set:
             typer.echo("Warning: Failed to set origin in container.", err=True)
     else:
@@ -528,8 +529,9 @@ def _setup_precommit(
 ) -> None:
     """Set up pre-commit hooks if config exists."""
     from paude.git_remote import (
-        setup_precommit_in_container_openshift,
-        setup_precommit_in_container_podman,
+        openshift_exec_builder,
+        podman_exec_builder,
+        setup_precommit_in_container,
     )
 
     if not Path(".pre-commit-config.yaml").exists():
@@ -537,16 +539,15 @@ def _setup_precommit(
 
     typer.echo("Setting up pre-commit hooks in container...")
     if is_local_backend(backend_type):
-        engine = engine_binary_for_backend(backend_type)
-        success = setup_precommit_in_container_podman(
-            resource_name(session_name), engine=engine, transport=transport
+        exec_builder = podman_exec_builder(
+            resource_name(session_name), engine_binary_for_backend(backend_type)
         )
+        success = setup_precommit_in_container(exec_builder, transport=transport)
     else:
-        success = setup_precommit_in_container_openshift(
-            pod_name(session_name),
-            openshift_namespace or "default",
-            context=openshift_context,
+        exec_builder = openshift_exec_builder(
+            pod_name(session_name), openshift_namespace or "default", openshift_context
         )
+        success = setup_precommit_in_container(exec_builder, set_home=True)
     if not success:
         typer.echo(
             "Warning: Failed to install pre-commit hooks in container.",
@@ -569,13 +570,13 @@ def _remote_add(
         get_current_branch,
         git_push_to_remote,
         git_remote_add,
-        initialize_container_workspace_openshift,
-        initialize_container_workspace_podman,
+        initialize_container_workspace,
         is_container_running_podman,
         is_ext_protocol_allowed,
         is_pod_running_openshift,
-        set_base_ref_in_container_openshift,
-        set_base_ref_in_container_podman,
+        openshift_exec_builder,
+        podman_exec_builder,
+        set_base_ref_in_container,
     )
 
     # Check if ext protocol is enabled (required for ext:: remotes)
@@ -651,12 +652,8 @@ def _remote_add(
 
         # Initialize git repository in container
         typer.echo("Initializing git repository in container...")
-        if not initialize_container_workspace_openshift(
-            pod_name=pname,
-            namespace=namespace,
-            context=openshift_context,
-            branch=branch,
-        ):
+        exec_builder = openshift_exec_builder(pname, namespace, openshift_context)
+        if not initialize_container_workspace(exec_builder, branch=branch):
             raise typer.Exit(1)
 
         remote_url = build_openshift_remote_url(
@@ -691,8 +688,9 @@ def _remote_add(
 
         # Initialize git repository in container
         typer.echo("Initializing git repository in container...")
-        if not initialize_container_workspace_podman(
-            cname, branch=branch, engine=engine, transport=effective_transport
+        exec_builder = podman_exec_builder(cname, engine)
+        if not initialize_container_workspace(
+            exec_builder, branch=branch, transport=effective_transport
         ):
             raise typer.Exit(1)
 
@@ -723,13 +721,11 @@ def _remote_add(
                 raise typer.Exit(1)
             # Set base ref to mark initial push point
             if session.backend_type == "openshift":
-                set_base_ref_in_container_openshift(
-                    pname, namespace, context=openshift_context
-                )
+                eb = openshift_exec_builder(pname, namespace, openshift_context)
+                set_base_ref_in_container(eb)
             else:
-                set_base_ref_in_container_podman(
-                    cname, engine=engine, transport=effective_transport
-                )
+                eb = podman_exec_builder(cname, engine)
+                set_base_ref_in_container(eb, transport=effective_transport)
             typer.echo("Push complete.")
         else:
             typer.echo("")

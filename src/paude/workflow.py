@@ -77,10 +77,11 @@ def _ensure_remote_exists(
         build_podman_remote_url,
         enable_ext_protocol,
         git_remote_add,
-        initialize_container_workspace_openshift,
-        initialize_container_workspace_podman,
+        initialize_container_workspace,
         is_ext_protocol_allowed,
         list_paude_remotes,
+        openshift_exec_builder,
+        podman_exec_builder,
     )
 
     remote_name = resource_name(session_name)
@@ -112,15 +113,15 @@ def _ensure_remote_exists(
             namespace = openshift_namespace or "default"
 
         pname = pod_name(session_name)
-        initialize_container_workspace_openshift(
-            pname, namespace, context=openshift_context
-        )
+        exec_builder = openshift_exec_builder(pname, namespace, openshift_context)
+        initialize_container_workspace(exec_builder)
         remote_url = build_openshift_remote_url(
             pname, namespace, context=openshift_context
         )
     else:
         engine = engine_binary_for_backend(backend_type)
-        initialize_container_workspace_podman(cname, engine=engine)
+        exec_builder = podman_exec_builder(cname, engine)
+        initialize_container_workspace(exec_builder)
         remote_url = build_podman_remote_url(cname, engine=engine)
 
     if not git_remote_add(remote_name, remote_url):

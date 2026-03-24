@@ -188,6 +188,56 @@ class TestContainerEngineContainerExists:
         assert engine.container_exists("missing") is False
 
 
+class TestContainerEngineExists:
+    """Tests for the _exists helper method."""
+
+    @patch("paude.transport.local.subprocess.run")
+    def test_podman_exists_uses_exists_subcmd(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = MagicMock(returncode=0)
+        engine = ContainerEngine("podman")
+        assert engine._exists("volume", "myvol") is True
+        cmd = mock_run.call_args[0][0]
+        assert cmd == ["podman", "volume", "exists", "myvol"]
+
+    @patch("paude.transport.local.subprocess.run")
+    def test_docker_exists_uses_inspect_subcmd(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = MagicMock(returncode=0)
+        engine = ContainerEngine("docker")
+        assert engine._exists("volume", "myvol") is True
+        cmd = mock_run.call_args[0][0]
+        assert cmd == ["docker", "volume", "inspect", "myvol"]
+
+    @patch("paude.transport.local.subprocess.run")
+    def test_exists_returns_false_on_nonzero(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = MagicMock(returncode=1)
+        engine = ContainerEngine("podman")
+        assert engine._exists("image", "missing") is False
+
+
+class TestContainerEngineGpuArgs:
+    """Tests for ContainerEngine.gpu_args method."""
+
+    def test_docker_gpu_args(self) -> None:
+        engine = ContainerEngine("docker")
+        assert engine.gpu_args("all") == ["--gpus", "all"]
+
+    def test_podman_gpu_args(self) -> None:
+        engine = ContainerEngine("podman")
+        assert engine.gpu_args("all") == ["--device", "nvidia.com/gpu=all"]
+
+
+class TestContainerEngineImageNameFormat:
+    """Tests for ContainerEngine.image_name_format property."""
+
+    def test_podman_image_name_format(self) -> None:
+        engine = ContainerEngine("podman")
+        assert engine.image_name_format == "{{.ImageName}}"
+
+    def test_docker_image_name_format(self) -> None:
+        engine = ContainerEngine("docker")
+        assert engine.image_name_format == "{{.Config.Image}}"
+
+
 class TestContainerEngineTransport:
     """Tests for transport integration."""
 

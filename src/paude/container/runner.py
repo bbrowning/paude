@@ -87,10 +87,7 @@ class ContainerRunner:
         ]
 
         if gpu:
-            if self._engine.binary == "docker":
-                args.extend(["--gpus", gpu])
-            else:  # podman - CDI syntax
-                args.extend(["--device", f"nvidia.com/gpu={gpu}"])
+            args.extend(self._engine.gpu_args(gpu))
 
         if network:
             args.extend(["--network", network])
@@ -280,11 +277,16 @@ class ContainerRunner:
         if result.returncode != 0:
             return []
 
+        return self._parse_container_list(result.stdout)
+
+    @staticmethod
+    def _parse_container_list(raw_output: str) -> list[dict[str, Any]]:
+        """Parse JSON/NDJSON container list output and normalize labels."""
         try:
-            parsed = json.loads(result.stdout) if result.stdout.strip() else []
+            parsed = json.loads(raw_output) if raw_output.strip() else []
         except json.JSONDecodeError:
             # Docker outputs NDJSON (one JSON object per line), not an array
-            lines = [ln for ln in result.stdout.strip().splitlines() if ln.strip()]
+            lines = [ln for ln in raw_output.strip().splitlines() if ln.strip()]
             if not lines:
                 return []
             try:
@@ -311,12 +313,9 @@ class ContainerRunner:
 
     def get_container_image(self, name: str) -> str | None:
         """Get the image name of a container."""
-        # Docker uses .Config.Image; Podman uses .ImageName
-        if self._engine.binary == "podman":
-            fmt = "{{.ImageName}}"
-        else:
-            fmt = "{{.Config.Image}}"
-        result = self._engine.run("inspect", "-f", fmt, name, check=False)
+        result = self._engine.run(
+            "inspect", "-f", self._engine.image_name_format, name, check=False
+        )
         if result.returncode != 0:
             return None
         return result.stdout.strip() or None

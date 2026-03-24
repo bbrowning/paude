@@ -599,7 +599,7 @@ class TestSetBaseRefInContainerOpenshift:
 class TestGitPushToRemote:
     """Tests for git_push_to_remote."""
 
-    @patch("paude.git_remote.get_current_branch")
+    @patch("paude.git_remote.utils.get_current_branch")
     @patch("paude.git_remote.subprocess.run")
     def test_returns_true_on_success(self, mock_run, mock_branch) -> None:
         """Return True when push succeeds."""
@@ -614,7 +614,7 @@ class TestGitPushToRemote:
         call_args = mock_run.call_args[0][0]
         assert call_args == ["git", "push", "paude-test", "main"]
 
-    @patch("paude.git_remote.get_current_branch")
+    @patch("paude.git_remote.utils.get_current_branch")
     @patch("paude.git_remote.subprocess.run")
     def test_uses_specified_branch(self, mock_run, mock_branch) -> None:
         """Use specified branch instead of current."""
@@ -628,7 +628,7 @@ class TestGitPushToRemote:
         call_args = mock_run.call_args[0][0]
         assert call_args == ["git", "push", "paude-test", "feature-branch"]
 
-    @patch("paude.git_remote.get_current_branch")
+    @patch("paude.git_remote.utils.get_current_branch")
     @patch("paude.git_remote.subprocess.run")
     def test_returns_false_on_failure(self, mock_run, mock_branch) -> None:
         """Return False when push fails."""
@@ -1139,7 +1139,7 @@ class TestGetBranchRemoteUrl:
 
         assert result is None
 
-    @patch("paude.git_remote.get_current_branch")
+    @patch("paude.git_remote.utils.get_current_branch")
     @patch("paude.git_remote.subprocess.run")
     def test_no_branch_uses_get_current_branch(self, mock_run, mock_branch) -> None:
         """Use get_current_branch() when no branch is specified."""
@@ -1187,7 +1187,7 @@ class TestGetBranchRemoteUrl:
 class TestGetUpstreamUrl:
     """Tests for get_upstream_url."""
 
-    @patch("paude.git_remote.get_branch_remote_url")
+    @patch("paude.git_remote.utils.get_branch_remote_url")
     def test_prefers_main_branch_remote(self, mock_get_url) -> None:
         """Use main branch's tracking remote when available."""
         mock_get_url.return_value = "https://github.com/upstream/repo.git"
@@ -1197,7 +1197,7 @@ class TestGetUpstreamUrl:
         assert result == "https://github.com/upstream/repo.git"
         mock_get_url.assert_called_once_with("main", cwd=None)
 
-    @patch("paude.git_remote.get_branch_remote_url")
+    @patch("paude.git_remote.utils.get_branch_remote_url")
     def test_falls_back_to_master(self, mock_get_url) -> None:
         """Fall back to master branch when main has no remote."""
         mock_get_url.side_effect = [None, "https://github.com/upstream/repo.git"]
@@ -1209,7 +1209,7 @@ class TestGetUpstreamUrl:
         mock_get_url.assert_any_call("main", cwd=None)
         mock_get_url.assert_any_call("master", cwd=None)
 
-    @patch("paude.git_remote.get_branch_remote_url")
+    @patch("paude.git_remote.utils.get_branch_remote_url")
     def test_falls_back_to_current_branch(self, mock_get_url) -> None:
         """Fall back to current branch when main/master have no remotes."""
         mock_get_url.side_effect = [
@@ -1224,7 +1224,7 @@ class TestGetUpstreamUrl:
         assert mock_get_url.call_count == 3
         mock_get_url.assert_any_call(None, cwd=None)
 
-    @patch("paude.git_remote.get_branch_remote_url")
+    @patch("paude.git_remote.utils.get_branch_remote_url")
     def test_returns_none_when_no_remotes(self, mock_get_url) -> None:
         """Return None when no remotes can be resolved."""
         mock_get_url.return_value = None
@@ -1233,7 +1233,7 @@ class TestGetUpstreamUrl:
 
         assert result is None
 
-    @patch("paude.git_remote.get_branch_remote_url")
+    @patch("paude.git_remote.utils.get_branch_remote_url")
     def test_passes_cwd(self, mock_get_url) -> None:
         """Pass cwd to get_branch_remote_url."""
         mock_get_url.return_value = "https://github.com/upstream/repo.git"
@@ -1242,7 +1242,7 @@ class TestGetUpstreamUrl:
 
         mock_get_url.assert_called_once_with("main", cwd="/some/repo")
 
-    @patch("paude.git_remote.get_branch_remote_url")
+    @patch("paude.git_remote.utils.get_branch_remote_url")
     def test_fork_workflow_uses_upstream_not_fork(self, mock_get_url) -> None:
         """In a fork workflow, prefer main's upstream remote over current branch's origin."""
         # Simulate: main tracks upstream (vllm-project/vllm),
@@ -1260,7 +1260,7 @@ class TestGetUpstreamUrl:
 class TestResolveOriginCmd:
     """Tests for resolve_origin_cmd."""
 
-    @patch("paude.git_remote.get_upstream_url")
+    @patch("paude.git_remote.utils.get_upstream_url")
     def test_returns_set_origin_cmd(self, mock_get_url) -> None:
         """Return a set-origin command when URL is found."""
         mock_get_url.return_value = "git@github.com:user/repo.git"
@@ -1272,7 +1272,7 @@ class TestResolveOriginCmd:
         assert "git -C /pvc/workspace remote" in result
         mock_get_url.assert_called_once_with(cwd="/some/repo")
 
-    @patch("paude.git_remote.get_upstream_url")
+    @patch("paude.git_remote.utils.get_upstream_url")
     def test_returns_none_when_no_url(self, mock_get_url) -> None:
         """Return None when no remote URL is found."""
         mock_get_url.return_value = None
@@ -1478,7 +1478,7 @@ class TestCountLocalOnlyCommits:
 class TestGitPushToRemoteQuiet:
     """Tests for git_push_to_remote quiet parameter."""
 
-    @patch("paude.git_remote.get_current_branch")
+    @patch("paude.git_remote.utils.get_current_branch")
     @patch("paude.git_remote.subprocess.run")
     def test_quiet_captures_output(self, mock_run, mock_branch) -> None:
         """When quiet=True, capture_output should be True."""
@@ -1492,7 +1492,7 @@ class TestGitPushToRemoteQuiet:
         _, kwargs = mock_run.call_args
         assert kwargs["capture_output"] is True
 
-    @patch("paude.git_remote.get_current_branch")
+    @patch("paude.git_remote.utils.get_current_branch")
     @patch("paude.git_remote.subprocess.run")
     def test_default_shows_output(self, mock_run, mock_branch) -> None:
         """By default, capture_output should be False."""
@@ -1561,3 +1561,262 @@ class TestBuildSshRemoteUrl:
             workspace_path="/custom/path",
         )
         assert url.endswith("/custom/path")
+
+
+class TestExecCmdBuilders:
+    """Tests for podman_exec_builder and openshift_exec_builder."""
+
+    def test_podman_exec_builder_default_engine(self) -> None:
+        """Build podman exec command with default engine."""
+        from paude.git_remote import podman_exec_builder
+
+        builder = podman_exec_builder("my-container")
+        result = builder("echo hello")
+        assert result == ["podman", "exec", "my-container", "bash", "-c", "echo hello"]
+
+    def test_podman_exec_builder_docker_engine(self) -> None:
+        """Build docker exec command."""
+        from paude.git_remote import podman_exec_builder
+
+        builder = podman_exec_builder("my-container", engine="docker")
+        result = builder("echo hello")
+        assert result == ["docker", "exec", "my-container", "bash", "-c", "echo hello"]
+
+    def test_openshift_exec_builder_no_context(self) -> None:
+        """Build oc exec command without context."""
+        from paude.git_remote import openshift_exec_builder
+
+        builder = openshift_exec_builder("pod-0", "my-ns")
+        result = builder("echo hello")
+        assert result == [
+            "oc",
+            "exec",
+            "pod-0",
+            "-n",
+            "my-ns",
+            "--",
+            "bash",
+            "-c",
+            "echo hello",
+        ]
+
+    def test_openshift_exec_builder_with_context(self) -> None:
+        """Build oc exec command with context."""
+        from paude.git_remote import openshift_exec_builder
+
+        builder = openshift_exec_builder("pod-0", "my-ns", context="my-ctx")
+        result = builder("echo hello")
+        assert result == [
+            "oc",
+            "--context",
+            "my-ctx",
+            "exec",
+            "pod-0",
+            "-n",
+            "my-ns",
+            "--",
+            "bash",
+            "-c",
+            "echo hello",
+        ]
+
+    def test_builder_is_callable(self) -> None:
+        """ExecCmdBuilder is callable."""
+        from paude.git_remote import ExecCmdBuilder, podman_exec_builder
+
+        builder: ExecCmdBuilder = podman_exec_builder("c")
+        assert callable(builder)
+
+
+class TestUnifiedInitializeContainerWorkspace:
+    """Tests for the unified initialize_container_workspace function."""
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_with_podman_builder(self, mock_run) -> None:
+        """Initialize workspace using podman exec builder."""
+        from paude.git_remote import initialize_container_workspace, podman_exec_builder
+
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        builder = podman_exec_builder("paude-test")
+        result = initialize_container_workspace(builder, branch="develop")
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        assert call_args[0:2] == ["podman", "exec"]
+        assert "paude-test" in call_args
+        bash_cmd_idx = call_args.index("-c") + 1
+        assert "git init -b develop" in call_args[bash_cmd_idx]
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_with_openshift_builder(self, mock_run) -> None:
+        """Initialize workspace using openshift exec builder."""
+        from paude.git_remote import (
+            initialize_container_workspace,
+            openshift_exec_builder,
+        )
+
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        builder = openshift_exec_builder("pod-0", "my-ns", context="ctx")
+        result = initialize_container_workspace(builder)
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        assert "oc" in call_args
+        assert "--context" in call_args
+        assert "ctx" in call_args
+        assert "pod-0" in call_args
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_false_on_failure(self, mock_run) -> None:
+        """Return False when initialization fails."""
+        from paude.git_remote import initialize_container_workspace, podman_exec_builder
+
+        mock_run.return_value.returncode = 1
+        mock_run.return_value.stderr = "exec error"
+
+        builder = podman_exec_builder("paude-test")
+        result = initialize_container_workspace(builder)
+
+        assert result is False
+
+
+class TestUnifiedSetOriginInContainer:
+    """Tests for the unified set_origin_in_container function."""
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_sets_origin_with_podman(self, mock_run) -> None:
+        """Set origin using podman exec builder."""
+        from paude.git_remote import podman_exec_builder, set_origin_in_container
+
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        builder = podman_exec_builder("paude-test", engine="docker")
+        result = set_origin_in_container(builder, "https://github.com/user/repo")
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        assert call_args[0:2] == ["docker", "exec"]
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_false_on_failure(self, mock_run) -> None:
+        """Return False when setting origin fails."""
+        from paude.git_remote import podman_exec_builder, set_origin_in_container
+
+        mock_run.return_value.returncode = 1
+        mock_run.return_value.stderr = "error"
+
+        builder = podman_exec_builder("paude-test")
+        result = set_origin_in_container(builder, "https://example.com/repo")
+
+        assert result is False
+
+
+class TestUnifiedSetBaseRefInContainer:
+    """Tests for the unified set_base_ref_in_container function."""
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_sets_base_ref(self, mock_run) -> None:
+        """Set base ref using exec builder."""
+        from paude.git_remote import podman_exec_builder, set_base_ref_in_container
+
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        builder = podman_exec_builder("paude-test")
+        result = set_base_ref_in_container(builder)
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        bash_cmd_idx = call_args.index("-c") + 1
+        assert "update-ref refs/paude/base HEAD" in call_args[bash_cmd_idx]
+
+
+class TestUnifiedSetupPrecommitInContainer:
+    """Tests for the unified setup_precommit_in_container function."""
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_without_set_home(self, mock_run) -> None:
+        """Run pre-commit install without HOME override."""
+        from paude.git_remote import podman_exec_builder, setup_precommit_in_container
+
+        mock_run.return_value.returncode = 0
+
+        builder = podman_exec_builder("paude-test")
+        result = setup_precommit_in_container(builder)
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        bash_cmd_idx = call_args.index("-c") + 1
+        assert "pre-commit install" in call_args[bash_cmd_idx]
+        assert "export HOME=" not in call_args[bash_cmd_idx]
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_with_set_home(self, mock_run) -> None:
+        """Run pre-commit install with HOME override for OpenShift."""
+        from paude.git_remote import (
+            openshift_exec_builder,
+            setup_precommit_in_container,
+        )
+
+        mock_run.return_value.returncode = 0
+
+        builder = openshift_exec_builder("pod-0", "ns")
+        result = setup_precommit_in_container(builder, set_home=True)
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        bash_cmd_idx = call_args.index("-c") + 1
+        assert "pre-commit install" in call_args[bash_cmd_idx]
+        assert "export HOME=" in call_args[bash_cmd_idx]
+
+
+class TestUnifiedCloneFromOrigin:
+    """Tests for the unified clone_from_origin function."""
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_true_on_success(self, mock_run) -> None:
+        """Return True when clone succeeds."""
+        from paude.git_remote import clone_from_origin, podman_exec_builder
+
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        builder = podman_exec_builder("paude-test")
+        result = clone_from_origin(builder, "https://github.com/user/repo.git")
+
+        assert result is True
+        call_args = mock_run.call_args[0][0]
+        bash_cmd_idx = call_args.index("-c") + 1
+        assert "git clone" in call_args[bash_cmd_idx]
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_false_on_timeout(self, mock_run) -> None:
+        """Return False when clone times out."""
+        import subprocess
+
+        from paude.git_remote import clone_from_origin, podman_exec_builder
+
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="git clone", timeout=600)
+
+        builder = podman_exec_builder("paude-test")
+        result = clone_from_origin(builder, "https://github.com/user/repo.git")
+
+        assert result is False
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_false_on_failure(self, mock_run) -> None:
+        """Return False when clone fails."""
+        from paude.git_remote import clone_from_origin, openshift_exec_builder
+
+        mock_run.return_value.returncode = 128
+        mock_run.return_value.stderr = "fatal: not found"
+
+        builder = openshift_exec_builder("pod-0", "ns")
+        result = clone_from_origin(builder, "https://github.com/user/private.git")
+
+        assert result is False

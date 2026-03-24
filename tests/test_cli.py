@@ -631,11 +631,11 @@ class TestRemoteCommand:
     @patch("paude.git_remote.is_git_repository")
     @patch("paude.git_remote.is_ext_protocol_allowed")
     @patch("paude.git_remote.is_container_running_podman")
-    @patch("paude.git_remote.initialize_container_workspace_podman")
+    @patch("paude.git_remote.initialize_container_workspace")
     @patch("paude.git_remote.git_remote_add")
     @patch("paude.git_remote.get_current_branch")
     @patch("paude.git_remote.git_push_to_remote")
-    @patch("paude.git_remote.set_base_ref_in_container_podman")
+    @patch("paude.git_remote.set_base_ref_in_container")
     def test_remote_add_with_push_flag(
         self,
         mock_set_base_ref,
@@ -674,16 +674,14 @@ class TestRemoteCommand:
         assert "Added git remote" in output
         assert "Pushing main to container" in output
         assert "Push complete" in output
-        mock_init.assert_called_once_with(
-            "paude-test-session", branch="main", engine="podman", transport=None
-        )
+        mock_init.assert_called_once()
         mock_push.assert_called_once_with("paude-test-session", "main")
 
     @patch("paude.cli.remote.find_session_backend")
     @patch("paude.git_remote.is_git_repository")
     @patch("paude.git_remote.is_ext_protocol_allowed")
     @patch("paude.git_remote.is_container_running_podman")
-    @patch("paude.git_remote.initialize_container_workspace_podman")
+    @patch("paude.git_remote.initialize_container_workspace")
     @patch("paude.git_remote.git_remote_add")
     @patch("paude.git_remote.get_current_branch")
     def test_remote_add_initializes_container_workspace(
@@ -718,9 +716,7 @@ class TestRemoteCommand:
         assert result.exit_code == 0
         output = result.stdout + (result.stderr or "")
         assert "Initializing git repository in container" in output
-        mock_init.assert_called_once_with(
-            "paude-test-session", branch="main", engine="podman", transport=None
-        )
+        mock_init.assert_called_once()
 
 
 def test_subcommand_runs_without_main_execution():
