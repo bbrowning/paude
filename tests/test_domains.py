@@ -280,7 +280,7 @@ class TestDomainAliases:
 
     def test_python_has_pytorch(self):
         """python alias includes download.pytorch.org."""
-        assert "download.pytorch.org" in DOMAIN_ALIASES["python"]
+        assert ".pytorch.org" in DOMAIN_ALIASES["python"]
 
     def test_claude_has_claude_ai(self):
         """claude alias includes .claude.ai."""
@@ -308,7 +308,7 @@ class TestPypiBackwardCompatibility:
         """'pypi' backward-compat alias also includes pytorch."""
         result = expand_domains(["pypi"])
         assert result is not None
-        assert "download.pytorch.org" in result
+        assert ".pytorch.org" in result
 
 
 class TestGolangAlias:

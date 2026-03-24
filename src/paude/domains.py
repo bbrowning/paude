@@ -37,7 +37,7 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
     "python": [
         ".pypi.org",
         ".pythonhosted.org",
-        "download.pytorch.org",
+        ".pytorch.org",
     ],
     "golang": [
         "go.dev",
