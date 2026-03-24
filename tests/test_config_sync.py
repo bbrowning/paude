@@ -190,7 +190,7 @@ class TestCleanupRemoteConfigDir:
     """Tests for _cleanup_remote_config_dir helper in commands.py."""
 
     @patch("paude.transport.config_sync.cleanup_remote_configs")
-    @patch("paude.cli.remote._build_transport")
+    @patch("paude.cli.remote_git_setup._build_transport")
     def test_calls_cleanup_when_entry_has_remote_config(
         self, mock_build, mock_cleanup
     ) -> None:
@@ -218,7 +218,7 @@ class TestCleanupRemoteConfigDir:
         _cleanup_remote_config_dir(entry)  # should not raise
 
     @patch(
-        "paude.cli.remote._build_transport",
+        "paude.cli.remote_git_setup._build_transport",
         side_effect=Exception("connection failed"),
     )
     def test_swallows_exceptions(self, mock_build) -> None:

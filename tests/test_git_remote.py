@@ -5,16 +5,13 @@ from unittest.mock import patch
 
 from paude.git_remote import (
     _build_clone_from_origin_cmd,
-    _build_openshift_exec_cmd,
-    _build_podman_exec_cmd,
     _build_set_origin_cmd,
     _build_workspace_init_cmd,
     _exec_in_container,
     build_openshift_remote_url,
     build_podman_remote_url,
     build_ssh_remote_url,
-    clone_from_origin_openshift,
-    clone_from_origin_podman,
+    clone_from_origin,
     enable_ext_protocol,
     get_branch_remote_url,
     get_current_branch,
@@ -24,14 +21,16 @@ from paude.git_remote import (
     git_push_tags_to_remote,
     git_remote_add,
     git_remote_remove,
+    initialize_container_workspace,
     is_ext_protocol_allowed,
     is_git_repository,
     list_paude_remotes,
+    openshift_exec_builder,
+    podman_exec_builder,
     resolve_origin_cmd,
-    set_origin_in_container_openshift,
-    set_origin_in_container_podman,
-    setup_precommit_in_container_openshift,
-    setup_precommit_in_container_podman,
+    set_base_ref_in_container,
+    set_origin_in_container,
+    setup_precommit_in_container,
     ssh_url_to_https,
 )
 
@@ -316,17 +315,16 @@ class TestEnableExtProtocol:
 
 
 class TestInitializeContainerWorkspacePodman:
-    """Tests for initialize_container_workspace_podman."""
+    """Tests for initialize_container_workspace with podman exec builder."""
 
     @patch("paude.git_remote.subprocess.run")
     def test_returns_true_on_success(self, mock_run) -> None:
         """Return True when git init succeeds."""
-        from paude.git_remote import initialize_container_workspace_podman
-
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
 
-        result = initialize_container_workspace_podman("paude-test")
+        eb = podman_exec_builder("paude-test", "podman")
+        result = initialize_container_workspace(eb)
 
         assert result is True
         mock_run.assert_called_once()
@@ -337,45 +335,41 @@ class TestInitializeContainerWorkspacePodman:
     @patch("paude.git_remote.subprocess.run")
     def test_returns_false_on_failure(self, mock_run) -> None:
         """Return False when git init fails."""
-        from paude.git_remote import initialize_container_workspace_podman
-
         mock_run.return_value.returncode = 1
         mock_run.return_value.stderr = "exec error"
 
-        result = initialize_container_workspace_podman("paude-test")
+        eb = podman_exec_builder("paude-test", "podman")
+        result = initialize_container_workspace(eb)
 
         assert result is False
 
     @patch("paude.git_remote.subprocess.run")
     def test_uses_branch_name(self, mock_run) -> None:
         """Use specified branch name in git init."""
-        from paude.git_remote import initialize_container_workspace_podman
-
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
 
-        result = initialize_container_workspace_podman("paude-test", branch="develop")
+        eb = podman_exec_builder("paude-test", "podman")
+        result = initialize_container_workspace(eb, branch="develop")
 
         assert result is True
         call_args = mock_run.call_args[0][0]
-        # Find the bash -c command argument
         bash_cmd_idx = call_args.index("-c") + 1
         bash_cmd = call_args[bash_cmd_idx]
         assert "git init -b develop" in bash_cmd
 
 
 class TestInitializeContainerWorkspaceOpenshift:
-    """Tests for initialize_container_workspace_openshift."""
+    """Tests for initialize_container_workspace with openshift exec builder."""
 
     @patch("paude.git_remote.subprocess.run")
     def test_returns_true_on_success(self, mock_run) -> None:
         """Return True when git init succeeds."""
-        from paude.git_remote import initialize_container_workspace_openshift
-
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
 
-        result = initialize_container_workspace_openshift("pod-0", "namespace")
+        eb = openshift_exec_builder("pod-0", "namespace")
+        result = initialize_container_workspace(eb)
 
         assert result is True
         mock_run.assert_called_once()
@@ -388,14 +382,11 @@ class TestInitializeContainerWorkspaceOpenshift:
     @patch("paude.git_remote.subprocess.run")
     def test_with_context(self, mock_run) -> None:
         """Include context when specified."""
-        from paude.git_remote import initialize_container_workspace_openshift
-
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
 
-        result = initialize_container_workspace_openshift(
-            "pod-0", "ns", context="my-ctx"
-        )
+        eb = openshift_exec_builder("pod-0", "ns", "my-ctx")
+        result = initialize_container_workspace(eb)
 
         assert result is True
         call_args = mock_run.call_args[0][0]
@@ -405,18 +396,14 @@ class TestInitializeContainerWorkspaceOpenshift:
     @patch("paude.git_remote.subprocess.run")
     def test_uses_branch_name(self, mock_run) -> None:
         """Use specified branch name in git init."""
-        from paude.git_remote import initialize_container_workspace_openshift
-
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
 
-        result = initialize_container_workspace_openshift(
-            "pod-0", "ns", branch="feature-branch"
-        )
+        eb = openshift_exec_builder("pod-0", "ns")
+        result = initialize_container_workspace(eb, branch="feature-branch")
 
         assert result is True
         call_args = mock_run.call_args[0][0]
-        # Find the bash -c command argument
         bash_cmd_idx = call_args.index("-c") + 1
         bash_cmd = call_args[bash_cmd_idx]
         assert "git init -b feature-branch" in bash_cmd
@@ -516,17 +503,16 @@ class TestIsPodRunningOpenshift:
 
 
 class TestSetBaseRefInContainerPodman:
-    """Tests for set_base_ref_in_container_podman."""
+    """Tests for set_base_ref_in_container with podman exec builder."""
 
     @patch("paude.git_remote.subprocess.run")
     def test_returns_true_on_success(self, mock_run) -> None:
         """Return True when setting base ref succeeds."""
-        from paude.git_remote import set_base_ref_in_container_podman
-
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
 
-        result = set_base_ref_in_container_podman("paude-test")
+        eb = podman_exec_builder("paude-test", "podman")
+        result = set_base_ref_in_container(eb)
 
         assert result is True
         call_args = mock_run.call_args[0][0]
@@ -538,28 +524,26 @@ class TestSetBaseRefInContainerPodman:
     @patch("paude.git_remote.subprocess.run")
     def test_returns_false_on_failure(self, mock_run) -> None:
         """Return False when setting base ref fails."""
-        from paude.git_remote import set_base_ref_in_container_podman
-
         mock_run.return_value.returncode = 1
         mock_run.return_value.stderr = "exec error"
 
-        result = set_base_ref_in_container_podman("paude-test")
+        eb = podman_exec_builder("paude-test", "podman")
+        result = set_base_ref_in_container(eb)
 
         assert result is False
 
 
 class TestSetBaseRefInContainerOpenshift:
-    """Tests for set_base_ref_in_container_openshift."""
+    """Tests for set_base_ref_in_container with openshift exec builder."""
 
     @patch("paude.git_remote.subprocess.run")
     def test_returns_true_on_success(self, mock_run) -> None:
         """Return True when setting base ref succeeds."""
-        from paude.git_remote import set_base_ref_in_container_openshift
-
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
 
-        result = set_base_ref_in_container_openshift("pod-0", "namespace")
+        eb = openshift_exec_builder("pod-0", "namespace")
+        result = set_base_ref_in_container(eb)
 
         assert result is True
         call_args = mock_run.call_args[0][0]
@@ -571,12 +555,11 @@ class TestSetBaseRefInContainerOpenshift:
     @patch("paude.git_remote.subprocess.run")
     def test_with_context(self, mock_run) -> None:
         """Include context when specified."""
-        from paude.git_remote import set_base_ref_in_container_openshift
-
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
 
-        result = set_base_ref_in_container_openshift("pod-0", "ns", context="my-ctx")
+        eb = openshift_exec_builder("pod-0", "ns", "my-ctx")
+        result = set_base_ref_in_container(eb)
 
         assert result is True
         call_args = mock_run.call_args[0][0]
@@ -586,12 +569,11 @@ class TestSetBaseRefInContainerOpenshift:
     @patch("paude.git_remote.subprocess.run")
     def test_returns_false_on_failure(self, mock_run) -> None:
         """Return False when setting base ref fails."""
-        from paude.git_remote import set_base_ref_in_container_openshift
-
         mock_run.return_value.returncode = 1
         mock_run.return_value.stderr = "exec error"
 
-        result = set_base_ref_in_container_openshift("pod-0", "namespace")
+        eb = openshift_exec_builder("pod-0", "namespace")
+        result = set_base_ref_in_container(eb)
 
         assert result is False
 
@@ -701,7 +683,7 @@ class TestGitPushTagsToRemote:
 
 
 class TestSetOriginInContainerPodman:
-    """Tests for set_origin_in_container_podman."""
+    """Tests for set_origin_in_container with podman exec builder."""
 
     @patch("paude.git_remote.subprocess.run")
     def test_returns_true_on_success(self, mock_run) -> None:
@@ -709,9 +691,8 @@ class TestSetOriginInContainerPodman:
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
 
-        result = set_origin_in_container_podman(
-            "paude-test", "https://github.com/user/repo"
-        )
+        eb = podman_exec_builder("paude-test", "podman")
+        result = set_origin_in_container(eb, "https://github.com/user/repo")
 
         assert result is True
         call_args = mock_run.call_args[0][0]
@@ -724,15 +705,14 @@ class TestSetOriginInContainerPodman:
         mock_run.return_value.returncode = 1
         mock_run.return_value.stderr = "exec error"
 
-        result = set_origin_in_container_podman(
-            "paude-test", "https://github.com/user/repo"
-        )
+        eb = podman_exec_builder("paude-test", "podman")
+        result = set_origin_in_container(eb, "https://github.com/user/repo")
 
         assert result is False
 
 
 class TestSetOriginInContainerOpenshift:
-    """Tests for set_origin_in_container_openshift."""
+    """Tests for set_origin_in_container with openshift exec builder."""
 
     @patch("paude.git_remote.subprocess.run")
     def test_returns_true_on_success(self, mock_run) -> None:
@@ -740,9 +720,8 @@ class TestSetOriginInContainerOpenshift:
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
 
-        result = set_origin_in_container_openshift(
-            "pod-0", "namespace", "https://github.com/user/repo"
-        )
+        eb = openshift_exec_builder("pod-0", "namespace")
+        result = set_origin_in_container(eb, "https://github.com/user/repo")
 
         assert result is True
         call_args = mock_run.call_args[0][0]
@@ -755,12 +734,8 @@ class TestSetOriginInContainerOpenshift:
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
 
-        result = set_origin_in_container_openshift(
-            "pod-0",
-            "ns",
-            "https://github.com/user/repo",
-            context="my-ctx",
-        )
+        eb = openshift_exec_builder("pod-0", "ns", "my-ctx")
+        result = set_origin_in_container(eb, "https://github.com/user/repo")
 
         assert result is True
         call_args = mock_run.call_args[0][0]
@@ -773,22 +748,22 @@ class TestSetOriginInContainerOpenshift:
         mock_run.return_value.returncode = 1
         mock_run.return_value.stderr = "exec error"
 
-        result = set_origin_in_container_openshift(
-            "pod-0", "ns", "https://github.com/user/repo"
-        )
+        eb = openshift_exec_builder("pod-0", "ns")
+        result = set_origin_in_container(eb, "https://github.com/user/repo")
 
         assert result is False
 
 
 class TestSetupPrecommitInContainerPodman:
-    """Tests for setup_precommit_in_container_podman."""
+    """Tests for setup_precommit_in_container with podman exec builder."""
 
     @patch("paude.git_remote.subprocess.run")
     def test_returns_true_on_success(self, mock_run) -> None:
         """Return True when pre-commit install succeeds."""
         mock_run.return_value.returncode = 0
 
-        result = setup_precommit_in_container_podman("paude-test")
+        eb = podman_exec_builder("paude-test", "podman")
+        result = setup_precommit_in_container(eb)
 
         assert result is True
         call_args = mock_run.call_args[0][0]
@@ -800,7 +775,8 @@ class TestSetupPrecommitInContainerPodman:
         """Run pre-commit install command in container."""
         mock_run.return_value.returncode = 0
 
-        setup_precommit_in_container_podman("paude-test")
+        eb = podman_exec_builder("paude-test", "podman")
+        setup_precommit_in_container(eb)
 
         call_args = mock_run.call_args[0][0]
         bash_cmd_idx = call_args.index("-c") + 1
@@ -813,20 +789,22 @@ class TestSetupPrecommitInContainerPodman:
         """Return False when command fails."""
         mock_run.return_value.returncode = 1
 
-        result = setup_precommit_in_container_podman("paude-test")
+        eb = podman_exec_builder("paude-test", "podman")
+        result = setup_precommit_in_container(eb)
 
         assert result is False
 
 
 class TestSetupPrecommitInContainerOpenshift:
-    """Tests for setup_precommit_in_container_openshift."""
+    """Tests for setup_precommit_in_container with openshift exec builder."""
 
     @patch("paude.git_remote.subprocess.run")
     def test_returns_true_on_success(self, mock_run) -> None:
         """Return True when pre-commit install succeeds."""
         mock_run.return_value.returncode = 0
 
-        result = setup_precommit_in_container_openshift("pod-0", "namespace")
+        eb = openshift_exec_builder("pod-0", "namespace")
+        result = setup_precommit_in_container(eb, set_home=True)
 
         assert result is True
         call_args = mock_run.call_args[0][0]
@@ -838,7 +816,8 @@ class TestSetupPrecommitInContainerOpenshift:
         """Include context when specified."""
         mock_run.return_value.returncode = 0
 
-        result = setup_precommit_in_container_openshift("pod-0", "ns", context="my-ctx")
+        eb = openshift_exec_builder("pod-0", "ns", "my-ctx")
+        result = setup_precommit_in_container(eb, set_home=True)
 
         assert result is True
         call_args = mock_run.call_args[0][0]
@@ -850,7 +829,8 @@ class TestSetupPrecommitInContainerOpenshift:
         """Run pre-commit install command in pod."""
         mock_run.return_value.returncode = 0
 
-        setup_precommit_in_container_openshift("pod-0", "ns")
+        eb = openshift_exec_builder("pod-0", "ns")
+        setup_precommit_in_container(eb, set_home=True)
 
         call_args = mock_run.call_args[0][0]
         bash_cmd_idx = call_args.index("-c") + 1
@@ -863,12 +843,12 @@ class TestSetupPrecommitInContainerOpenshift:
         """Set HOME explicitly for OpenShift arbitrary UID compatibility."""
         mock_run.return_value.returncode = 0
 
-        setup_precommit_in_container_openshift("pod-0", "ns")
+        eb = openshift_exec_builder("pod-0", "ns")
+        setup_precommit_in_container(eb, set_home=True)
 
         call_args = mock_run.call_args[0][0]
         bash_cmd_idx = call_args.index("-c") + 1
         bash_cmd = call_args[bash_cmd_idx]
-        # Must handle both empty HOME and HOME="/" (OpenShift arbitrary UID)
         assert '"$HOME" == "/"' in bash_cmd
         assert "export HOME=" in bash_cmd
 
@@ -877,26 +857,29 @@ class TestSetupPrecommitInContainerOpenshift:
         """Return False when command fails."""
         mock_run.return_value.returncode = 1
 
-        result = setup_precommit_in_container_openshift("pod-0", "namespace")
+        eb = openshift_exec_builder("pod-0", "namespace")
+        result = setup_precommit_in_container(eb, set_home=True)
 
         assert result is False
 
 
 class TestBuildPodmanExecCmd:
-    """Tests for _build_podman_exec_cmd."""
+    """Tests for podman_exec_builder."""
 
     def test_builds_correct_command(self) -> None:
         """Build correct podman exec command."""
-        result = _build_podman_exec_cmd("my-container", "echo hello")
+        eb = podman_exec_builder("my-container", "podman")
+        result = eb("echo hello")
         assert result == ["podman", "exec", "my-container", "bash", "-c", "echo hello"]
 
 
 class TestBuildOpenshiftExecCmd:
-    """Tests for _build_openshift_exec_cmd."""
+    """Tests for openshift_exec_builder."""
 
     def test_builds_correct_command_without_context(self) -> None:
         """Build oc exec command without context."""
-        result = _build_openshift_exec_cmd("pod-0", "ns", None, "echo hello")
+        eb = openshift_exec_builder("pod-0", "ns")
+        result = eb("echo hello")
         assert result == [
             "oc",
             "exec",
@@ -911,7 +894,8 @@ class TestBuildOpenshiftExecCmd:
 
     def test_builds_correct_command_with_context(self) -> None:
         """Build oc exec command with context."""
-        result = _build_openshift_exec_cmd("pod-0", "ns", "my-ctx", "echo hello")
+        eb = openshift_exec_builder("pod-0", "ns", "my-ctx")
+        result = eb("echo hello")
         assert result == [
             "oc",
             "--context",
@@ -1301,7 +1285,7 @@ class TestBuildCloneFromOriginCmd:
 
 
 class TestCloneFromOriginPodman:
-    """Tests for clone_from_origin_podman."""
+    """Tests for clone_from_origin with podman exec builder."""
 
     @patch("paude.git_remote.subprocess.run")
     def test_returns_true_on_success(self, mock_run) -> None:
@@ -1309,9 +1293,8 @@ class TestCloneFromOriginPodman:
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
 
-        result = clone_from_origin_podman(
-            "paude-test", "https://github.com/user/repo.git"
-        )
+        eb = podman_exec_builder("paude-test", "podman")
+        result = clone_from_origin(eb, "https://github.com/user/repo.git")
 
         assert result is True
         call_args = mock_run.call_args[0][0]
@@ -1326,9 +1309,8 @@ class TestCloneFromOriginPodman:
         mock_run.return_value.returncode = 128
         mock_run.return_value.stderr = "fatal: repository not found"
 
-        result = clone_from_origin_podman(
-            "paude-test", "https://github.com/user/private-repo.git"
-        )
+        eb = podman_exec_builder("paude-test", "podman")
+        result = clone_from_origin(eb, "https://github.com/user/private-repo.git")
 
         assert result is False
 
@@ -1339,9 +1321,8 @@ class TestCloneFromOriginPodman:
 
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="git clone", timeout=600)
 
-        result = clone_from_origin_podman(
-            "paude-test", "https://github.com/user/repo.git"
-        )
+        eb = podman_exec_builder("paude-test", "podman")
+        result = clone_from_origin(eb, "https://github.com/user/repo.git")
 
         assert result is False
 
@@ -1351,7 +1332,8 @@ class TestCloneFromOriginPodman:
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
 
-        clone_from_origin_podman("paude-test", "https://github.com/user/repo.git")
+        eb = podman_exec_builder("paude-test", "podman")
+        clone_from_origin(eb, "https://github.com/user/repo.git")
 
         from paude.constants import CLONE_FROM_ORIGIN_TIMEOUT
 
@@ -1359,7 +1341,7 @@ class TestCloneFromOriginPodman:
 
 
 class TestCloneFromOriginOpenshift:
-    """Tests for clone_from_origin_openshift."""
+    """Tests for clone_from_origin with openshift exec builder."""
 
     @patch("paude.git_remote.subprocess.run")
     def test_returns_true_on_success(self, mock_run) -> None:
@@ -1367,9 +1349,8 @@ class TestCloneFromOriginOpenshift:
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
 
-        result = clone_from_origin_openshift(
-            "pod-0", "namespace", "https://github.com/user/repo.git"
-        )
+        eb = openshift_exec_builder("pod-0", "namespace")
+        result = clone_from_origin(eb, "https://github.com/user/repo.git")
 
         assert result is True
         call_args = mock_run.call_args[0][0]
@@ -1384,9 +1365,8 @@ class TestCloneFromOriginOpenshift:
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
 
-        result = clone_from_origin_openshift(
-            "pod-0", "ns", "https://github.com/user/repo.git", context="my-ctx"
-        )
+        eb = openshift_exec_builder("pod-0", "ns", "my-ctx")
+        result = clone_from_origin(eb, "https://github.com/user/repo.git")
 
         assert result is True
         call_args = mock_run.call_args[0][0]
@@ -1399,9 +1379,8 @@ class TestCloneFromOriginOpenshift:
         mock_run.return_value.returncode = 128
         mock_run.return_value.stderr = "fatal: repository not found"
 
-        result = clone_from_origin_openshift(
-            "pod-0", "namespace", "https://github.com/user/private-repo.git"
-        )
+        eb = openshift_exec_builder("pod-0", "namespace")
+        result = clone_from_origin(eb, "https://github.com/user/private-repo.git")
 
         assert result is False
 
@@ -1412,9 +1391,8 @@ class TestCloneFromOriginOpenshift:
 
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="git clone", timeout=600)
 
-        result = clone_from_origin_openshift(
-            "pod-0", "namespace", "https://github.com/user/repo.git"
-        )
+        eb = openshift_exec_builder("pod-0", "namespace")
+        result = clone_from_origin(eb, "https://github.com/user/repo.git")
 
         assert result is False
 

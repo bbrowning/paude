@@ -284,7 +284,7 @@ def _finalize_session_create(
     remote_config_dir: str | None = None,
 ) -> None:
     """Shared post-create output and git setup."""
-    from paude.cli.remote import _setup_git_after_create
+    from paude.cli.remote_git_setup import _setup_git_after_create
     from paude.domains import format_domains_for_display
     from paude.registry import SessionRegistry
 

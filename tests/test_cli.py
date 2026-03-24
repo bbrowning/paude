@@ -1899,7 +1899,7 @@ class TestCreateGitEnvVar:
         ],
         ids=["with-git", "without-git"],
     )
-    @patch("paude.cli.remote._setup_git_after_create")
+    @patch("paude.cli.remote_git_setup._setup_git_after_create")
     @patch("paude.cli.create.OpenShiftBackend")
     @patch("paude.cli.create.OpenShiftConfig")
     @patch("paude.config.detect_config", return_value=None)

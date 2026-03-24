@@ -32,7 +32,7 @@ def _cleanup_remote_config_dir(entry: RegistryEntry | None) -> None:
     if not entry or not entry.remote_config_dir or not entry.ssh_host:
         return
     try:
-        from paude.cli.remote import _build_transport
+        from paude.cli.remote_git_setup import _build_transport
         from paude.transport.config_sync import cleanup_remote_configs
 
         transport = _build_transport(entry.ssh_host, entry.ssh_key)
