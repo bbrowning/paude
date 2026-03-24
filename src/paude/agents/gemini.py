@@ -89,7 +89,7 @@ fi
         gemini_dir = home / ".gemini"
         resolved_gemini = resolve_path(gemini_dir)
         if resolved_gemini and resolved_gemini.is_dir():
-            mounts.extend(["-v", f"{resolved_gemini}:/tmp/gemini.seed:ro"])
+            mounts.extend(["-v", f"{resolved_gemini}:/tmp/gemini.seed:ro,z"])
 
         return mounts
 

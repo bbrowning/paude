@@ -134,18 +134,18 @@ fi
         claude_dir = home / ".claude"
         resolved_claude = resolve_path(claude_dir)
         if resolved_claude and resolved_claude.is_dir():
-            mounts.extend(["-v", f"{resolved_claude}:/tmp/claude.seed:ro"])
+            mounts.extend(["-v", f"{resolved_claude}:/tmp/claude.seed:ro,z"])
 
             # Plugins at original host path (ro)
             plugins_dir = resolved_claude / "plugins"
             if plugins_dir.is_dir():
-                mounts.extend(["-v", f"{plugins_dir}:{plugins_dir}:ro"])
+                mounts.extend(["-v", f"{plugins_dir}:{plugins_dir}:ro,z"])
 
         # claude.json seed (ro)
         claude_json = home / ".claude.json"
         resolved_claude_json = resolve_path(claude_json)
         if resolved_claude_json and resolved_claude_json.is_file():
-            mounts.extend(["-v", f"{resolved_claude_json}:/tmp/claude.json.seed:ro"])
+            mounts.extend(["-v", f"{resolved_claude_json}:/tmp/claude.json.seed:ro,z"])
 
         return mounts
 
