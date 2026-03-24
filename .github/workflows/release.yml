@@ -101,7 +101,7 @@ jobs:
 
   publish-pypi:
     name: Publish to PyPI
-    needs: test
+    needs: [test, publish-containers]
     runs-on: ubuntu-22.04
     environment: pypi
     permissions:
