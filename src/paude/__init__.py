@@ -1,3 +1,3 @@
-"""Paude - Podman wrapper for running Claude Code in isolated containers."""
+"""Paude - Run AI coding agents in isolated, secure containers."""
 
 __version__ = "0.12.1"

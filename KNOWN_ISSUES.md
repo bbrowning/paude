@@ -13,6 +13,30 @@ Technical debt identified during codebase analysis. Address these before adding 
 **Discovered**: 2026-01-29 during code quality analysis
 **Resolved**: 2026-03-09 — Split 2,246-line `cli.py` into `cli/` package with 8 modules (app.py, help.py, helpers.py, create.py, commands.py, remote.py, domains.py, status.py). Backward compatibility preserved via `__init__.py` re-exports. Dead `_encode_path`/`_decode_path` wrappers removed from `podman.py`.
 
+### REFACTOR-003: Oversized files, methods, and classes
+
+**Status**: Open
+**Priority**: Medium (address before adding significant new functionality to affected files)
+**Discovered**: 2026-03-24 during v0.13.0 pre-release audit
+
+**Files exceeding 400-line limit:**
+- `backends/openshift/sync.py` — 595 lines
+- `cli/commands.py` — 580 lines
+- `backends/podman/backend.py` — 504 lines
+- `backends/openshift/proxy.py` — 484 lines
+- `workflow.py` — 467 lines
+- `backends/openshift/build.py` — 459 lines
+
+**Methods exceeding 50-line limit:**
+- `workflow.py` — `harvest_session()` (~102 lines), `status_sessions()` (~84), `reset_session()` (~72)
+- `cli/commands.py` — `session_cp()` (~75 lines)
+- `backends/openshift/sync.py` — `_sync_agent_config()` (~90 lines)
+- `backends/podman/backend.py` — `create_session()` (~95 lines)
+
+**Classes exceeding 20-method limit:**
+- `PodmanBackend` in `backends/podman/backend.py` — 26 methods
+- `OpenShiftBackend` in `backends/openshift/backend.py` — 28 methods
+
 ## Agent Limitations
 
 Issues caused by upstream agent behavior, not paude bugs.
