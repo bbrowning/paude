@@ -3,95 +3,27 @@
 from __future__ import annotations
 
 import json
-import subprocess
+import time
 from pathlib import Path
 
 import pytest
 
 from paude.backends.base import SessionConfig
 from paude.backends.openshift.backend import OpenShiftBackend
-from paude.backends.openshift.config import OpenShiftConfig
 from paude.backends.openshift.exceptions import (
     SessionExistsError,
     SessionNotFoundError,
 )
 
+from .conftest import resource_exists, run_oc
+
 pytestmark = [pytest.mark.integration, pytest.mark.kubernetes]
 
 
-def run_oc(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    """Run an oc command and return the result."""
-    result = subprocess.run(
-        ["oc", *args],
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    if check and result.returncode != 0:
-        raise RuntimeError(f"oc {' '.join(args)} failed: {result.stderr}")
-    return result
-
-
-def resource_exists(kind: str, name: str, namespace: str | None = None) -> bool:
-    """Check if a Kubernetes resource exists."""
-    cmd = ["get", kind, name, "-o", "name"]
-    if namespace:
-        cmd.extend(["-n", namespace])
-    result = run_oc(*cmd, check=False)
-    return result.returncode == 0
-
-
-@pytest.fixture(scope="session")
-def test_namespace(kubernetes_available: bool) -> str:
-    """Get or create a test namespace."""
-    if not kubernetes_available:
-        pytest.skip("kubernetes not available")
-
-    namespace = "paude-integration-test"
-
-    # Create namespace if it doesn't exist
-    if not resource_exists("namespace", namespace):
-        run_oc("create", "namespace", namespace)
-
-    return namespace
-
-
-@pytest.fixture
-def openshift_backend(test_namespace: str) -> OpenShiftBackend:
-    """Create an OpenShift backend configured for the test namespace."""
-    config = OpenShiftConfig(namespace=test_namespace)
-    return OpenShiftBackend(config)
-
-
 @pytest.fixture(autouse=True)
-def cleanup_test_resources(test_namespace: str, unique_session_name: str):
-    """Clean up test resources after each test."""
-    yield
-
-    # Delete all labeled resources in one call
-    run_oc(
-        "delete",
-        "statefulset,networkpolicy,deployment,service",
-        "-n",
-        test_namespace,
-        "-l",
-        f"paude.io/session-name={unique_session_name}",
-        "--ignore-not-found",
-        check=False,
-    )
-
-    # PVC needs separate deletion (created by volumeClaimTemplate, may not have session label)
-    sts_name = f"paude-{unique_session_name}"
-    pvc_name = f"workspace-{sts_name}-0"
-    run_oc(
-        "delete",
-        "pvc",
-        pvc_name,
-        "-n",
-        test_namespace,
-        "--ignore-not-found",
-        check=False,
-    )
+def _cleanup(cleanup_k8s_test_resources):
+    """Activate shared K8s cleanup for every test in this module."""
+    pass
 
 
 class TestOpenShiftSessionLifecycle:
@@ -405,8 +337,6 @@ class TestProxyDeployment:
         proxy_name = f"paude-proxy-{unique_session_name}"
 
         # Poll for proxy readiness (create_session waits too, but give extra time)
-        import time
-
         ready_replicas = 0
         for _ in range(5):
             result = run_oc(
