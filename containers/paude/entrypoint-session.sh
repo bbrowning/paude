@@ -248,6 +248,25 @@ if [[ -z "${PAUDE_SKIP_AGENT_INSTALL:-}" ]] && [[ -z "${PAUDE_SKIP_CLAUDE_INSTAL
     install_agent
 fi
 
+# Set up terminal environment and attach to an existing tmux session.
+# Used by both the reconnect early-exit and the normal attach path.
+attach_to_session() {
+    export TERM=xterm-256color
+    export LANG="${LANG:-C.UTF-8}"
+    export LC_ALL="${LC_ALL:-C.UTF-8}"
+    export SHELL=/bin/bash
+    cd "${PAUDE_WORKSPACE:-/workspace}" 2>/dev/null || true
+    echo "Attaching to existing $AGENT_NAME session..."
+    exec tmux -u attach -t "$AGENT_SESSION_NAME"
+}
+
+# On reconnect (tmux session already exists), skip config copy and sandbox
+# config — re-copying from host seed mounts would overwrite in-container
+# state (prompt history, project data, conversation context).
+if tmux -u has-session -t "$AGENT_SESSION_NAME" 2>/dev/null; then
+    attach_to_session
+fi
+
 # Legacy: Copy seed files if provided via Secret mount (Podman backend fallback)
 if [[ -d "$AGENT_SEED_DIR" ]] && [[ ! -d /credentials ]]; then
     copy_agent_config "$AGENT_SEED_DIR"
@@ -393,32 +412,13 @@ if [[ -d "$WORKSPACE/$AGENT_CONFIG_DIR" ]]; then
     chmod -R g+rwX "$WORKSPACE/$AGENT_CONFIG_DIR" 2>/dev/null || true
 fi
 
-SESSION_NAME="$AGENT_SESSION_NAME"
-
-# Set up terminal environment for tmux
-# Force xterm-256color so the container's tmux knows the outer terminal supports
-# 256 colors. The inherited TERM (often "screen" from a host tmux) understates
-# the actual capabilities of the terminal chain.
-export TERM=xterm-256color
-
-# Set UTF-8 locale for proper character rendering
-export LANG="${LANG:-C.UTF-8}"
-export LC_ALL="${LC_ALL:-C.UTF-8}"
-
-# Explicitly set SHELL for tmux
-export SHELL=/bin/bash
-
-# Change to workspace directory
-cd "$WORKSPACE" 2>/dev/null || true
-
-if tmux -u has-session -t "$SESSION_NAME" 2>/dev/null; then
-    echo "Attaching to existing $AGENT_NAME session..."
-    exec tmux -u attach -t "$SESSION_NAME"
+if tmux -u has-session -t "$AGENT_SESSION_NAME" 2>/dev/null; then
+    attach_to_session
 else
     echo "Starting new $AGENT_NAME session..."
-    tmux -u new-session -s "$SESSION_NAME" -d "bash -l"
-    tmux send-keys -t "$SESSION_NAME" "export HOME=$HOME PATH=$HOME/.local/bin:\$PATH" Enter
-    tmux send-keys -t "$SESSION_NAME" "cd $WORKSPACE" Enter
-    tmux send-keys -t "$SESSION_NAME" "clear && $AGENT_LAUNCH_CMD $AGENT_ARGS" Enter
-    exec tmux -u attach -t "$SESSION_NAME"
+    tmux -u new-session -s "$AGENT_SESSION_NAME" -d "bash -l"
+    tmux send-keys -t "$AGENT_SESSION_NAME" "export HOME=$HOME PATH=$HOME/.local/bin:\$PATH" Enter
+    tmux send-keys -t "$AGENT_SESSION_NAME" "cd $WORKSPACE" Enter
+    tmux send-keys -t "$AGENT_SESSION_NAME" "clear && $AGENT_LAUNCH_CMD $AGENT_ARGS" Enter
+    attach_to_session
 fi

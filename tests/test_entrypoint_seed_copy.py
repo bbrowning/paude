@@ -110,6 +110,28 @@ class TestEntrypointContract:
             "apply_sandbox_config must set skipDangerousModePermissionPrompt"
         )
 
+    def test_entrypoint_checks_tmux_before_seed_copy(self) -> None:
+        """tmux has-session check must appear before the seed copy block."""
+        content = ENTRYPOINT_PATH.read_text()
+        tmux_check_pos = content.find("tmux -u has-session")
+        seed_copy_pos = content.find('copy_agent_config "$AGENT_SEED_DIR"')
+        assert tmux_check_pos != -1, "entrypoint must check for existing tmux session"
+        assert seed_copy_pos != -1, "entrypoint must have seed copy block"
+        assert tmux_check_pos < seed_copy_pos, (
+            "tmux session check must come before seed config copy"
+        )
+
+    def test_entrypoint_checks_tmux_before_sandbox_config(self) -> None:
+        """tmux has-session check must appear before apply_sandbox_config call."""
+        content = ENTRYPOINT_PATH.read_text()
+        tmux_check_pos = content.find("tmux -u has-session")
+        sandbox_call_pos = content.find("apply_sandbox_config 2>>")
+        assert tmux_check_pos != -1
+        assert sandbox_call_pos != -1
+        assert tmux_check_pos < sandbox_call_pos, (
+            "tmux session check must come before apply_sandbox_config call"
+        )
+
     def test_entrypoint_no_old_file_loop(self) -> None:
         """The old file-by-file loop pattern must not be present."""
         content = ENTRYPOINT_PATH.read_text()
