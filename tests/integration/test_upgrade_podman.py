@@ -69,7 +69,7 @@ class TestPodmanUpgrade:
                     container,
                     "sh",
                     "-c",
-                    "echo upgrade-test > /pvc/workspace/marker.txt",
+                    "mkdir -p /pvc/workspace && echo upgrade-test > /pvc/workspace/marker.txt",
                 ],
                 check=True,
                 capture_output=True,

@@ -87,7 +87,7 @@ class TestOpenShiftUpgrade:
             "--",
             "sh",
             "-c",
-            "echo upgrade-test > /pvc/workspace/marker.txt",
+            "mkdir -p /pvc/workspace && echo upgrade-test > /pvc/workspace/marker.txt",
         )
 
         # Verify old version label before upgrade
