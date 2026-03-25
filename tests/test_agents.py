@@ -103,7 +103,7 @@ class TestClaudeAgentConfig:
 
     def test_env_vars(self) -> None:
         cfg = ClaudeAgent().config
-        assert cfg.env_vars == {"DISABLE_AUTOUPDATER": "1"}
+        assert cfg.env_vars == {}
 
     def test_config_dir_name(self) -> None:
         assert ClaudeAgent().config.config_dir_name == ".claude"
@@ -155,11 +155,6 @@ class TestClaudeAgentDockerfile:
         lines = ClaudeAgent().dockerfile_install_lines("/home/paude")
         text = "\n".join(lines)
         assert "/home/paude/.local/bin" in text
-
-    def test_disables_autoupdater(self) -> None:
-        lines = ClaudeAgent().dockerfile_install_lines("/home/paude")
-        text = "\n".join(lines)
-        assert "DISABLE_AUTOUPDATER=1" in text
 
     def test_uses_container_home(self) -> None:
         lines = ClaudeAgent().dockerfile_install_lines("/custom/home")

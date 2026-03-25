@@ -479,7 +479,6 @@ class TestGeneratePipInstallDockerfile:
         assert (
             "umask 0002 && curl -fsSL https://claude.ai/install.sh | bash" in dockerfile
         )
-        assert "DISABLE_AUTOUPDATER=1" in dockerfile
         assert "/home/paude/.local/bin" in dockerfile
 
     def test_ends_with_user_paude_when_claude_only(self):
@@ -592,7 +591,6 @@ class TestGenerateClaudeLayerDockerfile:
         assert (
             "umask 0002 && curl -fsSL https://claude.ai/install.sh | bash" in dockerfile
         )
-        assert "DISABLE_AUTOUPDATER=1" in dockerfile
         assert "/home/paude/.local/bin" in dockerfile
         assert 'ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]' in dockerfile
 
