@@ -11,6 +11,10 @@ from paude.cli.app import app
 
 @app.command("status")
 def status_cmd(
+    session: Annotated[
+        str | None,
+        typer.Argument(help="Session name (all sessions if not specified)"),
+    ] = None,
     openshift_context: Annotated[
         str | None,
         typer.Option(
@@ -30,6 +34,7 @@ def status_cmd(
     from paude.workflow import status_sessions
 
     status_sessions(
+        session_name=session,
         openshift_context=openshift_context,
         openshift_namespace=openshift_namespace,
     )

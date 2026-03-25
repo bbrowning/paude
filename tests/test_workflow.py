@@ -438,6 +438,54 @@ class TestStatusSessions:
         assert "idle-ses" in data_lines[1]
         assert "stopped-ses" in data_lines[2]
 
+    @patch("paude.session_status.get_session_enrichment")
+    @patch("paude.cli.find_session_backend")
+    def test_single_session_by_name(
+        self,
+        mock_find: MagicMock,
+        mock_enrichment: MagicMock,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        from paude.backends.base import Session
+        from paude.session_status import SessionActivity, WorkSummary
+
+        mock_session = Session(
+            name="remote-1",
+            status="running",
+            workspace=Path("/workspace/myproject"),
+            created_at="2026-01-01T00:00:00Z",
+            backend_type="podman",
+        )
+        mock_backend = MagicMock()
+        mock_backend.get_session.return_value = mock_session
+        mock_find.return_value = ("podman", mock_backend)
+        mock_enrichment.return_value = (
+            SessionActivity(last_activity="5s ago", state="Active", elapsed_seconds=5),
+            WorkSummary(branch="feat-x", commits_ahead=1, latest_subject="WIP"),
+        )
+
+        status_sessions(session_name="remote-1")
+
+        captured = capsys.readouterr()
+        assert "remote-1" in captured.out
+        assert "Active" in captured.out
+        assert "feat-x WIP (+1)" in captured.out
+        mock_find.assert_called_once_with("remote-1", None, None, connect_timeout=2)
+
+    @patch("paude.cli.find_session_backend")
+    def test_single_session_not_found(
+        self,
+        mock_find: MagicMock,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        mock_find.return_value = None
+
+        with pytest.raises(click.exceptions.Exit):
+            status_sessions(session_name="nonexistent")
+
+        captured = capsys.readouterr()
+        assert "Session 'nonexistent' not found" in captured.err
+
 
 class TestResetSession:
     """Tests for reset_session."""

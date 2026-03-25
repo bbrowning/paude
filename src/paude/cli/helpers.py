@@ -23,6 +23,7 @@ def find_session_backend(
     session_name: str,
     openshift_context: str | None = None,
     openshift_namespace: str | None = None,
+    connect_timeout: int | None = None,
 ) -> tuple[BackendType, Backend] | None:
     """Find which backend contains the given session.
 
@@ -43,7 +44,7 @@ def find_session_backend(
 
     entry = SessionRegistry().get(session_name)
     if entry and entry.ssh_host:
-        backend = _build_ssh_backend(entry)
+        backend = _build_ssh_backend(entry, connect_timeout=connect_timeout)
         if backend is not None:
             bt = BackendType(entry.engine)
             return (bt, backend)
@@ -76,11 +77,14 @@ def find_session_backend(
     return None
 
 
-def _build_ssh_backend(entry: object) -> PodmanBackend | None:
+def _build_ssh_backend(
+    entry: object,
+    connect_timeout: int | None = None,
+) -> PodmanBackend | None:
     """Reconstruct a PodmanBackend with SSH transport from a registry entry."""
     from paude.backends.shared import build_ssh_backend
 
-    return build_ssh_backend(entry)
+    return build_ssh_backend(entry, connect_timeout=connect_timeout)
 
 
 def _get_backend_instance(

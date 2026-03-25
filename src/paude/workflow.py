@@ -46,11 +46,17 @@ def _find_backend_and_session(
     session_name: str,
     openshift_context: str | None = None,
     openshift_namespace: str | None = None,
+    connect_timeout: int | None = None,
 ) -> tuple[str, Backend, Session]:
     """Find the backend and session. Raises typer.Exit if not found."""
     from paude.cli import find_session_backend
 
-    result = find_session_backend(session_name, openshift_context, openshift_namespace)
+    result = find_session_backend(
+        session_name,
+        openshift_context,
+        openshift_namespace,
+        connect_timeout=connect_timeout,
+    )
     if result is None:
         typer.echo(f"Error: Session '{session_name}' not found.", err=True)
         raise typer.Exit(1)
@@ -262,12 +268,11 @@ def harvest_session(
 
 
 def status_sessions(
+    session_name: str | None = None,
     openshift_context: str | None = None,
     openshift_namespace: str | None = None,
 ) -> None:
-    """Display enriched status for all sessions."""
-    from paude.registry import SessionRegistry, merge_registry_with_live
-    from paude.session_discovery import collect_all_sessions
+    """Display enriched status for all sessions, or a single named session."""
     from paude.session_status import (
         SessionActivity,
         WorkSummary,
@@ -275,21 +280,35 @@ def status_sessions(
         get_session_enrichment,
     )
 
-    live_results, reachable_backends = collect_all_sessions(
-        openshift_context=openshift_context,
-        openshift_namespace=openshift_namespace,
-    )
+    if session_name:
+        from paude.transport.ssh import SSH_STATUS_TIMEOUT
 
-    registry = SessionRegistry()
-    live_sessions = [s for s, _b in live_results]
-    all_merged = merge_registry_with_live(registry, live_sessions, reachable_backends)
+        _btype, found_backend, found_session = _find_backend_and_session(
+            session_name,
+            openshift_context,
+            openshift_namespace,
+            connect_timeout=SSH_STATUS_TIMEOUT,
+        )
+        all_merged = [found_session]
+        backend_by_name: dict[str, Backend] = {found_session.name: found_backend}
+    else:
+        from paude.registry import SessionRegistry, merge_registry_with_live
+        from paude.session_discovery import collect_all_sessions
+
+        live_results, reachable_backends = collect_all_sessions(
+            openshift_context=openshift_context,
+            openshift_namespace=openshift_namespace,
+        )
+        registry = SessionRegistry()
+        live_sessions = [s for s, _b in live_results]
+        all_merged = merge_registry_with_live(
+            registry, live_sessions, reachable_backends
+        )
+        backend_by_name = {s.name: b for s, b in live_results}
 
     if not all_merged:
         typer.echo("No sessions found.")
         return
-
-    # Build a backend lookup from live results for enrichment
-    backend_by_name = {s.name: b for s, b in live_results}
 
     # Separate running sessions (enrichable) from others
     running_rows: list[
