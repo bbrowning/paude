@@ -78,7 +78,7 @@ class ConfigSyncer(BaseConfigSyncer):
         )
         if not success:
             print(
-                f"  Warning: Failed to sync {local_dir}/"
+                f"  Warning: Failed to {context} ({local_dir}/)"
                 " - plugins may not work",
                 file=sys.stderr,
             )
@@ -342,8 +342,11 @@ class ConfigSyncer(BaseConfigSyncer):
                     self._namespace,
                     check=False,
                 )
-        except Exception:  # noqa: S110
-            pass
+        except Exception as exc:
+            print(
+                f"Warning: failed to copy content to {dest_path}: {exc}",
+                file=sys.stderr,
+            )
 
     def _sync_secret_env_vars(self, secret_env: dict[str, str]) -> None:
         """Sync secret environment variables to /credentials/env/ on the pod."""

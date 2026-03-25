@@ -24,6 +24,13 @@ class BaseConfigSyncer(ABC):
 
     Provides shared decision logic for which files to sync.
     Subclasses implement transport-specific copy and exec methods.
+
+    Subclasses store ``_target`` (container/pod name) as instance state
+    set at the start of each public sync call. This is not thread-safe;
+    each syncer instance should be used from a single thread at a time.
+
+    Note: ``_copy_dir`` receives ``excludes`` from the shared orchestration,
+    but not all transports support them (e.g. ``podman cp`` ignores excludes).
     """
 
     # -- abstract transport methods ----------------------------------------

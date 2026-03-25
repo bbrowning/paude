@@ -2878,7 +2878,7 @@ class TestSyncConfigWithPlugins:
             backend._syncer.sync_full_config("test-pod-0")
 
         captured = capsys.readouterr()
-        assert "Failed to sync" in captured.err
+        assert "Failed to copy agent config directory" in captured.err
         assert "plugins may not work" in captured.err
 
 
