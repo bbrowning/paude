@@ -37,10 +37,10 @@ class BuildContext:
 
 def resolve_entrypoint(script_dir: Path | None) -> Path:
     """Resolve the entrypoint.sh path based on script directory."""
-    base_path = Path(__file__).parent.parent.parent.parent
     if script_dir:
         return script_dir / "containers" / "paude" / "entrypoint.sh"
-    return base_path / "containers" / "paude" / "entrypoint.sh"
+    # Bundled via hatchling force-include into paude/container/data/
+    return Path(__file__).parent / "data" / "entrypoint.sh"
 
 
 def copy_entrypoints(entrypoint: Path, dest_dir: Path) -> None:
@@ -58,12 +58,17 @@ def copy_entrypoints(entrypoint: Path, dest_dir: Path) -> None:
     if entrypoint_session.exists():
         content = entrypoint_session.read_text().replace("\r\n", "\n")
         entrypoint_session_dest.write_text(content, newline="\n")
-        entrypoint_session_dest.chmod(0o755)
+    else:
+        entrypoint_session_dest.write_text('#!/bin/bash\nexec "$@"\n', newline="\n")
+    entrypoint_session_dest.chmod(0o755)
 
     tmux_conf = entrypoint.parent / "tmux.conf"
+    tmux_conf_dest = dest_dir / "tmux.conf"
     if tmux_conf.exists():
         content = tmux_conf.read_text().replace("\r\n", "\n")
-        (dest_dir / "tmux.conf").write_text(content, newline="\n")
+        tmux_conf_dest.write_text(content, newline="\n")
+    else:
+        tmux_conf_dest.write_text("# auto-generated\n", newline="\n")
 
 
 def inject_features(dockerfile_content: str, features: list[FeatureSpec] | None) -> str:

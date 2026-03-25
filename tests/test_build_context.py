@@ -30,9 +30,9 @@ class TestResolveEntrypoint:
 
     def test_without_script_dir(self) -> None:
         result = resolve_entrypoint(None)
-        # Should return path relative to package root
+        # Should return path under paude/container/data/ (bundled via force-include)
         assert result.name == "entrypoint.sh"
-        assert "containers" in str(result)
+        assert "data" in str(result)
 
     def test_paths_are_path_objects(self, tmp_path: Path) -> None:
         assert isinstance(resolve_entrypoint(tmp_path), Path)
@@ -95,6 +95,31 @@ class TestCopyEntrypoints:
         assert session_dest.exists()
         assert "\r\n" not in session_dest.read_text()
         assert session_dest.stat().st_mode & 0o755 == 0o755
+
+    def test_creates_fallback_session_entrypoint_when_missing(
+        self, tmp_path: Path
+    ) -> None:
+        nonexistent = tmp_path / "nonexistent" / "entrypoint.sh"
+        dest_dir = tmp_path / "dest"
+        dest_dir.mkdir()
+
+        copy_entrypoints(nonexistent, dest_dir)
+
+        session_dest = dest_dir / "entrypoint-session.sh"
+        assert session_dest.exists()
+        assert session_dest.read_text() == '#!/bin/bash\nexec "$@"\n'
+        assert session_dest.stat().st_mode & 0o755 == 0o755
+
+    def test_creates_fallback_tmux_conf_when_missing(self, tmp_path: Path) -> None:
+        nonexistent = tmp_path / "nonexistent" / "entrypoint.sh"
+        dest_dir = tmp_path / "dest"
+        dest_dir.mkdir()
+
+        copy_entrypoints(nonexistent, dest_dir)
+
+        tmux_dest = dest_dir / "tmux.conf"
+        assert tmux_dest.exists()
+        assert tmux_dest.read_text() == "# auto-generated\n"
 
     def test_copies_tmux_conf_when_exists(self, tmp_path: Path) -> None:
         src_dir = tmp_path / "src"

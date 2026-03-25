@@ -455,6 +455,15 @@ class TestGenerateWorkspaceDockerfile:
         assert "COPY --chmod=664 tmux.conf" in dockerfile
         assert ".tmux.conf" in dockerfile
 
+    def test_installs_tini(self):
+        """generate_workspace_dockerfile installs tini for zombie reaping."""
+        config = PaudeConfig()
+        dockerfile = generate_workspace_dockerfile(config)
+
+        assert "/usr/local/bin/tini" in dockerfile
+        assert "TINI_VERSION" in dockerfile
+        assert "krallin/tini" in dockerfile
+
 
 class TestGeneratePipInstallDockerfile:
     """Tests for feature layer Dockerfile generation."""

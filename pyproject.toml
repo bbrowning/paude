@@ -44,6 +44,11 @@ paude = "paude.cli:app"
 [tool.hatch.build.targets.wheel]
 packages = ["src/paude"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"containers/paude/entrypoint.sh" = "paude/container/data/entrypoint.sh"
+"containers/paude/entrypoint-session.sh" = "paude/container/data/entrypoint-session.sh"
+"containers/paude/tmux.conf" = "paude/container/data/tmux.conf"
+
 [tool.ruff]
 line-length = 88
 target-version = "py311"

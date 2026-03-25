@@ -138,6 +138,19 @@ RUN if command -v apt-get >/dev/null 2>&1; then \\
     fi""")
 
     lines.append("")
+    lines.append("""# Install tini init process for zombie reaping
+ARG TINI_VERSION=v0.19.0
+RUN ARCH=$(uname -m) && \\
+    case "$ARCH" in \\
+        x86_64) TINI_ARCH="amd64" ;; \\
+        aarch64) TINI_ARCH="arm64" ;; \\
+        *) echo "Unsupported architecture: $ARCH" && exit 1 ;; \\
+    esac && \\
+    curl -fsSL "https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-${TINI_ARCH}" \\
+        -o /usr/local/bin/tini && \\
+    chmod +x /usr/local/bin/tini""")
+
+    lines.append("")
     lines.append("# Set UTF-8 locale for proper terminal rendering")
     lines.append("ENV LANG=en_US.UTF-8")
     lines.append("ENV LC_ALL=en_US.UTF-8")
