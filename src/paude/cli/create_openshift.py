@@ -124,6 +124,8 @@ def create_openshift_session(
             pass
         raise typer.Exit(1) from None
 
+    from paude import __version__
+
     _finalize_session_create(
         session=session,
         expanded_domains=expanded_domains,
@@ -132,4 +134,5 @@ def create_openshift_session(
         openshift_context=openshift_context,
         openshift_namespace=os_backend.namespace,
         no_clone_origin=no_clone_origin,
+        paude_version=__version__,
     )

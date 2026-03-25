@@ -13,6 +13,7 @@ from paude.backends.shared import (
     PAUDE_LABEL_AGENT,
     PAUDE_LABEL_APP,
     PAUDE_LABEL_SESSION,
+    PAUDE_LABEL_VERSION,
     decode_path,
     pod_name,
     proxy_resource_name,
@@ -167,6 +168,7 @@ class SessionLookup:
             container_id=pod_name(session_name),
             volume_name=pvc_name(session_name),
             agent=labels.get(PAUDE_LABEL_AGENT, "claude"),
+            version=labels.get(PAUDE_LABEL_VERSION),
         )
 
     def get_session(self, name: str) -> Session | None:

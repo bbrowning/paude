@@ -165,6 +165,7 @@ class SessionLifecycleManager:
             storage_class=config.storage_class,
             agent=config.agent,
             gpu=config.gpu,
+            yolo=config.yolo,
         )
 
         print(
@@ -333,6 +334,7 @@ class SessionLifecycleManager:
         storage_class: str | None = None,
         agent: str = "claude",
         gpu: str | None = None,
+        yolo: bool = False,
     ) -> dict[str, Any]:
         """Generate a Kubernetes StatefulSet specification."""
         return (
@@ -343,6 +345,7 @@ class SessionLifecycleManager:
                 resources=self._config.resources,
                 agent=agent,
                 gpu=gpu,
+                yolo=yolo,
             )
             .with_env(env)
             .with_workspace(workspace)

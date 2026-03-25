@@ -17,6 +17,7 @@ import paude.cli.create as _create  # noqa: F401
 import paude.cli.domains as _domains  # noqa: F401
 import paude.cli.remote as _remote  # noqa: F401
 import paude.cli.status as _status  # noqa: F401
+import paude.cli.upgrade as _upgrade  # noqa: F401
 from paude.cli.app import app as app
 from paude.cli.app import version_callback
 from paude.cli.commands import session_list

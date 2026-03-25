@@ -19,6 +19,9 @@ PAUDE_LABEL_CREATED = "paude.io/created-at"
 PAUDE_LABEL_AGENT = "paude.io/agent"
 PAUDE_LABEL_DOMAINS = "paude.io/allowed-domains"
 PAUDE_LABEL_PROXY_IMAGE = "paude.io/proxy-image"
+PAUDE_LABEL_VERSION = "paude.io/version"
+PAUDE_LABEL_GPU = "paude.io/gpu"
+PAUDE_LABEL_YOLO = "paude.io/yolo"
 
 SQUID_BLOCKED_LOG_PATH = "/tmp/squid-blocked.log"  # noqa: S108
 

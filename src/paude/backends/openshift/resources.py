@@ -8,7 +8,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from paude.backends.shared import PAUDE_LABEL_AGENT, encode_path, resource_name
+from paude.backends.shared import (
+    PAUDE_LABEL_AGENT,
+    PAUDE_LABEL_GPU,
+    PAUDE_LABEL_VERSION,
+    PAUDE_LABEL_YOLO,
+    encode_path,
+    resource_name,
+)
 from paude.constants import CONTAINER_WORKSPACE
 
 
@@ -48,6 +55,7 @@ class StatefulSetBuilder:
         resources: dict[str, dict[str, str]],
         agent: str = "claude",
         gpu: str | None = None,
+        yolo: bool = False,
     ) -> None:
         """Initialize the StatefulSet builder.
 
@@ -58,6 +66,7 @@ class StatefulSetBuilder:
             resources: Resource requests/limits for the container.
             agent: Agent name (e.g., "claude").
             gpu: GPU spec (e.g., "all", "device=0,1", "2").
+            yolo: Whether YOLO mode is enabled.
         """
         self._session_name = session_name
         self._namespace = namespace
@@ -65,6 +74,7 @@ class StatefulSetBuilder:
         self._resources = resources
         self._agent = agent
         self._gpu = gpu
+        self._yolo = yolo
         self._env: dict[str, str] = {}
         self._workspace: Path | None = None
         self._pvc_size = "10Gi"
@@ -114,15 +124,24 @@ class StatefulSetBuilder:
 
     def _build_metadata(self, created_at: str) -> dict[str, Any]:
         """Build the metadata section of the StatefulSet spec."""
+        from paude import __version__
+
         sts_name = resource_name(self._session_name)
+        labels: dict[str, str] = {
+            "app": "paude",
+            "paude.io/session-name": self._session_name,
+            PAUDE_LABEL_AGENT: self._agent,
+            PAUDE_LABEL_VERSION: __version__,
+        }
+        if self._gpu:
+            labels[PAUDE_LABEL_GPU] = self._gpu
+        if self._yolo:
+            labels[PAUDE_LABEL_YOLO] = "1"
+
         metadata: dict[str, Any] = {
             "name": sts_name,
             "namespace": self._namespace,
-            "labels": {
-                "app": "paude",
-                "paude.io/session-name": self._session_name,
-                PAUDE_LABEL_AGENT: self._agent,
-            },
+            "labels": labels,
             "annotations": {
                 "paude.io/created-at": created_at,
             },
