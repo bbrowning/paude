@@ -75,8 +75,9 @@ def create_podman_session(
         typer.echo(f"Error ensuring image: {e}", err=True)
         raise typer.Exit(1) from None
 
-    # Build mounts
-    mounts = build_mounts(home, agent_instance)
+    # Build mounts — skip config bind mounts for local engines (use podman cp
+    # instead, which avoids SELinux label issues). SSH remotes keep bind mounts.
+    mounts = build_mounts(home, agent_instance, include_config=engine.is_remote)
 
     # Sync configs to remote host if using SSH
     remote_config_paths = None

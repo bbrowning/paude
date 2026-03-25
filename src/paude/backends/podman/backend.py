@@ -30,10 +30,12 @@ from paude.backends.shared import (
     PAUDE_LABEL_SESSION,
     PAUDE_LABEL_WORKSPACE,
     build_session_env,
+    config_file_basename,
     encode_path,
 )
 from paude.constants import (
     CONTAINER_ENTRYPOINT,
+    CONTAINER_HOME,
     CONTAINER_WORKSPACE,
     GCP_ADC_FILENAME,
     GCP_ADC_SECRET_NAME,
@@ -95,6 +97,12 @@ class PodmanBackend:
             )
         return cname
 
+    def _get_session_agent_name(self, session_name: str) -> str:
+        """Look up the agent name from container labels."""
+        container = find_container_by_session_name(self._runner, session_name)
+        labels = (container.get("Labels", {}) or {}) if container else {}
+        return str(labels.get(PAUDE_LABEL_AGENT, "claude"))
+
     def _build_attach_env(
         self, name: str, github_token: str | None
     ) -> dict[str, str] | None:
@@ -102,9 +110,7 @@ class PodmanBackend:
         from paude.agents import get_agent
         from paude.agents.base import build_secret_environment_from_config
 
-        container = find_container_by_session_name(self._runner, name)
-        labels = (container.get("Labels", {}) or {}) if container else {}
-        agent_name = labels.get(PAUDE_LABEL_AGENT, "claude")
+        agent_name = self._get_session_agent_name(name)
         agent = get_agent(agent_name)
         secret_env = build_secret_environment_from_config(agent.config)
 
@@ -113,6 +119,116 @@ class PodmanBackend:
             extra_env["GH_TOKEN"] = github_token
         extra_env.update(secret_env)
         return extra_env or None
+
+    def _sync_host_config(self, cname: str, agent_name: str) -> None:
+        """Copy host config files into /credentials/ via podman cp.
+
+        Mirrors the OpenShift ConfigSyncer approach: copies agent config,
+        gitconfig, and creates a .ready marker so the entrypoint's
+        setup_credentials() processes them. Skipped for SSH remotes which
+        use bind mounts instead.
+        """
+        if self._engine.is_remote:
+            return
+
+        from paude.agents import get_agent
+
+        agent = get_agent(agent_name)
+        home = Path.home()
+        config_path = "/credentials"
+
+        # Ensure /credentials/ directory exists and is writable by paude user
+        self._engine.run(
+            "exec", "--user", "root", cname,
+            "mkdir", "-p", config_path, check=False,
+        )
+        self._engine.run(
+            "exec", "--user", "root", cname,
+            "chown", "paude:0", config_path, check=False,
+        )
+
+        # Create agent subdirectory
+        agent_path = f"{config_path}/{agent_name}"
+        self._engine.run(
+            "exec", "--user", "root", cname,
+            "mkdir", "-p", agent_path, check=False,
+        )
+
+        # Copy agent config directory
+        config_dir = home / agent.config.config_dir_name
+        if config_dir.is_dir():
+            if agent.config.config_sync_files_only:
+                # Only copy specific files (e.g., cursor: cli-config.json)
+                for filename in agent.config.config_sync_files_only:
+                    filepath = config_dir / filename
+                    if filepath.exists():
+                        self._engine.run(
+                            "cp", str(filepath),
+                            f"{cname}:{agent_path}/{filename}",
+                            check=False,
+                        )
+            else:
+                # Copy entire config directory contents
+                self._engine.run(
+                    "cp", f"{config_dir}/.",
+                    f"{cname}:{agent_path}",
+                    check=False,
+                )
+
+        # Copy agent config file (e.g., .claude.json -> claude/claude.json)
+        if agent.config.config_file_name:
+            config_file = home / agent.config.config_file_name
+            if config_file.is_file():
+                basename = config_file_basename(agent.config.config_file_name)
+                self._engine.run(
+                    "cp", str(config_file),
+                    f"{cname}:{agent_path}/{basename}",
+                    check=False,
+                )
+
+        # Copy cursor auth.json separately (like OpenShift sync)
+        if agent_name == "cursor":
+            auth_json = home / ".config" / "cursor" / "auth.json"
+            if auth_json.is_file():
+                self._engine.run(
+                    "cp", str(auth_json),
+                    f"{cname}:{config_path}/cursor-auth.json",
+                    check=False,
+                )
+
+        # Copy gitconfig
+        gitconfig = home / ".gitconfig"
+        if gitconfig.is_file():
+            self._engine.run(
+                "cp", str(gitconfig),
+                f"{cname}:{config_path}/gitconfig",
+                check=False,
+            )
+
+        # Rewrite host home paths in plugin JSON files so Claude Code can
+        # find plugins at the container's home directory instead of the host's
+        host_home = str(home)
+        container_home = CONTAINER_HOME
+        if host_home != container_home:
+            self._engine.run(
+                "exec", "--user", "root", cname,
+                "sed", "-i", f"s|{host_home}|{container_home}|g",
+                f"{agent_path}/plugins/installed_plugins.json",
+                f"{agent_path}/plugins/known_marketplaces.json",
+                check=False,
+            )
+
+        # Ensure everything is readable by paude user
+        self._engine.run(
+            "exec", "--user", "root", cname,
+            "chown", "-R", "paude:0", config_path, check=False,
+        )
+
+        # Mark ready so entrypoint's wait_for_credentials() proceeds
+        self._engine.run(
+            "exec", "--user", "root", cname,
+            "touch", f"{config_path}/.ready", check=False,
+        )
 
     @staticmethod
     def _local_adc_path() -> Path | None:
@@ -294,6 +410,7 @@ class PodmanBackend:
         self._runner.start_container(cname)
         self._fix_volume_permissions(cname)
         self._inject_credentials(cname)
+        self._sync_host_config(cname, self._get_session_agent_name(name))
 
     def delete_session(self, name: str, confirm: bool = False) -> None:
         """Delete a session and all its resources."""
@@ -357,6 +474,7 @@ class PodmanBackend:
         self._runner.start_container(cname)
         self._fix_volume_permissions(cname)
         self._inject_credentials(cname)
+        self._sync_host_config(cname, self._get_session_agent_name(name))
 
         return self._runner.attach_container(
             cname,
@@ -414,6 +532,9 @@ class PodmanBackend:
             print(f"  paude remote add {name}", file=sys.stderr)
             print(f"  git push paude-{name} main", file=sys.stderr)
             print("", file=sys.stderr)
+
+        # Re-sync config on every connect (refreshes if user updated config)
+        self._sync_host_config(cname, self._get_session_agent_name(name))
 
         print(f"Connecting to session '{name}'...", file=sys.stderr)
         return self._runner.attach_container(

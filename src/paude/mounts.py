@@ -28,7 +28,9 @@ def resolve_path(path: Path) -> Path | None:
     return None
 
 
-def build_mounts(home: Path, agent: Agent | None = None) -> list[str]:
+def build_mounts(
+    home: Path, agent: Agent | None = None, *, include_config: bool = True
+) -> list[str]:
     """Build the list of volume mount arguments for podman.
 
     Note: Workspace is NOT mounted here - it uses a named volume at /pvc/workspace.
@@ -39,26 +41,32 @@ def build_mounts(home: Path, agent: Agent | None = None) -> list[str]:
     Args:
         home: Path to the user's home directory.
         agent: Agent instance for agent-specific mounts. If None, uses Claude defaults.
+        include_config: Whether to include agent config and gitconfig bind mounts.
+            Set to False when using podman cp to copy configs into /credentials/
+            instead (avoids SELinux bind mount issues).
 
     Returns:
         List of mount argument strings (e.g., ["-v", "/path:/path:rw", ...]).
     """
     mounts: list[str] = []
 
-    # Agent-specific config mounts
-    if agent is not None:
-        mounts.extend(agent.host_config_mounts(home))
-    else:
-        # Backward compat: Claude defaults when no agent provided
-        from paude.agents import get_agent
+    if include_config:
+        # Agent-specific config mounts
+        if agent is not None:
+            mounts.extend(agent.host_config_mounts(home))
+        else:
+            # Backward compat: Claude defaults when no agent provided
+            from paude.agents import get_agent
 
-        claude = get_agent("claude")
-        mounts.extend(claude.host_config_mounts(home))
+            claude = get_agent("claude")
+            mounts.extend(claude.host_config_mounts(home))
 
-    # gitconfig (ro) - shared across all agents
-    gitconfig = home / ".gitconfig"
-    resolved_gitconfig = resolve_path(gitconfig)
-    if resolved_gitconfig and resolved_gitconfig.is_file():
-        mounts.extend(["-v", f"{resolved_gitconfig}:{CONTAINER_HOME}/.gitconfig:ro"])
+        # gitconfig (ro) - shared across all agents
+        gitconfig = home / ".gitconfig"
+        resolved_gitconfig = resolve_path(gitconfig)
+        if resolved_gitconfig and resolved_gitconfig.is_file():
+            mounts.extend(
+                ["-v", f"{resolved_gitconfig}:{CONTAINER_HOME}/.gitconfig:ro"]
+            )
 
     return mounts

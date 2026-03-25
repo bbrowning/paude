@@ -86,3 +86,27 @@ class TestBuildMounts:
         mount_str = " ".join(mounts)
 
         assert "/tmp/claude.json.seed:ro" in mount_str
+
+    def test_include_config_false_skips_all_config_mounts(self, tmp_path: Path):
+        """include_config=False returns no config or gitconfig mounts."""
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / ".claude").mkdir()
+        (home / ".claude.json").write_text("{}")
+        (home / ".gitconfig").write_text("[user]\n  name = Test\n")
+
+        mounts = build_mounts(home, include_config=False)
+
+        assert mounts == []
+
+    def test_include_config_true_is_default(self, tmp_path: Path):
+        """Default behavior includes config mounts."""
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / ".claude").mkdir()
+
+        mounts_default = build_mounts(home)
+        mounts_explicit = build_mounts(home, include_config=True)
+
+        assert mounts_default == mounts_explicit
+        assert len(mounts_default) > 0
