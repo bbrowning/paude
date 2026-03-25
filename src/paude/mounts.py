@@ -59,6 +59,6 @@ def build_mounts(home: Path, agent: Agent | None = None) -> list[str]:
     gitconfig = home / ".gitconfig"
     resolved_gitconfig = resolve_path(gitconfig)
     if resolved_gitconfig and resolved_gitconfig.is_file():
-        mounts.extend(["-v", f"{resolved_gitconfig}:{CONTAINER_HOME}/.gitconfig:ro,z"])
+        mounts.extend(["-v", f"{resolved_gitconfig}:{CONTAINER_HOME}/.gitconfig:ro"])
 
     return mounts

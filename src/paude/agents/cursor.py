@@ -131,13 +131,13 @@ TRUST
         cli_config = home / ".cursor" / "cli-config.json"
         resolved = resolve_path(cli_config)
         if resolved and resolved.is_file():
-            mounts.extend(["-v", f"{resolved}:/tmp/cursor-cli-config.seed:ro,z"])
+            mounts.extend(["-v", f"{resolved}:/tmp/cursor-cli-config.seed:ro"])
 
         # Mount auth.json (accessToken/refreshToken) from ~/.config/cursor/
         auth_json = home / ".config" / "cursor" / "auth.json"
         resolved_auth = resolve_path(auth_json)
         if resolved_auth and resolved_auth.is_file():
-            mounts.extend(["-v", f"{resolved_auth}:/tmp/cursor-auth.seed:ro,z"])
+            mounts.extend(["-v", f"{resolved_auth}:/tmp/cursor-auth.seed:ro"])
 
         return mounts
 
