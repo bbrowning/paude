@@ -86,8 +86,8 @@ class TestPodmanUpgrade:
             mock_im.ensure_proxy_image.return_value = podman_proxy_image
 
             with (
-                patch("paude.cli.upgrade.ImageManager", return_value=mock_im),
-                patch("paude.cli.upgrade.build_mounts", return_value=[]),
+                patch("paude.container.ImageManager", return_value=mock_im),
+                patch("paude.mounts.build_mounts", return_value=[]),
             ):
                 from paude.cli.upgrade import _upgrade_podman
 

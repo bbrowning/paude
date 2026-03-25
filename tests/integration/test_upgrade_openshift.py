@@ -98,9 +98,11 @@ class TestOpenShiftUpgrade:
             "-n",
             test_namespace,
             "-o",
-            f"jsonpath={{.metadata.labels.{PAUDE_LABEL_VERSION.replace('/', '~1')}}}",
+            "json",
         )
-        assert result.stdout.strip() == OLD_VERSION
+        sts_json = json.loads(result.stdout)
+        pre_labels = sts_json.get("metadata", {}).get("labels", {})
+        assert pre_labels.get(PAUDE_LABEL_VERSION) == OLD_VERSION
 
         # 4. Run upgrade with mocked image building and config sync
         with (
