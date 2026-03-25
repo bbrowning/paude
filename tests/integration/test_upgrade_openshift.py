@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -111,7 +111,7 @@ class TestOpenShiftUpgrade:
                 "ensure_image_via_build",
                 return_value=kubernetes_test_image,
             ),
-            patch.object(openshift_backend, "_syncer"),
+            patch.object(openshift_backend, "_syncer_instance", MagicMock()),
         ):
             from paude.cli.upgrade import _upgrade_openshift
 
