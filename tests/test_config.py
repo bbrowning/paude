@@ -463,6 +463,9 @@ class TestGenerateWorkspaceDockerfile:
         assert "/usr/local/bin/tini" in dockerfile
         assert "TINI_VERSION" in dockerfile
         assert "krallin/tini" in dockerfile
+        assert "tini --version" in dockerfile
+        assert "command -v tini" in dockerfile  # idempotency guard
+        assert "tini-static" in dockerfile  # static binary for musl/glibc compat
 
 
 class TestGeneratePipInstallDockerfile:
