@@ -38,6 +38,18 @@ class VolumeManager:
 
         self._engine.run(*args, check=False)
 
+    def remove_volume_verified(self, name: str) -> None:
+        """Remove a volume and verify it was actually removed.
+
+        Raises:
+            RuntimeError: If the volume still exists after removal.
+        """
+        self.remove_volume(name, force=True)
+        if self.volume_exists(name):
+            raise RuntimeError(
+                f"Failed to remove volume '{name}' — it still exists after removal"
+            )
+
     def volume_exists(self, name: str) -> bool:
         """Check if a volume exists."""
         return self._engine.volume_exists(name)

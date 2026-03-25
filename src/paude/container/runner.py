@@ -155,6 +155,18 @@ class ContainerRunner:
         args.append(name)
         self._engine.run(*args, check=False)
 
+    def remove_container_verified(self, name: str) -> None:
+        """Remove a container and verify it was actually removed.
+
+        Raises:
+            RuntimeError: If the container still exists after removal.
+        """
+        self.remove_container(name, force=True)
+        if self.container_exists(name):
+            raise RuntimeError(
+                f"Failed to remove container '{name}' — it still exists after 'rm -f'"
+            )
+
     def attach_container(
         self,
         name: str,

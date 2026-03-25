@@ -919,6 +919,68 @@ class TestVolumeManager:
 
         assert result == []
 
+    def test_remove_volume_verified_succeeds(self):
+        """remove_volume_verified succeeds when volume is removed."""
+        from paude.container.engine import ContainerEngine
+        from paude.container.volume import VolumeManager
+
+        engine = ContainerEngine()
+        with (
+            patch.object(engine, "run") as mock_run,
+            patch.object(engine, "volume_exists", return_value=False),
+        ):
+            mock_run.return_value = MagicMock(returncode=0)
+            manager = VolumeManager(engine)
+            manager.remove_volume_verified("test-vol")  # Should not raise
+
+    def test_remove_volume_verified_raises_on_failure(self):
+        """remove_volume_verified raises RuntimeError when volume persists."""
+        from paude.container.engine import ContainerEngine
+        from paude.container.volume import VolumeManager
+
+        engine = ContainerEngine()
+        with (
+            patch.object(engine, "run") as mock_run,
+            patch.object(engine, "volume_exists", return_value=True),
+        ):
+            mock_run.return_value = MagicMock(returncode=0)
+            manager = VolumeManager(engine)
+            with pytest.raises(RuntimeError, match="Failed to remove volume"):
+                manager.remove_volume_verified("stuck-vol")
+
+
+class TestContainerRunnerVerifiedRemoval:
+    """Tests for ContainerRunner.remove_container_verified."""
+
+    def test_remove_container_verified_succeeds(self):
+        """remove_container_verified succeeds when container is removed."""
+        from paude.container.engine import ContainerEngine
+        from paude.container.runner import ContainerRunner
+
+        engine = ContainerEngine()
+        with (
+            patch.object(engine, "run") as mock_run,
+            patch.object(engine, "container_exists", return_value=False),
+        ):
+            mock_run.return_value = MagicMock(returncode=0)
+            runner = ContainerRunner(engine)
+            runner.remove_container_verified("test-ctr")  # Should not raise
+
+    def test_remove_container_verified_raises_on_failure(self):
+        """remove_container_verified raises RuntimeError when container persists."""
+        from paude.container.engine import ContainerEngine
+        from paude.container.runner import ContainerRunner
+
+        engine = ContainerEngine()
+        with (
+            patch.object(engine, "run") as mock_run,
+            patch.object(engine, "container_exists", return_value=True),
+        ):
+            mock_run.return_value = MagicMock(returncode=0)
+            runner = ContainerRunner(engine)
+            with pytest.raises(RuntimeError, match="Failed to remove container"):
+                runner.remove_container_verified("stuck-ctr")
+
 
 class TestContainerRunnerGpu:
     """Tests for GPU passthrough in ContainerRunner.create_container."""

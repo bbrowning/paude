@@ -309,8 +309,7 @@ class PodmanBackend:
             if not self._volume_manager.volume_exists(vname):
                 raise SessionNotFoundError(f"Session '{name}' not found")
             print(f"Removing orphaned volume {vname}...", file=sys.stderr)
-            self._volume_manager.remove_volume(vname, force=True)
-            print(f"Session '{name}' deleted.", file=sys.stderr)
+            self._volume_manager.remove_volume_verified(vname)
             return
 
         print(f"Deleting session '{name}'...", file=sys.stderr)
@@ -324,21 +323,19 @@ class PodmanBackend:
         if self._runner.container_exists(pname):
             print(f"Removing proxy {pname}...", file=sys.stderr)
             self._runner.stop_container(pname)
-            self._runner.remove_container(pname, force=True)
+            self._runner.remove_container_verified(pname)
 
         # Remove main container
         print(f"Removing container {cname}...", file=sys.stderr)
-        self._runner.remove_container(cname, force=True)
+        self._runner.remove_container_verified(cname)
 
         # Remove network
         self._network_manager.remove_network(network_name(name))
 
         # Remove volume and secret
         print(f"Removing volume {vname}...", file=sys.stderr)
-        self._volume_manager.remove_volume(vname, force=True)
+        self._volume_manager.remove_volume_verified(vname)
         self._runner.remove_secret(GCP_ADC_SECRET_NAME)
-
-        print(f"Session '{name}' deleted.", file=sys.stderr)
 
     def start_session(self, name: str, github_token: str | None = None) -> int:
         """Start a session and connect to it."""

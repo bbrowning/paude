@@ -390,11 +390,11 @@ class TestPodmanBackendDeleteSession:
 
         backend.delete_session("my-session", confirm=True)
 
-        mock_runner.remove_container.assert_called_once_with(
-            "paude-my-session", force=True
+        mock_runner.remove_container_verified.assert_called_once_with(
+            "paude-my-session"
         )
-        mock_volume.remove_volume.assert_called_once_with(
-            "paude-my-session-workspace", force=True
+        mock_volume.remove_volume_verified.assert_called_once_with(
+            "paude-my-session-workspace"
         )
 
     @patch("paude.backends.podman.backend.ContainerRunner")
@@ -448,8 +448,49 @@ class TestPodmanBackendDeleteSession:
 
         backend.delete_session("orphaned", confirm=True)
 
-        mock_runner.remove_container.assert_not_called()
-        mock_volume.remove_volume.assert_called_once()
+        mock_runner.remove_container_verified.assert_not_called()
+        mock_volume.remove_volume_verified.assert_called_once()
+
+    @patch("paude.backends.podman.backend.ContainerRunner")
+    def test_delete_session_raises_on_container_removal_failure(
+        self, mock_runner_class: MagicMock
+    ) -> None:
+        """Delete session raises RuntimeError when container removal fails."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.side_effect = (
+            lambda name: name == "paude-stuck-session"
+        )
+        mock_runner.container_running.return_value = False
+        mock_runner.remove_container_verified.side_effect = RuntimeError(
+            "Failed to remove container 'paude-stuck-session'"
+        )
+        mock_runner_class.return_value = mock_runner
+
+        backend = _make_backend(mock_runner, MagicMock())
+
+        with pytest.raises(RuntimeError, match="Failed to remove container"):
+            backend.delete_session("stuck-session", confirm=True)
+
+    @patch("paude.backends.podman.backend.ContainerRunner")
+    def test_delete_session_raises_on_volume_removal_failure(
+        self, mock_runner_class: MagicMock
+    ) -> None:
+        """Delete session raises RuntimeError when volume removal fails."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.side_effect = (
+            lambda name: name == "paude-vol-stuck"
+        )
+        mock_runner.container_running.return_value = False
+        mock_runner_class.return_value = mock_runner
+        mock_volume = MagicMock()
+        mock_volume.remove_volume_verified.side_effect = RuntimeError(
+            "Failed to remove volume"
+        )
+
+        backend = _make_backend(mock_runner, MagicMock(), mock_volume)
+
+        with pytest.raises(RuntimeError, match="Failed to remove volume"):
+            backend.delete_session("vol-stuck", confirm=True)
 
 
 class TestPodmanBackendStartSession:
@@ -1290,9 +1331,11 @@ class TestPodmanBackendDeleteSessionWithProxy:
 
         backend.delete_session("my-session", confirm=True)
 
-        # Should remove both containers
-        assert mock_runner.remove_container.call_count == 2
-        remove_calls = [c[0][0] for c in mock_runner.remove_container.call_args_list]
+        # Should remove both containers with verification
+        assert mock_runner.remove_container_verified.call_count == 2
+        remove_calls = [
+            c[0][0] for c in mock_runner.remove_container_verified.call_args_list
+        ]
         assert "paude-proxy-my-session" in remove_calls
         assert "paude-my-session" in remove_calls
 
