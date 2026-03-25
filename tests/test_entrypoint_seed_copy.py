@@ -818,3 +818,50 @@ class TestProjectRewriting:
         ws_entry = claude_json["projects"][workspace]
         assert ws_entry["hasTrustDialogAccepted"] is True
         assert ws_entry["hasCompletedProjectOnboarding"] is True
+
+
+class TestTerminalEnvBeforeTmux:
+    """Regression: TERM/SHELL/LANG/LC_ALL must be exported before any tmux call.
+
+    OpenShift runs containers with arbitrary UIDs whose default SHELL is
+    /sbin/nologin. If tmux inherits that, `tmux new-session -d "bash -l"`
+    uses nologin as default-shell, the session immediately exits, and the
+    server dies with "no server running".
+    """
+
+    def _read_entrypoint(self) -> str:
+        return ENTRYPOINT_PATH.read_text()
+
+    def _first_tmux_command_pos(self, content: str) -> int:
+        """Find the position of the first non-comment tmux invocation."""
+        for line in content.split("\n"):
+            stripped = line.strip()
+            if "tmux " in stripped and not stripped.startswith("#"):
+                # Return the position in the original content
+                return content.find(stripped)
+        return -1
+
+    def test_shell_exported_before_first_tmux(self) -> None:
+        """SHELL=/bin/bash must appear before any tmux invocation."""
+        content = self._read_entrypoint()
+        shell_pos = content.find("export SHELL=/bin/bash")
+        first_tmux = self._first_tmux_command_pos(content)
+        assert shell_pos != -1, "entrypoint-session.sh must export SHELL=/bin/bash"
+        assert first_tmux != -1, "entrypoint-session.sh must contain tmux commands"
+        assert shell_pos < first_tmux, (
+            "export SHELL=/bin/bash must appear before the first tmux call. "
+            "OpenShift arbitrary UIDs default SHELL to /sbin/nologin, which "
+            "causes tmux to fail on session creation."
+        )
+
+    def test_term_exported_before_first_tmux(self) -> None:
+        """TERM=xterm-256color must appear before any tmux invocation."""
+        content = self._read_entrypoint()
+        term_pos = content.find("export TERM=xterm-256color")
+        first_tmux = self._first_tmux_command_pos(content)
+        assert term_pos != -1, "entrypoint-session.sh must export TERM=xterm-256color"
+        assert first_tmux != -1, "entrypoint-session.sh must contain tmux commands"
+        assert term_pos < first_tmux, (
+            "export TERM must appear before the first tmux call "
+            "for correct color handling."
+        )

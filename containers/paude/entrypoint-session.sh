@@ -248,13 +248,17 @@ if [[ -z "${PAUDE_SKIP_AGENT_INSTALL:-}" ]] && [[ -z "${PAUDE_SKIP_CLAUDE_INSTAL
     install_agent
 fi
 
-# Set up terminal environment and attach to an existing tmux session.
+# Set up terminal environment for tmux
+# Must be set before any tmux calls — OpenShift arbitrary UIDs default
+# SHELL to /sbin/nologin, which causes tmux to fail on session creation.
+export TERM=xterm-256color
+export LANG="${LANG:-C.UTF-8}"
+export LC_ALL="${LC_ALL:-C.UTF-8}"
+export SHELL=/bin/bash
+
+# Attach to an existing tmux session.
 # Used by both the reconnect early-exit and the normal attach path.
 attach_to_session() {
-    export TERM=xterm-256color
-    export LANG="${LANG:-C.UTF-8}"
-    export LC_ALL="${LC_ALL:-C.UTF-8}"
-    export SHELL=/bin/bash
     cd "${PAUDE_WORKSPACE:-/workspace}" 2>/dev/null || true
     echo "Attaching to existing $AGENT_NAME session..."
     exec tmux -u attach -t "$AGENT_SESSION_NAME"
