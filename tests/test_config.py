@@ -467,6 +467,14 @@ class TestGenerateWorkspaceDockerfile:
         assert "command -v tini" in dockerfile  # idempotency guard
         assert "tini-static" in dockerfile  # static binary for musl/glibc compat
 
+    def test_preserves_path_across_login_shells(self):
+        """generate_workspace_dockerfile writes /etc/profile.d script to preserve PATH."""
+        config = PaudeConfig()
+        dockerfile = generate_workspace_dockerfile(config)
+
+        assert "/etc/profile.d/paude-path.sh" in dockerfile
+        assert 'export PATH=' in dockerfile
+
 
 class TestGeneratePipInstallDockerfile:
     """Tests for feature layer Dockerfile generation."""

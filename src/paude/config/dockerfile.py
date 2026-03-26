@@ -183,6 +183,13 @@ RUN if ! command -v tini >/dev/null 2>&1; then \\
     lines.append("")
     lines.append("# Copy entrypoints and tmux config (requires root)")
     lines.append("USER root")
+
+    lines.append("")
+    lines.append("# Preserve base image PATH across login shells (Debian /etc/profile resets PATH)")
+    lines.append(
+        'RUN echo \'export PATH="\'\"$PATH\"\'"\' > /etc/profile.d/paude-path.sh '
+        "&& chmod 644 /etc/profile.d/paude-path.sh"
+    )
     lines.append(f"COPY --chmod=755 entrypoint.sh {CONTAINER_ENTRYPOINT}")
     lines.append(
         "COPY --chmod=755 entrypoint-session.sh /usr/local/bin/entrypoint-session.sh"
