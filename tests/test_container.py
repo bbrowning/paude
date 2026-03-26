@@ -1102,3 +1102,181 @@ class TestContainerRunnerGpu:
         call_args = mock_run.call_args[0][0]
         assert "--gpus" not in call_args
         assert "--device" not in call_args
+
+
+class TestContainerRunnerDns:
+    """Tests for DNS parameter in ContainerRunner."""
+
+    @patch("paude.transport.local.subprocess.run")
+    def test_create_container_with_dns(self, mock_run):
+        """create_container passes --dns flags when dns is provided."""
+        from paude.container.engine import ContainerEngine
+        from paude.container.runner import ContainerRunner
+
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="container-id", stderr=""
+        )
+        engine = ContainerEngine("podman")
+        runner = ContainerRunner(engine)
+        runner.create_container(
+            name="test",
+            image="test:latest",
+            mounts=[],
+            env={},
+            workdir="/pvc",
+            dns=["10.89.0.2"],
+        )
+        call_args = mock_run.call_args[0][0]
+        assert "--dns" in call_args
+        dns_idx = call_args.index("--dns")
+        assert call_args[dns_idx + 1] == "10.89.0.2"
+
+    @patch("paude.transport.local.subprocess.run")
+    def test_create_container_without_dns(self, mock_run):
+        """create_container does not pass --dns when dns is None."""
+        from paude.container.engine import ContainerEngine
+        from paude.container.runner import ContainerRunner
+
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="container-id", stderr=""
+        )
+        engine = ContainerEngine("podman")
+        runner = ContainerRunner(engine)
+        runner.create_container(
+            name="test",
+            image="test:latest",
+            mounts=[],
+            env={},
+            workdir="/pvc",
+        )
+        call_args = mock_run.call_args[0][0]
+        assert "--dns" not in call_args
+
+    @patch("paude.transport.local.subprocess.run")
+    def test_create_container_with_multiple_dns(self, mock_run):
+        """create_container passes multiple --dns flags."""
+        from paude.container.engine import ContainerEngine
+        from paude.container.runner import ContainerRunner
+
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="container-id", stderr=""
+        )
+        engine = ContainerEngine("podman")
+        runner = ContainerRunner(engine)
+        runner.create_container(
+            name="test",
+            image="test:latest",
+            mounts=[],
+            env={},
+            workdir="/pvc",
+            dns=["10.89.0.2", "8.8.8.8"],
+        )
+        call_args = mock_run.call_args[0][0]
+        dns_indices = [i for i, x in enumerate(call_args) if x == "--dns"]
+        assert len(dns_indices) == 2
+        assert call_args[dns_indices[0] + 1] == "10.89.0.2"
+        assert call_args[dns_indices[1] + 1] == "8.8.8.8"
+
+
+class TestNetworkManagerGateway:
+    """Tests for NetworkManager gateway and proxy IP derivation."""
+
+    def test_get_network_gateway_returns_ip(self):
+        """get_network_gateway returns the gateway IP."""
+        from paude.container.engine import ContainerEngine
+        from paude.container.network import NetworkManager
+
+        engine = ContainerEngine()
+        with patch.object(engine, "run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="10.89.0.1\n")
+            manager = NetworkManager(engine)
+            result = manager.get_network_gateway("paude-net-test")
+
+        assert result == "10.89.0.1"
+        call_args = mock_run.call_args[0]
+        assert "network" in call_args
+        assert "inspect" in call_args
+        assert "paude-net-test" in call_args
+
+    def test_get_network_gateway_returns_none_on_error(self):
+        """get_network_gateway returns None when inspect fails."""
+        from paude.container.engine import ContainerEngine
+        from paude.container.network import NetworkManager
+
+        engine = ContainerEngine()
+        with patch.object(engine, "run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=1, stdout="", stderr="no such network"
+            )
+            manager = NetworkManager(engine)
+            result = manager.get_network_gateway("nonexistent")
+
+        assert result is None
+
+    def test_get_network_gateway_returns_none_on_empty(self):
+        """get_network_gateway returns None when output is empty."""
+        from paude.container.engine import ContainerEngine
+        from paude.container.network import NetworkManager
+
+        engine = ContainerEngine()
+        with patch.object(engine, "run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="\n")
+            manager = NetworkManager(engine)
+            result = manager.get_network_gateway("paude-net-test")
+
+        assert result is None
+
+    def test_derive_proxy_ip_increments_gateway(self):
+        """derive_proxy_ip returns gateway + 1."""
+        from paude.container.network import NetworkManager
+
+        assert NetworkManager.derive_proxy_ip("10.89.0.1") == "10.89.0.2"
+        assert NetworkManager.derive_proxy_ip("172.28.0.1") == "172.28.0.2"
+        assert NetworkManager.derive_proxy_ip("192.168.1.1") == "192.168.1.2"
+
+
+class TestProxyRunnerFixedIp:
+    """Tests for ProxyRunner with fixed IP."""
+
+    def test_create_session_proxy_passes_ip_flag(self):
+        """create_session_proxy passes --ip flag when ip is provided."""
+        from paude.container.proxy_runner import ProxyRunner
+
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.run.return_value = MagicMock(returncode=0)
+
+        proxy = ProxyRunner(mock_runner)
+        proxy.create_session_proxy(
+            name="paude-proxy-test",
+            image="proxy:latest",
+            network="paude-net-test",
+            ip="10.89.0.2",
+        )
+
+        call_args = mock_runner.engine.run.call_args[0]
+        assert "--ip" in call_args
+        ip_idx = call_args.index("--ip")
+        assert call_args[ip_idx + 1] == "10.89.0.2"
+
+    def test_create_session_proxy_omits_ip_when_none(self):
+        """create_session_proxy does not pass --ip when ip is None."""
+        from paude.container.proxy_runner import ProxyRunner
+
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.run.return_value = MagicMock(returncode=0)
+
+        proxy = ProxyRunner(mock_runner)
+        proxy.create_session_proxy(
+            name="paude-proxy-test",
+            image="proxy:latest",
+            network="paude-net-test",
+        )
+
+        call_args = mock_runner.engine.run.call_args[0]
+        assert "--ip" not in call_args

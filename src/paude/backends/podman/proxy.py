@@ -123,6 +123,7 @@ class PodmanProxyManager:
 
         self._network_manager.create_internal_network(nname)
 
+        proxy_ip = self._get_proxy_ip(nname)
         dns = _get_host_dns(self._runner.engine)
         print(f"Recreating missing proxy {pname}...", file=sys.stderr)
         self._proxy_runner.create_session_proxy(
@@ -131,7 +132,13 @@ class PodmanProxyManager:
             network=nname,
             dns=dns,
             allowed_domains=domains,
+            ip=proxy_ip,
         )
+        self._proxy_runner.start_session_proxy(pname)
+
+    def start_proxy(self, session_name: str) -> None:
+        """Start the proxy container for a session."""
+        pname = proxy_container_name(session_name)
         self._proxy_runner.start_session_proxy(pname)
 
     def stop_if_needed(self, session_name: str) -> None:
@@ -145,22 +152,32 @@ class PodmanProxyManager:
 
         self._runner.stop_container(pname)
 
+    def _get_proxy_ip(self, nname: str) -> str | None:
+        """Derive a fixed proxy IP from the network's gateway address."""
+        gateway = self._network_manager.get_network_gateway(nname)
+        if not gateway:
+            return None
+        return NetworkManager.derive_proxy_ip(gateway)
+
     def create_proxy(
         self,
         session_name: str,
         proxy_image: str,
         allowed_domains: list[str] | None,
-    ) -> str:
+    ) -> tuple[str, str | None]:
         """Create a proxy container for a session.
 
         Returns:
-            Network name for the proxy.
+            Tuple of (network_name, proxy_ip). proxy_ip is None if the
+            network gateway could not be determined.
         """
         if not proxy_image:
             raise ValueError("proxy_image is required when allowed_domains is set")
 
         nname = network_name(session_name)
         self._network_manager.create_internal_network(nname)
+
+        proxy_ip = self._get_proxy_ip(nname)
 
         pname = proxy_container_name(session_name)
         dns = _get_host_dns(self._runner.engine)
@@ -172,12 +189,13 @@ class PodmanProxyManager:
                 network=nname,
                 dns=dns,
                 allowed_domains=allowed_domains,
+                ip=proxy_ip,
             )
         except Exception:
             self._network_manager.remove_network(nname)
             raise
 
-        return nname
+        return nname, proxy_ip
 
     def get_allowed_domains(self, session_name: str) -> list[str] | None:
         """Get current allowed domains for a session."""
@@ -221,6 +239,7 @@ class PodmanProxyManager:
             raise ValueError(f"Cannot inspect proxy container: {pname}")
 
         nname = network_name(session_name)
+        proxy_ip = self._get_proxy_ip(nname)
         dns = _get_host_dns(self._runner.engine)
 
         print(
@@ -233,4 +252,5 @@ class PodmanProxyManager:
             network=nname,
             dns=dns,
             allowed_domains=domains,
+            ip=proxy_ip,
         )

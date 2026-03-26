@@ -69,6 +69,7 @@ class ContainerRunner:
         command: list[str] | None = None,
         secrets: list[str] | None = None,
         gpu: str | None = None,
+        dns: list[str] | None = None,
     ) -> str:
         """Create a container without starting it.
 
@@ -91,6 +92,10 @@ class ContainerRunner:
 
         if network:
             args.extend(["--network", network])
+
+        if dns:
+            for server in dns:
+                args.extend(["--dns", server])
 
         if secrets:
             for secret in secrets:
@@ -359,6 +364,7 @@ class ContainerRunner:
         command: str,
         workdir: str,
         network: str | None = None,
+        dns: list[str] | None = None,
     ) -> bool:
         """Run the postCreateCommand.
 
@@ -374,6 +380,10 @@ class ContainerRunner:
 
         if network:
             args.extend(["--network", network])
+
+        if dns:
+            for server in dns:
+                args.extend(["--dns", server])
 
         args.extend(mounts)
 

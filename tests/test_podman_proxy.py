@@ -33,6 +33,7 @@ class TestPodmanProxyManagerDnsLogging:
         mock_runner = _make_mock_runner()
         mock_runner.container_exists.return_value = False
         mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
 
         manager = PodmanProxyManager(mock_runner, mock_network)
         manager.create_proxy(
@@ -54,6 +55,7 @@ class TestPodmanProxyManagerDnsLogging:
         mock_runner = _make_mock_runner()
         mock_runner.container_exists.return_value = False
         mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
 
         manager = PodmanProxyManager(mock_runner, mock_network)
         manager.create_proxy(
@@ -76,6 +78,7 @@ class TestPodmanProxyManagerDnsLogging:
         mock_runner.container_exists.return_value = True
         mock_runner.get_container_image.return_value = "proxy:latest"
         mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
 
         manager = PodmanProxyManager(mock_runner, mock_network)
         manager.update_domains(
@@ -108,12 +111,82 @@ class TestPodmanProxyManagerDnsLogging:
             }
         ]
         mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
 
         manager = PodmanProxyManager(mock_runner, mock_network)
         manager.start_if_needed("test-session")
 
         captured = capsys.readouterr()
         assert "Using Podman VM DNS: 192.168.127.1" in captured.err
+
+
+class TestProxyManagerFixedIp:
+    """Tests for PodmanProxyManager proxy IP derivation."""
+
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    def test_create_proxy_returns_network_and_ip(self, mock_dns: MagicMock) -> None:
+        """create_proxy returns (network_name, proxy_ip) tuple."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = False
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        nname, proxy_ip = manager.create_proxy(
+            session_name="test-session",
+            proxy_image="proxy:latest",
+            allowed_domains=[".googleapis.com"],
+        )
+
+        assert nname == "paude-net-test-session"
+        assert proxy_ip == "10.89.0.2"
+
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    def test_create_proxy_returns_none_ip_when_no_gateway(
+        self, mock_dns: MagicMock
+    ) -> None:
+        """create_proxy returns None for proxy_ip when gateway unavailable."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = False
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = None
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        nname, proxy_ip = manager.create_proxy(
+            session_name="test-session",
+            proxy_image="proxy:latest",
+            allowed_domains=[".googleapis.com"],
+        )
+
+        assert nname == "paude-net-test-session"
+        assert proxy_ip is None
+
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    def test_create_proxy_passes_ip_to_proxy_runner(self, mock_dns: MagicMock) -> None:
+        """create_proxy passes the fixed IP to create_session_proxy."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = False
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "172.28.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        manager.create_proxy(
+            session_name="test-session",
+            proxy_image="proxy:latest",
+            allowed_domains=[".googleapis.com"],
+        )
+
+        # Check --ip was passed via engine.run
+        engine_calls = mock_runner.engine.run.call_args_list
+        create_call = [c for c in engine_calls if "create" in str(c)]
+        assert create_call, "Expected a create call"
+        call_args = create_call[0][0]
+        assert "--ip" in call_args
+        ip_idx = call_args.index("--ip")
+        assert call_args[ip_idx + 1] == "172.28.0.2"
 
 
 class TestGetHostDns:

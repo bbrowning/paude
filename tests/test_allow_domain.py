@@ -415,8 +415,10 @@ class TestPodmanUpdateAllowedDomains:
 
         backend = PodmanBackend()
         backend._runner = mock_runner
-        backend._proxy = PodmanProxyManager(mock_runner, MagicMock())
-        backend._network_manager = MagicMock()
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
+        backend._proxy = PodmanProxyManager(mock_runner, mock_network)
+        backend._network_manager = mock_network
 
         backend.update_allowed_domains(
             "my-session", [".googleapis.com", ".example.com"]
