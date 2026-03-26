@@ -1746,7 +1746,8 @@ class TestPodmanBackendSyncHostConfig:
 
         # Should have called podman cp for config dir contents
         cp_calls = [
-            c for c in mock_runner.engine.run.call_args_list
+            c
+            for c in mock_runner.engine.run.call_args_list
             if len(c[0]) >= 2 and c[0][0] == "cp"
         ]
         assert len(cp_calls) > 0
@@ -1771,10 +1772,9 @@ class TestPodmanBackendSyncHostConfig:
 
         # Should have called podman cp for gitconfig
         cp_calls = [
-            c for c in mock_runner.engine.run.call_args_list
-            if len(c[0]) >= 2
-            and c[0][0] == "cp"
-            and "gitconfig" in str(c[0][1])
+            c
+            for c in mock_runner.engine.run.call_args_list
+            if len(c[0]) >= 2 and c[0][0] == "cp" and "gitconfig" in str(c[0][1])
         ]
         assert len(cp_calls) == 1
 
@@ -1796,7 +1796,8 @@ class TestPodmanBackendSyncHostConfig:
 
         # Should have called exec touch /credentials/.ready
         exec_calls = [
-            c for c in mock_runner.engine.run.call_args_list
+            c
+            for c in mock_runner.engine.run.call_args_list
             if len(c[0]) >= 4
             and c[0][0] == "exec"
             and "touch" in c[0]
@@ -1846,10 +1847,9 @@ class TestPodmanBackendSyncHostConfig:
 
         # Should have called podman cp for .claude.json
         cp_calls = [
-            c for c in mock_runner.engine.run.call_args_list
-            if len(c[0]) >= 2
-            and c[0][0] == "cp"
-            and ".claude.json" in str(c[0][1])
+            c
+            for c in mock_runner.engine.run.call_args_list
+            if len(c[0]) >= 2 and c[0][0] == "cp" and ".claude.json" in str(c[0][1])
         ]
         assert len(cp_calls) == 1
         # Dest should be /credentials/claude/claude.json
@@ -1877,10 +1877,9 @@ class TestPodmanBackendSyncHostConfig:
 
         # Should have called podman cp for auth.json
         cp_calls = [
-            c for c in mock_runner.engine.run.call_args_list
-            if len(c[0]) >= 2
-            and c[0][0] == "cp"
-            and "auth.json" in str(c[0][1])
+            c
+            for c in mock_runner.engine.run.call_args_list
+            if len(c[0]) >= 2 and c[0][0] == "cp" and "auth.json" in str(c[0][1])
         ]
         assert len(cp_calls) == 1
         assert "paude-test:/credentials/cursor-auth.json" in str(cp_calls[0])
@@ -1940,9 +1939,7 @@ class TestPodmanBackendSyncHostConfig:
         backend._engine = MagicMock()
         backend._engine.is_remote = False
         backend._engine.supports_secrets = True
-        backend._engine.run.return_value = MagicMock(
-            returncode=0, stdout="", stderr=""
-        )
+        backend._engine.run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         with patch.object(backend, "_sync_host_config") as mock_sync:
             backend.start_session("my-session")
@@ -1969,10 +1966,80 @@ class TestPodmanBackendSyncHostConfig:
         backend = _make_backend(mock_runner)
         backend._engine = MagicMock()
         backend._engine.is_remote = False
-        backend._engine.run.return_value = MagicMock(
-            returncode=0, stdout="", stderr=""
-        )
+        backend._engine.run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         with patch.object(backend, "_sync_host_config") as mock_sync:
             backend.connect_session("my-session")
             mock_sync.assert_called_once()
+
+    def test_sync_excludes_config_excludes(self, tmp_path: Path) -> None:
+        """Sync filters out config_excludes (e.g., projects/, todos/)."""
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.is_remote = False
+        mock_runner.engine.run.return_value = MagicMock(
+            returncode=0, stdout="", stderr=""
+        )
+        backend = _make_backend(mock_runner)
+        backend._engine = mock_runner.engine
+
+        with patch("paude.backends.podman.sync.Path.home", return_value=tmp_path):
+            claude_dir = tmp_path / ".claude"
+            claude_dir.mkdir()
+            (claude_dir / "settings.json").write_text("{}")
+            # Create dirs that should be excluded
+            (claude_dir / "projects").mkdir()
+            (claude_dir / "projects" / "big_file.json").write_text("{}")
+            (claude_dir / "todos").mkdir()
+            (claude_dir / "todos" / "todo.json").write_text("{}")
+            (claude_dir / "cache").mkdir()
+            (claude_dir / "cache" / "data.bin").write_text("x" * 100)
+
+            backend._sync_host_config("paude-test", "claude")
+
+        # Find the cp call that copies the config dir
+        cp_calls = [
+            c
+            for c in mock_runner.engine.run.call_args_list
+            if len(c[0]) >= 2
+            and c[0][0] == "cp"
+            and "/credentials/claude" in str(c[0][2])
+        ]
+        assert len(cp_calls) == 1
+        # The source path should be a filtered temp dir, not the original
+        source = cp_calls[0][0][1]
+        assert "filtered" in source
+        # Verify the temp dir would not contain excluded dirs
+        assert "projects" not in source
+        assert "todos" not in source
+
+    def test_sync_copies_global_gitignore(self, tmp_path: Path) -> None:
+        """Sync copies global gitignore to /credentials/gitignore-global."""
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.is_remote = False
+        mock_runner.engine.run.return_value = MagicMock(
+            returncode=0, stdout="", stderr=""
+        )
+        backend = _make_backend(mock_runner)
+        backend._engine = mock_runner.engine
+
+        with patch("paude.backends.podman.sync.Path.home", return_value=tmp_path):
+            git_config = tmp_path / ".config" / "git"
+            git_config.mkdir(parents=True)
+            (git_config / "ignore").write_text(".DS_Store\n*.swp\n")
+
+            backend._sync_host_config("paude-test", "claude")
+
+        # Should have called podman cp for gitignore-global
+        cp_calls = [
+            c
+            for c in mock_runner.engine.run.call_args_list
+            if len(c[0]) >= 2 and c[0][0] == "cp" and "gitignore-global" in str(c[0][2])
+        ]
+        assert len(cp_calls) == 1
+        assert "paude-test:/credentials/gitignore-global" in str(cp_calls[0])

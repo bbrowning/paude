@@ -42,9 +42,7 @@ class ConfigSyncer(BaseConfigSyncer):
 
     # -- BaseConfigSyncer transport implementation -------------------------
 
-    def _copy_file(
-        self, local_path: str, container_path: str, *, context: str
-    ) -> bool:
+    def _copy_file(self, local_path: str, container_path: str, *, context: str) -> bool:
         try:
             self._oc.run(
                 "cp",
@@ -78,15 +76,12 @@ class ConfigSyncer(BaseConfigSyncer):
         )
         if not success:
             print(
-                f"  Warning: Failed to {context} ({local_dir}/)"
-                " - plugins may not work",
+                f"  Warning: Failed to {context} ({local_dir}/) - plugins may not work",
                 file=sys.stderr,
             )
         return success
 
-    def _rewrite_plugin_paths(
-        self, agent_path: str, agent: Agent, home: Path
-    ) -> None:
+    def _rewrite_plugin_paths(self, agent_path: str, agent: Agent, home: Path) -> None:
         config_dir_name = agent.config.config_dir_name
         container_plugins_path = f"{CONTAINER_HOME}/{config_dir_name}/plugins"
 
@@ -114,9 +109,7 @@ class ConfigSyncer(BaseConfigSyncer):
             timeout=OC_EXEC_TIMEOUT,
         )
 
-        known_marketplaces = (
-            f"{agent_path}/plugins/known_marketplaces.json"
-        )
+        known_marketplaces = f"{agent_path}/plugins/known_marketplaces.json"
         jq_expr2 = (
             "with_entries(if .value.installLocation then "
             '.value.installLocation = ($prefix + "/marketplaces/" + .key) '
@@ -255,7 +248,6 @@ class ConfigSyncer(BaseConfigSyncer):
         self._prepare_config_directory(agent_name=agent_name)
         self._sync_gcloud_credentials()
         self._sync_config_files(agent_name)
-        self._sync_global_gitignore()
         self._sync_github_token(github_token)
         self._sync_secret_env_vars(secret_env or {})
         self._finalize_sync()
@@ -414,17 +406,6 @@ class ConfigSyncer(BaseConfigSyncer):
                     f"{CONFIG_PATH}/gcloud/{filename}",
                     context=f"sync gcloud {filename}",
                 )
-
-    def _sync_global_gitignore(self) -> None:
-        """Sync global gitignore to the pod."""
-        home = Path.home()
-        global_gitignore = home / ".config" / "git" / "ignore"
-        if global_gitignore.exists():
-            self._copy_file(
-                str(global_gitignore),
-                f"{CONFIG_PATH}/gitignore-global",
-                context="sync global gitignore",
-            )
 
     def _finalize_sync(self) -> None:
         """Finalize sync by setting permissions and creating .ready marker."""

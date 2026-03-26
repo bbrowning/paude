@@ -54,11 +54,11 @@ class ConfigSyncer(BaseConfigSyncer):
             return False
         return True
 
-    def _copy_file(
-        self, local_path: str, container_path: str, *, context: str
-    ) -> bool:
+    def _copy_file(self, local_path: str, container_path: str, *, context: str) -> bool:
         return self._run_step(
-            "cp", local_path, f"{self._target}:{container_path}",
+            "cp",
+            local_path,
+            f"{self._target}:{container_path}",
             context=context,
         )
 
@@ -70,30 +70,65 @@ class ConfigSyncer(BaseConfigSyncer):
         excludes: list[str] | None = None,
         context: str,
     ) -> bool:
-        # podman cp doesn't support excludes
+        if excludes:
+            import shutil
+            import tempfile
+
+            patterns = {e.strip("/") for e in excludes}
+
+            def _ignore(_dir: str, entries: list[str]) -> set[str]:
+                return {e for e in entries if e in patterns}
+
+            with tempfile.TemporaryDirectory() as tmp:
+                filtered = str(Path(tmp) / "filtered")
+                shutil.copytree(local_dir, filtered, ignore=_ignore)
+                return self._run_step(
+                    "cp",
+                    f"{filtered}/.",
+                    f"{self._target}:{container_path}",
+                    context=context,
+                )
         return self._run_step(
-            "cp", f"{local_dir}/.", f"{self._target}:{container_path}",
+            "cp",
+            f"{local_dir}/.",
+            f"{self._target}:{container_path}",
             context=context,
         )
 
     def _prepare_directory(self, agent_path: str) -> None:
         t = self._target
         self._run_step(
-            "exec", "--user", "root", t, "mkdir", "-p", CONFIG_PATH,
+            "exec",
+            "--user",
+            "root",
+            t,
+            "mkdir",
+            "-p",
+            CONFIG_PATH,
             context="create credentials directory",
         )
         self._run_step(
-            "exec", "--user", "root", t, "chown", "paude:0", CONFIG_PATH,
+            "exec",
+            "--user",
+            "root",
+            t,
+            "chown",
+            "paude:0",
+            CONFIG_PATH,
             context="set credentials directory ownership",
         )
         self._run_step(
-            "exec", "--user", "root", t, "mkdir", "-p", agent_path,
+            "exec",
+            "--user",
+            "root",
+            t,
+            "mkdir",
+            "-p",
+            agent_path,
             context="create agent credentials directory",
         )
 
-    def _rewrite_plugin_paths(
-        self, agent_path: str, agent: Agent, home: Path
-    ) -> None:
+    def _rewrite_plugin_paths(self, agent_path: str, agent: Agent, home: Path) -> None:
         host_home = str(home)
         container_home = CONTAINER_HOME
         if host_home == container_home:
@@ -106,7 +141,13 @@ class ConfigSyncer(BaseConfigSyncer):
         t = self._target
         for plugin_file in plugin_files:
             exists = self._run_step(
-                "exec", "--user", "root", t, "test", "-f", plugin_file,
+                "exec",
+                "--user",
+                "root",
+                t,
+                "test",
+                "-f",
+                plugin_file,
                 context=f"check plugin file exists: {plugin_file}",
             )
             if not exists:
@@ -120,21 +161,38 @@ class ConfigSyncer(BaseConfigSyncer):
                 "p.write_text(p.read_text().replace(old, new))\n"
             )
             self._run_step(
-                "exec", "--user", "root", t,
-                "python3", "-c", python_script,
-                plugin_file, host_home, container_home,
+                "exec",
+                "--user",
+                "root",
+                t,
+                "python3",
+                "-c",
+                python_script,
+                plugin_file,
+                host_home,
+                container_home,
                 context=f"rewrite plugin home paths in {plugin_file}",
             )
 
     def _finalize(self) -> None:
         t = self._target
         self._run_step(
-            "exec", "--user", "root", t,
-            "chown", "-R", "paude:0", CONFIG_PATH,
+            "exec",
+            "--user",
+            "root",
+            t,
+            "chown",
+            "-R",
+            "paude:0",
+            CONFIG_PATH,
             context="set credentials ownership recursively",
         )
         self._run_step(
-            "exec", "--user", "root", t,
-            "touch", f"{CONFIG_PATH}/.ready",
+            "exec",
+            "--user",
+            "root",
+            t,
+            "touch",
+            f"{CONFIG_PATH}/.ready",
             context="create credentials ready marker",
         )

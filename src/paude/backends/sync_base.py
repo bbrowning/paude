@@ -29,16 +29,15 @@ class BaseConfigSyncer(ABC):
     set at the start of each public sync call. This is not thread-safe;
     each syncer instance should be used from a single thread at a time.
 
-    Note: ``_copy_dir`` receives ``excludes`` from the shared orchestration,
-    but not all transports support them (e.g. ``podman cp`` ignores excludes).
+    Note: ``_copy_dir`` receives ``excludes`` from the shared orchestration.
+    Transports that lack native exclude support (e.g. podman cp) should
+    filter locally before copying.
     """
 
     # -- abstract transport methods ----------------------------------------
 
     @abstractmethod
-    def _copy_file(
-        self, local_path: str, container_path: str, *, context: str
-    ) -> bool:
+    def _copy_file(self, local_path: str, container_path: str, *, context: str) -> bool:
         """Copy a single file into the container. Returns True on success."""
 
     @abstractmethod
@@ -53,9 +52,7 @@ class BaseConfigSyncer(ABC):
         """Copy directory contents into the container. Returns True on success."""
 
     @abstractmethod
-    def _rewrite_plugin_paths(
-        self, agent_path: str, agent: Agent, home: Path
-    ) -> None:
+    def _rewrite_plugin_paths(self, agent_path: str, agent: Agent, home: Path) -> None:
         """Rewrite absolute host paths in plugin metadata files."""
 
     # -- shared orchestration ----------------------------------------------
@@ -79,14 +76,13 @@ class BaseConfigSyncer(ABC):
         if agent_name == "cursor":
             self._sync_cursor_auth(home)
         self._sync_gitconfig(home)
+        self._sync_global_gitignore(home)
         if config_synced:
             self._rewrite_plugin_paths(agent_path, agent, home)
 
     # -- shared step implementations ---------------------------------------
 
-    def _sync_agent_config(
-        self, agent_path: str, agent: Agent, home: Path
-    ) -> bool:
+    def _sync_agent_config(self, agent_path: str, agent: Agent, home: Path) -> bool:
         """Sync agent config directory. Returns True on success."""
         config_dir = home / agent.config.config_dir_name
         if not config_dir.is_dir():
@@ -143,4 +139,14 @@ class BaseConfigSyncer(ABC):
                 str(gitconfig),
                 f"{CONFIG_PATH}/gitconfig",
                 context="copy gitconfig",
+            )
+
+    def _sync_global_gitignore(self, home: Path) -> None:
+        """Sync ~/.config/git/ignore (global gitignore)."""
+        global_gitignore = home / ".config" / "git" / "ignore"
+        if global_gitignore.is_file():
+            self._copy_file(
+                str(global_gitignore),
+                f"{CONFIG_PATH}/gitignore-global",
+                context="copy global gitignore",
             )
