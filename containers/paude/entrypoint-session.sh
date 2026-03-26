@@ -420,7 +420,7 @@ if tmux -u has-session -t "$AGENT_SESSION_NAME" 2>/dev/null; then
     attach_to_session
 else
     echo "Starting new $AGENT_NAME session..."
-    tmux -u new-session -s "$AGENT_SESSION_NAME" -d "bash -l"
+    tmux -u new-session -s "$AGENT_SESSION_NAME" -c "$WORKSPACE" -d "bash -l"
     tmux send-keys -t "$AGENT_SESSION_NAME" "export HOME=$HOME PATH='$PATH'" Enter
     tmux send-keys -t "$AGENT_SESSION_NAME" "cd $WORKSPACE" Enter
     tmux send-keys -t "$AGENT_SESSION_NAME" "clear && $AGENT_LAUNCH_CMD $AGENT_ARGS" Enter
