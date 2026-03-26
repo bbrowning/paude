@@ -26,9 +26,12 @@ from paude.backends.shared import (
     PAUDE_LABEL_APP,
     PAUDE_LABEL_CREATED,
     PAUDE_LABEL_DOMAINS,
+    PAUDE_LABEL_GPU,
     PAUDE_LABEL_PROXY_IMAGE,
     PAUDE_LABEL_SESSION,
+    PAUDE_LABEL_VERSION,
     PAUDE_LABEL_WORKSPACE,
+    PAUDE_LABEL_YOLO,
     build_session_env,
     encode_path,
 )
@@ -193,13 +196,20 @@ class PodmanBackend:
         created_at = datetime.now(UTC).isoformat()
 
         # Create labels
+        from paude import __version__
+
         labels: dict[str, str] = {
             "app": "paude",
             PAUDE_LABEL_SESSION: session_name,
             PAUDE_LABEL_WORKSPACE: encode_path(config.workspace, url_safe=True),
             PAUDE_LABEL_CREATED: created_at,
             PAUDE_LABEL_AGENT: config.agent,
+            PAUDE_LABEL_VERSION: __version__,
         }
+        if config.gpu:
+            labels[PAUDE_LABEL_GPU] = config.gpu
+        if config.yolo:
+            labels[PAUDE_LABEL_YOLO] = "1"
         if use_proxy:
             labels[PAUDE_LABEL_DOMAINS] = ",".join(config.allowed_domains or [])
             if config.proxy_image:
@@ -207,9 +217,12 @@ class PodmanBackend:
 
         print(f"Creating session '{session_name}'...", file=sys.stderr)
 
-        # Create volume for workspace persistence
-        print(f"Creating volume {vname}...", file=sys.stderr)
-        self._volume_manager.create_volume(vname, labels=labels)
+        # Create volume for workspace persistence (skip if reusing existing)
+        if config.reuse_volume and self._volume_manager.volume_exists(vname):
+            print(f"Reusing existing volume {vname}...", file=sys.stderr)
+        else:
+            print(f"Creating volume {vname}...", file=sys.stderr)
+            self._volume_manager.create_volume(vname, labels=labels)
 
         # Set up proxy network and container if domain filtering is active
         network: str | None = None
@@ -219,7 +232,8 @@ class PodmanBackend:
                     session_name, config.proxy_image or "", config.allowed_domains
                 )
             except Exception:
-                self._volume_manager.remove_volume(vname, force=True)
+                if not config.reuse_volume:
+                    self._volume_manager.remove_volume(vname, force=True)
                 raise
 
         # Build mounts with session volume

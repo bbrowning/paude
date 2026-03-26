@@ -42,6 +42,7 @@ class RegistryEntry:
     ssh_host: str | None = None
     ssh_key: str | None = None
     remote_config_dir: str | None = None
+    paude_version: str | None = None
 
     def to_session(self, status: str = "unknown") -> Session:
         """Convert this entry to a Session object."""
@@ -52,6 +53,7 @@ class RegistryEntry:
             created_at=self.created_at,
             backend_type=self.backend_type,
             agent=self.agent,
+            version=self.paude_version,
         )
 
 
@@ -108,6 +110,7 @@ class SessionRegistry:
         ssh_host: str | None = None,
         ssh_key: str | None = None,
         remote_config_dir: str | None = None,
+        paude_version: str | None = None,
     ) -> None:
         """Add or update a session in the registry."""
         from paude.backends.shared import is_local_backend
@@ -129,6 +132,7 @@ class SessionRegistry:
             ssh_host=ssh_host,
             ssh_key=ssh_key,
             remote_config_dir=remote_config_dir,
+            paude_version=paude_version,
         )
         self._save(entries)
 
@@ -204,6 +208,7 @@ def merge_registry_with_live(
                 workspace=str(session.workspace),
                 agent=session.agent,
                 created_at=session.created_at or datetime.now(UTC).isoformat(),
+                paude_version=session.version,
             )
         registry._save(entries)
 

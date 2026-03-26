@@ -53,3 +53,14 @@ class PaudeConfig:
     # Create hints (from paude.json "create" section)
     create_allowed_domains: list[str] = field(default_factory=list)
     create_agent: str | None = None
+
+    @property
+    def has_customizations(self) -> bool:
+        """Whether this config requires a custom image build."""
+        return bool(
+            self.base_image
+            or self.dockerfile
+            or self.packages
+            or self.features
+            or self.post_create_command
+        )

@@ -31,6 +31,7 @@ class Session:
     container_id: str | None = None
     volume_name: str | None = None
     agent: str = "claude"
+    version: str | None = None
 
 
 @dataclass
@@ -69,6 +70,7 @@ class SessionConfig:
     wait_for_ready: bool = True
     agent: str = "claude"
     gpu: str | None = None
+    reuse_volume: bool = False
 
 
 class Backend(Protocol):

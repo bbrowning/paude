@@ -58,14 +58,7 @@ def create_podman_session(
 
     # Ensure image
     try:
-        has_custom = config and (
-            config.base_image
-            or config.dockerfile
-            or config.packages
-            or config.features
-            or config.post_create_command
-        )
-        if has_custom and config is not None:
+        if config is not None and config.has_customizations:
             image = image_manager.ensure_custom_image(
                 config, force_rebuild=rebuild, workspace=workspace
             )
@@ -145,6 +138,8 @@ def create_podman_session(
                 pass
         raise typer.Exit(1) from None
 
+    from paude import __version__
+
     _finalize_session_create(
         session=session,
         expanded_domains=expanded_domains,
@@ -156,4 +151,5 @@ def create_podman_session(
         remote_config_dir=(
             remote_config_paths.remote_base if remote_config_paths else None
         ),
+        paude_version=__version__,
     )

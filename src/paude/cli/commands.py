@@ -454,17 +454,24 @@ def session_list(
         typer.echo("  paude start        # Start and connect to session")
         return
 
+    from paude import __version__
+
     # Print header
-    typer.echo(f"{'NAME':<25} {'BACKEND':<12} {'STATUS':<12} {'WORKSPACE':<40}")
-    typer.echo("-" * 90)
+    typer.echo(
+        f"{'NAME':<25} {'BACKEND':<12} {'STATUS':<12} {'VERSION':<12} {'WORKSPACE':<40}"
+    )
+    typer.echo("-" * 102)
 
     for session in all_sessions:
         workspace_str = str(session.workspace)
         if len(workspace_str) > 40:
             workspace_str = "..." + workspace_str[-37:]
+        version_str = session.version or "-"
+        if session.version and session.version != __version__:
+            version_str += "*"
         line = (
             f"{session.name:<25} {session.backend_type:<12} "
-            f"{session.status:<12} {workspace_str:<40}"
+            f"{session.status:<12} {version_str:<12} {workspace_str:<40}"
         )
         typer.echo(line)
 

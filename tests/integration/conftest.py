@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 
 from paude.backends.base import Session, SessionConfig
+from paude.backends.openshift.backend import OpenShiftBackend
+from paude.backends.openshift.config import OpenShiftConfig
 from paude.backends.podman import PodmanBackend, SessionNotFoundError
 
 # Default test images - can be overridden via environment variables
@@ -221,6 +223,89 @@ def shorter_pod_timeout() -> None:
     # Only set if not already configured
     if "PAUDE_POD_READY_TIMEOUT" not in os.environ:
         os.environ["PAUDE_POD_READY_TIMEOUT"] = "60"
+
+
+# ---------------------------------------------------------------------------
+# Shared OpenShift/Kubernetes helpers and fixtures
+# ---------------------------------------------------------------------------
+
+
+def run_oc(
+    *args: str, check: bool = True, timeout: int = 120
+) -> subprocess.CompletedProcess[str]:
+    """Run an oc command and return the result."""
+    result = subprocess.run(
+        ["oc", *args],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    if check and result.returncode != 0:
+        raise RuntimeError(f"oc {' '.join(args)} failed: {result.stderr}")
+    return result
+
+
+def resource_exists(kind: str, name: str, namespace: str | None = None) -> bool:
+    """Check if a Kubernetes resource exists."""
+    cmd = ["get", kind, name, "-o", "name"]
+    if namespace:
+        cmd.extend(["-n", namespace])
+    result = run_oc(*cmd, check=False)
+    return result.returncode == 0
+
+
+@pytest.fixture(scope="session")
+def test_namespace(kubernetes_available: bool) -> str:
+    """Get or create a test namespace."""
+    if not kubernetes_available:
+        pytest.skip("kubernetes not available")
+
+    namespace = "paude-integration-test"
+
+    if not resource_exists("namespace", namespace):
+        run_oc("create", "namespace", namespace)
+
+    return namespace
+
+
+@pytest.fixture
+def openshift_backend(test_namespace: str) -> OpenShiftBackend:
+    """Create an OpenShift backend configured for the test namespace."""
+    config = OpenShiftConfig(namespace=test_namespace)
+    return OpenShiftBackend(config)
+
+
+@pytest.fixture(autouse=False)
+def cleanup_k8s_test_resources(test_namespace: str, unique_session_name: str):
+    """Clean up Kubernetes test resources after each test.
+
+    Not autouse — test modules must request it explicitly or mark it autouse
+    via their own fixture.
+    """
+    yield
+
+    run_oc(
+        "delete",
+        "statefulset,networkpolicy,deployment,service",
+        "-n",
+        test_namespace,
+        "-l",
+        f"paude.io/session-name={unique_session_name}",
+        "--ignore-not-found",
+        check=False,
+    )
+
+    sts_name = f"paude-{unique_session_name}"
+    pvc_name = f"workspace-{sts_name}-0"
+    run_oc(
+        "delete",
+        "pvc",
+        pvc_name,
+        "-n",
+        test_namespace,
+        "--ignore-not-found",
+        check=False,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -20,9 +20,10 @@ paude
 | `start` | Starts container/pod and connects |
 | `stop` | Stops container/pod, preserves volume |
 | `connect` | Attaches to running session |
+| `upgrade` | Upgrades session to current paude version (preserves data) |
 | `remote` | Manages git remotes for code sync |
 | `delete` | Removes all resources including volume |
-| `list` | Shows all sessions |
+| `list` | Shows all sessions with version info |
 
 ## Examples
 
@@ -46,6 +47,11 @@ paude stop my-project
 
 # Restart - instant resume, no reinstall
 paude start my-project
+
+# Upgrade after updating paude
+pip install --upgrade paude
+paude list                         # Shows version and outdated indicator (*)
+paude upgrade my-project           # Rebuilds image, preserves all data
 
 # Delete session completely
 paude delete my-project --confirm

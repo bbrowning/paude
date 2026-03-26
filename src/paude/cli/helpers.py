@@ -286,6 +286,7 @@ def _finalize_session_create(
     ssh_host: str | None = None,
     ssh_key: str | None = None,
     remote_config_dir: str | None = None,
+    paude_version: str | None = None,
 ) -> None:
     """Shared post-create output and git setup."""
     from paude.cli.remote_git_setup import _setup_git_after_create
@@ -299,6 +300,7 @@ def _finalize_session_create(
         ssh_host=ssh_host,
         ssh_key=ssh_key,
         remote_config_dir=remote_config_dir,
+        paude_version=paude_version,
     )
 
     from paude.backends.shared import is_local_backend
