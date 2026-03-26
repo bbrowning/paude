@@ -226,15 +226,26 @@ class PodmanBackend:
 
         # Set up proxy network and container if domain filtering is active
         network: str | None = None
+        proxy_ip: str | None = None
         if use_proxy:
             try:
-                network = self._proxy.create_proxy(
+                network, proxy_ip = self._proxy.create_proxy(
                     session_name, config.proxy_image or "", config.allowed_domains
                 )
             except Exception:
                 if not config.reuse_volume:
                     self._volume_manager.remove_volume(vname, force=True)
                 raise
+
+            if proxy_ip is None:
+                print(
+                    "WARNING: Could not determine proxy IP; "
+                    "container DNS will not use the proxy for resolution.",
+                    file=sys.stderr,
+                )
+
+            # Start the proxy now so it's ready when the session starts
+            self._proxy.start_proxy(session_name)
 
         # Build mounts with session volume
         mounts = list(config.mounts)
@@ -256,6 +267,7 @@ class PodmanBackend:
         # Create container (stopped)
         print(f"Creating container {cname}...", file=sys.stderr)
         try:
+            dns = [proxy_ip] if proxy_ip else None
             self._runner.create_container(
                 name=cname,
                 image=config.image,
@@ -268,6 +280,7 @@ class PodmanBackend:
                 secrets=secrets,
                 network=network,
                 gpu=config.gpu,
+                dns=dns,
             )
         except Exception:
             # Cleanup all resources on failure

@@ -110,6 +110,7 @@ class ProxyRunner:
         network: str,
         dns: str | None = None,
         allowed_domains: list[str] | None = None,
+        ip: str | None = None,
     ) -> str:
         """Create a proxy container for a session (does not start it).
 
@@ -119,12 +120,17 @@ class ProxyRunner:
         net_args = self._build_multi_network(network)
         env_args = self._build_env_args(dns, allowed_domains)
 
+        ip_args: list[str] = []
+        if ip:
+            ip_args = ["--ip", ip]
+
         result = self._engine.run(
             "create",
             "--pull=never",
             "--name",
             name,
             *net_args,
+            *ip_args,
             *env_args,
             image,
             check=False,
@@ -153,6 +159,7 @@ class ProxyRunner:
         network: str,
         dns: str | None = None,
         allowed_domains: list[str] | None = None,
+        ip: str | None = None,
     ) -> str:
         """Recreate a session proxy with new configuration.
 
@@ -168,6 +175,7 @@ class ProxyRunner:
             network=network,
             dns=dns,
             allowed_domains=allowed_domains,
+            ip=ip,
         )
         self.start_session_proxy(name)
 

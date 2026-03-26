@@ -100,8 +100,34 @@ if ! /usr/sbin/squid -k parse -f "$CONFIG_FILE" 2>&1; then
     exit 1
 fi
 
+# Configure and start dnsmasq for DNS forwarding to main container
+# This allows tools that resolve DNS locally (e.g. Rust reqwest) to work
+# even on --internal networks where external DNS is unreachable.
+DNSMASQ_CONF=/tmp/dnsmasq.conf
+cat > "$DNSMASQ_CONF" <<DNSEOF
+# Listen on all interfaces for DNS queries from the main container
+listen-address=0.0.0.0
+port=53
+# Don't read /etc/resolv.conf or /etc/hosts — configure servers explicitly
+no-resolv
+no-hosts
+DNSEOF
+
+# Use the same upstream DNS servers as Squid
+if [[ -n "$SQUID_DNS" ]]; then
+    echo "server=$SQUID_DNS" >> "$DNSMASQ_CONF"
+fi
+for dns in $FALLBACK_DNS; do
+    echo "server=$dns" >> "$DNSMASQ_CONF"
+done
+
+# Start dnsmasq as a background daemon
+dnsmasq --conf-file="$DNSMASQ_CONF" --log-facility=/tmp/dnsmasq.log \
+    || echo "WARNING: dnsmasq failed to start" >&2
+
 # Clean up stale PID file from previous run (container restart)
 rm -f /tmp/squid.pid
 
-# Run squid with the generated config
-exec /usr/sbin/squid -f "$CONFIG_FILE" "$@"
+# Run squid under tini with process-group signaling (-g) so that
+# SIGTERM reaches both squid and the background dnsmasq daemon.
+exec tini -g -- /usr/sbin/squid -f "$CONFIG_FILE" "$@"
