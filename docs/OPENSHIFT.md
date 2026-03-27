@@ -90,7 +90,7 @@ paude create my-project --backend=openshift --storage-class=fast-ssd
 | `--backend=openshift` | Use OpenShift backend | `podman` |
 | `--openshift-namespace=NAME` | Kubernetes namespace | current context namespace |
 | `--openshift-context=NAME` | kubeconfig context | current |
-| `--allowed-domains all` | Disable network filtering | `default` (vertexai + pypi + github) |
+| `--allowed-domains all` | Disable network filtering | `default` (vertexai + python + github + agent-specific) |
 | `--yolo` | Skip agent permission prompts | `False` |
 
 **Notes:**
@@ -124,15 +124,17 @@ Configuration is synced via `oc cp` to tmpfs on session start and reconnect:
 - `~/.config/gcloud` → gcloud credentials for Vertex AI authentication
 - `~/.gitconfig` → Git identity configuration
 - `~/.claude/` → Agent config directory (for Claude Code), including:
-  - `settings.json`, `credentials.json` - Core settings
+  - `settings.json`, `settings.local.json` - Core settings
   - `plugins/` - Installed plugins and marketplace metadata
   - `CLAUDE.md` - Global instructions
 - `~/.claude.json` → Agent preferences
 
 **Excluded (session-specific):**
-- `history.jsonl`, `tasks/`, `todos/` - Session state
-- `cache/`, `stats-cache.json` - Caches
-- `debug/`, `file-history/` - Debug logs
+- `history.jsonl`, `tasks/`, `todos/`, `plans/` - Session state
+- `sessions/`, `session-env/`, `projects/` - Session metadata
+- `cache/`, `stats-cache.json`, `statsig/` - Caches
+- `debug/`, `file-history/`, `shell-snapshots/` - Debug logs
+- `backups/`, `downloads/`, `paste-cache/`, `.git/` - Misc
 
 Plugin paths are automatically rewritten from host paths to container paths.
 
@@ -146,7 +148,7 @@ Plugin paths are automatically rewritten from host paths to container paths.
 
 By default, sessions run with restricted network access:
 
-- **Allowed**: DNS resolution, Vertex AI APIs (*.googleapis.com), PyPI (*.pypi.org), GitHub (github.com, api.github.com), plus agent-specific domains
+- **Allowed**: DNS resolution, Vertex AI APIs (*.googleapis.com), PyPI (*.pypi.org), GitHub (github.com and related subdomains), plus agent-specific domains
 - **Blocked**: All other external traffic
 
 NetworkPolicy enforces egress restrictions at the Kubernetes level. Use `--allowed-domains all` to disable filtering for unrestricted access.

@@ -146,6 +146,9 @@ paude create --dry-run
 | `gpu` | yes | — | `--gpu` / `--no-gpu` | (none) |
 | `openshift.context` | yes | — | `--openshift-context` | (none) |
 | `openshift.namespace` | yes | — | `--openshift-namespace` | (none) |
+| `openshift.resources` | yes | — | — | (none) |
+| `openshift.build-resources` | yes | — | — | (none) |
+| `storage-class` | yes | — | `--storage-class` | (none) |
 
 > **Backend values**: `podman` (default), `docker`, or `openshift`.
 
@@ -179,7 +182,7 @@ paude create --allowed-domains default --allowed-domains golang
 
 The default allowlist includes:
 - **vertexai**: Vertex AI and Google OAuth domains (`.googleapis.com`, `.google.com`)
-- **python**: Python package repositories (`.pypi.org`, `.pythonhosted.org`, `download.pytorch.org`)
+- **python**: Python package repositories (`.pypi.org`, `.pythonhosted.org`, `.pytorch.org`)
 
 Agent-specific defaults are added automatically:
 - **Claude Code**: `.claude.ai`, `.anthropic.com`
@@ -188,12 +191,12 @@ Agent-specific defaults are added automatically:
 
 Opt-in language ecosystem aliases:
 - **golang**: Go modules (`go.dev`, `proxy.golang.org`, `sum.golang.org`, `dl.google.com`, `storage.googleapis.com`)
-- **nodejs**: npm/Yarn registries (`registry.npmjs.org`, `.npmjs.org`, `.yarnpkg.com`)
+- **nodejs**: npm/Yarn registries (`.nodejs.org`, `.npmjs.org`, `.yarnpkg.com`)
 - **rust**: Cargo/rustup (`crates.io`, `static.crates.io`, `static.rust-lang.org`)
 
 > **Note**: `pypi` is a backward-compatible alias for `python`.
 
-**Special values**: `all` (unrestricted), `default` (vertexai + python + github), `vertexai`, `python`, `golang`, `nodejs`, `rust`, `github`. Specifying domains without `default` replaces the allowlist entirely.
+**Special values**: `all` (unrestricted), `default` (vertexai + python + github + agent-specific), `vertexai`, `python`, `golang`, `nodejs`, `rust`, `github`. Specifying domains without `default` replaces the allowlist entirely.
 
 ## Diagnosing Blocked Domains
 
