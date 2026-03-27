@@ -8,9 +8,6 @@ from typing import TYPE_CHECKING, Annotated
 import typer
 
 from paude.backends import SessionNotFoundError
-from paude.backends.openshift import (
-    SessionNotFoundError as OpenshiftSessionNotFoundError,
-)
 from paude.cli.app import BackendType, app
 from paude.cli.helpers import find_session_backend
 
@@ -96,7 +93,7 @@ def session_upgrade(
         else:
             typer.echo("Unsupported backend for upgrade.", err=True)
             raise typer.Exit(1)
-    except (SessionNotFoundError, OpenshiftSessionNotFoundError) as e:
+    except SessionNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
     except typer.Exit:

@@ -292,42 +292,57 @@ class TestAgentSpecificDomainExpansion:
 
 
 @pytest.mark.parametrize(
-    "command",
+    ("command", "patch_target"),
     [
-        pytest.param("start", id="start"),
-        pytest.param("connect", id="connect"),
+        pytest.param(
+            "start",
+            "paude.cli.commands.lifecycle.find_session_backend",
+            id="start",
+        ),
+        pytest.param(
+            "connect",
+            "paude.cli.commands.connect.find_session_backend",
+            id="connect",
+        ),
     ],
 )
-@patch("paude.cli.commands.find_session_backend")
-def test_command_accepts_github_token_flag(
-    mock_find_session_backend: MagicMock, command
-):
+def test_command_accepts_github_token_flag(command, patch_target):
     """start/connect accept --github-token flag (session not found is expected)."""
-    mock_find_session_backend.return_value = None  # Session not found
-    result = runner.invoke(
-        app, [command, "test-session", "--github-token", "ghp_test123"]
-    )
+    with patch(patch_target, return_value=None):
+        result = runner.invoke(
+            app, [command, "test-session", "--github-token", "ghp_test123"]
+        )
     assert "No such option" not in result.output
     assert result.exit_code == 1  # Session not found is expected
 
 
 @pytest.mark.parametrize(
-    ("command", "backend_method", "token"),
+    ("command", "backend_method", "token", "patch_target"),
     [
-        pytest.param("start", "start_session", "ghp_test123", id="start"),
-        pytest.param("connect", "connect_session", "ghp_test456", id="connect"),
+        pytest.param(
+            "start",
+            "start_session",
+            "ghp_test123",
+            "paude.cli.commands.lifecycle.find_session_backend",
+            id="start",
+        ),
+        pytest.param(
+            "connect",
+            "connect_session",
+            "ghp_test456",
+            "paude.cli.commands.connect.find_session_backend",
+            id="connect",
+        ),
     ],
 )
-@patch("paude.cli.commands.find_session_backend")
 def test_command_passes_github_token_to_backend(
-    mock_find_session_backend: MagicMock, command, backend_method, token
+    command, backend_method, token, patch_target
 ):
     """start/connect pass the resolved github_token to the backend."""
     mock_backend = MagicMock()
     getattr(mock_backend, backend_method).return_value = 0
-    mock_find_session_backend.return_value = (MagicMock(), mock_backend)
-
-    runner.invoke(app, [command, "test-session", "--github-token", token])
+    with patch(patch_target, return_value=(MagicMock(), mock_backend)):
+        runner.invoke(app, [command, "test-session", "--github-token", token])
 
     getattr(mock_backend, backend_method).assert_called_once_with(
         "test-session",
@@ -335,7 +350,7 @@ def test_command_passes_github_token_to_backend(
     )
 
 
-@patch("paude.cli.commands.find_session_backend")
+@patch("paude.cli.commands.lifecycle.find_session_backend")
 def test_start_reads_paude_github_token_env(
     mock_find_session_backend: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
@@ -1509,7 +1524,7 @@ class TestDeleteGitRemoteCleanup:
         mock_cleanup.assert_not_called()
 
     @patch("paude.cli.remote._cleanup_session_git_remote")
-    @patch("paude.cli.commands.find_session_backend")
+    @patch("paude.cli.commands.delete.find_session_backend")
     def test_delete_cleans_git_remote_with_auto_detected_backend(
         self,
         mock_find_backend: MagicMock,
@@ -1782,7 +1797,7 @@ class TestCpCommand:
         output = result.stdout + (result.stderr or "")
         assert "Only one of SRC or DEST can be a remote path" in output
 
-    @patch("paude.cli.commands.find_session_backend")
+    @patch("paude.cli.commands.cp.find_session_backend")
     def test_cp_to_session_calls_copy_to(self, mock_find):
         """cp local -> session calls copy_to_session."""
         mock_backend = MagicMock()
@@ -1795,7 +1810,7 @@ class TestCpCommand:
             "my-session", "./file.txt", "/pvc/workspace/file.txt"
         )
 
-    @patch("paude.cli.commands.find_session_backend")
+    @patch("paude.cli.commands.cp.find_session_backend")
     def test_cp_from_session_calls_copy_from(self, mock_find):
         """cp session -> local calls copy_from_session."""
         mock_backend = MagicMock()
@@ -1808,7 +1823,7 @@ class TestCpCommand:
             "my-session", "/pvc/workspace/output.log", "./"
         )
 
-    @patch("paude.cli.commands.find_session_backend")
+    @patch("paude.cli.commands.cp.find_session_backend")
     def test_cp_relative_remote_path_resolved(self, mock_find):
         """Relative remote paths get /pvc/workspace/ prefix."""
         mock_backend = MagicMock()
@@ -1821,7 +1836,7 @@ class TestCpCommand:
             "my-session", "./local", "/pvc/workspace/subdir/file"
         )
 
-    @patch("paude.cli.commands.find_session_backend")
+    @patch("paude.cli.commands.cp.find_session_backend")
     def test_cp_absolute_remote_path_preserved(self, mock_find):
         """Absolute remote paths are used as-is."""
         mock_backend = MagicMock()
@@ -1834,7 +1849,7 @@ class TestCpCommand:
             "my-session", "./local", "/tmp/file"
         )
 
-    @patch("paude.cli.commands.find_session_backend")
+    @patch("paude.cli.commands.cp.find_session_backend")
     def test_cp_session_not_found(self, mock_find):
         """Error when session doesn't exist."""
         mock_find.return_value = None
@@ -1845,7 +1860,7 @@ class TestCpCommand:
         output = result.stdout + (result.stderr or "")
         assert "not found" in output
 
-    @patch("paude.cli.commands.find_session_backend")
+    @patch("paude.cli.commands.cp.find_session_backend")
     def test_cp_copy_failure_shows_error(self, mock_find):
         """Backend raises, CLI shows error."""
         mock_backend = MagicMock()
@@ -1858,7 +1873,7 @@ class TestCpCommand:
         output = result.stdout + (result.stderr or "")
         assert "copy failed" in output
 
-    @patch("paude.cli.commands.find_session_backend")
+    @patch("paude.cli.commands.cp.find_session_backend")
     def test_cp_session_not_running_shows_error(self, mock_find):
         """ValueError from backend shows error."""
         mock_backend = MagicMock()

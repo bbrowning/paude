@@ -1,6 +1,12 @@
 """Backend abstraction for paude container execution."""
 
-from paude.backends.base import Backend, Session, SessionConfig
+from paude.backends.base import (
+    Backend,
+    Session,
+    SessionConfig,
+    SessionExistsError,
+    SessionNotFoundError,
+)
 from paude.backends.openshift import (
     BuildFailedError,
     NamespaceNotFoundError,
@@ -11,11 +17,7 @@ from paude.backends.openshift import (
     OpenShiftConfig,
     OpenShiftError,
 )
-from paude.backends.podman import (
-    PodmanBackend,
-    SessionExistsError,
-    SessionNotFoundError,
-)
+from paude.backends.podman import PodmanBackend
 
 __all__ = [
     "Backend",

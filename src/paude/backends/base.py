@@ -7,6 +7,18 @@ from pathlib import Path
 from typing import Protocol
 
 
+class SessionNotFoundError(Exception):
+    """Session not found."""
+
+    pass
+
+
+class SessionExistsError(Exception):
+    """Session with this name already exists."""
+
+    pass
+
+
 @dataclass
 class Session:
     """Represents a paude session.
