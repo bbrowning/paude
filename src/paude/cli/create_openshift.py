@@ -46,6 +46,8 @@ def create_openshift_session(
     credential_timeout: int,
     agent_name: str = "claude",
     gpu: str | None = None,
+    resources: dict[str, dict[str, str]] | None = None,
+    build_resources: dict[str, dict[str, str]] | None = None,
 ) -> None:
     """OpenShift-specific session creation logic."""
     os_script_dir = _detect_dev_script_dir()
@@ -53,6 +55,8 @@ def create_openshift_session(
     openshift_config = OpenShiftConfig(
         context=openshift_context,
         namespace=openshift_namespace,
+        **({"resources": resources} if resources is not None else {}),
+        **({"build_resources": build_resources} if build_resources is not None else {}),
     )
 
     os_backend = OpenShiftBackend(config=openshift_config)

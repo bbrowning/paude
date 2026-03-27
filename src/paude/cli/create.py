@@ -229,6 +229,8 @@ def session_create(
     r_openshift_namespace = resolved.openshift_namespace.value
     # Empty string means explicitly disabled via --no-gpu
     r_gpu = resolved.gpu.value or None
+    r_openshift_resources = resolved.openshift_resources.value
+    r_openshift_build_resources = resolved.openshift_build_resources.value
 
     # Use resolved domains, or fall back to ["default"] if nothing configured
     r_allowed_domains: list[str] | None = (
@@ -356,4 +358,6 @@ def session_create(
             credential_timeout=r_credential_timeout,
             agent_name=r_agent,
             gpu=r_gpu,
+            resources=r_openshift_resources,
+            build_resources=r_openshift_build_resources,
         )

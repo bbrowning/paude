@@ -51,7 +51,27 @@ Then edit it to set the values you want. Any field set to `null` or omitted uses
     "allowed-domains": ["default", "golang"],
     "openshift": {
       "context": "my-cluster",
-      "namespace": "my-ns"
+      "namespace": "my-ns",
+      "resources": {
+        "requests": {
+          "cpu": "250m",
+          "memory": "2Gi"
+        },
+        "limits": {
+          "cpu": "2",
+          "memory": "4Gi"
+        }
+      },
+      "build-resources": {
+        "requests": {
+          "cpu": "500m",
+          "memory": "1Gi"
+        },
+        "limits": {
+          "cpu": "1",
+          "memory": "2Gi"
+        }
+      }
     }
   }
 }
