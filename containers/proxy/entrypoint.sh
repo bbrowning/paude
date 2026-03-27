@@ -105,8 +105,6 @@ fi
 # even on --internal networks where external DNS is unreachable.
 DNSMASQ_CONF=/tmp/dnsmasq.conf
 cat > "$DNSMASQ_CONF" <<DNSEOF
-# Listen on all interfaces for DNS queries from the main container
-listen-address=0.0.0.0
 port=53
 # Don't read /etc/resolv.conf or /etc/hosts — configure servers explicitly
 no-resolv

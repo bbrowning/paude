@@ -121,7 +121,9 @@ class PodmanProxyManager:
         proxy_image, domains = proxy_config
         nname = network_name(session_name)
 
-        self._network_manager.create_internal_network(nname)
+        self._network_manager.create_internal_network(
+            nname, disable_dns=self._runner.engine.is_podman
+        )
 
         proxy_ip = self._get_proxy_ip(nname)
         dns = _get_host_dns(self._runner.engine)
@@ -153,7 +155,18 @@ class PodmanProxyManager:
         self._runner.stop_container(pname)
 
     def _get_proxy_ip(self, nname: str) -> str | None:
-        """Derive a fixed proxy IP from the network's gateway address."""
+        """Derive a fixed proxy IP from the network's gateway address.
+
+        On networks with a gateway (normal Podman/Docker networks), the
+        proxy IP is gateway + 1 (e.g. 10.89.0.1 → 10.89.0.2).
+
+        On --disable-dns internal networks (no gateway),
+        get_network_gateway() derives a synthetic gateway from the
+        subnet's first host IP (e.g. 10.89.2.0/24 → 10.89.2.1), and
+        derive_proxy_ip() adds 1 → 10.89.2.2. The proxy is then
+        explicitly assigned this IP via --network net:ip=10.89.2.2,
+        so container creation order does not matter.
+        """
         gateway = self._network_manager.get_network_gateway(nname)
         if not gateway:
             return None
@@ -175,7 +188,9 @@ class PodmanProxyManager:
             raise ValueError("proxy_image is required when allowed_domains is set")
 
         nname = network_name(session_name)
-        self._network_manager.create_internal_network(nname)
+        self._network_manager.create_internal_network(
+            nname, disable_dns=self._runner.engine.is_podman
+        )
 
         proxy_ip = self._get_proxy_ip(nname)
 

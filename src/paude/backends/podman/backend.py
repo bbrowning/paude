@@ -255,7 +255,9 @@ class PodmanBackend:
         from paude.agents import get_agent
 
         agent = get_agent(config.agent)
-        proxy_name_for_env = proxy_container_name(session_name) if use_proxy else None
+        proxy_name_for_env = (
+            (proxy_ip or proxy_container_name(session_name)) if use_proxy else None
+        )
         env, _agent_args = build_session_env(
             config, agent, proxy_name=proxy_name_for_env
         )

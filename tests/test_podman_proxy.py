@@ -12,6 +12,7 @@ def _make_mock_runner(engine_binary: str = "podman") -> MagicMock:
     mock_runner = MagicMock()
     mock_runner.engine.binary = engine_binary
     mock_runner.engine.is_remote = False
+    mock_runner.engine.is_podman = engine_binary != "docker"
     mock_runner.engine.supports_multi_network_create = engine_binary != "docker"
     mock_runner.engine.default_bridge_network = (
         "podman" if engine_binary == "podman" else "bridge"
@@ -179,14 +180,60 @@ class TestProxyManagerFixedIp:
             allowed_domains=[".googleapis.com"],
         )
 
-        # Check --ip was passed via engine.run
+        # Check IP was embedded in --network spec (Podman multi-network)
         engine_calls = mock_runner.engine.run.call_args_list
         create_call = [c for c in engine_calls if "create" in str(c)]
         assert create_call, "Expected a create call"
         call_args = create_call[0][0]
-        assert "--ip" in call_args
-        ip_idx = call_args.index("--ip")
-        assert call_args[ip_idx + 1] == "172.28.0.2"
+        assert "--ip" not in call_args
+        # IP embedded in first --network, bridge as separate --network
+        net_indices = [i for i, a in enumerate(call_args) if a == "--network"]
+        assert len(net_indices) == 2
+        assert "ip=172.28.0.2" in call_args[net_indices[0] + 1]
+
+
+class TestProxyManagerDisableDns:
+    """Tests for disable_dns on network creation in PodmanProxyManager."""
+
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    def test_create_proxy_disables_dns_for_podman(self, mock_dns: MagicMock) -> None:
+        """create_proxy passes disable_dns=True for Podman engine."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner("podman")
+        mock_runner.container_exists.return_value = False
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        manager.create_proxy(
+            session_name="test-session",
+            proxy_image="proxy:latest",
+            allowed_domains=[".googleapis.com"],
+        )
+
+        mock_network.create_internal_network.assert_called_once_with(
+            "paude-net-test-session", disable_dns=True
+        )
+
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    def test_create_proxy_keeps_dns_for_docker(self, mock_dns: MagicMock) -> None:
+        """create_proxy passes disable_dns=False for Docker engine."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner("docker")
+        mock_runner.container_exists.return_value = False
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "172.17.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        manager.create_proxy(
+            session_name="test-session",
+            proxy_image="proxy:latest",
+            allowed_domains=[".googleapis.com"],
+        )
+
+        mock_network.create_internal_network.assert_called_once_with(
+            "paude-net-test-session", disable_dns=False
+        )
 
 
 class TestGetHostDns:

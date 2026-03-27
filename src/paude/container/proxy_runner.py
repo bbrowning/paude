@@ -30,15 +30,21 @@ class ProxyRunner:
     def _engine(self) -> ContainerEngine:
         return self._runner.engine
 
-    def _build_multi_network(self, internal: str) -> list[str]:
+    def _build_multi_network(self, internal: str, ip: str | None = None) -> list[str]:
         """Build network arguments for proxy containers.
 
         Podman supports ``--network net1,net2`` in create/run.
         Docker requires creating with one network, then connecting
         the second.
+
+        When *ip* is given, separate ``--network`` flags are used because
+        per-network options (``net:ip=…``) and comma-separated network
+        lists are incompatible in Podman.
         """
         bridge = self._engine.default_bridge_network
         if self._engine.supports_multi_network_create:
+            if ip:
+                return ["--network", f"{internal}:ip={ip}", "--network", bridge]
             return ["--network", f"{internal},{bridge}"]
         return ["--network", internal]
 
@@ -117,11 +123,12 @@ class ProxyRunner:
         Returns:
             Container name.
         """
-        net_args = self._build_multi_network(network)
+        net_args = self._build_multi_network(network, ip=ip)
         env_args = self._build_env_args(dns, allowed_domains)
 
         ip_args: list[str] = []
-        if ip:
+        if ip and not self._engine.supports_multi_network_create:
+            # Docker doesn't support multi-network create, so --ip is separate
             ip_args = ["--ip", ip]
 
         result = self._engine.run(

@@ -1178,17 +1178,58 @@ class TestContainerRunnerDns:
         assert call_args[dns_indices[1] + 1] == "8.8.8.8"
 
 
-class TestNetworkManagerGateway:
-    """Tests for NetworkManager gateway and proxy IP derivation."""
+class TestNetworkManagerDisableDns:
+    """Tests for disable_dns parameter in create_internal_network."""
 
-    def test_get_network_gateway_returns_ip(self):
-        """get_network_gateway returns the gateway IP."""
+    def test_create_internal_network_with_disable_dns(self):
+        """create_internal_network passes --disable-dns when requested."""
         from paude.container.engine import ContainerEngine
         from paude.container.network import NetworkManager
 
+        engine = ContainerEngine("podman")
+        with (
+            patch.object(engine, "network_exists", return_value=False),
+            patch.object(engine, "run") as mock_run,
+        ):
+            manager = NetworkManager(engine)
+            manager.create_internal_network("test-net", disable_dns=True)
+
+            call_args = mock_run.call_args[0]
+            assert "--disable-dns" in call_args
+
+    def test_create_internal_network_without_disable_dns(self):
+        """create_internal_network omits --disable-dns by default."""
+        from paude.container.engine import ContainerEngine
+        from paude.container.network import NetworkManager
+
+        engine = ContainerEngine("podman")
+        with (
+            patch.object(engine, "network_exists", return_value=False),
+            patch.object(engine, "run") as mock_run,
+        ):
+            manager = NetworkManager(engine)
+            manager.create_internal_network("test-net")
+
+            call_args = mock_run.call_args[0]
+            assert "--disable-dns" not in call_args
+
+
+class TestNetworkManagerGateway:
+    """Tests for NetworkManager gateway and proxy IP derivation."""
+
+    def test_get_network_gateway_returns_ip_from_podman_json(self):
+        """get_network_gateway parses Podman JSON format."""
+        import json
+
+        from paude.container.engine import ContainerEngine
+        from paude.container.network import NetworkManager
+
+        podman_json = json.dumps(
+            [{"subnets": [{"subnet": "10.89.0.0/24", "gateway": "10.89.0.1"}]}]
+        )
         engine = ContainerEngine()
         with patch.object(engine, "run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="10.89.0.1\n")
+            mock_run.return_value = MagicMock(returncode=0, stdout=podman_json)
             manager = NetworkManager(engine)
             result = manager.get_network_gateway("paude-net-test")
 
@@ -1197,6 +1238,23 @@ class TestNetworkManagerGateway:
         assert "network" in call_args
         assert "inspect" in call_args
         assert "paude-net-test" in call_args
+        assert "--format" not in call_args
+
+    def test_get_network_gateway_returns_ip_from_docker_json(self):
+        """get_network_gateway parses Docker JSON format."""
+        import json
+
+        from paude.container.engine import ContainerEngine
+        from paude.container.network import NetworkManager
+
+        docker_json = json.dumps([{"IPAM": {"Config": [{"Gateway": "172.17.0.1"}]}}])
+        engine = ContainerEngine()
+        with patch.object(engine, "run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=docker_json)
+            manager = NetworkManager(engine)
+            result = manager.get_network_gateway("paude-net-test")
+
+        assert result == "172.17.0.1"
 
     def test_get_network_gateway_returns_none_on_error(self):
         """get_network_gateway returns None when inspect fails."""
@@ -1226,6 +1284,131 @@ class TestNetworkManagerGateway:
 
         assert result is None
 
+
+class TestParseGatewayJson:
+    """Tests for NetworkManager._parse_gateway_json."""
+
+    def test_docker_format(self):
+        """Parses Docker IPAM format."""
+        import json
+
+        from paude.container.network import NetworkManager
+
+        data = json.dumps([{"IPAM": {"Config": [{"Gateway": "172.17.0.1"}]}}])
+        assert NetworkManager._parse_gateway_json(data) == "172.17.0.1"
+
+    def test_podman_format(self):
+        """Parses Podman subnets format."""
+        import json
+
+        from paude.container.network import NetworkManager
+
+        data = json.dumps(
+            [{"subnets": [{"subnet": "10.89.0.0/24", "gateway": "10.89.0.1"}]}]
+        )
+        assert NetworkManager._parse_gateway_json(data) == "10.89.0.1"
+
+    def test_podman_single_object(self):
+        """Parses Podman format when not wrapped in array."""
+        import json
+
+        from paude.container.network import NetworkManager
+
+        data = json.dumps(
+            {"subnets": [{"subnet": "10.89.0.0/24", "gateway": "10.89.0.1"}]}
+        )
+        assert NetworkManager._parse_gateway_json(data) == "10.89.0.1"
+
+    def test_invalid_json(self):
+        """Returns None for invalid JSON."""
+        from paude.container.network import NetworkManager
+
+        assert NetworkManager._parse_gateway_json("not json") is None
+
+    def test_empty_string(self):
+        """Returns None for empty string."""
+        from paude.container.network import NetworkManager
+
+        assert NetworkManager._parse_gateway_json("") is None
+
+    def test_empty_array(self):
+        """Returns None for empty JSON array."""
+        from paude.container.network import NetworkManager
+
+        assert NetworkManager._parse_gateway_json("[]") is None
+
+    def test_missing_gateway_fields(self):
+        """Returns None when gateway fields are absent."""
+        import json
+
+        from paude.container.network import NetworkManager
+
+        data = json.dumps([{"name": "test-net"}])
+        assert NetworkManager._parse_gateway_json(data) is None
+
+    def test_empty_gateway_string(self):
+        """Returns None when gateway is empty string."""
+        import json
+
+        from paude.container.network import NetworkManager
+
+        data = json.dumps([{"IPAM": {"Config": [{"Gateway": ""}]}}])
+        assert NetworkManager._parse_gateway_json(data) is None
+
+    def test_multiple_subnets_returns_first(self):
+        """Returns first gateway when multiple subnets exist."""
+        import json
+
+        from paude.container.network import NetworkManager
+
+        data = json.dumps(
+            [
+                {
+                    "subnets": [
+                        {"subnet": "10.89.0.0/24", "gateway": "10.89.0.1"},
+                        {"subnet": "10.89.1.0/24", "gateway": "10.89.1.1"},
+                    ]
+                }
+            ]
+        )
+        assert NetworkManager._parse_gateway_json(data) == "10.89.0.1"
+
+    def test_podman_no_gateway_derives_from_subnet(self):
+        """Falls back to first host IP from subnet when no gateway."""
+        import json
+
+        from paude.container.network import NetworkManager
+
+        data = json.dumps([{"subnets": [{"subnet": "10.89.2.0/24"}]}])
+        assert NetworkManager._parse_gateway_json(data) == "10.89.2.1"
+
+    def test_podman_no_gateway_multiple_subnets(self):
+        """Uses first subnet when no gateway and multiple subnets."""
+        import json
+
+        from paude.container.network import NetworkManager
+
+        data = json.dumps(
+            [
+                {
+                    "subnets": [
+                        {"subnet": "10.89.2.0/24"},
+                        {"subnet": "10.89.3.0/24"},
+                    ]
+                }
+            ]
+        )
+        assert NetworkManager._parse_gateway_json(data) == "10.89.2.1"
+
+    def test_podman_invalid_subnet_returns_none(self):
+        """Returns None for malformed CIDR in subnet."""
+        import json
+
+        from paude.container.network import NetworkManager
+
+        data = json.dumps([{"subnets": [{"subnet": "not-a-cidr"}]}])
+        assert NetworkManager._parse_gateway_json(data) is None
+
     def test_derive_proxy_ip_increments_gateway(self):
         """derive_proxy_ip returns gateway + 1."""
         from paude.container.network import NetworkManager
@@ -1234,12 +1417,29 @@ class TestNetworkManagerGateway:
         assert NetworkManager.derive_proxy_ip("172.28.0.1") == "172.28.0.2"
         assert NetworkManager.derive_proxy_ip("192.168.1.1") == "192.168.1.2"
 
+    def test_derive_proxy_ip_from_subnet_no_gateway(self):
+        """End-to-end: network with no gateway derives correct proxy IP."""
+        import json
+
+        from paude.container.engine import ContainerEngine
+        from paude.container.network import NetworkManager
+
+        podman_json = json.dumps([{"subnets": [{"subnet": "10.89.2.0/24"}]}])
+        engine = ContainerEngine("podman")
+        with patch.object(engine, "run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=podman_json)
+            manager = NetworkManager(engine)
+            gateway = manager.get_network_gateway("paude-net-test")
+
+        assert gateway == "10.89.2.1"
+        assert NetworkManager.derive_proxy_ip(gateway) == "10.89.2.2"
+
 
 class TestProxyRunnerFixedIp:
     """Tests for ProxyRunner with fixed IP."""
 
-    def test_create_session_proxy_passes_ip_flag(self):
-        """create_session_proxy passes --ip flag when ip is provided."""
+    def test_create_session_proxy_embeds_ip_in_network_podman(self):
+        """Podman: IP is embedded in --network spec, not as separate --ip."""
         from paude.container.proxy_runner import ProxyRunner
 
         mock_runner = MagicMock()
@@ -1256,7 +1456,37 @@ class TestProxyRunnerFixedIp:
             ip="10.89.0.2",
         )
 
-        call_args = mock_runner.engine.run.call_args[0]
+        # First engine.run call is the "create" call
+        create_call = mock_runner.engine.run.call_args_list[0]
+        call_args = create_call[0]
+        assert "--ip" not in call_args
+        # IP embedded in first --network flag, bridge as separate --network
+        net_indices = [i for i, a in enumerate(call_args) if a == "--network"]
+        assert len(net_indices) == 2
+        assert call_args[net_indices[0] + 1] == "paude-net-test:ip=10.89.0.2"
+        assert call_args[net_indices[1] + 1] == "podman"
+
+    def test_create_session_proxy_passes_ip_flag_docker(self):
+        """Docker: IP is passed as separate --ip flag."""
+        from paude.container.proxy_runner import ProxyRunner
+
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "docker"
+        mock_runner.engine.supports_multi_network_create = False
+        mock_runner.engine.default_bridge_network = "bridge"
+        mock_runner.engine.run.return_value = MagicMock(returncode=0)
+
+        proxy = ProxyRunner(mock_runner)
+        proxy.create_session_proxy(
+            name="paude-proxy-test",
+            image="proxy:latest",
+            network="paude-net-test",
+            ip="10.89.0.2",
+        )
+
+        # First engine.run call is the "create" call
+        create_call = mock_runner.engine.run.call_args_list[0]
+        call_args = create_call[0]
         assert "--ip" in call_args
         ip_idx = call_args.index("--ip")
         assert call_args[ip_idx + 1] == "10.89.0.2"
