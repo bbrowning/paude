@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from paude.backends.base import SessionExistsError as _BaseExists
+from paude.backends.base import SessionNotFoundError as _BaseNotFound
+
 
 class OpenShiftError(Exception):
     """Base exception for OpenShift backend errors."""
@@ -52,13 +55,13 @@ class BuildFailedError(OpenShiftError):
         super().__init__(message)
 
 
-class SessionExistsError(OpenShiftError):
+class SessionExistsError(OpenShiftError, _BaseExists):
     """Session with this name already exists."""
 
     pass
 
 
-class SessionNotFoundError(OpenShiftError):
+class SessionNotFoundError(OpenShiftError, _BaseNotFound):
     """Session not found."""
 
     pass

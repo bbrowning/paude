@@ -8,9 +8,6 @@ import typer
 
 from paude.backends import SessionNotFoundError
 from paude.backends.base import Backend
-from paude.backends.openshift import (
-    SessionNotFoundError as OpenshiftSessionNotFoundError,
-)
 from paude.cli.app import BackendType, app
 from paude.cli.helpers import _get_backend_instance, find_session_backend
 from paude.proxy_log import parse_blocked_log
@@ -243,7 +240,7 @@ def allowed_domains_cmd(
     except NotImplementedError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
-    except (OpenshiftSessionNotFoundError, SessionNotFoundError) as e:
+    except SessionNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
     except ValueError as e:
@@ -290,7 +287,7 @@ def blocked_domains_cmd(
 
     try:
         log_content = backend_obj.get_proxy_blocked_log(name)
-    except (OpenshiftSessionNotFoundError, SessionNotFoundError) as e:
+    except SessionNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
     except ValueError as e:

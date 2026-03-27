@@ -9,15 +9,12 @@ from pathlib import Path
 import typer
 
 from paude.agents import get_agent
-from paude.backends import SessionConfig
+from paude.backends import SessionConfig, SessionExistsError
 from paude.backends.openshift import (
     BuildFailedError,
     OpenShiftBackend,
     OpenShiftConfig,
     _generate_session_name,
-)
-from paude.backends.openshift import (
-    SessionExistsError as OpenshiftSessionExistsError,
 )
 from paude.cli.helpers import (
     _detect_dev_script_dir,
@@ -115,7 +112,7 @@ def create_openshift_session(
     except BuildFailedError as e:
         typer.echo(f"Build failed: {e}", err=True)
         raise typer.Exit(1) from None
-    except OpenshiftSessionExistsError as e:
+    except SessionExistsError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
     except Exception as e:
