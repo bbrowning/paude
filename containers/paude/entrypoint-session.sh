@@ -105,14 +105,16 @@ copy_agent_config() {
     mkdir -p "$HOME/$AGENT_CONFIG_DIR"
     chmod g+rwX "$HOME/$AGENT_CONFIG_DIR" 2>/dev/null || true
 
-    # Copy entire directory structure (--no-preserve=ownership for OpenShift arbitrary UID)
-    cp -a --no-preserve=ownership "$source_path/." "$HOME/$AGENT_CONFIG_DIR/" 2>/dev/null || true
+    # Copy entire directory structure — use explicit preserves to avoid copying
+    # SELinux context/xattr from source (breaks cross-filesystem copies to PVC).
+    cp -dR --preserve=mode,timestamps "$source_path/." "$HOME/$AGENT_CONFIG_DIR/" 2>/dev/null || true
 
     # Handle config file specially - goes to ~/.<config_file>
-    # Remove any image-baked config file first (may have wrong ownership on OpenShift)
+    # Use cp instead of mv to write through symlinks (persist_agent_config
+    # may have symlinked $HOME/$AGENT_CONFIG_FILE to /pvc for persistence).
     if [[ -n "$AGENT_CONFIG_FILE" ]] && [[ -n "$AGENT_CONFIG_FILE_BASENAME" ]] && [[ -f "$HOME/$AGENT_CONFIG_DIR/$AGENT_CONFIG_FILE_BASENAME" ]]; then
-        rm -f "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
-        mv "$HOME/$AGENT_CONFIG_DIR/$AGENT_CONFIG_FILE_BASENAME" "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
+        cp -f "$HOME/$AGENT_CONFIG_DIR/$AGENT_CONFIG_FILE_BASENAME" "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
+        rm -f "$HOME/$AGENT_CONFIG_DIR/$AGENT_CONFIG_FILE_BASENAME" 2>/dev/null || true
         chmod g+rw "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
     fi
 
@@ -123,6 +125,66 @@ copy_agent_config() {
 
     # g+rwX sets read/write and execute on directories (X = execute only if dir)
     chmod -R g+rwX "$HOME/$AGENT_CONFIG_DIR" 2>/dev/null || true
+}
+
+# Persist agent config on the PVC volume so it survives container recreation.
+# Creates symlinks: $HOME/$AGENT_CONFIG_DIR -> /pvc/$AGENT_CONFIG_DIR
+#                    $HOME/$AGENT_CONFIG_FILE -> /pvc/$AGENT_CONFIG_FILE
+# Follows the same pattern as agent binary persistence at /pvc/.local/bin.
+persist_agent_config() {
+    # Skip if /pvc doesn't exist (non-persistent setup)
+    if [[ ! -d /pvc ]]; then
+        return 0
+    fi
+
+    local pvc_config_dir="/pvc/$AGENT_CONFIG_DIR"
+    local home_config_dir="$HOME/$AGENT_CONFIG_DIR"
+
+    # Create PVC directory if it doesn't exist (first start)
+    mkdir -p "$pvc_config_dir" 2>/dev/null || true
+    chmod g+rwX "$pvc_config_dir" 2>/dev/null || true
+    # Fix SELinux context on PVC config dir — earlier versions of cp -a
+    # preserved the image filesystem context, making the dir inaccessible.
+    chcon -R --reference=/pvc "$pvc_config_dir" 2>/dev/null || true
+
+    # If HOME config dir is a real directory (not symlink), merge into PVC first
+    if [[ -d "$home_config_dir" ]] && [[ ! -L "$home_config_dir" ]]; then
+        cp -dR --preserve=mode,timestamps "$home_config_dir/." "$pvc_config_dir/" 2>/dev/null || true
+        rm -rf "$home_config_dir"
+    fi
+
+    # Create symlink if not already present
+    if [[ ! -L "$home_config_dir" ]]; then
+        rm -rf "$home_config_dir" 2>/dev/null || true
+        ln -sf "$pvc_config_dir" "$home_config_dir"
+    fi
+
+    # Config file (e.g., .claude.json) — symlink to PVC
+    if [[ -n "$AGENT_CONFIG_FILE" ]]; then
+        local pvc_config_file="/pvc/$AGENT_CONFIG_FILE"
+        local home_config_file="$HOME/$AGENT_CONFIG_FILE"
+
+        # If HOME config file is a real file (not symlink), move to PVC
+        if [[ -f "$home_config_file" ]] && [[ ! -L "$home_config_file" ]]; then
+            if [[ ! -f "$pvc_config_file" ]]; then
+                cp -dR --preserve=mode,timestamps "$home_config_file" "$pvc_config_file" 2>/dev/null || true
+            fi
+            rm -f "$home_config_file"
+        fi
+
+        # Create PVC file if it doesn't exist
+        if [[ ! -f "$pvc_config_file" ]]; then
+            echo '{}' > "$pvc_config_file" 2>/dev/null || true
+        fi
+        chmod g+rw "$pvc_config_file" 2>/dev/null || true
+        chcon --reference=/pvc "$pvc_config_file" 2>/dev/null || true
+
+        # Create symlink
+        if [[ ! -L "$home_config_file" ]]; then
+            rm -f "$home_config_file" 2>/dev/null || true
+            ln -sf "$pvc_config_file" "$home_config_file"
+        fi
+    fi
 }
 
 # Set up credentials from tmpfs-based storage (/credentials)
@@ -162,6 +224,7 @@ setup_credentials() {
 
 # Wait for and set up tmpfs-based credentials
 wait_for_credentials
+persist_agent_config
 setup_credentials
 wait_for_git
 
@@ -369,6 +432,8 @@ TRUST
             local host_ws="${PAUDE_HOST_WORKSPACE:-}"
 
             # Suppress trust prompt and onboarding, rewriting host project entry
+            # Use cp+rm instead of mv to write through symlinks (config_file
+            # may be symlinked to /pvc for persistence across upgrades).
             if [[ -f "$config_file" ]]; then
                 jq --arg ws "$workspace" --arg host_ws "$host_ws" '
                     (.projects[$host_ws] // {}) as $host_data |
@@ -376,7 +441,8 @@ TRUST
                     .hasCompletedOnboarding = true |
                     .projects = {($ws): $ws_entry}
                 ' "$config_file" > "${config_file}.tmp" \
-                    && mv "${config_file}.tmp" "$config_file"
+                    && cp -f "${config_file}.tmp" "$config_file" \
+                    && rm -f "${config_file}.tmp"
             else
                 jq -n --arg ws "$workspace" '{
                     hasCompletedOnboarding: true,

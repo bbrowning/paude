@@ -505,9 +505,10 @@ class TestPodmanBackendDeleteSession:
 class TestPodmanBackendStartSession:
     """Tests for PodmanBackend.start_session."""
 
+    @patch.object(PodmanBackend, "_sync_host_config")
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_starts_stopped_container(
-        self, mock_runner_class: MagicMock
+        self, mock_runner_class: MagicMock, mock_sync: MagicMock
     ) -> None:
         """Start session starts a stopped container."""
         mock_runner = MagicMock()
@@ -527,9 +528,10 @@ class TestPodmanBackendStartSession:
         mock_runner.attach_container.assert_called_once()
         assert exit_code == 0
 
+    @patch.object(PodmanBackend, "_sync_host_config")
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_connects_if_already_running(
-        self, mock_runner_class: MagicMock
+        self, mock_runner_class: MagicMock, mock_sync: MagicMock
     ) -> None:
         """Start session connects if container already running."""
         mock_runner = MagicMock()
@@ -1345,9 +1347,10 @@ class TestPodmanBackendCreateSessionWithProxy:
 class TestPodmanBackendStartSessionWithProxy:
     """Tests for start_session proxy lifecycle."""
 
+    @patch.object(PodmanBackend, "_sync_host_config")
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_starts_proxy_before_main(
-        self, mock_runner_class: MagicMock
+        self, mock_runner_class: MagicMock, mock_sync: MagicMock
     ) -> None:
         """start_session starts proxy container before main container."""
         mock_runner = MagicMock()
@@ -1367,9 +1370,10 @@ class TestPodmanBackendStartSessionWithProxy:
         assert any("start" in c for c in engine_calls)
         mock_runner.start_container.assert_called_once_with("paude-my-session")
 
+    @patch.object(PodmanBackend, "_sync_host_config")
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_skips_proxy_when_absent(
-        self, mock_runner_class: MagicMock
+        self, mock_runner_class: MagicMock, mock_sync: MagicMock
     ) -> None:
         """start_session skips proxy start when no proxy container exists."""
         mock_runner = MagicMock()
@@ -1593,10 +1597,11 @@ class TestProxyHealthCheck:
 class TestProxyRecreation:
     """Tests for proxy recreation when proxy is missing but expected."""
 
+    @patch.object(PodmanBackend, "_sync_host_config")
     @patch("paude.backends.podman.proxy.get_podman_machine_dns")
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_recreates_missing_proxy(
-        self, mock_runner_class: MagicMock, mock_dns: MagicMock
+        self, mock_runner_class: MagicMock, mock_dns: MagicMock, mock_sync: MagicMock
     ) -> None:
         """start_session recreates proxy when missing but configured in labels."""
         mock_runner = MagicMock()
@@ -1630,9 +1635,10 @@ class TestProxyRecreation:
         assert any("create" in c for c in engine_calls)
         assert any("start" in c for c in engine_calls)
 
+    @patch.object(PodmanBackend, "_sync_host_config")
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_skips_recreate_without_labels(
-        self, mock_runner_class: MagicMock
+        self, mock_runner_class: MagicMock, mock_sync: MagicMock
     ) -> None:
         """start_session does not recreate proxy when no domain labels."""
         mock_runner = MagicMock()
@@ -1660,10 +1666,11 @@ class TestProxyRecreation:
         mock_runner.create_session_proxy.assert_not_called()
         mock_runner.start_session_proxy.assert_not_called()
 
+    @patch.object(PodmanBackend, "_sync_host_config")
     @patch("paude.backends.podman.proxy.get_podman_machine_dns")
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_connect_session_recreates_missing_proxy(
-        self, mock_runner_class: MagicMock, mock_dns: MagicMock
+        self, mock_runner_class: MagicMock, mock_dns: MagicMock, mock_sync: MagicMock
     ) -> None:
         """connect_session recreates proxy when missing but configured."""
         mock_runner = MagicMock()
