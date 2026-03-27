@@ -127,6 +127,11 @@ class ContainerEngine:
         return "{{.ImageName}}" if self.binary == "podman" else "{{.Config.Image}}"
 
     @property
+    def is_podman(self) -> bool:
+        """Whether the engine is Podman (not Docker)."""
+        return self.binary != "docker"
+
+    @property
     def supports_secrets(self) -> bool:
         """Whether the engine supports standalone secrets.
 

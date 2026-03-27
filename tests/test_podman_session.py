@@ -54,6 +54,7 @@ def _make_backend(
             mock_runner.engine.binary, MagicMock
         ):
             mock_runner.engine.binary = "podman"
+            mock_runner.engine.is_podman = True
             mock_runner.engine.supports_multi_network_create = True
             mock_runner.engine.default_bridge_network = "podman"
             mock_runner.engine.is_remote = False
@@ -1148,7 +1149,7 @@ class TestPodmanBackendCreateSessionWithProxy:
 
         # Network should be created
         mock_network.create_internal_network.assert_called_once_with(
-            "paude-net-my-session"
+            "paude-net-my-session", disable_dns=True
         )
 
         # Proxy container should be created via engine.run
@@ -1159,10 +1160,10 @@ class TestPodmanBackendCreateSessionWithProxy:
         call_kwargs = mock_runner.create_container.call_args[1]
         assert call_kwargs["network"] == "paude-net-my-session"
 
-        # Main container should have proxy env vars
+        # Main container should have proxy env vars (using proxy IP)
         env = call_kwargs["env"]
-        assert env["HTTP_PROXY"] == "http://paude-proxy-my-session:3128"
-        assert env["HTTPS_PROXY"] == "http://paude-proxy-my-session:3128"
+        assert env["HTTP_PROXY"] == "http://10.89.0.2:3128"
+        assert env["HTTPS_PROXY"] == "http://10.89.0.2:3128"
 
         assert session.status == "stopped"
 
@@ -1220,6 +1221,35 @@ class TestPodmanBackendCreateSessionWithProxy:
 
         call_kwargs = mock_runner.create_container.call_args[1]
         assert call_kwargs["dns"] == ["10.89.0.2"]
+        assert call_kwargs["network"] == "paude-net-dns-session"
+
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    @patch("paude.backends.podman.backend.ContainerRunner")
+    def test_create_session_no_dns_false_when_no_proxy_ip(
+        self, mock_runner_class: MagicMock, mock_dns: MagicMock
+    ) -> None:
+        """Network keeps plain name when proxy IP cannot be determined."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = False
+        mock_runner_class.return_value = mock_runner
+        mock_dns.return_value = None
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = None
+
+        backend = _make_backend(mock_runner, mock_network)
+
+        config = SessionConfig(
+            name="no-ip-session",
+            workspace=Path("/home/user/project"),
+            image="paude:latest",
+            allowed_domains=[".googleapis.com"],
+            proxy_image="proxy:latest",
+        )
+        backend.create_session(config)
+
+        call_kwargs = mock_runner.create_container.call_args[1]
+        assert call_kwargs["network"] == "paude-net-no-ip-session"
+        assert call_kwargs.get("dns") is None
 
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_no_dns_without_proxy(
