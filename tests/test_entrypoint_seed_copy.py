@@ -1171,18 +1171,38 @@ class TestPersistAgentConfigContract:
             "entrypoint-session.sh must define persist_agent_config()"
         )
 
-    def test_persist_called_before_setup_credentials(self) -> None:
-        """persist_agent_config must be called before setup_credentials."""
+    def test_setup_credentials_called_before_persist(self) -> None:
+        """setup_credentials must run before persist_agent_config.
+
+        This ordering ensures host config lands in a real ~/.claude dir first,
+        then persist_agent_config merges it into /pvc/.claude (preserving
+        existing runtime state like sessions/history) and creates the symlink.
+        """
         content = ENTRYPOINT_PATH.read_text()
-        # Find the non-function-definition calls (outside function bodies)
-        # Look for standalone calls (not inside function definitions)
         persist_pos = content.find("\npersist_agent_config\n")
         setup_pos = content.find("\nsetup_credentials\n")
         assert persist_pos != -1, "persist_agent_config must be called"
         assert setup_pos != -1, "setup_credentials must be called"
-        assert persist_pos < setup_pos, (
-            "persist_agent_config must be called before setup_credentials"
+        assert setup_pos < persist_pos, (
+            "setup_credentials must be called before persist_agent_config "
+            "so host config is merged into PVC without clobbering runtime state"
         )
+
+    def test_copy_agent_config_skips_runtime_dirs(self) -> None:
+        """copy_agent_config skip list must match Python _CLAUDE_CONFIG_EXCLUDES."""
+        from paude.agents.claude import _CLAUDE_CONFIG_EXCLUDES
+
+        content = ENTRYPOINT_PATH.read_text()
+        func_start = content.find("copy_agent_config()")
+        func_end = content.find("\n}", func_start)
+        func_body = content[func_start:func_end]
+
+        for pattern in _CLAUDE_CONFIG_EXCLUDES:
+            name = pattern.lstrip("/")
+            assert name in func_body, (
+                f"copy_agent_config must skip '{name}' — present in "
+                f"_CLAUDE_CONFIG_EXCLUDES but missing from entrypoint case statement"
+            )
 
     def test_entrypoint_uses_cp_not_mv_for_config_file(self) -> None:
         """copy_agent_config must use cp -f (not mv) for config file relocation."""
