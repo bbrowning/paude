@@ -58,7 +58,7 @@ After the PR merges, reset the remote session to prepare for the next task:
 paude reset my-project
 ```
 
-Reset performs a `git reset --hard` to `origin/main` and `git clean -fdx` inside the container, and clears conversation history. Use `--keep-conversation` to preserve history across tasks.
+Reset performs a `git reset --hard` to `origin/main` (or a custom branch via `--branch`/`-b`) and `git clean -fdx` inside the container, and clears conversation history. Use `--keep-conversation` to preserve history across tasks.
 
 If the agent has unmerged work, reset warns you. Use `--force` to proceed anyway.
 

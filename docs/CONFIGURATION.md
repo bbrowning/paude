@@ -148,13 +148,13 @@ paude create --dry-run
 | `openshift.namespace` | yes | — | `--openshift-namespace` | (none) |
 | `openshift.resources` | yes | — | — | (none) |
 | `openshift.build-resources` | yes | — | — | (none) |
-| `storage-class` | yes | — | `--storage-class` | (none) |
+| `storage-class` | — | — | `--storage-class` | (none) |
 
 > **Backend values**: `podman` (default), `docker`, or `openshift`.
 
 ## Network Domains
 
-By default, paude runs a proxy sidecar that filters network access to Vertex AI, Python packages, and GitHub only.
+By default, paude runs a proxy sidecar that filters network access to Vertex AI, Python packages, GitHub, and agent-specific domains only.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -181,8 +181,9 @@ paude create --allowed-domains default --allowed-domains golang
 ```
 
 The default allowlist includes:
-- **vertexai**: Vertex AI and Google OAuth domains (`.googleapis.com`, `.google.com`)
+- **vertexai**: Vertex AI and Google OAuth domains (`accounts.google.com`, `oauth2.googleapis.com`, `*-aiplatform.googleapis.com`, etc.)
 - **python**: Python package repositories (`.pypi.org`, `.pythonhosted.org`, `.pytorch.org`)
+- **github**: GitHub domains (`github.com`, `api.github.com`, `raw.githubusercontent.com`, etc.)
 
 Agent-specific defaults are added automatically:
 - **Claude Code**: `.claude.ai`, `.anthropic.com`

@@ -89,7 +89,7 @@ The `--git` flag:
 2. Adds a `paude-<name>` git remote locally
 3. Pushes the current branch and all tags to the container
 4. Sets the `origin` remote inside the container (from your local origin)
-5. Fetches tags from origin inside the container (for `git describe`)
+5. Tags are available inside the container (for `git describe`)
 
 ### Manual Code Sync
 
