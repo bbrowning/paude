@@ -11,18 +11,25 @@ from paude.agents.base import (
 )
 from paude.mounts import resolve_path
 
+# Keep in sync with the case statement in copy_agent_config() in
+# containers/paude/entrypoint-session.sh (defense-in-depth).
 _CLAUDE_CONFIG_EXCLUDES = [
+    "/backups",
+    "/cache",
     "/debug",
+    "/downloads",
     "/file-history",
     "/history.jsonl",
     "/paste-cache",
+    "/plans",
     "/session-env",
+    "/sessions",
     "/shell-snapshots",
     "/stats-cache.json",
+    "/statsig",
     "/tasks",
     "/todos",
     "/projects",
-    "/cache",
     "/.git",
 ]
 
