@@ -104,7 +104,8 @@ if [ -f /credentials/cursor-auth.json ]; then
 fi
 
 # Pre-trust workspace folder so Cursor doesn't prompt on every connect
-ws_slug="${{{workspace}//\\//-}}"
+workspace_path="{workspace}"
+ws_slug="${{workspace_path//\\//-}}"
 ws_slug="${{ws_slug#-}}"
 trusted_dir="{home}/.cursor/projects/$ws_slug"
 mkdir -p "$trusted_dir" 2>/dev/null || true

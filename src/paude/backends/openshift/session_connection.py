@@ -85,6 +85,7 @@ class SessionConnector:
         sts = self._lookup.get_statefulset(name)
         sts_labels = sts.get("metadata", {}).get("labels", {}) if sts else {}
         agent_name = sts_labels.get(PAUDE_LABEL_AGENT, "claude")
+        agent_args = self._extract_env_from_sts(sts, "PAUDE_AGENT_ARGS")
 
         agent = get_agent(agent_name)
         secret_env = build_secret_environment_from_config(agent.config)
@@ -96,6 +97,7 @@ class SessionConnector:
                 github_token=github_token,
                 secret_env=secret_env,
                 agent_name=agent_name,
+                args=agent_args,
             )
         else:
             self._syncer.sync_full_config(
@@ -104,7 +106,24 @@ class SessionConnector:
                 github_token=github_token,
                 agent_name=agent_name,
                 secret_env=secret_env,
+                args=agent_args,
             )
+
+    @staticmethod
+    def _extract_env_from_sts(sts: dict[str, object] | None, var_name: str) -> str:
+        """Extract an env var value from a StatefulSet spec."""
+        if not sts:
+            return ""
+        spec: dict[str, object] = sts.get("spec", {})  # type: ignore[assignment]
+        template: dict[str, object] = spec.get("template", {})  # type: ignore[assignment]
+        pod_spec: dict[str, object] = template.get("spec", {})  # type: ignore[assignment]
+        containers: list[dict[str, object]] = pod_spec.get("containers", [])  # type: ignore[assignment]
+        for container in containers:
+            env_list: list[dict[str, str]] = container.get("env", [])  # type: ignore[assignment]
+            for env in env_list:
+                if env.get("name") == var_name:
+                    return str(env.get("value", ""))
+        return ""
 
     def _attach_to_pod(self, pname: str, name: str, ns: str) -> int:
         """Check workspace state, build exec command, and attach."""

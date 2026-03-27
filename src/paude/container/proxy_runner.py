@@ -65,7 +65,11 @@ class ProxyRunner:
         if dns:
             args.extend(["-e", f"SQUID_DNS={dns}"])
         if allowed_domains:
+            from paude.domains import format_domains_as_squid_acls
+
             args.extend(["-e", f"ALLOWED_DOMAINS={','.join(allowed_domains)}"])
+            acls = format_domains_as_squid_acls(allowed_domains)
+            args.extend(["-e", f"ALLOWED_DOMAIN_ACLS={acls}"])
         return args
 
     def run_proxy(

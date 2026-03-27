@@ -96,18 +96,19 @@ echo "[watchdog] Started. timeout=${TIMEOUT_MINUTES}m check_interval=${CHECK_INT
 while true; do
     sleep "$CHECK_INTERVAL"
 
+    now=$(date +%s)
     echo "[watchdog] Checking activity..." >&2
 
     # Never remove credentials if tmux clients are attached or Claude is actively working
     if has_tmux_clients; then
         echo "[watchdog] Tmux clients attached, resetting timer" >&2
-        last_activity=$(date +%s)
+        last_activity=$now
         continue
     fi
 
     if has_active_agent_process; then
         echo "[watchdog] Agent is active (CPU >= ${CPU_THRESHOLD}%), resetting timer" >&2
-        last_activity=$(date +%s)
+        last_activity=$now
         continue
     fi
 
@@ -118,7 +119,6 @@ while true; do
     fi
 
     # Check if inactivity threshold has been exceeded
-    now=$(date +%s)
     inactive=$((now - last_activity))
 
     echo "[watchdog] Inactive for ${inactive}s (threshold: ${INACTIVITY_THRESHOLD}s)" >&2

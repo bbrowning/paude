@@ -99,20 +99,25 @@ class ClaudeAgent:
 # Auto-generated sandbox config for Claude Code
 claude_json="{home}/.claude.json"
 settings_json="{home}/.claude/settings.json"
+host_ws="${{PAUDE_HOST_WORKSPACE:-}}"
 
-# Suppress trust prompt and onboarding
+# Suppress trust prompt and onboarding, rewriting host project entry
 if [ -f "$claude_json" ]; then
-    jq --arg ws "{workspace}" '. * {{
-        hasCompletedOnboarding: true,
-        projects: {{($ws): {{hasTrustDialogAccepted: true}}}}
-    }}' "$claude_json" > "${{claude_json}}.tmp" \\
-        && mv "${{claude_json}}.tmp" "$claude_json"
+    jq --arg ws "{workspace}" --arg host_ws "$host_ws" '
+        (.projects[$host_ws] // {{}}) as $host_data |
+        ($host_data * {{hasTrustDialogAccepted: true}}) as $ws_entry |
+        .hasCompletedOnboarding = true |
+        .projects = {{($ws): $ws_entry}}
+    ' "$claude_json" > "${{claude_json}}.tmp" \\
+        && cp -f "${{claude_json}}.tmp" "$claude_json" \\
+        && rm -f "${{claude_json}}.tmp"
 else
     jq -n --arg ws "{workspace}" '{{
         hasCompletedOnboarding: true,
         projects: {{($ws): {{hasTrustDialogAccepted: true}}}}
     }}' > "$claude_json"
 fi
+chmod g+rw "$claude_json" 2>/dev/null || true
 
 # Suppress bypass permissions warning when yolo flag is in args
 if echo "{args}" | grep -q -- "--dangerously-skip-permissions"; then
@@ -121,11 +126,12 @@ if echo "{args}" | grep -q -- "--dangerously-skip-permissions"; then
     if [ -f "$settings_json" ]; then
         jq --argjson patch "$skip_patch" '. * $patch' \
             "$settings_json" > "${{settings_json}}.tmp" \\
-            && mv "${{settings_json}}.tmp" \
-            "$settings_json"
+            && cp -f "${{settings_json}}.tmp" "$settings_json" \\
+            && rm -f "${{settings_json}}.tmp"
     else
         echo "$skip_patch" > "$settings_json"
     fi
+    chmod g+rw "$settings_json" 2>/dev/null || true
 fi
 """
 

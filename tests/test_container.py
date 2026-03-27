@@ -471,13 +471,21 @@ class TestContainerRunner:
         assert "-e" in call_args
         env_indices = [i for i, x in enumerate(call_args) if x == "-e"]
         found_domains = False
+        found_acls = False
         for idx in env_indices:
-            if call_args[idx + 1].startswith("ALLOWED_DOMAINS="):
+            val = call_args[idx + 1]
+            if val.startswith("ALLOWED_DOMAINS="):
                 found_domains = True
                 expected = "ALLOWED_DOMAINS=.googleapis.com,.pypi.org,api.example.com"
-                assert call_args[idx + 1] == expected
-                break
+                assert val == expected
+            if val.startswith("ALLOWED_DOMAIN_ACLS="):
+                found_acls = True
+                acl_content = val.split("=", 1)[1]
+                assert "dstdomain .googleapis.com" in acl_content
+                assert "dstdomain .pypi.org" in acl_content
+                assert "dstdomain api.example.com" in acl_content
         assert found_domains, "ALLOWED_DOMAINS env var not found in command"
+        assert found_acls, "ALLOWED_DOMAIN_ACLS env var not found in command"
 
     def test_run_proxy_omits_allowed_domains_when_none(self):
         """run_proxy omits ALLOWED_DOMAINS env var when not provided."""
