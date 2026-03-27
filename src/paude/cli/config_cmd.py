@@ -75,6 +75,8 @@ def config_show() -> None:
         ("platform", resolved.platform),
         ("openshift-context", resolved.openshift_context),
         ("openshift-namespace", resolved.openshift_namespace),
+        ("openshift-resources", resolved.openshift_resources),
+        ("openshift-build-resources", resolved.openshift_build_resources),
     ]
     for name, setting in settings:
         typer.echo(format_setting(name, setting))
@@ -116,6 +118,8 @@ def config_init() -> None:
             "openshift": {
                 "context": None,
                 "namespace": None,
+                "resources": None,
+                "build-resources": None,
             },
         }
     }

@@ -16,6 +16,8 @@ class OpenShiftDefaults:
 
     context: str | None = None
     namespace: str | None = None
+    resources: dict[str, dict[str, str]] | None = None
+    build_resources: dict[str, dict[str, str]] | None = None
 
 
 @dataclass
@@ -53,7 +55,7 @@ _KNOWN_KEYS = {
 }
 
 # Keys allowed inside "openshift"
-_KNOWN_OPENSHIFT_KEYS = {"context", "namespace"}
+_KNOWN_OPENSHIFT_KEYS = {"context", "namespace", "resources", "build-resources"}
 
 
 def _paude_config_dir() -> Path:
@@ -125,9 +127,36 @@ def _parse_defaults(data: dict[str, Any], path: Path) -> UserDefaults:
     openshift_data = data.get("openshift", {})
     if isinstance(openshift_data, dict):
         _warn_unknown_keys(openshift_data, _KNOWN_OPENSHIFT_KEYS, path)
+
+        raw_resources = openshift_data.get("resources")
+        resources: dict[str, dict[str, str]] | None = None
+        if raw_resources is not None:
+            if isinstance(raw_resources, dict):
+                resources = raw_resources
+            else:
+                print(
+                    f"Warning: 'openshift.resources' in {path}"
+                    " is not an object, ignoring",
+                    file=sys.stderr,
+                )
+
+        raw_build = openshift_data.get("build-resources")
+        build_resources: dict[str, dict[str, str]] | None = None
+        if raw_build is not None:
+            if isinstance(raw_build, dict):
+                build_resources = raw_build
+            else:
+                print(
+                    f"Warning: 'openshift.build-resources' in {path}"
+                    " is not an object, ignoring",
+                    file=sys.stderr,
+                )
+
         openshift = OpenShiftDefaults(
             context=openshift_data.get("context"),
             namespace=openshift_data.get("namespace"),
+            resources=resources,
+            build_resources=build_resources,
         )
     else:
         openshift = OpenShiftDefaults()

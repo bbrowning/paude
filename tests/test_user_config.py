@@ -109,6 +109,59 @@ class TestLoadUserDefaults:
         captured = capsys.readouterr()
         assert "not an object" in captured.err
 
+    def test_loads_openshift_resources(self, tmp_path: Path):
+        """Loads resources and build-resources from openshift section."""
+        config = tmp_path / "defaults.json"
+        config.write_text(
+            json.dumps({
+                "defaults": {
+                    "openshift": {
+                        "resources": {
+                            "requests": {"cpu": "500m", "memory": "2Gi"},
+                            "limits": {"cpu": "2", "memory": "4Gi"},
+                        },
+                        "build-resources": {
+                            "requests": {"cpu": "500m", "memory": "1Gi"},
+                        },
+                    }
+                }
+            })
+        )
+
+        result = load_user_defaults(config)
+        assert result.openshift.resources == {
+            "requests": {"cpu": "500m", "memory": "2Gi"},
+            "limits": {"cpu": "2", "memory": "4Gi"},
+        }
+        assert result.openshift.build_resources == {
+            "requests": {"cpu": "500m", "memory": "1Gi"},
+        }
+
+    def test_openshift_resources_absent_yields_none(self, tmp_path: Path):
+        """resources and build_resources are None when not in config."""
+        config = tmp_path / "defaults.json"
+        config.write_text(json.dumps({"defaults": {"openshift": {"context": "x"}}}))
+
+        result = load_user_defaults(config)
+        assert result.openshift.resources is None
+        assert result.openshift.build_resources is None
+
+    def test_openshift_resources_non_dict_warns(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ):
+        """Non-dict value for resources warns and yields None."""
+        config = tmp_path / "defaults.json"
+        config.write_text(
+            json.dumps({"defaults": {"openshift": {"resources": "bad", "build-resources": 42}}})
+        )
+
+        result = load_user_defaults(config)
+        assert result.openshift.resources is None
+        assert result.openshift.build_resources is None
+        captured = capsys.readouterr()
+        assert "openshift.resources" in captured.err
+        assert "openshift.build-resources" in captured.err
+
 
 class TestResolveCreateOptions:
     """Tests for resolve_create_options."""
@@ -267,6 +320,30 @@ class TestResolveCreateOptions:
         result = self._resolve(cli_gpu="", user_defaults=user)
         assert result.gpu.value == ""
         assert result.gpu.source == "cli"
+
+    def test_openshift_resources_default_to_none(self):
+        """openshift_resources and openshift_build_resources default to None."""
+        result = self._resolve()
+        assert result.openshift_resources.value is None
+        assert result.openshift_resources.source == "built-in"
+        assert result.openshift_build_resources.value is None
+        assert result.openshift_build_resources.source == "built-in"
+
+    def test_openshift_resources_from_user_defaults(self):
+        """openshift_resources resolves from user defaults."""
+        from paude.config.user_config import OpenShiftDefaults
+
+        res = {"requests": {"cpu": "500m", "memory": "2Gi"}}
+        build_res = {"requests": {"cpu": "250m", "memory": "1Gi"}}
+        user = UserDefaults(
+            openshift=OpenShiftDefaults(resources=res, build_resources=build_res)
+        )
+
+        result = self._resolve(user_defaults=user)
+        assert result.openshift_resources.value == res
+        assert result.openshift_resources.source == "user defaults"
+        assert result.openshift_build_resources.value == build_res
+        assert result.openshift_build_resources.source == "user defaults"
 
 
 class TestUserDefaultsGpu:

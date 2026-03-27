@@ -62,6 +62,12 @@ class ResolvedCreateOptions:
     openshift_namespace: SettingValue[str | None] = field(
         default_factory=lambda: SettingValue(None, "built-in")
     )
+    openshift_resources: SettingValue[dict[str, dict[str, str]] | None] = field(
+        default_factory=lambda: SettingValue(None, "built-in")
+    )
+    openshift_build_resources: SettingValue[dict[str, dict[str, str]] | None] = field(
+        default_factory=lambda: SettingValue(None, "built-in")
+    )
     allowed_domains: list[str] = field(default_factory=list)
     allowed_domains_provenance: list[tuple[list[str], Source]] = field(
         default_factory=list
@@ -165,6 +171,20 @@ def resolve_create_options(
         cli=cli_openshift_namespace,
         project=None,
         user=user_defaults.openshift.namespace,
+        builtin=None,
+    )
+
+    result.openshift_resources = _resolve_scalar(
+        cli=None,  # not exposed via CLI or project config
+        project=None,
+        user=user_defaults.openshift.resources,
+        builtin=None,
+    )
+
+    result.openshift_build_resources = _resolve_scalar(
+        cli=None,  # not exposed via CLI or project config
+        project=None,
+        user=user_defaults.openshift.build_resources,
         builtin=None,
     )
 
