@@ -184,6 +184,15 @@ def engine_binary_for_backend(backend_type: str) -> str:
     raise ValueError(f"No engine binary for backend type: {backend_type}")
 
 
+def generate_sandbox_config_script(agent_name: str, workspace: str, args: str) -> str:
+    """Generate the sandbox config bash script for an agent."""
+    from paude.agents import get_agent
+    from paude.constants import CONTAINER_HOME
+
+    agent = get_agent(agent_name)
+    return agent.apply_sandbox_config(CONTAINER_HOME, workspace, args)
+
+
 def build_ssh_backend(
     entry: object,
     connect_timeout: int | None = None,

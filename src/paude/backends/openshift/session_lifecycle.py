@@ -183,7 +183,10 @@ class SessionLifecycleManager:
             self._pod_waiter.wait_for_ready(pname)
 
             self._syncer.sync_full_config(
-                pname, agent_name=config.agent, secret_env=secret_env
+                pname,
+                agent_name=config.agent,
+                secret_env=secret_env,
+                args=session_env.get("PAUDE_AGENT_ARGS", ""),
             )
 
     def delete_session(self, name: str, confirm: bool = False) -> None:

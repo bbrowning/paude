@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from paude.domains import format_domains_as_squid_acls
+
 PROXY_DIR = Path(__file__).parent.parent / "containers" / "proxy"
 SQUID_CONF = PROXY_DIR / "squid.conf"
 ENTRYPOINT_SH = PROXY_DIR / "entrypoint.sh"
@@ -53,38 +55,96 @@ class TestSquidConfACLTypes:
         assert "http_access allow allowed_domains_regex" in content
 
 
+class TestFormatDomainsAsSquidACLs:
+    """Test Python-side ACL formatting (replaces shell-side domain parsing).
+
+    The output uses literal \\n separators (not real newlines) so it can be
+    passed through sed's s/// command for squid.conf injection.
+    """
+
+    @staticmethod
+    def _expand(acls: str) -> str:
+        """Expand \\n-separated ACL string to real newlines for assertions."""
+        return acls.replace("\\n", "\n")
+
+    def test_normal_domains_produce_dstdomain(self):
+        acls = self._expand(
+            format_domains_as_squid_acls(["oauth2.googleapis.com", ".example.com"])
+        )
+        assert "acl allowed_domains dstdomain oauth2.googleapis.com" in acls
+        assert "acl allowed_domains dstdomain .example.com" in acls
+
+    def test_regex_domains_produce_dstdom_regex(self):
+        acls = self._expand(
+            format_domains_as_squid_acls(
+                ["oauth2.googleapis.com", "~aiplatform\\.googleapis\\.com$"]
+            )
+        )
+        assert (
+            "acl allowed_domains_regex dstdom_regex aiplatform\\.googleapis\\.com$"
+            in acls
+        )
+        assert "acl allowed_domains dstdomain oauth2.googleapis.com" in acls
+
+    def test_fallback_regex_acl_when_no_regex_domains(self):
+        acls = self._expand(format_domains_as_squid_acls(["oauth2.googleapis.com"]))
+        assert "acl allowed_domains_regex dstdom_regex ^$" in acls
+
+    def test_no_fallback_when_regex_present(self):
+        acls = format_domains_as_squid_acls(["~foo\\.com$"])
+        assert "^$" not in acls
+
+    def test_fallback_dstdomain_when_only_regex(self):
+        """allowed_domains must always be defined, even with only regex domains."""
+        acls = self._expand(format_domains_as_squid_acls(["~foo\\.com$"]))
+        assert "acl allowed_domains dstdomain" in acls
+
+    def test_no_mixed_types(self):
+        """ACL names must not mix dstdomain and dstdom_regex."""
+        acls = self._expand(
+            format_domains_as_squid_acls(
+                [
+                    "oauth2.googleapis.com",
+                    "~aiplatform\\.googleapis\\.com$",
+                    ".example.com",
+                ]
+            )
+        )
+        acl_types: dict[str, set[str]] = {}
+        for line in acls.splitlines():
+            m = re.match(r"^acl\s+(\S+)\s+(dstdomain|dstdom_regex)\s", line)
+            if m:
+                name, typ = m.group(1), m.group(2)
+                acl_types.setdefault(name, set()).add(typ)
+        for name, types in acl_types.items():
+            assert len(types) == 1, f"ACL '{name}' mixes types {types}"
+
+    def test_empty_list(self):
+        acls = format_domains_as_squid_acls([])
+        assert "acl allowed_domains_regex dstdom_regex ^$" in acls
+        assert "acl allowed_domains dstdomain" in acls
+
+
 @pytest.mark.skipif(
     platform.system() == "Darwin",
     reason="entrypoint.sh uses GNU sed; macOS BSD sed is incompatible",
 )
-class TestEntrypointRegexACL:
-    """Test entrypoint.sh generates separate ACL names for regex domains."""
+class TestEntrypointACLInjection:
+    """Test entrypoint.sh correctly injects pre-formatted ACLs from Python."""
 
     @pytest.fixture
     def run_entrypoint(self, tmp_path: Path):
-        """Helper that runs entrypoint domain-generation logic in a subprocess."""
+        """Helper that runs the ACL injection block from entrypoint.sh."""
 
-        def _run(allowed_domains: str) -> str:
-            """Run entrypoint.sh with ALLOWED_DOMAINS and return generated config."""
-            # Copy squid.conf to tmp so entrypoint can modify it
+        def _run(domains: list[str]) -> str:
             config = tmp_path / "squid.conf"
             config.write_text(SQUID_CONF.read_text())
 
-            # Build a mini script that sources the domain-generation logic
-            script = f"""\
-#!/bin/bash
-set -e
-CONFIG_FILE="{config}"
-ALLOWED_DOMAINS="{allowed_domains}"
-export CONFIG_FILE ALLOWED_DOMAINS
+            acls = format_domains_as_squid_acls(domains)
 
-# Inline the ALLOWED_DOMAINS block from entrypoint.sh
-"""
-            # Extract the ALLOWED_DOMAINS block from entrypoint.sh
+            # Extract the ALLOWED_DOMAIN_ACLS block from entrypoint.sh
             entrypoint = ENTRYPOINT_SH.read_text()
-            # Find the block: if [[ -n "$ALLOWED_DOMAINS" ]]; then ... fi
-            start = entrypoint.index('if [[ -n "$ALLOWED_DOMAINS" ]]; then')
-            # Find matching fi (the block ends with a standalone fi line)
+            start = entrypoint.index('if [[ -n "${ALLOWED_DOMAIN_ACLS:-}" ]]; then')
             lines = entrypoint[start:].splitlines()
             depth = 0
             block_lines = []
@@ -98,6 +158,12 @@ export CONFIG_FILE ALLOWED_DOMAINS
                     if depth == 0:
                         break
 
+            script = (
+                f"#!/bin/bash\nset -e\n"
+                f'CONFIG_FILE="{config}"\n'
+                f"ALLOWED_DOMAIN_ACLS='{acls}'\n"
+                f"export CONFIG_FILE ALLOWED_DOMAIN_ACLS\n\n"
+            )
             script += "\n".join(block_lines) + '\ncat "$CONFIG_FILE"\n'
 
             result = subprocess.run(
@@ -113,50 +179,38 @@ export CONFIG_FILE ALLOWED_DOMAINS
         return _run
 
     def test_regex_domain_uses_separate_acl_name(self, run_entrypoint):
-        """Regex domains (~prefix) must use allowed_domains_regex, not allowed_domains."""
-        output = run_entrypoint("oauth2.googleapis.com,~aiplatform\\.googleapis\\.com$")
-
-        # dstdom_regex must be under allowed_domains_regex
+        """Regex domains must use allowed_domains_regex, not allowed_domains."""
+        output = run_entrypoint(
+            ["oauth2.googleapis.com", "~aiplatform\\.googleapis\\.com$"]
+        )
         for line in output.splitlines():
             if "dstdom_regex" in line and line.startswith("acl "):
-                assert "allowed_domains_regex" in line, (
-                    f"dstdom_regex line uses wrong ACL name: {line}"
-                )
+                assert "allowed_domains_regex" in line
 
-        # dstdomain must be under allowed_domains (not _regex)
-        for line in output.splitlines():
             if "dstdomain" in line and line.startswith("acl "):
-                assert "allowed_domains " in line, (
-                    f"dstdomain line uses wrong ACL name: {line}"
-                )
+                assert "allowed_domains " in line
 
     def test_fallback_regex_acl_when_no_regex_domains(self, run_entrypoint):
         """allowed_domains_regex must always be defined, even with no regex domains."""
-        output = run_entrypoint("oauth2.googleapis.com,accounts.google.com")
-
-        # Must have an allowed_domains_regex ACL (fallback no-match)
+        output = run_entrypoint(["oauth2.googleapis.com", "accounts.google.com"])
         regex_acl_lines = [
             line
             for line in output.splitlines()
             if line.startswith("acl allowed_domains_regex")
         ]
-        assert len(regex_acl_lines) >= 1, (
-            "allowed_domains_regex ACL must be defined even without regex domains"
-        )
+        assert len(regex_acl_lines) >= 1
 
     def test_no_mixed_types_in_generated_config(self, run_entrypoint):
         """Generated config must not mix dstdomain and dstdom_regex under same ACL name."""
         output = run_entrypoint(
-            "oauth2.googleapis.com,~aiplatform\\.googleapis\\.com$,.example.com"
+            ["oauth2.googleapis.com", "~aiplatform\\.googleapis\\.com$", ".example.com"]
         )
-
         acl_types: dict[str, set[str]] = {}
         for line in output.splitlines():
             m = re.match(r"^acl\s+(\S+)\s+(dstdomain|dstdom_regex)\s", line)
             if m:
                 name, typ = m.group(1), m.group(2)
                 acl_types.setdefault(name, set()).add(typ)
-
         for name, types in acl_types.items():
             assert len(types) == 1, (
                 f"Generated config: ACL '{name}' mixes types {types}"

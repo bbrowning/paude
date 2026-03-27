@@ -34,6 +34,7 @@ from paude.backends.shared import (
     PAUDE_LABEL_YOLO,
     build_session_env,
     encode_path,
+    generate_sandbox_config_script,
 )
 from paude.constants import (
     CONTAINER_ENTRYPOINT,
@@ -130,6 +131,22 @@ class PodmanBackend:
         from paude.backends.podman.sync import ConfigSyncer
 
         ConfigSyncer(self._engine).sync(cname, agent_name)
+
+    def _sync_sandbox_config(self, cname: str, session_name: str) -> None:
+        """Generate and write agent sandbox config script into container."""
+        agent_name = self._get_session_agent_name(session_name)
+        workspace = (
+            self._runner.get_container_env(cname, "PAUDE_WORKSPACE")
+            or CONTAINER_WORKSPACE
+        )
+        args = self._runner.get_container_env(cname, "PAUDE_AGENT_ARGS") or ""
+        content = generate_sandbox_config_script(agent_name, workspace, args)
+        self._runner.inject_file(
+            cname,
+            content,
+            "/tmp/agent-sandbox-config.sh",  # noqa: S108
+            owner="paude:0",
+        )
 
     @staticmethod
     def _local_adc_path() -> Path | None:
@@ -338,6 +355,7 @@ class PodmanBackend:
         self._fix_volume_permissions(cname)
         self._inject_credentials(cname)
         self._sync_host_config(cname, self._get_session_agent_name(name))
+        self._sync_sandbox_config(cname, name)
 
     def delete_session(self, name: str, confirm: bool = False) -> None:
         """Delete a session and all its resources."""
@@ -402,6 +420,7 @@ class PodmanBackend:
         self._fix_volume_permissions(cname)
         self._inject_credentials(cname)
         self._sync_host_config(cname, self._get_session_agent_name(name))
+        self._sync_sandbox_config(cname, name)
 
         return self._runner.attach_container(
             cname,
@@ -462,6 +481,7 @@ class PodmanBackend:
 
         # Re-sync config on every connect (refreshes if user updated config)
         self._sync_host_config(cname, self._get_session_agent_name(name))
+        self._sync_sandbox_config(cname, name)
 
         print(f"Connecting to session '{name}'...", file=sys.stderr)
         return self._runner.attach_container(

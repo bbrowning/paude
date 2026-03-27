@@ -234,8 +234,12 @@ class ProxyManager:
 
         env_list: list[dict[str, str]] = []
         if allowed_domains:
+            from paude.domains import format_domains_as_squid_acls
+
             domains_str = ",".join(allowed_domains)
             env_list.append({"name": "ALLOWED_DOMAINS", "value": domains_str})
+            acls = format_domains_as_squid_acls(allowed_domains)
+            env_list.append({"name": "ALLOWED_DOMAIN_ACLS", "value": acls})
 
         deployment_spec: dict[str, Any] = {
             "apiVersion": "apps/v1",
@@ -419,8 +423,11 @@ class ProxyManager:
             session_name: Session name.
             domains: New list of allowed domains.
         """
+        from paude.domains import format_domains_as_squid_acls
+
         deployment_name = proxy_resource_name(session_name)
         domains_str = ",".join(domains)
+        acls = format_domains_as_squid_acls(domains)
 
         patch = json.dumps(
             {
@@ -434,7 +441,11 @@ class ProxyManager:
                                         {
                                             "name": "ALLOWED_DOMAINS",
                                             "value": domains_str,
-                                        }
+                                        },
+                                        {
+                                            "name": "ALLOWED_DOMAIN_ACLS",
+                                            "value": acls,
+                                        },
                                     ],
                                 }
                             ]

@@ -14,10 +14,32 @@ import subprocess
 import textwrap
 from pathlib import Path
 
-# Path to the real entrypoint, used by contract tests
+# Paths to the real entrypoint and library files, used by contract tests
 ENTRYPOINT_PATH = (
     Path(__file__).parent.parent / "containers" / "paude" / "entrypoint-session.sh"
 )
+ENTRYPOINT_LIB_CONFIG_PATH = (
+    Path(__file__).parent.parent / "containers" / "paude" / "entrypoint-lib-config.sh"
+)
+ENTRYPOINT_LIB_CREDENTIALS_PATH = (
+    Path(__file__).parent.parent
+    / "containers"
+    / "paude"
+    / "entrypoint-lib-credentials.sh"
+)
+ENTRYPOINT_LIB_INSTALL_PATH = (
+    Path(__file__).parent.parent / "containers" / "paude" / "entrypoint-lib-install.sh"
+)
+
+
+def _read_all_entrypoint_files() -> str:
+    """Read the main entrypoint and all library files concatenated."""
+    return (
+        ENTRYPOINT_PATH.read_text()
+        + ENTRYPOINT_LIB_CONFIG_PATH.read_text()
+        + ENTRYPOINT_LIB_CREDENTIALS_PATH.read_text()
+        + ENTRYPOINT_LIB_INSTALL_PATH.read_text()
+    )
 
 
 def _build_script(home_dir: str, seed_dir: str, credentials_dir: str | None) -> str:
@@ -87,28 +109,22 @@ class TestEntrypointContract:
 
     def test_entrypoint_uses_recursive_copy(self) -> None:
         """The entrypoint must use recursive cp for seed copy, not a file loop."""
-        content = ENTRYPOINT_PATH.read_text()
+        content = _read_all_entrypoint_files()
         assert "cp -dR" in content, (
-            "entrypoint-session.sh must use 'cp -dR' for recursive seed copy"
+            "entrypoint files must use 'cp -dR' for recursive seed copy"
         )
         assert "$AGENT_SEED_DIR" in content or "/tmp/claude.seed" in content, (
-            "entrypoint-session.sh must reference seed directory variable"
+            "entrypoint files must reference seed directory variable"
         )
 
-    def test_entrypoint_has_apply_sandbox_config(self) -> None:
-        """The entrypoint must contain the apply_sandbox_config function."""
+    def test_entrypoint_sources_sandbox_config_script(self) -> None:
+        """The entrypoint must source the Python-generated sandbox config script."""
         content = ENTRYPOINT_PATH.read_text()
-        assert "apply_sandbox_config()" in content, (
-            "entrypoint-session.sh must define apply_sandbox_config()"
+        assert "agent-sandbox-config.sh" in content, (
+            "entrypoint-session.sh must source agent-sandbox-config.sh"
         )
-        assert "hasCompletedOnboarding" in content, (
-            "apply_sandbox_config must set hasCompletedOnboarding"
-        )
-        assert "hasTrustDialogAccepted" in content, (
-            "apply_sandbox_config must set hasTrustDialogAccepted"
-        )
-        assert "skipDangerousModePermissionPrompt" in content, (
-            "apply_sandbox_config must set skipDangerousModePermissionPrompt"
+        assert "PAUDE_SUPPRESS_PROMPTS" in content, (
+            "entrypoint-session.sh must check PAUDE_SUPPRESS_PROMPTS before sourcing"
         )
 
     def test_entrypoint_checks_tmux_before_seed_copy(self) -> None:
@@ -123,34 +139,34 @@ class TestEntrypointContract:
         )
 
     def test_entrypoint_checks_tmux_before_sandbox_config(self) -> None:
-        """tmux has-session check must appear before apply_sandbox_config call."""
+        """tmux has-session check must appear before sandbox config sourcing."""
         content = ENTRYPOINT_PATH.read_text()
         tmux_check_pos = content.find("tmux -u has-session")
-        sandbox_call_pos = content.find("apply_sandbox_config 2>>")
+        sandbox_source_pos = content.find("source /tmp/agent-sandbox-config.sh")
         assert tmux_check_pos != -1
-        assert sandbox_call_pos != -1
-        assert tmux_check_pos < sandbox_call_pos, (
-            "tmux session check must come before apply_sandbox_config call"
+        assert sandbox_source_pos != -1
+        assert tmux_check_pos < sandbox_source_pos, (
+            "tmux session check must come before sandbox config sourcing"
         )
 
     def test_entrypoint_cp_does_not_preserve_selinux(self) -> None:
         """Copy commands must not use cp -a (which preserves SELinux xattr)."""
         import re
 
-        content = ENTRYPOINT_PATH.read_text()
+        content = _read_all_entrypoint_files()
         # cp -a preserves xattr including security.selinux — must not be used
         # for cross-filesystem copies (image → PVC, credentials → PVC)
         cp_a_lines = re.findall(r"cp -a .*\$.*DIR", content)
         assert len(cp_a_lines) == 0, (
-            f"entrypoint must not use 'cp -a' for config copies "
+            f"entrypoint files must not use 'cp -a' for config copies "
             f"(preserves SELinux xattr): {cp_a_lines}"
         )
 
     def test_entrypoint_has_selinux_remediation(self) -> None:
         """persist_agent_config must fix SELinux context with chcon."""
-        content = ENTRYPOINT_PATH.read_text()
+        content = ENTRYPOINT_LIB_CONFIG_PATH.read_text()
         assert "chcon" in content, (
-            "persist_agent_config must include chcon for SELinux remediation"
+            "entrypoint-lib-config.sh must include chcon for SELinux remediation"
         )
         assert "--reference=/pvc" in content, (
             "chcon must use --reference=/pvc to inherit PVC SELinux context"
@@ -158,14 +174,14 @@ class TestEntrypointContract:
 
     def test_entrypoint_no_old_file_loop(self) -> None:
         """The old file-by-file loop pattern must not be present."""
-        content = ENTRYPOINT_PATH.read_text()
+        content = _read_all_entrypoint_files()
         assert "for f in /tmp/claude.seed/*" not in content, (
-            "entrypoint-session.sh still contains the old file-by-file loop"
+            "entrypoint files still contain the old file-by-file loop"
         )
 
     def test_entrypoint_handles_claude_json_after_copy(self) -> None:
         """Config file must be moved (not copied separately) after recursive copy."""
-        content = ENTRYPOINT_PATH.read_text()
+        content = ENTRYPOINT_LIB_CONFIG_PATH.read_text()
         # Find the recursive copy in copy_agent_config function
         cp_pos = content.find("cp -dR --preserve=mode,timestamps")
         if cp_pos == -1:
@@ -410,44 +426,15 @@ def _build_gemini_sandbox_script(
     workspace: str,
     suppress_prompts: bool,
 ) -> str:
-    """Build a script that replicates Gemini apply_sandbox_config logic."""
-    env_lines = f'export HOME="{home_dir}"\n'
-    env_lines += f'export PAUDE_WORKSPACE="{workspace}"\n'
-    env_lines += 'AGENT_NAME="gemini"\n'
-    env_lines += 'AGENT_CONFIG_DIR=".gemini"\n'
-    if suppress_prompts:
-        env_lines += 'export PAUDE_SUPPRESS_PROMPTS="1"\n'
-    else:
-        env_lines += "unset PAUDE_SUPPRESS_PROMPTS 2>/dev/null || true\n"
+    """Build a script using Python-generated Gemini sandbox config."""
+    if not suppress_prompts:
+        return f'#!/bin/bash\nexport HOME="{home_dir}"\n'
 
-    return textwrap.dedent(f"""\
-        #!/bin/bash
-        set -e
-        {env_lines}
-        apply_sandbox_config() {{
-            if [[ "${{PAUDE_SUPPRESS_PROMPTS:-}}" != "1" ]]; then
-                return 0
-            fi
+    from paude.agents.gemini import GeminiAgent
 
-            local workspace="${{PAUDE_WORKSPACE:-/workspace}}"
-
-            case "$AGENT_NAME" in
-                gemini)
-                    local trusted_json="$HOME/$AGENT_CONFIG_DIR/trustedFolders.json"
-                    mkdir -p "$HOME/$AGENT_CONFIG_DIR" 2>/dev/null || true
-                    if [[ -f "$trusted_json" ]]; then
-                        jq --arg ws "$workspace" '. + {{($ws): "TRUST_FOLDER"}}' \\
-                            "$trusted_json" > "${{trusted_json}}.tmp" \\
-                            && mv "${{trusted_json}}.tmp" "$trusted_json"
-                    else
-                        jq -n --arg ws "$workspace" '{{($ws): "TRUST_FOLDER"}}' > "$trusted_json"
-                    fi
-                    ;;
-            esac
-        }}
-
-        apply_sandbox_config
-    """)
+    agent = GeminiAgent()
+    config_script = agent.apply_sandbox_config(home_dir, workspace, "")
+    return f'#!/bin/bash\nset -e\nexport HOME="{home_dir}"\n{config_script}'
 
 
 def _build_sandbox_script(
@@ -457,62 +444,18 @@ def _build_sandbox_script(
     claude_args: str = "",
     host_workspace: str = "",
 ) -> str:
-    """Build a script that replicates the apply_sandbox_config logic."""
+    """Build a script using Python-generated Claude sandbox config."""
+    if not suppress_prompts:
+        return f'#!/bin/bash\nexport HOME="{home_dir}"\n'
+
+    from paude.agents.claude import ClaudeAgent
+
+    agent = ClaudeAgent()
+    config_script = agent.apply_sandbox_config(home_dir, workspace, claude_args)
+
     env_lines = f'export HOME="{home_dir}"\n'
-    env_lines += f'export PAUDE_WORKSPACE="{workspace}"\n'
     env_lines += f'export PAUDE_HOST_WORKSPACE="{host_workspace}"\n'
-    if suppress_prompts:
-        env_lines += 'export PAUDE_SUPPRESS_PROMPTS="1"\n'
-    else:
-        env_lines += "unset PAUDE_SUPPRESS_PROMPTS 2>/dev/null || true\n"
-    if claude_args:
-        env_lines += f'export PAUDE_CLAUDE_ARGS="{claude_args}"\n'
-    else:
-        env_lines += "unset PAUDE_CLAUDE_ARGS 2>/dev/null || true\n"
-
-    return textwrap.dedent(f"""\
-        #!/bin/bash
-        set -e
-        {env_lines}
-        apply_sandbox_config() {{
-            if [[ "${{PAUDE_SUPPRESS_PROMPTS:-}}" != "1" ]]; then
-                return 0
-            fi
-
-            local workspace="${{PAUDE_WORKSPACE:-/workspace}}"
-            local claude_json="$HOME/.claude.json"
-            local settings_json="$HOME/.claude/settings.json"
-            local host_ws="${{PAUDE_HOST_WORKSPACE:-}}"
-
-            if [[ -f "$claude_json" ]]; then
-                jq --arg ws "$workspace" --arg host_ws "$host_ws" '
-                    (.projects[$host_ws] // {{}}) as $host_data |
-                    ($host_data * {{hasTrustDialogAccepted: true}}) as $ws_entry |
-                    .hasCompletedOnboarding = true |
-                    .projects = {{($ws): $ws_entry}}
-                ' "$claude_json" > "${{claude_json}}.tmp" \\
-                    && mv "${{claude_json}}.tmp" "$claude_json"
-            else
-                jq -n --arg ws "$workspace" '{{
-                    hasCompletedOnboarding: true,
-                    projects: {{($ws): {{hasTrustDialogAccepted: true}}}}
-                }}' > "$claude_json"
-            fi
-
-            if [[ "${{PAUDE_CLAUDE_ARGS:-}}" == *"--dangerously-skip-permissions"* ]]; then
-                mkdir -p "$HOME/.claude" 2>/dev/null || true
-                local skip_patch='{{"skipDangerousModePermissionPrompt": true}}'
-                if [[ -f "$settings_json" ]]; then
-                    jq --argjson patch "$skip_patch" '. * $patch' "$settings_json" > "${{settings_json}}.tmp" \\
-                        && mv "${{settings_json}}.tmp" "$settings_json"
-                else
-                    echo "$skip_patch" > "$settings_json"
-                fi
-            fi
-        }}
-
-        apply_sandbox_config
-    """)
+    return f"#!/bin/bash\nset -e\n{env_lines}{config_script}"
 
 
 class TestSandboxPromptSuppression:
@@ -676,14 +619,17 @@ class TestGeminiSandboxConfig:
 
         assert not (home / ".gemini").exists()
 
-    def test_entrypoint_has_gemini_trust_case(self) -> None:
-        """Contract: entrypoint-session.sh handles Gemini trusted folders."""
-        content = ENTRYPOINT_PATH.read_text()
-        assert "trustedFolders.json" in content, (
-            "entrypoint-session.sh must handle Gemini trustedFolders.json"
+    def test_gemini_python_generates_trust_config(self) -> None:
+        """Contract: Gemini agent's apply_sandbox_config handles trusted folders."""
+        from paude.agents.gemini import GeminiAgent
+
+        agent = GeminiAgent()
+        script = agent.apply_sandbox_config("/home/paude", "/pvc/workspace", "")
+        assert "trustedFolders.json" in script, (
+            "Gemini apply_sandbox_config must handle trustedFolders.json"
         )
-        assert "TRUST_FOLDER" in content, (
-            "entrypoint-session.sh must set TRUST_FOLDER for Gemini"
+        assert "TRUST_FOLDER" in script, (
+            "Gemini apply_sandbox_config must set TRUST_FOLDER"
         )
 
 
@@ -1165,10 +1111,10 @@ class TestPersistAgentConfigContract:
     """Contract tests for persist_agent_config in the real entrypoint."""
 
     def test_entrypoint_has_persist_function(self) -> None:
-        """entrypoint-session.sh must define persist_agent_config()."""
-        content = ENTRYPOINT_PATH.read_text()
+        """entrypoint-lib-config.sh must define persist_agent_config()."""
+        content = ENTRYPOINT_LIB_CONFIG_PATH.read_text()
         assert "persist_agent_config()" in content, (
-            "entrypoint-session.sh must define persist_agent_config()"
+            "entrypoint-lib-config.sh must define persist_agent_config()"
         )
 
     def test_setup_credentials_called_before_persist(self) -> None:
@@ -1192,7 +1138,7 @@ class TestPersistAgentConfigContract:
         """copy_agent_config skip list must match Python _CLAUDE_CONFIG_EXCLUDES."""
         from paude.agents.claude import _CLAUDE_CONFIG_EXCLUDES
 
-        content = ENTRYPOINT_PATH.read_text()
+        content = ENTRYPOINT_LIB_CONFIG_PATH.read_text()
         func_start = content.find("copy_agent_config()")
         func_end = content.find("\n}", func_start)
         func_body = content[func_start:func_end]
@@ -1206,7 +1152,7 @@ class TestPersistAgentConfigContract:
 
     def test_entrypoint_uses_cp_not_mv_for_config_file(self) -> None:
         """copy_agent_config must use cp -f (not mv) for config file relocation."""
-        content = ENTRYPOINT_PATH.read_text()
+        content = ENTRYPOINT_LIB_CONFIG_PATH.read_text()
         # Find copy_agent_config function body
         func_start = content.find("copy_agent_config()")
         func_end = content.find("\n}", func_start)
@@ -1218,15 +1164,17 @@ class TestPersistAgentConfigContract:
             "copy_agent_config must not use 'mv' which breaks symlinks"
         )
 
-    def test_sandbox_config_uses_cp_for_claude_json(self) -> None:
-        """apply_sandbox_config Claude case must use cp+rm, not mv on config file."""
-        content = ENTRYPOINT_PATH.read_text()
-        # Find the Claude sandbox config section (the *) case)
-        claude_case_start = content.find("# Claude Code sandbox config")
-        claude_case_end = content.find(";;", claude_case_start)
-        claude_case = content[claude_case_start:claude_case_end]
-        assert 'cp -f "${config_file}.tmp" "$config_file"' in claude_case, (
+    def test_sandbox_config_python_uses_cp_for_claude_json(self) -> None:
+        """Claude agent's apply_sandbox_config must use cp+rm, not mv."""
+        from paude.agents.claude import ClaudeAgent
+
+        agent = ClaudeAgent()
+        script = agent.apply_sandbox_config("/home/paude", "/pvc/workspace", "")
+        assert 'cp -f "${claude_json}.tmp" "$claude_json"' in script, (
             "Claude sandbox config must use 'cp -f' for .claude.json to preserve symlinks"
+        )
+        assert 'rm -f "${claude_json}.tmp"' in script, (
+            "Claude sandbox config must remove temp file after cp"
         )
 
 
@@ -1308,3 +1256,93 @@ class TestCopyThroughSymlinks:
         assert (home / ".claude.json").is_symlink()
         # Data went through to PVC
         assert json.loads((pvc / ".claude.json").read_text())["seeded"] is True
+
+
+class TestCursorSandboxConfig:
+    """Tests for Cursor agent sandbox config generation and execution."""
+
+    def test_cursor_sandbox_creates_workspace_trust(self, tmp_path: Path) -> None:
+        """Cursor sandbox config must create .workspace-trusted file."""
+        home = tmp_path / "home"
+        home.mkdir()
+        workspace = "/pvc/workspace"
+
+        from paude.agents.cursor import CursorAgent
+
+        agent = CursorAgent()
+        config_script = agent.apply_sandbox_config(str(home), workspace, "")
+        script = f'#!/bin/bash\nset -e\nexport HOME="{home}"\n{config_script}'
+
+        result = _run_script(script)
+        assert result.returncode == 0, (
+            f"Cursor sandbox config script failed:\n{result.stderr}"
+        )
+
+        # Verify .workspace-trusted was created with correct content
+        # workspace /pvc/workspace → slug pvc-workspace
+        trusted_dir = home / ".cursor" / "projects" / "pvc-workspace"
+        trusted_file = trusted_dir / ".workspace-trusted"
+        assert trusted_file.exists(), (
+            f".workspace-trusted not found; home contents: "
+            f"{list((home / '.cursor').rglob('*')) if (home / '.cursor').exists() else 'no .cursor'}"
+        )
+        content = json.loads(trusted_file.read_text())
+        assert content["workspacePath"] == workspace
+
+    def test_cursor_python_generates_trust_config(self) -> None:
+        """Contract: Cursor agent's apply_sandbox_config handles workspace trust."""
+        from paude.agents.cursor import CursorAgent
+
+        agent = CursorAgent()
+        script = agent.apply_sandbox_config("/home/paude", "/pvc/workspace", "")
+        assert "cli-config.json" in script, (
+            "Cursor apply_sandbox_config must handle cli-config.json"
+        )
+        assert "workspace-trusted" in script, (
+            "Cursor apply_sandbox_config must create workspace-trusted"
+        )
+
+
+class TestGenerateSandboxConfigScript:
+    """Tests for generate_sandbox_config_script() in shared.py."""
+
+    def test_generates_claude_script(self) -> None:
+        from paude.backends.shared import generate_sandbox_config_script
+
+        script = generate_sandbox_config_script("claude", "/pvc/workspace", "")
+        assert "hasCompletedOnboarding" in script
+        assert "hasTrustDialogAccepted" in script
+
+    def test_generates_gemini_script(self) -> None:
+        from paude.backends.shared import generate_sandbox_config_script
+
+        script = generate_sandbox_config_script("gemini", "/pvc/workspace", "")
+        assert "trustedFolders.json" in script
+        assert "TRUST_FOLDER" in script
+
+    def test_generates_cursor_script(self) -> None:
+        from paude.backends.shared import generate_sandbox_config_script
+
+        script = generate_sandbox_config_script("cursor", "/pvc/workspace", "")
+        assert "cli-config.json" in script
+        assert "workspace-trusted" in script
+
+    def test_claude_script_includes_host_workspace(self) -> None:
+        from paude.backends.shared import generate_sandbox_config_script
+
+        script = generate_sandbox_config_script("claude", "/pvc/workspace", "")
+        assert "PAUDE_HOST_WORKSPACE" in script
+
+    def test_claude_script_uses_container_home(self) -> None:
+        from paude.backends.shared import generate_sandbox_config_script
+
+        script = generate_sandbox_config_script("claude", "/pvc/workspace", "")
+        assert "/home/paude/.claude.json" in script
+
+    def test_claude_script_with_yolo_args(self) -> None:
+        from paude.backends.shared import generate_sandbox_config_script
+
+        script = generate_sandbox_config_script(
+            "claude", "/pvc/workspace", "--dangerously-skip-permissions"
+        )
+        assert "skipDangerousModePermissionPrompt" in script
