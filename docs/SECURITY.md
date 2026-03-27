@@ -6,7 +6,7 @@ The container intentionally restricts certain operations:
 |----------|--------|---------|
 | Network | proxy-filtered (Vertex AI, PyPI, GitHub, agent-specific) | Prevents data exfiltration |
 | Current directory | read-write | Working files |
-| `~/.config/gcloud` | read-only | Vertex AI auth |
+| gcloud credentials | injected (Podman secret / oc cp) | Vertex AI auth |
 | Agent config | copied in, not mounted | Prevents host config poisoning |
 | `~/.gitconfig` | read-only | Git identity |
 | SSH keys | not mounted | Prevents git push via SSH |
@@ -24,7 +24,7 @@ These exfiltration paths have been tested and confirmed blocked:
 | Git push via SSH | Blocked | No `~/.ssh` mounted; DNS resolution fails anyway |
 | Git push via HTTPS | Blocked | No credential helpers; no stored credentials; DNS blocked |
 | GitHub CLI write ops | Relies on token scope — use a read-only fine-grained PAT | Use read-only PAT via `PAUDE_GITHUB_TOKEN`; host `GH_TOKEN` never propagated |
-| Modify cloud credentials | Blocked | gcloud directory mounted read-only |
+| Modify cloud credentials | Blocked | Credentials injected via Podman secret (not mounted); read-only inside container |
 | Escape container | Blocked | Non-root user; standard Podman isolation |
 
 ## When is `--yolo` Safe?

@@ -22,8 +22,8 @@ paude status
 ```
 
 ```
-SESSION     PROJECT        BACKEND   STATUS    ACTIVITY              STATE
-my-project  your-project   podman    running   2026-03-08 14:32:01   Active
+SESSION              PROJECT         BACKEND    ACTIVITY   STATE      SUMMARY
+my-project           your-project    podman     14:32      Active     Refactoring auth module
 ```
 
 The `STATE` column shows `Active` when the agent is working or `Idle` when waiting.
@@ -38,7 +38,7 @@ paude harvest my-project -b feature/auth-refactor
 
 This creates a local `feature/auth-refactor` branch with all of the agent's commits. Review the diff, run tests, and iterate as needed.
 
-Protected branches (`main`, `master`, `release`) cannot be used as harvest targets.
+Protected branches (`main`, `master`, `release`, `release-*`, `release/*`) cannot be used as harvest targets.
 
 ## Open a PR
 
