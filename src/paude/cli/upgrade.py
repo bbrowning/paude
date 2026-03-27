@@ -221,13 +221,18 @@ def _upgrade_podman(
 
     # Build mounts and env
     home = Path.home()
-    mounts = build_mounts(home, agent_instance)
+    mounts = build_mounts(home, agent_instance, include_config=engine.is_remote)
+
+    # Build environment (passthrough vars like CLAUDE_CODE_USE_VERTEX)
+    env = agent_instance.build_environment()
+    if config and config.container_env:
+        env.update(config.container_env)
 
     # Only expand domains if the original session had domain filtering.
     # allowed_domains=None means the session had no proxy (unrestricted);
     # passing None to _prepare_session_create would incorrectly add defaults.
     if allowed_domains is not None:
-        expanded_domains, parsed_args, env, unrestricted = _prepare_session_create(
+        expanded_domains, parsed_args, _env, unrestricted = _prepare_session_create(
             allowed_domains, yolo, None, config, agent_name=agent_name
         )
         session_domains = expanded_domains if not unrestricted else allowed_domains
@@ -241,6 +246,7 @@ def _upgrade_podman(
         name=name,
         workspace=workspace,
         image=image,
+        env=env,
         mounts=mounts,
         allowed_domains=session_domains,
         yolo=yolo,
