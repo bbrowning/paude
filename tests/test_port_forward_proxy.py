@@ -29,6 +29,26 @@ def _find_free_port() -> int:
         return s.getsockname()[1]
 
 
+def _cleanup_proxy(proc: subprocess.Popen[bytes]) -> None:
+    """Reliably kill a proxy subprocess and its children.
+
+    Sends SIGTERM to the process group first, then escalates to SIGKILL
+    if the process doesn't exit within 3 seconds.
+    """
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        pass
+    try:
+        proc.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        proc.wait(timeout=3)
+
+
 class TestPortForwardProxy:
     """Integration tests for the proxy script."""
 
@@ -67,8 +87,7 @@ class TestPortForwardProxy:
 
             assert response == b"hello world"
         finally:
-            os.kill(proc.pid, signal.SIGTERM)
-            proc.wait(timeout=5)
+            _cleanup_proxy(proc)
 
     def test_proxy_handles_multiple_connections(self) -> None:
         """Test that the proxy can handle multiple concurrent connections."""
@@ -107,8 +126,7 @@ class TestPortForwardProxy:
 
             assert results == [b"msg-0", b"msg-1", b"msg-2"]
         finally:
-            os.kill(proc.pid, signal.SIGTERM)
-            proc.wait(timeout=5)
+            _cleanup_proxy(proc)
 
     def test_proxy_shuts_down_on_sigterm(self) -> None:
         """Test that the proxy exits cleanly on SIGTERM."""
@@ -131,7 +149,11 @@ class TestPortForwardProxy:
         _wait_for_port(listen_port)
 
         os.kill(proc.pid, signal.SIGTERM)
-        proc.wait(timeout=5)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _cleanup_proxy(proc)
+            raise
         assert proc.returncode is not None
 
     def test_proxy_binds_to_localhost_only(self) -> None:
@@ -159,5 +181,4 @@ class TestPortForwardProxy:
             with socket.create_connection(("127.0.0.1", listen_port)) as sock:
                 sock.close()
         finally:
-            os.kill(proc.pid, signal.SIGTERM)
-            proc.wait(timeout=5)
+            _cleanup_proxy(proc)
