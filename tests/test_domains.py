@@ -639,6 +639,29 @@ class TestMessagingDomainAliases:
         assert result is not None
         assert any("slack" in d for d in result)
 
+    def test_openclaw_includes_builtin_services(self):
+        """OpenClaw alias includes DuckDuckGo and weather domains."""
+        result = expand_domains(["openclaw"])
+        assert result is not None
+        assert ".duckduckgo.com" in result
+        assert "wttr.in" in result
+        assert "api.open-meteo.com" in result
+
+    def test_clawhub_alias_exists(self):
+        """Clawhub alias is separate from openclaw for opt-in skill install."""
+        assert "clawhub" in DOMAIN_ALIASES
+        result = expand_domains(["clawhub"])
+        assert result is not None
+        assert any("clawhub" in d for d in result)
+        assert "registry.npmjs.org" in result
+
+    def test_openclaw_does_not_include_clawhub(self):
+        """Clawhub domains are NOT in the openclaw alias (opt-in only)."""
+        result = expand_domains(["openclaw"])
+        assert result is not None
+        assert not any("clawhub" in d for d in result)
+        assert "registry.npmjs.org" not in result
+
     def test_openclaw_with_messaging_aliases(self):
         """Can combine openclaw with messaging aliases."""
         result = expand_domains(
