@@ -6,11 +6,8 @@ import os
 import signal
 from unittest.mock import MagicMock, patch
 
-from paude.backends.openshift.port_forward import (
-    PortForwardManager,
-    _is_process_running,
-    _pid_file,
-)
+from paude.backends.openshift.port_forward import PortForwardManager
+from paude.backends.port_forward_utils import is_process_running, pid_file
 
 
 class TestPortForwardManagerStart:
@@ -20,10 +17,10 @@ class TestPortForwardManagerStart:
         mgr = PortForwardManager("test-ns")
         mgr.start("my-session", "pod-0", [])
         # Should not create any PID file
-        assert not _pid_file("my-session").exists()
+        assert not pid_file("my-session").exists()
 
     @patch("paude.backends.openshift.port_forward.subprocess.Popen")
-    @patch("paude.backends.openshift.port_forward._pid_dir")
+    @patch("paude.backends.port_forward_utils.pid_dir")
     def test_starts_port_forward(self, mock_pid_dir, mock_popen, tmp_path) -> None:
         mock_pid_dir.return_value = tmp_path
         mock_proc = MagicMock()
@@ -43,12 +40,12 @@ class TestPortForwardManagerStart:
         assert "pod-0" in cmd
         assert "18789:18789" in cmd
 
-        pid_file = tmp_path / "my-session.pid"
-        assert pid_file.exists()
-        assert pid_file.read_text() == "12345"
+        pid_f = tmp_path / "my-session.pid"
+        assert pid_f.exists()
+        assert pid_f.read_text() == "12345"
 
     @patch("paude.backends.openshift.port_forward.subprocess.Popen")
-    @patch("paude.backends.openshift.port_forward._pid_dir")
+    @patch("paude.backends.port_forward_utils.pid_dir")
     def test_includes_context_when_set(
         self, mock_pid_dir, mock_popen, tmp_path
     ) -> None:
@@ -64,9 +61,9 @@ class TestPortForwardManagerStart:
         assert "--context" in cmd
         assert "my-ctx" in cmd
 
-    @patch("paude.backends.openshift.port_forward._is_process_running")
+    @patch("paude.backends.port_forward_utils.is_process_running")
     @patch("paude.backends.openshift.port_forward.subprocess.Popen")
-    @patch("paude.backends.openshift.port_forward._pid_dir")
+    @patch("paude.backends.port_forward_utils.pid_dir")
     def test_idempotent_when_already_running(
         self, mock_pid_dir, mock_popen, mock_running, tmp_path
     ) -> None:
@@ -74,8 +71,8 @@ class TestPortForwardManagerStart:
         mock_running.return_value = True
 
         # Write a PID file as if port-forward is already running
-        pid_file = tmp_path / "my-session.pid"
-        pid_file.write_text("12345")
+        pid_f = tmp_path / "my-session.pid"
+        pid_f.write_text("12345")
 
         mgr = PortForwardManager("test-ns")
         mgr.start("my-session", "pod-0", [(18789, 18789)])
@@ -92,44 +89,44 @@ class TestPortForwardManagerStop:
         mgr = PortForwardManager("test-ns")
         mgr.stop("nonexistent-session")
 
-    @patch("paude.backends.openshift.port_forward._is_process_running")
-    @patch("paude.backends.openshift.port_forward._pid_dir")
+    @patch("paude.backends.port_forward_utils.is_process_running")
+    @patch("paude.backends.port_forward_utils.pid_dir")
     def test_stop_kills_process(self, mock_pid_dir, mock_running, tmp_path) -> None:
         mock_pid_dir.return_value = tmp_path
         mock_running.return_value = True
 
-        pid_file = tmp_path / "my-session.pid"
-        pid_file.write_text("12345")
+        pid_f = tmp_path / "my-session.pid"
+        pid_f.write_text("12345")
 
-        with patch("os.kill") as mock_kill:
+        with patch("paude.backends.port_forward_utils.os.kill") as mock_kill:
             mgr = PortForwardManager("test-ns")
             mgr.stop("my-session")
 
             mock_kill.assert_called_once_with(12345, signal.SIGTERM)
 
-        assert not pid_file.exists()
+        assert not pid_f.exists()
 
-    @patch("paude.backends.openshift.port_forward._pid_dir")
+    @patch("paude.backends.port_forward_utils.pid_dir")
     def test_stop_cleans_up_stale_pid(self, mock_pid_dir, tmp_path) -> None:
         mock_pid_dir.return_value = tmp_path
 
-        pid_file = tmp_path / "my-session.pid"
-        pid_file.write_text("99999")
+        pid_f = tmp_path / "my-session.pid"
+        pid_f.write_text("99999")
 
         # Process is not running, but PID file exists
-        with patch("os.kill", side_effect=OSError):
+        with patch("paude.backends.port_forward_utils.os.kill", side_effect=OSError):
             mgr = PortForwardManager("test-ns")
             mgr.stop("my-session")
 
-        assert not pid_file.exists()
+        assert not pid_f.exists()
 
 
 class TestIsProcessRunning:
-    """Tests for _is_process_running helper."""
+    """Tests for is_process_running helper."""
 
     def test_current_process_is_running(self) -> None:
-        assert _is_process_running(os.getpid()) is True
+        assert is_process_running(os.getpid()) is True
 
     def test_nonexistent_process(self) -> None:
         # PID 99999999 should not exist
-        assert _is_process_running(99999999) is False
+        assert is_process_running(99999999) is False

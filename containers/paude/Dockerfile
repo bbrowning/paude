@@ -25,6 +25,7 @@ RUN dnf install -y dnf-plugins-core && \
         findutils \
         grep \
         sed \
+        socat \
         gawk \
         diffutils \
         less \
