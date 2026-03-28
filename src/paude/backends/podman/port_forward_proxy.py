@@ -20,7 +20,6 @@ import shlex
 import signal
 import socket
 import subprocess
-import sys
 import threading
 from typing import NoReturn
 
@@ -177,7 +176,7 @@ def main(argv: list[str] | None = None) -> NoReturn:
                 s.close()
             except OSError:
                 pass
-        sys.exit(0)
+        os._exit(0)
 
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
