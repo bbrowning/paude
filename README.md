@@ -9,6 +9,7 @@ Run AI coding agents in secure containers. They make commits, you pull them back
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `--agent claude` (default) | Supported |
 | [Cursor CLI](https://docs.cursor.com/cli) | `--agent cursor` | Supported |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `--agent gemini` | Supported |
+| [OpenClaw](https://github.com/openclaw/openclaw) | `--agent openclaw` | Supported |
 
 > **Note**: Your chosen agent must be installed and working on your local machine first.
 
@@ -76,6 +77,9 @@ paude create --agent cursor --yolo --git my-project
 
 # Gemini CLI
 paude create --agent gemini --yolo --git my-project
+
+# OpenClaw (web UI at http://localhost:18789)
+paude create --agent openclaw --allowed-domains "default openclaw" my-project
 
 # Connect to the running session
 paude connect my-project

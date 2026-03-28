@@ -106,6 +106,7 @@ def create_podman_session(
         proxy_image=podman_proxy_image,
         agent=agent_name,
         gpu=gpu,
+        ports=agent_instance.config.exposed_ports,
     )
 
     try:

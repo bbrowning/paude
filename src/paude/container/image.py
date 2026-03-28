@@ -162,10 +162,13 @@ class ImageManager:
 
         entrypoint = resolve_entrypoint(self.script_dir)
         agent_name = self.agent.config.name if self.agent else None
+        effective_base = config.base_image
+        if not effective_base and self.agent and self.agent.config.default_base_image:
+            effective_base = self.agent.config.default_base_image
         config_hash = compute_config_hash(
             config.config_file,
             config.dockerfile,
-            config.base_image,
+            effective_base,
             entrypoint,
             self.version,
             agent_name=agent_name,
@@ -223,6 +226,10 @@ class ImageManager:
         elif config.base_image:
             print(f"  → Using base: {config.base_image}", file=sys.stderr)
             return config.base_image, False
+        elif self.agent and self.agent.config.default_base_image:
+            base = self.agent.config.default_base_image
+            print(f"  → Using agent default base: {base}", file=sys.stderr)
+            return base, False
         else:
             base_image = self.ensure_default_image()
             print(f"  → Using default paude image: {base_image}", file=sys.stderr)

@@ -70,6 +70,7 @@ class ContainerRunner:
         secrets: list[str] | None = None,
         gpu: str | None = None,
         dns: list[str] | None = None,
+        ports: list[tuple[int, int]] | None = None,
     ) -> str:
         """Create a container without starting it.
 
@@ -86,6 +87,10 @@ class ContainerRunner:
             workdir,
             "-it",
         ]
+
+        if ports:
+            for host_port, container_port in ports:
+                args.extend(["-p", f"{host_port}:{container_port}"])
 
         if gpu:
             args.extend(self._engine.gpu_args(gpu))

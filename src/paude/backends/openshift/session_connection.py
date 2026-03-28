@@ -44,7 +44,8 @@ class SessionConnector:
             return 1
 
         self._sync_for_connect(pname, name, github_token)
-        return self._attach_to_pod(pname, name, ns)
+        port_urls = self._start_port_forward(name, pname)
+        return self._attach_to_pod(pname, name, ns, port_urls=port_urls)
 
     def _verify_pod_running(self, name: str) -> tuple[str | None, str]:
         """Check pod exists and is in Running phase.
@@ -75,6 +76,40 @@ class SessionConnector:
 
         return pname, ns
 
+    def _start_port_forward(self, session_name: str, pod_name: str) -> list[str]:
+        """Start port-forwarding if the agent has exposed ports.
+
+        Returns:
+            List of port-forward URL strings.
+        """
+        from paude.agents import get_agent
+        from paude.backends.openshift.port_forward import PortForwardManager
+
+        agent_name = self._get_session_agent_name(session_name)
+        agent = get_agent(agent_name)
+        ports = agent.config.exposed_ports
+        if not ports:
+            return []
+
+        mgr = PortForwardManager(self._namespace, self._config.context)
+        mgr.start(session_name, pod_name, ports)
+
+        return [f"http://localhost:{hp}" for hp, _cp in ports]
+
+    @staticmethod
+    def _agent_name_from_sts(sts: dict[str, object] | None) -> str:
+        """Extract the agent name from a StatefulSet's labels."""
+        if not sts:
+            return "claude"
+        metadata: dict[str, object] = sts.get("metadata", {})  # type: ignore[assignment]
+        labels: dict[str, object] = metadata.get("labels", {})  # type: ignore[assignment]
+        return str(labels.get(PAUDE_LABEL_AGENT, "claude"))
+
+    def _get_session_agent_name(self, session_name: str) -> str:
+        """Look up the agent name from StatefulSet labels."""
+        sts = self._lookup.get_statefulset(session_name)
+        return self._agent_name_from_sts(sts)
+
     def _sync_for_connect(
         self, pname: str, name: str, github_token: str | None
     ) -> None:
@@ -83,8 +118,7 @@ class SessionConnector:
         from paude.agents.base import build_secret_environment_from_config
 
         sts = self._lookup.get_statefulset(name)
-        sts_labels = sts.get("metadata", {}).get("labels", {}) if sts else {}
-        agent_name = sts_labels.get(PAUDE_LABEL_AGENT, "claude")
+        agent_name = self._agent_name_from_sts(sts)
         agent_args = self._extract_env_from_sts(sts, "PAUDE_AGENT_ARGS")
 
         agent = get_agent(agent_name)
@@ -125,7 +159,13 @@ class SessionConnector:
                     return str(env.get("value", ""))
         return ""
 
-    def _attach_to_pod(self, pname: str, name: str, ns: str) -> int:
+    def _attach_to_pod(
+        self,
+        pname: str,
+        name: str,
+        ns: str,
+        port_urls: list[str] | None = None,
+    ) -> int:
         """Check workspace state, build exec command, and attach."""
         check_result = self._oc.run(
             "exec",
@@ -146,14 +186,23 @@ class SessionConnector:
             print(f"  git push {resource_name(name)} main", file=sys.stderr)
             print("", file=sys.stderr)
 
-        exec_cmd = self._build_exec_cmd(pname, ns)
+        exec_cmd = self._build_exec_cmd(pname, ns, port_urls=port_urls)
         exec_result = subprocess.run(exec_cmd)
 
         os.system("stty sane 2>/dev/null")  # noqa: S605
 
+        if port_urls:
+            for url in port_urls:
+                print(f"Port-forward active: {url}", file=sys.stderr)
+
         return exec_result.returncode
 
-    def _build_exec_cmd(self, pname: str, ns: str) -> list[str]:
+    def _build_exec_cmd(
+        self,
+        pname: str,
+        ns: str,
+        port_urls: list[str] | None = None,
+    ) -> list[str]:
         """Build the oc exec command list."""
         if self._config.context:
             cmd = [
@@ -169,6 +218,9 @@ class SessionConnector:
             ]
         else:
             cmd = ["oc", "exec", "-it", "-n", ns, pname, "--"]
+
+        if port_urls:
+            cmd.extend(["env", f"PAUDE_PORT_URLS={';'.join(port_urls)}"])
 
         cmd.append("/usr/local/bin/entrypoint-session.sh")
         return cmd

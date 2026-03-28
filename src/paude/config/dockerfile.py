@@ -178,6 +178,11 @@ RUN if ! command -v tini >/dev/null 2>&1; then \\
         f"chown -R paude:0 {CONTAINER_HOME}"
     )
 
+    # Copy patch script before agent install lines (agents may RUN it)
+    lines.append(
+        "COPY --chmod=755 patch-proxy-fetch.sh /usr/local/bin/patch-proxy-fetch.sh"
+    )
+
     lines.extend(agent.dockerfile_install_lines(CONTAINER_HOME))
 
     lines.append("")
@@ -185,14 +190,31 @@ RUN if ! command -v tini >/dev/null 2>&1; then \\
     lines.append("USER root")
 
     lines.append("")
-    lines.append("# Preserve base image PATH across login shells (Debian /etc/profile resets PATH)")
     lines.append(
-        'RUN echo \'export PATH="\'\"$PATH\"\'"\' > /etc/profile.d/paude-path.sh '
+        "# Preserve base image PATH across login shells (Debian /etc/profile resets PATH)"
+    )
+    lines.append(
+        "RUN echo 'export PATH=\"'\"$PATH\"'\"' > /etc/profile.d/paude-path.sh "
         "&& chmod 644 /etc/profile.d/paude-path.sh"
     )
     lines.append(f"COPY --chmod=755 entrypoint.sh {CONTAINER_ENTRYPOINT}")
     lines.append(
         "COPY --chmod=755 entrypoint-session.sh /usr/local/bin/entrypoint-session.sh"
+    )
+    lines.append(
+        "COPY --chmod=755 entrypoint-lib-credentials.sh"
+        " /usr/local/bin/entrypoint-lib-credentials.sh"
+    )
+    lines.append(
+        "COPY --chmod=755 entrypoint-lib-config.sh"
+        " /usr/local/bin/entrypoint-lib-config.sh"
+    )
+    lines.append(
+        "COPY --chmod=755 entrypoint-lib-install.sh"
+        " /usr/local/bin/entrypoint-lib-install.sh"
+    )
+    lines.append(
+        "COPY --chmod=755 credential-watchdog.sh /usr/local/bin/credential-watchdog.sh"
     )
     lines.append(f"COPY --chmod=664 tmux.conf {CONTAINER_HOME}/.tmux.conf")
 

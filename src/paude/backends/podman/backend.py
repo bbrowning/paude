@@ -105,6 +105,27 @@ class PodmanBackend:
         labels = (container.get("Labels", {}) or {}) if container else {}
         return str(labels.get(PAUDE_LABEL_AGENT, "claude"))
 
+    def _get_port_urls(self, session_name: str) -> list[str]:
+        """Get port-forward URL strings for a session's agent."""
+        from paude.agents import get_agent
+
+        agent_name = self._get_session_agent_name(session_name)
+        agent = get_agent(agent_name)
+        return [f"http://localhost:{hp}" for hp, _cp in agent.config.exposed_ports]
+
+    def _print_port_urls(self, session_name: str) -> None:
+        """Print access URLs for any exposed ports."""
+        from paude.agents import get_agent
+
+        agent_name = self._get_session_agent_name(session_name)
+        agent = get_agent(agent_name)
+        for host_port, _container_port in agent.config.exposed_ports:
+            print(
+                f"{agent.config.display_name} UI available at:"
+                f" http://localhost:{host_port}",
+                file=sys.stderr,
+            )
+
     def _build_attach_env(
         self, name: str, github_token: str | None
     ) -> dict[str, str] | None:
@@ -120,6 +141,11 @@ class PodmanBackend:
         if github_token:
             extra_env["GH_TOKEN"] = github_token
         extra_env.update(secret_env)
+
+        port_urls = self._get_port_urls(name)
+        if port_urls:
+            extra_env["PAUDE_PORT_URLS"] = ";".join(port_urls)
+
         return extra_env or None
 
     def _sync_host_config(self, cname: str, agent_name: str) -> None:
@@ -300,6 +326,7 @@ class PodmanBackend:
                 network=network,
                 gpu=config.gpu,
                 dns=dns,
+                ports=config.ports or None,
             )
         except Exception:
             # Cleanup all resources on failure
@@ -422,11 +449,14 @@ class PodmanBackend:
         self._sync_host_config(cname, self._get_session_agent_name(name))
         self._sync_sandbox_config(cname, name)
 
-        return self._runner.attach_container(
+        self._print_port_urls(name)
+        exit_code = self._runner.attach_container(
             cname,
             entrypoint=CONTAINER_ENTRYPOINT,
             extra_env=self._build_attach_env(name, github_token),
         )
+        self._print_port_urls(name)
+        return exit_code
 
     def stop_session(self, name: str) -> None:
         """Stop a session (preserves volume)."""
@@ -484,11 +514,14 @@ class PodmanBackend:
         self._sync_sandbox_config(cname, name)
 
         print(f"Connecting to session '{name}'...", file=sys.stderr)
-        return self._runner.attach_container(
+        self._print_port_urls(name)
+        exit_code = self._runner.attach_container(
             cname,
             entrypoint=CONTAINER_ENTRYPOINT,
             extra_env=self._build_attach_env(name, github_token),
         )
+        self._print_port_urls(name)
+        return exit_code
 
     def list_sessions(self) -> list[Session]:
         """List all sessions."""

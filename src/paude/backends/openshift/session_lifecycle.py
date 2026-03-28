@@ -207,6 +207,8 @@ class SessionLifecycleManager:
 
         print(f"Deleting session '{name}'...", file=sys.stderr)
 
+        self._stop_port_forward(name)
+
         print(f"Scaling StatefulSet/{sts_name} to 0...", file=sys.stderr)
         self._oc.run(
             "scale",
@@ -294,6 +296,8 @@ class SessionLifecycleManager:
         """Stop a session (preserves volume)."""
         self._lookup.require_session(name)
 
+        self._stop_port_forward(name)
+
         print(f"Stopping session '{name}'...", file=sys.stderr)
         self._scale_statefulset(name, 0)
 
@@ -303,6 +307,13 @@ class SessionLifecycleManager:
             self._scale_deployment(proxy_dep, 0)
 
         print(f"Session '{name}' stopped.", file=sys.stderr)
+
+    def _stop_port_forward(self, session_name: str) -> None:
+        """Stop any active port-forward for this session."""
+        from paude.backends.openshift.port_forward import PortForwardManager
+
+        mgr = PortForwardManager(self._namespace, self._config.context)
+        mgr.stop(session_name)
 
     def _scale_statefulset(self, session_name: str, replicas: int) -> None:
         """Scale a StatefulSet to the specified number of replicas."""

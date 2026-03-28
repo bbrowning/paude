@@ -6,6 +6,7 @@ from paude.agents.base import Agent, AgentConfig
 from paude.agents.claude import ClaudeAgent
 from paude.agents.cursor import CursorAgent
 from paude.agents.gemini import GeminiAgent
+from paude.agents.openclaw import OpenClawAgent
 
 __all__ = [
     "Agent",
@@ -13,6 +14,7 @@ __all__ = [
     "ClaudeAgent",
     "CursorAgent",
     "GeminiAgent",
+    "OpenClawAgent",
     "get_agent",
     "list_agents",
 ]
@@ -21,6 +23,7 @@ _REGISTRY: dict[str, type] = {
     "claude": ClaudeAgent,
     "cursor": CursorAgent,
     "gemini": GeminiAgent,
+    "openclaw": OpenClawAgent,
 }
 
 

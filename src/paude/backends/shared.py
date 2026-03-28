@@ -108,6 +108,12 @@ def build_session_env(
 
     env = dict(config.env)
     env.update(build_agent_env(agent.config))
+    # build_agent_env sets LAUNCH_CMD to process_name, which is wrong for
+    # agents where the launch binary differs from the process name (e.g.
+    # OpenClaw: process_name="node" but launch is "openclaw gateway ...").
+    # Override with the agent's actual launch command (no args — those are
+    # passed separately via PAUDE_AGENT_ARGS).
+    env["PAUDE_AGENT_LAUNCH_CMD"] = agent.launch_command("")
     env["PAUDE_HOST_WORKSPACE"] = str(config.workspace)
 
     agent_args = list(config.args)

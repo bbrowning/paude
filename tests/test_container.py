@@ -1186,6 +1186,80 @@ class TestContainerRunnerDns:
         assert call_args[dns_indices[1] + 1] == "8.8.8.8"
 
 
+class TestContainerPortMapping:
+    """Tests for port mapping in ContainerRunner.create_container."""
+
+    @patch("paude.transport.local.subprocess.run")
+    def test_create_container_with_ports(self, mock_run):
+        """create_container passes -p flags when ports are provided."""
+        from paude.container.engine import ContainerEngine
+        from paude.container.runner import ContainerRunner
+
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="container-id", stderr=""
+        )
+        engine = ContainerEngine("podman")
+        runner = ContainerRunner(engine)
+        runner.create_container(
+            name="test",
+            image="test:latest",
+            mounts=[],
+            env={},
+            workdir="/pvc",
+            ports=[(18789, 18789)],
+        )
+        call_args = mock_run.call_args[0][0]
+        assert "-p" in call_args
+        p_idx = call_args.index("-p")
+        assert call_args[p_idx + 1] == "18789:18789"
+
+    @patch("paude.transport.local.subprocess.run")
+    def test_create_container_without_ports(self, mock_run):
+        """create_container does not pass -p when ports is None."""
+        from paude.container.engine import ContainerEngine
+        from paude.container.runner import ContainerRunner
+
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="container-id", stderr=""
+        )
+        engine = ContainerEngine("podman")
+        runner = ContainerRunner(engine)
+        runner.create_container(
+            name="test",
+            image="test:latest",
+            mounts=[],
+            env={},
+            workdir="/pvc",
+        )
+        call_args = mock_run.call_args[0][0]
+        assert "-p" not in call_args
+
+    @patch("paude.transport.local.subprocess.run")
+    def test_create_container_with_multiple_ports(self, mock_run):
+        """create_container passes multiple -p flags."""
+        from paude.container.engine import ContainerEngine
+        from paude.container.runner import ContainerRunner
+
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="container-id", stderr=""
+        )
+        engine = ContainerEngine("podman")
+        runner = ContainerRunner(engine)
+        runner.create_container(
+            name="test",
+            image="test:latest",
+            mounts=[],
+            env={},
+            workdir="/pvc",
+            ports=[(8080, 80), (18789, 18789)],
+        )
+        call_args = mock_run.call_args[0][0]
+        p_indices = [i for i, x in enumerate(call_args) if x == "-p"]
+        assert len(p_indices) == 2
+        assert call_args[p_indices[0] + 1] == "8080:80"
+        assert call_args[p_indices[1] + 1] == "18789:18789"
+
+
 class TestNetworkManagerDisableDns:
     """Tests for disable_dns parameter in create_internal_network."""
 

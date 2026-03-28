@@ -607,3 +607,43 @@ class TestExpandDomainsWithExtraAliases:
         assert result is not None
         for domain in DOMAIN_ALIASES["claude"]:
             assert domain in result
+
+
+class TestMessagingDomainAliases:
+    """Tests for messaging platform domain aliases."""
+
+    def test_openclaw_alias_exists(self):
+        assert "openclaw" in DOMAIN_ALIASES
+
+    def test_whatsapp_alias_exists(self):
+        assert "whatsapp" in DOMAIN_ALIASES
+        result = expand_domains(["whatsapp"])
+        assert result is not None
+        assert any("whatsapp" in d for d in result)
+
+    def test_telegram_alias_exists(self):
+        assert "telegram" in DOMAIN_ALIASES
+        result = expand_domains(["telegram"])
+        assert result is not None
+        assert "api.telegram.org" in result
+
+    def test_discord_alias_exists(self):
+        assert "discord" in DOMAIN_ALIASES
+        result = expand_domains(["discord"])
+        assert result is not None
+        assert any("discord" in d for d in result)
+
+    def test_slack_alias_exists(self):
+        assert "slack" in DOMAIN_ALIASES
+        result = expand_domains(["slack"])
+        assert result is not None
+        assert any("slack" in d for d in result)
+
+    def test_openclaw_with_messaging_aliases(self):
+        """Can combine openclaw with messaging aliases."""
+        result = expand_domains(
+            ["default", "telegram", "discord"], extra_aliases=["openclaw"]
+        )
+        assert result is not None
+        assert "api.telegram.org" in result
+        assert any("discord" in d for d in result)
