@@ -2849,7 +2849,30 @@ class TestSyncConfigWithPlugins:
         self, mock_run: MagicMock, tmp_path: Path
     ) -> None:
         """_syncer.sync_full_config calls _rewrite_plugin_paths after rsync."""
-        # Create mock claude directory
+        # Create mock claude directory with plugins subdirectory
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "settings.json").write_text("{}")
+        (claude_dir / "plugins").mkdir()
+
+        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = mock_run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            with patch.object(backend._syncer, "_rewrite_plugin_paths") as mock_rewrite:
+                backend._syncer.sync_full_config("test-pod-0")
+                mock_rewrite.assert_called_once()
+
+    @patch("subprocess.run")
+    def test_sync_config_skips_rewrite_when_no_plugins_dir(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """_syncer.sync_full_config skips _rewrite_plugin_paths when no plugins dir."""
+        # Create mock claude directory WITHOUT plugins subdirectory
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
         (claude_dir / "settings.json").write_text("{}")
@@ -2864,7 +2887,7 @@ class TestSyncConfigWithPlugins:
         with patch("pathlib.Path.home", return_value=tmp_path):
             with patch.object(backend._syncer, "_rewrite_plugin_paths") as mock_rewrite:
                 backend._syncer.sync_full_config("test-pod-0")
-                mock_rewrite.assert_called_once()
+                mock_rewrite.assert_not_called()
 
     @patch("subprocess.run")
     def test_sync_config_handles_missing_claude_dir(
