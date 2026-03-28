@@ -214,6 +214,10 @@ RUN if ! command -v tini >/dev/null 2>&1; then \\
         " /usr/local/bin/entrypoint-lib-install.sh"
     )
     lines.append(
+        "COPY --chmod=755 entrypoint-lib-openclaw.sh"
+        " /usr/local/bin/entrypoint-lib-openclaw.sh"
+    )
+    lines.append(
         "COPY --chmod=755 credential-watchdog.sh /usr/local/bin/credential-watchdog.sh"
     )
     lines.append(f"COPY --chmod=664 tmux.conf {CONTAINER_HOME}/.tmux.conf")

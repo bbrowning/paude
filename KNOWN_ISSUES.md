@@ -37,6 +37,21 @@ Technical debt identified during codebase analysis. Address these before adding 
 - `PodmanBackend` in `backends/podman/backend.py` — 26 methods
 - `OpenShiftBackend` in `backends/openshift/backend.py` — 28 methods
 
+### REFACTOR-004: Duplicated Dockerfile between static file and generated code
+
+**Status**: Open
+**Priority**: Medium (every new container script requires updates in multiple places)
+**Discovered**: 2026-03-28 while adding entrypoint-lib-openclaw.sh
+
+The static `containers/paude/Dockerfile` and the programmatic Dockerfile generator in `src/paude/config/dockerfile.py` must be kept in sync manually. Adding a new script to the container requires changes in four places:
+
+1. `containers/paude/Dockerfile` — static COPY line (used by local Podman/Docker builds)
+2. `src/paude/config/dockerfile.py` — generated COPY line (used by OpenShift builds)
+3. `src/paude/container/build_context.py` — `copy_entrypoints()` file list
+4. `pyproject.toml` — `force-include` for production wheel packaging
+
+This caused a bug where the new OpenClaw helper script was added to the static Dockerfile but not to the generated one, so OpenShift builds silently omitted it. Consider having a single source of truth for the list of container scripts (e.g., a constant in `build_context.py`) that all four locations reference, or generating the static Dockerfile from the same code path.
+
 ## Agent Limitations
 
 Issues caused by upstream agent behavior, not paude bugs.

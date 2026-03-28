@@ -159,6 +159,27 @@ class SessionConnector:
                     return str(env.get("value", ""))
         return ""
 
+    def _read_openclaw_token(self, pname: str, ns: str) -> str | None:
+        """Read the OpenClaw auth token from the pod's config file."""
+        from paude.backends.shared import OPENCLAW_AUTH_READER_SCRIPT
+
+        result = self._oc.run(
+            "exec",
+            pname,
+            "-n",
+            ns,
+            "--",
+            "python3",
+            "-c",
+            OPENCLAW_AUTH_READER_SCRIPT,
+            check=False,
+            timeout=OC_EXEC_TIMEOUT,
+        )
+        if result.returncode == 0:
+            token = result.stdout.strip()
+            return token if token else None
+        return None
+
     def _attach_to_pod(
         self,
         pname: str,
@@ -192,8 +213,17 @@ class SessionConnector:
         os.system("stty sane 2>/dev/null")  # noqa: S605
 
         if port_urls:
+            from paude.backends.shared import enrich_port_url
+
+            agent_name = self._get_session_agent_name(name)
+            token = None
+            if agent_name == "openclaw":
+                token = self._read_openclaw_token(pname, ns)
             for url in port_urls:
-                print(f"Port-forward active: {url}", file=sys.stderr)
+                print(
+                    f"Port-forward active: {enrich_port_url(url, token)}",
+                    file=sys.stderr,
+                )
 
         return exec_result.returncode
 

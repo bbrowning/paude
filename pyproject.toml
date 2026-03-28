@@ -50,6 +50,7 @@ packages = ["src/paude"]
 "containers/paude/entrypoint-lib-credentials.sh" = "paude/container/data/entrypoint-lib-credentials.sh"
 "containers/paude/entrypoint-lib-config.sh" = "paude/container/data/entrypoint-lib-config.sh"
 "containers/paude/entrypoint-lib-install.sh" = "paude/container/data/entrypoint-lib-install.sh"
+"containers/paude/entrypoint-lib-openclaw.sh" = "paude/container/data/entrypoint-lib-openclaw.sh"
 "containers/paude/credential-watchdog.sh" = "paude/container/data/credential-watchdog.sh"
 "containers/paude/tmux.conf" = "paude/container/data/tmux.conf"
 
