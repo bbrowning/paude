@@ -25,6 +25,23 @@ PAUDE_LABEL_YOLO = "paude.io/yolo"
 
 SQUID_BLOCKED_LOG_PATH = "/tmp/squid-blocked.log"  # noqa: S108
 
+# Python snippet executed inside containers to extract the OpenClaw auth token.
+# Used by both Podman and OpenShift backends via exec.
+OPENCLAW_AUTH_READER_SCRIPT = (
+    "import json,sys,os\n"
+    "try:\n"
+    "  h=os.environ.get('HOME','/home/paude')\n"
+    "  f=open(h+'/.openclaw/openclaw.json')\n"
+    "  t=json.load(f).get('gateway',{}).get('auth',{}).get('token','')\n"
+    "  print(t) if t else sys.exit(1)\n"
+    "except: sys.exit(1)"
+)
+
+
+def enrich_port_url(url: str, token: str | None) -> str:
+    """Append an auth token fragment to a URL if a token is available."""
+    return f"{url}/#token={token}" if token else url
+
 
 def config_file_basename(config_file_name: str) -> str:
     """Strip leading dot from config file name.

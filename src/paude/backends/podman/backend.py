@@ -113,16 +113,32 @@ class PodmanBackend:
         agent = get_agent(agent_name)
         return [f"http://localhost:{hp}" for hp, _cp in agent.config.exposed_ports]
 
+    def _read_openclaw_token(self, cname: str) -> str | None:
+        """Read the OpenClaw auth token from the container's config file."""
+        from paude.backends.shared import OPENCLAW_AUTH_READER_SCRIPT
+
+        result = self._runner.exec_in_container(
+            cname, ["python3", "-c", OPENCLAW_AUTH_READER_SCRIPT], check=False
+        )
+        if result.returncode == 0:
+            token = result.stdout.strip()
+            return token if token else None
+        return None
+
     def _print_port_urls(self, session_name: str) -> None:
         """Print access URLs for any exposed ports."""
         from paude.agents import get_agent
+        from paude.backends.shared import enrich_port_url
 
         agent_name = self._get_session_agent_name(session_name)
         agent = get_agent(agent_name)
+        token = None
+        if agent_name == "openclaw":
+            token = self._read_openclaw_token(container_name(session_name))
         for host_port, _container_port in agent.config.exposed_ports:
+            url = enrich_port_url(f"http://localhost:{host_port}", token)
             print(
-                f"{agent.config.display_name} UI available at:"
-                f" http://localhost:{host_port}",
+                f"{agent.config.display_name} UI available at: {url}",
                 file=sys.stderr,
             )
 

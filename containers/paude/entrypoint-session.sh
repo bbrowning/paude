@@ -24,6 +24,10 @@ AGENT_ARGS="${PAUDE_AGENT_ARGS:-${PAUDE_CLAUDE_ARGS:-$*}}"
 source /usr/local/bin/entrypoint-lib-credentials.sh
 source /usr/local/bin/entrypoint-lib-config.sh
 source /usr/local/bin/entrypoint-lib-install.sh
+# Optional: OpenClaw helpers (may not exist in older container images)
+if [[ -f /usr/local/bin/entrypoint-lib-openclaw.sh ]]; then
+    source /usr/local/bin/entrypoint-lib-openclaw.sh
+fi
 
 # Ensure HOME is set correctly for OpenShift arbitrary UID
 # OpenShift runs containers with random UIDs that don't exist in /etc/passwd
@@ -113,11 +117,16 @@ export SHELL=/bin/bash
 # Attach to an existing tmux session.
 # Used by both the reconnect early-exit and the normal attach path.
 attach_to_session() {
+    local session_type="${1:-reconnect}"
     cd "${PAUDE_WORKSPACE:-/workspace}" 2>/dev/null || true
     echo "Attaching to existing $AGENT_NAME session..."
-    # Show port-forward URLs in tmux status line after attaching.
-    # The background process survives exec and fires after the client attaches.
-    if [[ -n "${PAUDE_PORT_URLS:-}" ]]; then
+
+    # For OpenClaw: show auth URL and wait for Enter before attaching
+    if [[ "$AGENT_NAME" == "openclaw" ]] && [[ -n "${PAUDE_PORT_URLS:-}" ]] && type show_openclaw_url &>/dev/null; then
+        show_openclaw_url "$session_type"
+    elif [[ -n "${PAUDE_PORT_URLS:-}" ]]; then
+        # Show port-forward URLs in tmux status line after attaching.
+        # The background process survives exec and fires after the client attaches.
         (sleep 1 && tmux display-message -t "$AGENT_SESSION_NAME" -d 5000 "${PAUDE_PORT_URLS//;/  |  }") &
     fi
     exec tmux -u attach -t "$AGENT_SESSION_NAME"
@@ -127,7 +136,7 @@ attach_to_session() {
 # config — re-copying from host seed mounts would overwrite in-container
 # state (prompt history, project data, conversation context).
 if tmux -u has-session -t "$AGENT_SESSION_NAME" 2>/dev/null; then
-    attach_to_session
+    attach_to_session reconnect
 fi
 
 # Legacy: Copy seed files if provided via Secret mount (Podman backend fallback)
@@ -163,12 +172,12 @@ if [[ -d "$WORKSPACE/$AGENT_CONFIG_DIR" ]]; then
 fi
 
 if tmux -u has-session -t "$AGENT_SESSION_NAME" 2>/dev/null; then
-    attach_to_session
+    attach_to_session reconnect
 else
     echo "Starting new $AGENT_NAME session..."
     tmux -u new-session -s "$AGENT_SESSION_NAME" -c "$WORKSPACE" -d "bash -l"
     tmux send-keys -t "$AGENT_SESSION_NAME" "export HOME=$HOME PATH='$PATH'" Enter
     tmux send-keys -t "$AGENT_SESSION_NAME" "cd $WORKSPACE" Enter
     tmux send-keys -t "$AGENT_SESSION_NAME" "clear && $AGENT_LAUNCH_CMD $AGENT_ARGS" Enter
-    attach_to_session
+    attach_to_session new
 fi
