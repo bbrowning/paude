@@ -67,6 +67,14 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
     "openclaw": [
         ".anthropic.com",
         ".openai.com",
+        ".duckduckgo.com",  # built-in web_search provider, no API key needed
+        "wttr.in",  # built-in weather skill, no API key needed
+        "api.open-meteo.com",  # built-in weather skill fallback
+    ],
+    "clawhub": [
+        "clawhub.ai",
+        ".clawhub.ai",
+        "registry.npmjs.org",  # skill packages distributed via npm
     ],
     "whatsapp": [
         "web.whatsapp.com",

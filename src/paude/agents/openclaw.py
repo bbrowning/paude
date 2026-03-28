@@ -94,6 +94,22 @@ class OpenClawAgent:
             "",
             "# Patch web_fetch to respect proxy env vars",
             ("RUN /usr/local/bin/patch-proxy-fetch.sh --force 2>&1 || true"),
+            "",
+            "# Install GitHub CLI (gh) via direct binary download",
+            "ARG GH_VERSION=2.74.1",
+            "RUN if ! command -v gh >/dev/null 2>&1; then"
+            "  ARCH=$(uname -m) &&"
+            '  case "$ARCH" in'
+            '    x86_64) GH_ARCH="amd64" ;;'
+            '    aarch64) GH_ARCH="arm64" ;;'
+            '    *) echo "Unsupported architecture for gh: $ARCH" >&2 && exit 1 ;;'
+            "  esac &&"
+            "  curl -fsSL"
+            ' "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${GH_ARCH}.tar.gz"'
+            "  | tar xz -C /tmp &&"
+            "  mv /tmp/gh_${GH_VERSION}_linux_${GH_ARCH}/bin/gh /usr/local/bin/gh &&"
+            "  rm -rf /tmp/gh_${GH_VERSION}_linux_${GH_ARCH};"
+            " fi",
             "USER paude",
             f"WORKDIR {container_home}",
         ]
