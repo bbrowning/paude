@@ -112,24 +112,24 @@ def generate_workspace_dockerfile(
 RUN if command -v apt-get >/dev/null 2>&1; then \\
         apt-get update && \\
         apt-get install -y --no-install-recommends \\
-            git curl ca-certificates bash tmux locales \\
+            git curl ca-certificates bash tmux locales socat \\
             coreutils findutils grep sed gawk diffutils less file \\
             tar gzip xz-utils unzip zip && \\
         rm -rf /var/lib/apt/lists/* && \\
         localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8; \\
     elif command -v apk >/dev/null 2>&1; then \\
-        apk add --no-cache git curl ca-certificates bash tmux \\
+        apk add --no-cache git curl ca-certificates bash tmux socat \\
             coreutils findutils grep sed gawk diffutils less file \\
             tar gzip xz unzip zip; \\
     elif command -v dnf >/dev/null 2>&1; then \\
         dnf install -y --allowerasing \\
-            git curl ca-certificates bash tmux glibc-langpack-en \\
+            git curl ca-certificates bash tmux glibc-langpack-en socat \\
             which coreutils findutils grep sed gawk diffutils less file \\
             tar gzip xz unzip zip && \\
         dnf clean all; \\
     elif command -v yum >/dev/null 2>&1; then \\
         yum install -y --allowerasing \\
-            git curl ca-certificates bash tmux glibc-langpack-en \\
+            git curl ca-certificates bash tmux glibc-langpack-en socat \\
             which coreutils findutils grep sed gawk diffutils less file \\
             tar gzip xz unzip zip && \\
         yum clean all; \\

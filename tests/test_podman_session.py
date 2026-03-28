@@ -2164,14 +2164,9 @@ class TestPodmanPortUrls:
         )
         backend = _make_backend(mock_runner)
 
-        # Mock agent lookup to return an agent with exposed ports
         mock_agent = MagicMock()
         mock_agent.config.exposed_ports = [(18789, 18789)]
-        with patch("paude.agents.get_agent", return_value=mock_agent):
-            with patch.object(
-                backend, "_get_session_agent_name", return_value="openclaw"
-            ):
-                urls = backend._get_port_urls("test-session")
+        urls = backend._get_port_urls(mock_agent)
 
         assert urls == ["http://localhost:18789"]
 
@@ -2190,11 +2185,7 @@ class TestPodmanPortUrls:
 
         mock_agent = MagicMock()
         mock_agent.config.exposed_ports = []
-        with patch("paude.agents.get_agent", return_value=mock_agent):
-            with patch.object(
-                backend, "_get_session_agent_name", return_value="claude"
-            ):
-                urls = backend._get_port_urls("test-session")
+        urls = backend._get_port_urls(mock_agent)
 
         assert urls == []
 
@@ -2214,11 +2205,7 @@ class TestPodmanPortUrls:
         mock_agent = MagicMock()
         mock_agent.config.exposed_ports = [(18789, 18789)]
         mock_agent.config.secret_env_vars = []
-        with patch("paude.agents.get_agent", return_value=mock_agent):
-            with patch.object(
-                backend, "_get_session_agent_name", return_value="openclaw"
-            ):
-                env = backend._build_attach_env("test-session", None)
+        env = backend._build_attach_env(mock_agent, None)
 
         assert env is not None
         assert "PAUDE_PORT_URLS" in env

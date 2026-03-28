@@ -24,6 +24,7 @@ from paude.backends.podman.helpers import (
     proxy_container_name,
     volume_name,
 )
+from paude.backends.podman.port_forward import PodmanPortForwardManager
 from paude.backends.podman.proxy import PodmanProxyManager
 from paude.backends.shared import (
     PAUDE_LABEL_AGENT,
@@ -77,6 +78,7 @@ class PodmanBackend:
         self._network_manager = NetworkManager(self._engine)
         self._volume_manager = VolumeManager(self._engine)
         self._proxy = PodmanProxyManager(self._runner, self._network_manager)
+        self._port_forward = PodmanPortForwardManager(self._engine)
 
     @property
     def engine(self) -> ContainerEngine:
@@ -110,11 +112,6 @@ class PodmanBackend:
         container = find_container_by_session_name(self._runner, session_name)
         return (container.get("Labels", {}) or {}) if container else {}
 
-    def _get_session_agent_name(self, session_name: str) -> str:
-        """Look up the agent name from container labels."""
-        labels = self._get_session_labels(session_name)
-        return str(labels.get(PAUDE_LABEL_AGENT, "claude"))
-
     def _get_session_agent(self, session_name: str) -> Agent:
         """Get the agent instance for a session from its container labels."""
         from paude.agents import get_agent
@@ -124,9 +121,8 @@ class PodmanBackend:
         provider = labels.get(PAUDE_LABEL_PROVIDER) or None
         return get_agent(agent_name, provider=provider)
 
-    def _get_port_urls(self, session_name: str) -> list[str]:
-        """Get port-forward URL strings for a session's agent."""
-        agent = self._get_session_agent(session_name)
+    def _get_port_urls(self, agent: Agent) -> list[str]:
+        """Get port-forward URL strings for an agent."""
         return [f"http://localhost:{hp}" for hp, _cp in agent.config.exposed_ports]
 
     def _read_openclaw_token(self, cname: str) -> str | None:
@@ -141,11 +137,10 @@ class PodmanBackend:
             return token if token else None
         return None
 
-    def _print_port_urls(self, session_name: str) -> None:
+    def _print_port_urls(self, session_name: str, agent: Agent) -> None:
         """Print access URLs for any exposed ports."""
         from paude.backends.shared import enrich_port_url
 
-        agent = self._get_session_agent(session_name)
         token = None
         if agent.config.name == "openclaw":
             token = self._read_openclaw_token(container_name(session_name))
@@ -156,13 +151,20 @@ class PodmanBackend:
                 file=sys.stderr,
             )
 
+    def _start_port_forward(self, session_name: str, agent: Agent) -> None:
+        """Start port-forwarding if the agent has exposed ports."""
+        ports = agent.config.exposed_ports
+        if not ports:
+            return
+        cname = container_name(session_name)
+        self._port_forward.start(session_name, cname, ports)
+
     def _build_attach_env(
-        self, name: str, github_token: str | None
+        self, agent: Agent, github_token: str | None
     ) -> dict[str, str] | None:
         """Build extra environment for container attachment."""
         from paude.agents.base import build_secret_environment_from_config
 
-        agent = self._get_session_agent(name)
         secret_env = build_secret_environment_from_config(agent.config)
 
         extra_env: dict[str, str] = {}
@@ -170,7 +172,7 @@ class PodmanBackend:
             extra_env["GH_TOKEN"] = github_token
         extra_env.update(secret_env)
 
-        port_urls = self._get_port_urls(name)
+        port_urls = self._get_port_urls(agent)
         if port_urls:
             extra_env["PAUDE_PORT_URLS"] = ";".join(port_urls)
 
@@ -360,7 +362,7 @@ class PodmanBackend:
                 network=network,
                 gpu=config.gpu,
                 dns=dns,
-                ports=config.ports or None,
+                ports=None,  # Port-forward proxy handles port access
             )
         except Exception:
             # Cleanup all resources on failure
@@ -415,8 +417,10 @@ class PodmanBackend:
         self._runner.start_container(cname)
         self._fix_volume_permissions(cname)
         self._inject_credentials(cname)
-        self._sync_host_config(cname, self._get_session_agent_name(name))
+        agent = self._get_session_agent(name)
+        self._sync_host_config(cname, agent.config.name)
         self._sync_sandbox_config(cname, name)
+        self._start_port_forward(name, agent)
 
     def delete_session(self, name: str, confirm: bool = False) -> None:
         """Delete a session and all its resources."""
@@ -436,6 +440,8 @@ class PodmanBackend:
             return
 
         print(f"Deleting session '{name}'...", file=sys.stderr)
+
+        self._port_forward.stop(name)
 
         if self._runner.container_running(cname):
             print(f"Stopping container {cname}...", file=sys.stderr)
@@ -480,16 +486,18 @@ class PodmanBackend:
         self._runner.start_container(cname)
         self._fix_volume_permissions(cname)
         self._inject_credentials(cname)
-        self._sync_host_config(cname, self._get_session_agent_name(name))
+        agent = self._get_session_agent(name)
+        self._sync_host_config(cname, agent.config.name)
         self._sync_sandbox_config(cname, name)
 
-        self._print_port_urls(name)
+        self._start_port_forward(name, agent)
+        self._print_port_urls(name, agent)
         exit_code = self._runner.attach_container(
             cname,
             entrypoint=CONTAINER_ENTRYPOINT,
-            extra_env=self._build_attach_env(name, github_token),
+            extra_env=self._build_attach_env(agent, github_token),
         )
-        self._print_port_urls(name)
+        self._print_port_urls(name, agent)
         return exit_code
 
     def stop_session(self, name: str) -> None:
@@ -507,6 +515,7 @@ class PodmanBackend:
         print(f"Stopping session '{name}'...", file=sys.stderr)
         self._runner.stop_container_graceful(cname)
 
+        self._port_forward.stop(name)
         self._proxy.stop_if_needed(name)
 
         print(f"Session '{name}' stopped.", file=sys.stderr)
@@ -544,17 +553,22 @@ class PodmanBackend:
             print("", file=sys.stderr)
 
         # Re-sync config on every connect (refreshes if user updated config)
-        self._sync_host_config(cname, self._get_session_agent_name(name))
+        agent = self._get_session_agent(name)
+        self._sync_host_config(cname, agent.config.name)
         self._sync_sandbox_config(cname, name)
 
+        self._start_port_forward(name, agent)
         print(f"Connecting to session '{name}'...", file=sys.stderr)
-        self._print_port_urls(name)
-        exit_code = self._runner.attach_container(
-            cname,
-            entrypoint=CONTAINER_ENTRYPOINT,
-            extra_env=self._build_attach_env(name, github_token),
-        )
-        self._print_port_urls(name)
+        self._print_port_urls(name, agent)
+        try:
+            exit_code = self._runner.attach_container(
+                cname,
+                entrypoint=CONTAINER_ENTRYPOINT,
+                extra_env=self._build_attach_env(agent, github_token),
+            )
+        finally:
+            self._port_forward.stop(name)
+        self._print_port_urls(name, agent)
         return exit_code
 
     def list_sessions(self) -> list[Session]:
