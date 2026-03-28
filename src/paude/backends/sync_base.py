@@ -78,7 +78,9 @@ class BaseConfigSyncer(ABC):
         self._sync_gitconfig(home)
         self._sync_global_gitignore(home)
         if config_synced:
-            self._rewrite_plugin_paths(agent_path, agent, home)
+            plugins_dir = home / agent.config.config_dir_name / "plugins"
+            if plugins_dir.is_dir():
+                self._rewrite_plugin_paths(agent_path, agent, home)
 
     # -- shared step implementations ---------------------------------------
 
