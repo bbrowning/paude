@@ -11,7 +11,7 @@ Run AI coding agents in secure containers. They make commits, you pull them back
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `--agent gemini` | Supported |
 | [OpenClaw](https://github.com/openclaw/openclaw) | `--agent openclaw` | Supported |
 
-> **Note**: Your chosen agent must be installed and working on your local machine first.
+> Agents are installed automatically inside the container — no local agent installation needed. You just need authentication credentials for your chosen provider.
 
 ## Why Paude?
 
@@ -30,32 +30,68 @@ Run AI coding agents in secure containers. They make commits, you pull them back
 
 ### Prerequisites
 
-**Your agent**: Claude Code, Cursor CLI, or Gemini CLI installed and working locally.
+**Container runtime**: [Podman](https://podman.io/getting-started/installation) or [Docker](https://docs.docker.com/get-docker/) (for local backend).
 
-**Podman or Docker**: [Install Podman](https://podman.io/getting-started/installation) or [Docker](https://docs.docker.com/get-docker/) (for local backend).
+**Authentication** — set up credentials for your chosen provider:
 
-**Google Cloud SDK**: `gcloud auth application-default login`
+<details>
+<summary><strong>Google Cloud / Vertex AI</strong> (Claude Code, Gemini CLI, OpenClaw)</summary>
 
-**Environment variables** (find your project ID in [Google Cloud Console](https://console.cloud.google.com)):
+Install the [Google Cloud SDK](https://cloud.google.com/sdk/docs/install), then:
 
-Claude Code:
 ```bash
+gcloud auth application-default login
+```
+
+Set your project (find the ID in [Google Cloud Console](https://console.cloud.google.com)):
+
+```bash
+# Claude Code via Vertex
 export CLAUDE_CODE_USE_VERTEX=1
 export ANTHROPIC_VERTEX_PROJECT_ID=your-project-id
 export GOOGLE_CLOUD_PROJECT=your-project-id
+
+# Gemini CLI / OpenClaw via Vertex
+export GOOGLE_CLOUD_PROJECT=your-project-id
 ```
 
-Cursor CLI:
+</details>
+
+<details>
+<summary><strong>Anthropic API key</strong> (Claude Code, OpenClaw)</summary>
+
+```bash
+export ANTHROPIC_API_KEY=your-api-key
+```
+
+For OpenClaw, also pass `--provider anthropic`:
+
+```bash
+paude create --agent openclaw --provider anthropic ...
+```
+
+</details>
+
+<details>
+<summary><strong>OpenAI API key</strong> (OpenClaw)</summary>
+
+```bash
+export OPENAI_API_KEY=your-api-key
+paude create --agent openclaw --provider openai ...
+```
+
+</details>
+
+<details>
+<summary><strong>Cursor</strong></summary>
+
 ```bash
 agent login  # or set CURSOR_API_KEY=your-api-key
 ```
 
 > **macOS note**: On Mac hosts, `CURSOR_API_KEY` is the simplest authentication method. Without it, each paude session requires a separate browser-based OAuth login via `agent login` inside the container.
 
-Gemini CLI:
-```bash
-export GOOGLE_CLOUD_PROJECT=your-project-id
-```
+</details>
 
 ### Install
 
@@ -68,6 +104,10 @@ uv tool install paude
 ### Your First Session
 
 ```bash
+# OpenClaw — browser-based, no local agent install needed
+# Web UI opens at http://localhost:18789
+paude create --agent openclaw --allowed-domains "default openclaw" my-project
+
 # Claude Code (default)
 cd your-project
 paude create --yolo --git my-project
@@ -78,17 +118,14 @@ paude create --agent cursor --yolo --git my-project
 # Gemini CLI
 paude create --agent gemini --yolo --git my-project
 
-# OpenClaw (web UI at http://localhost:18789)
-paude create --agent openclaw --allowed-domains "default openclaw" my-project
-
-# Connect to the running session
+# Connect to a CLI agent's running session
 paude connect my-project
 
 # Pull the agent's commits (use your branch name):
 git pull paude-my-project main
 ```
 
-**You'll know it's working when**: `paude connect` shows the agent interface, and `git pull` brings back commits the agent made.
+**You'll know it's working when**: For CLI agents, `paude connect` shows the agent interface and `git pull` brings back commits. For OpenClaw, open `http://localhost:18789` in your browser.
 
 ### Passing a Task
 
@@ -104,7 +141,7 @@ Or just start the session and type your request in the agent interface.
 - Run `paude list` to check session status
 - Use `paude create --dry-run` to verify configuration
 - Use `paude start -v` for verbose output (shows sync progress)
-- Check that your gcloud credentials are valid: `gcloud auth application-default print-access-token`
+- Check credentials: `gcloud auth application-default print-access-token` (Vertex/Gemini) or verify your API key is exported
 
 ---
 
@@ -144,10 +181,9 @@ pip install -e .
 ### Requirements
 
 - Python 3.11+ (for the Python package)
-- Your chosen agent CLI installed locally (Claude Code, Cursor CLI, or Gemini CLI)
 - [Podman](https://podman.io/getting-started/installation) or [Docker](https://docs.docker.com/get-docker/) (for local backend)
 - OpenShift CLI `oc` (for OpenShift backend)
-- Google Cloud SDK configured (`gcloud auth application-default login`)
+- Auth credentials for your provider (Google Cloud SDK, API key, etc.)
 
 ## Development
 
