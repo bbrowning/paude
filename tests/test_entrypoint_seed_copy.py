@@ -72,8 +72,7 @@ def _build_script(home_dir: str, seed_dir: str, credentials_dir: str | None) -> 
             mkdir -p "$HOME/.claude"
             chmod g+rwX "$HOME/.claude" 2>/dev/null || true
 
-            cp -dR --preserve=mode,timestamps "$SEED_DIR/." "$HOME/.claude/" 2>/dev/null \
-                || cp -r "$SEED_DIR/." "$HOME/.claude/" 2>/dev/null || true
+            cp -Rp "$SEED_DIR/." "$HOME/.claude/" 2>/dev/null || true
 
             if [[ -f "$HOME/.claude/claude.json" ]]; then
                 cp -f "$HOME/.claude/claude.json" "$HOME/.claude.json" 2>/dev/null || true
@@ -857,7 +856,7 @@ def _persist_bash_function(pvc_dir: str) -> str:
             chcon -R --reference="{pvc_dir}" "$pvc_config_dir" 2>/dev/null || true
 
             if [[ -d "$home_config_dir" ]] && [[ ! -L "$home_config_dir" ]]; then
-                cp -dR --preserve=mode,timestamps "$home_config_dir/." "$pvc_config_dir/" 2>/dev/null || true
+                cp -Rp "$home_config_dir/." "$pvc_config_dir/" 2>/dev/null || true
                 rm -rf "$home_config_dir"
             fi
 
@@ -872,7 +871,7 @@ def _persist_bash_function(pvc_dir: str) -> str:
 
                 if [[ -f "$home_config_file" ]] && [[ ! -L "$home_config_file" ]]; then
                     if [[ ! -f "$pvc_config_file" ]]; then
-                        cp -dR --preserve=mode,timestamps "$home_config_file" "$pvc_config_file" 2>/dev/null || true
+                        cp -Rp "$home_config_file" "$pvc_config_file" 2>/dev/null || true
                     fi
                     rm -f "$home_config_file"
                 fi
@@ -936,7 +935,7 @@ def _build_persist_and_copy_script(
             mkdir -p "$HOME/$AGENT_CONFIG_DIR"
             chmod g+rwX "$HOME/$AGENT_CONFIG_DIR" 2>/dev/null || true
 
-            cp -dR --preserve=mode,timestamps "$source_path/." "$HOME/$AGENT_CONFIG_DIR/" 2>/dev/null || true
+            cp -Rp "$source_path/." "$HOME/$AGENT_CONFIG_DIR/" 2>/dev/null || true
 
             if [[ -n "$AGENT_CONFIG_FILE" ]] && [[ -n "$AGENT_CONFIG_FILE_BASENAME" ]] && [[ -f "$HOME/$AGENT_CONFIG_DIR/$AGENT_CONFIG_FILE_BASENAME" ]]; then
                 cp -f "$HOME/$AGENT_CONFIG_DIR/$AGENT_CONFIG_FILE_BASENAME" "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
