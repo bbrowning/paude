@@ -238,6 +238,40 @@ git push origin main --tags
 #   - Creates a GitHub release with auto-generated notes
 ```
 
+### Pre-Releases
+
+To test a release before making it stable, create a pre-release using a [PEP 440](https://peps.python.org/pep-0440/) version suffix:
+
+```bash
+# Release candidates (most common for pre-releases)
+make release VERSION=0.15.0rc1
+
+# Alpha or beta releases
+make release VERSION=0.15.0a1
+make release VERSION=0.15.0b1
+
+# Then push as usual
+git push origin main --tags
+```
+
+**What's different for pre-releases:**
+
+| Behavior | Pre-release (`v0.15.0rc1`) | Stable (`v0.15.0`) |
+|----------|---------------------------|---------------------|
+| Container images | Versioned tag only | Versioned + `latest` |
+| GitHub Release | Marked as pre-release | Marked as stable |
+| PyPI | Published, but `pip install paude` won't pick it up | Installed by default |
+
+To install a pre-release from PyPI, users must request it explicitly:
+
+```bash
+pip install paude==0.15.0rc1
+# or
+pip install --pre paude
+```
+
+When you're ready to cut the stable release, just run `make release VERSION=0.15.0` as normal.
+
 ### What Happens Automatically
 
 When a tag matching `v*` is pushed, the `.github/workflows/release.yml` workflow:
