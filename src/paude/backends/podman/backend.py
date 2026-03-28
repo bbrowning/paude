@@ -420,7 +420,6 @@ class PodmanBackend:
         agent = self._get_session_agent(name)
         self._sync_host_config(cname, agent.config.name)
         self._sync_sandbox_config(cname, name)
-        self._start_port_forward(name, agent)
 
     def delete_session(self, name: str, confirm: bool = False) -> None:
         """Delete a session and all its resources."""
