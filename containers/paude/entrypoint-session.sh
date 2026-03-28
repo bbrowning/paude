@@ -115,6 +115,11 @@ export SHELL=/bin/bash
 attach_to_session() {
     cd "${PAUDE_WORKSPACE:-/workspace}" 2>/dev/null || true
     echo "Attaching to existing $AGENT_NAME session..."
+    # Show port-forward URLs in tmux status line after attaching.
+    # The background process survives exec and fires after the client attaches.
+    if [[ -n "${PAUDE_PORT_URLS:-}" ]]; then
+        (sleep 1 && tmux display-message -t "$AGENT_SESSION_NAME" -d 5000 "${PAUDE_PORT_URLS//;/  |  }") &
+    fi
     exec tmux -u attach -t "$AGENT_SESSION_NAME"
 }
 

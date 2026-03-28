@@ -251,6 +251,7 @@ def _upgrade_podman(
         agent=agent_name,
         gpu=gpu,
         reuse_volume=True,
+        ports=agent_instance.config.exposed_ports,
     )
 
     backend.create_session(session_config)

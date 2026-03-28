@@ -34,6 +34,10 @@ class AgentConfig:
             (e.g., "--dangerously-skip-permissions").
         clear_command: Tmux command to reset conversation (e.g., "/clear").
         args_env_var: Env var name for passing agent args.
+        exposed_ports: Ports this agent needs exposed as (host, container) tuples.
+            Empty for CLI agents; used by web-based agents like OpenClaw.
+        default_base_image: Default container base image for this agent, or None
+            to use paude's standard base image.
     """
 
     name: str
@@ -56,6 +60,8 @@ class AgentConfig:
     clear_command: str | None = "/clear"
     args_env_var: str = "PAUDE_AGENT_ARGS"
     extra_domain_aliases: list[str] = field(default_factory=lambda: ["claude"])
+    exposed_ports: list[tuple[int, int]] = field(default_factory=list)
+    default_base_image: str | None = None
 
 
 def build_environment_from_config(config: AgentConfig) -> dict[str, str]:

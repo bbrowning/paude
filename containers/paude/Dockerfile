@@ -88,6 +88,7 @@ COPY --chmod=755 entrypoint-lib-credentials.sh /usr/local/bin/entrypoint-lib-cre
 COPY --chmod=755 entrypoint-lib-config.sh /usr/local/bin/entrypoint-lib-config.sh
 COPY --chmod=755 entrypoint-lib-install.sh /usr/local/bin/entrypoint-lib-install.sh
 COPY --chmod=755 credential-watchdog.sh /usr/local/bin/credential-watchdog.sh
+COPY --chmod=755 patch-proxy-fetch.sh /usr/local/bin/patch-proxy-fetch.sh
 COPY --chmod=664 tmux.conf /home/paude/.tmux.conf
 
 USER paude

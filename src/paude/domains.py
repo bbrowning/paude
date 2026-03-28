@@ -64,6 +64,25 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
         "release-assets.githubusercontent.com",
         "results-receiver.actions.githubusercontent.com",
     ],
+    "openclaw": [
+        ".anthropic.com",
+        ".openai.com",
+    ],
+    "whatsapp": [
+        "web.whatsapp.com",
+        ".whatsapp.net",
+    ],
+    "telegram": [
+        "api.telegram.org",
+    ],
+    "discord": [
+        ".discord.com",
+        "gateway.discord.gg",
+        ".discordapp.com",
+    ],
+    "slack": [
+        ".slack.com",
+    ],
 }
 
 # Backward-compatible alias: pypi -> python

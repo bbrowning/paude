@@ -155,6 +155,7 @@ _SECTIONS: tuple[HelpSection, ...] = (
             ("--agent claude", "Claude Code (default)"),
             ("--agent cursor", "Cursor CLI"),
             ("--agent gemini", "Gemini CLI"),
+            ("--agent openclaw", "OpenClaw (web UI on port 18789)"),
         ),
     ),
 )

@@ -17,6 +17,7 @@ from paude.agents.base import (
 from paude.agents.claude import ClaudeAgent
 from paude.agents.cursor import CursorAgent
 from paude.agents.gemini import GeminiAgent
+from paude.agents.openclaw import OpenClawAgent
 
 
 class TestRegistry:
@@ -43,8 +44,14 @@ class TestRegistry:
         agent = get_agent("gemini")
         assert isinstance(agent, GeminiAgent)
 
+    def test_get_agent_openclaw(self) -> None:
+        agent = get_agent("openclaw")
+        assert isinstance(agent, OpenClawAgent)
+
     def test_get_agent_error_lists_available(self) -> None:
-        with pytest.raises(ValueError, match="Available: claude, cursor, gemini"):
+        with pytest.raises(
+            ValueError, match="Available: claude, cursor, gemini, openclaw"
+        ):
             get_agent("bad")
 
     def test_list_agents(self) -> None:
@@ -52,6 +59,7 @@ class TestRegistry:
         assert "claude" in agents
         assert "cursor" in agents
         assert "gemini" in agents
+        assert "openclaw" in agents
         assert agents == sorted(agents)
 
 
@@ -79,6 +87,8 @@ class TestAgentConfig:
         assert cfg.config_excludes == []
         assert cfg.activity_files == []
         assert cfg.extra_domain_aliases == ["claude"]
+        assert cfg.exposed_ports == []
+        assert cfg.default_base_image is None
 
 
 class TestClaudeAgentConfig:
@@ -867,3 +877,173 @@ class TestBuildSecretEnvironmentFromConfig:
         with patch.dict("os.environ", {"SOME_VAR": "x"}, clear=True):
             env = build_secret_environment_from_config(config)
             assert env == {}
+
+
+class TestOpenClawAgentConfig:
+    """Tests for OpenClawAgent configuration values."""
+
+    def test_name(self) -> None:
+        assert OpenClawAgent().config.name == "openclaw"
+
+    def test_display_name(self) -> None:
+        assert OpenClawAgent().config.display_name == "OpenClaw"
+
+    def test_process_name(self) -> None:
+        assert OpenClawAgent().config.process_name == "node"
+
+    def test_session_name(self) -> None:
+        assert OpenClawAgent().config.session_name == "openclaw"
+
+    def test_config_dir_name(self) -> None:
+        assert OpenClawAgent().config.config_dir_name == ".openclaw"
+
+    def test_config_file_name_is_none(self) -> None:
+        assert OpenClawAgent().config.config_file_name is None
+
+    def test_yolo_flag_is_none(self) -> None:
+        assert OpenClawAgent().config.yolo_flag is None
+
+    def test_clear_command_is_none(self) -> None:
+        assert OpenClawAgent().config.clear_command is None
+
+    def test_passthrough_vars(self) -> None:
+        cfg = OpenClawAgent().config
+        assert "ANTHROPIC_VERTEX_PROJECT_ID" in cfg.passthrough_env_vars
+        assert "GOOGLE_CLOUD_PROJECT" in cfg.passthrough_env_vars
+        assert "GOOGLE_CLOUD_PROJECT_ID" in cfg.passthrough_env_vars
+        assert "GOOGLE_CLOUD_LOCATION" in cfg.passthrough_env_vars
+        assert "CLOUD_ML_REGION" in cfg.passthrough_env_vars
+
+    def test_passthrough_prefixes(self) -> None:
+        cfg = OpenClawAgent().config
+        assert "CLOUDSDK_AUTH_" in cfg.passthrough_env_prefixes
+
+    def test_secret_env_vars(self) -> None:
+        cfg = OpenClawAgent().config
+        assert "ANTHROPIC_API_KEY" in cfg.secret_env_vars
+        assert "OPENAI_API_KEY" in cfg.secret_env_vars
+        assert "GROQ_API_KEY" in cfg.secret_env_vars
+
+    def test_extra_domain_aliases(self) -> None:
+        assert OpenClawAgent().config.extra_domain_aliases == ["openclaw"]
+
+    def test_exposed_ports(self) -> None:
+        cfg = OpenClawAgent().config
+        assert cfg.exposed_ports == [(18789, 18789)]
+
+    def test_default_base_image(self) -> None:
+        cfg = OpenClawAgent().config
+        assert cfg.default_base_image == "ghcr.io/openclaw/openclaw:latest"
+
+    def test_env_vars_node_proxy(self) -> None:
+        assert OpenClawAgent().config.env_vars == {"NODE_USE_ENV_PROXY": "1"}
+
+
+class TestOpenClawAgentDockerfile:
+    """Tests for OpenClawAgent.dockerfile_install_lines."""
+
+    def test_returns_list(self) -> None:
+        lines = OpenClawAgent().dockerfile_install_lines("/home/paude")
+        assert isinstance(lines, list)
+        assert len(lines) > 0
+
+    def test_contains_openclaw(self) -> None:
+        lines = OpenClawAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "openclaw" in text.lower()
+
+    def test_contains_node_proxy_env(self) -> None:
+        lines = OpenClawAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "NODE_USE_ENV_PROXY=1" in text
+
+    def test_handles_both_base_images(self) -> None:
+        lines = OpenClawAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        # Should handle case where openclaw is already installed
+        assert "already installed" in text.lower() or "openclaw" in text.lower()
+
+
+class TestOpenClawAgentLaunchCommand:
+    """Tests for OpenClawAgent.launch_command."""
+
+    def test_no_args(self) -> None:
+        cmd = OpenClawAgent().launch_command("")
+        assert "openclaw" in cmd
+        assert "gateway" in cmd
+
+    def test_with_args(self) -> None:
+        cmd = OpenClawAgent().launch_command("--verbose")
+        assert "openclaw" in cmd
+        assert "--verbose" in cmd
+
+
+class TestOpenClawAgentHostConfigMounts:
+    """Tests for OpenClawAgent.host_config_mounts."""
+
+    def test_empty_when_no_config(self, tmp_path: Path) -> None:
+        mounts = OpenClawAgent().host_config_mounts(tmp_path)
+        assert mounts == []
+
+    def test_mounts_openclaw_dir(self, tmp_path: Path) -> None:
+        openclaw_dir = tmp_path / ".openclaw"
+        openclaw_dir.mkdir()
+        mounts = OpenClawAgent().host_config_mounts(tmp_path)
+        assert "-v" in mounts
+        assert any("/tmp/openclaw.seed:ro" in m for m in mounts)
+
+
+class TestOpenClawAgentBuildEnvironment:
+    """Tests for OpenClawAgent.build_environment."""
+
+    def test_empty_when_no_vars_set(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            env = OpenClawAgent().build_environment()
+            assert env == {}
+
+    def test_does_not_include_secret_vars(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"ANTHROPIC_API_KEY": "sk-test", "UNRELATED": "x"},
+            clear=True,
+        ):
+            env = OpenClawAgent().build_environment()
+            assert "ANTHROPIC_API_KEY" not in env
+
+    def test_secret_env_collects_api_keys(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "ANTHROPIC_API_KEY": "sk-ant",
+                "OPENAI_API_KEY": "sk-oai",
+                "UNRELATED": "x",
+            },
+            clear=True,
+        ):
+            env = build_secret_environment_from_config(OpenClawAgent().config)
+            assert env == {
+                "ANTHROPIC_API_KEY": "sk-ant",
+                "OPENAI_API_KEY": "sk-oai",
+            }
+
+
+class TestOpenClawAgentSandboxConfig:
+    """Tests for OpenClawAgent.apply_sandbox_config."""
+
+    def test_returns_bash_script(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert script.startswith("#!/bin/bash")
+
+    def test_contains_port_config(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert "18789" in script
+
+    def test_contains_workspace(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config(
+            "/home/paude", "/pvc/workspace", ""
+        )
+        assert "/pvc/workspace" in script
+
+    def test_home_path_parameterized(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config("/custom/home", "/workspace", "")
+        assert "/custom/home/.openclaw" in script

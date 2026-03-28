@@ -64,13 +64,14 @@ def create_openshift_session(
     try:
         # Build image via OpenShift binary build
         typer.echo("Building image in OpenShift cluster...")
+        agent = get_agent(agent_name)
         image = os_backend.ensure_image_via_build(
             config=config,
             workspace=workspace,
             script_dir=os_script_dir,
             force_rebuild=rebuild,
             session_name=session_name,
-            agent=get_agent(agent_name),
+            agent=agent,
         )
 
         # Build proxy image when needed (PAUDE_DEV=1 and proxy is used)
@@ -106,6 +107,7 @@ def create_openshift_session(
             credential_timeout=credential_timeout,
             agent=agent_name,
             gpu=gpu,
+            ports=agent.config.exposed_ports,
         )
 
         session = os_backend.create_session(session_config)

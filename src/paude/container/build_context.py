@@ -70,6 +70,20 @@ def copy_entrypoints(entrypoint: Path, dest_dir: Path) -> None:
     else:
         tmux_conf_dest.write_text("# auto-generated\n", newline="\n")
 
+    for lib_name in [
+        "entrypoint-lib-credentials.sh",
+        "entrypoint-lib-config.sh",
+        "entrypoint-lib-install.sh",
+        "credential-watchdog.sh",
+        "patch-proxy-fetch.sh",
+    ]:
+        lib_src = entrypoint.parent / lib_name
+        lib_dest = dest_dir / lib_name
+        if lib_src.exists():
+            content = lib_src.read_text().replace("\r\n", "\n")
+            lib_dest.write_text(content, newline="\n")
+            lib_dest.chmod(0o755)
+
 
 def inject_features(dockerfile_content: str, features: list[FeatureSpec] | None) -> str:
     """Inject devcontainer features block into Dockerfile content."""
@@ -299,10 +313,13 @@ def prepare_build_context(
 
     entrypoint = resolve_entrypoint(script_dir)
     agent_name = agent.config.name if agent else None
+    effective_base = config.base_image
+    if not effective_base and agent and agent.config.default_base_image:
+        effective_base = agent.config.default_base_image
     config_hash = compute_config_hash(
         config.config_file,
         config.dockerfile,
-        config.base_image,
+        effective_base,
         entrypoint,
         __version__,
         agent_name=agent_name,
@@ -324,6 +341,10 @@ def prepare_build_context(
         base_image = config.base_image
         using_default_paude_image = False
         print(f"  → Using base: {base_image}", file=sys.stderr)
+    elif agent and agent.config.default_base_image:
+        base_image = agent.config.default_base_image
+        using_default_paude_image = False
+        print(f"  → Using agent default base: {base_image}", file=sys.stderr)
     else:
         base_image = _resolve_default_base(script_dir, platform, for_remote_build)
         using_default_paude_image = True

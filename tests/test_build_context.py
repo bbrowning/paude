@@ -136,6 +136,52 @@ class TestCopyEntrypoints:
         assert (dest_dir / "tmux.conf").exists()
         assert "tmux-256color" in (dest_dir / "tmux.conf").read_text()
 
+    def test_copies_entrypoint_library_files(self, tmp_path: Path) -> None:
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        entrypoint = src_dir / "entrypoint.sh"
+        entrypoint.write_text("#!/bin/bash\n")
+        for lib_name in [
+            "entrypoint-lib-credentials.sh",
+            "entrypoint-lib-config.sh",
+            "entrypoint-lib-install.sh",
+            "credential-watchdog.sh",
+            "patch-proxy-fetch.sh",
+        ]:
+            (src_dir / lib_name).write_text(f"#!/bin/bash\r\n# {lib_name}\r\n")
+
+        dest_dir = tmp_path / "dest"
+        dest_dir.mkdir()
+        copy_entrypoints(entrypoint, dest_dir)
+
+        for lib_name in [
+            "entrypoint-lib-credentials.sh",
+            "entrypoint-lib-config.sh",
+            "entrypoint-lib-install.sh",
+            "credential-watchdog.sh",
+            "patch-proxy-fetch.sh",
+        ]:
+            lib_dest = dest_dir / lib_name
+            assert lib_dest.exists(), f"{lib_name} not copied"
+            assert "\r\n" not in lib_dest.read_text()
+            assert lib_dest.stat().st_mode & 0o755 == 0o755
+
+    def test_skips_missing_library_files(self, tmp_path: Path) -> None:
+        nonexistent = tmp_path / "nonexistent" / "entrypoint.sh"
+        dest_dir = tmp_path / "dest"
+        dest_dir.mkdir()
+
+        copy_entrypoints(nonexistent, dest_dir)
+
+        for lib_name in [
+            "entrypoint-lib-credentials.sh",
+            "entrypoint-lib-config.sh",
+            "entrypoint-lib-install.sh",
+            "credential-watchdog.sh",
+            "patch-proxy-fetch.sh",
+        ]:
+            assert not (dest_dir / lib_name).exists()
+
 
 class TestInjectFeatures:
     """Tests for inject_features()."""
@@ -306,6 +352,62 @@ class TestPrepareBuildContext:
         finally:
             if result.context_dir.exists():
                 shutil.rmtree(result.context_dir)
+
+    @patch("paude.container.build_context.generate_dockerfile_content")
+    @patch("paude.container.build_context.compute_config_hash", return_value="abc123")
+    def test_uses_agent_default_base_image(
+        self,
+        mock_hash: MagicMock,
+        mock_gen: MagicMock,
+    ) -> None:
+        mock_gen.return_value = "ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\nRUN echo hi"
+        config = PaudeConfig()
+        agent = MagicMock()
+        agent.config.default_base_image = "ghcr.io/openclaw/openclaw:latest"
+        agent.config.name = "openclaw"
+
+        import shutil
+
+        result = prepare_build_context(config, agent=agent)
+        try:
+            assert result.base_image == "ghcr.io/openclaw/openclaw:latest"
+            content = result.dockerfile_path.read_text()
+            assert "ghcr.io/openclaw/openclaw:latest" in content
+            assert "ARG BASE_IMAGE" not in content
+        finally:
+            if result.context_dir.exists():
+                shutil.rmtree(result.context_dir)
+
+    @patch("paude.container.build_context._resolve_default_base")
+    @patch("paude.container.build_context.generate_dockerfile_content")
+    def test_agent_default_base_image_affects_config_hash(
+        self,
+        mock_gen: MagicMock,
+        mock_default_base: MagicMock,
+    ) -> None:
+        """Config hash differs when agent has default_base_image vs not."""
+        import shutil
+
+        mock_gen.return_value = "ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\nRUN echo hi"
+        mock_default_base.return_value = "paude-base-centos10:0.1.0"
+        config = PaudeConfig()
+
+        agent_with_base = MagicMock()
+        agent_with_base.config.default_base_image = "ghcr.io/openclaw/openclaw:latest"
+        agent_with_base.config.name = "openclaw"
+
+        agent_without_base = MagicMock()
+        agent_without_base.config.default_base_image = None
+        agent_without_base.config.name = "openclaw"
+
+        result1 = prepare_build_context(config, agent=agent_with_base)
+        result2 = prepare_build_context(config, agent=agent_without_base)
+        try:
+            assert result1.config_hash != result2.config_hash
+        finally:
+            for r in (result1, result2):
+                if r.context_dir.exists():
+                    shutil.rmtree(r.context_dir)
 
     @patch("paude.container.build_context.compute_config_hash", return_value="abc123")
     def test_raises_on_missing_dockerfile(

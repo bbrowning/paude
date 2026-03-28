@@ -1028,6 +1028,79 @@ class TestBuildFailedError:
         assert "OOM killed" in str(error)
 
 
+class TestSessionConnectorBuildExecCmd:
+    """Tests for SessionConnector._build_exec_cmd port URL injection."""
+
+    def _make_connector(self, context: str | None = None) -> Any:
+        from paude.backends.openshift.config import OpenShiftConfig
+        from paude.backends.openshift.session_connection import SessionConnector
+
+        oc = MagicMock()
+        config = OpenShiftConfig(context=context)
+        return SessionConnector(
+            oc=oc,
+            namespace="test-ns",
+            config=config,
+            lookup=MagicMock(),
+            syncer=MagicMock(),
+        )
+
+    def test_exec_cmd_without_port_urls(self) -> None:
+        """Exec command has no env prefix when no port URLs."""
+        connector = self._make_connector()
+        cmd = connector._build_exec_cmd("pod-0", "test-ns")
+        assert cmd == [
+            "oc",
+            "exec",
+            "-it",
+            "-n",
+            "test-ns",
+            "pod-0",
+            "--",
+            "/usr/local/bin/entrypoint-session.sh",
+        ]
+
+    def test_exec_cmd_with_port_urls(self) -> None:
+        """Exec command includes env PAUDE_PORT_URLS when port URLs provided."""
+        connector = self._make_connector()
+        cmd = connector._build_exec_cmd(
+            "pod-0",
+            "test-ns",
+            port_urls=["http://localhost:18789"],
+        )
+        assert "env" in cmd
+        assert "PAUDE_PORT_URLS=http://localhost:18789" in cmd
+        # env and PAUDE_PORT_URLS must come before entrypoint
+        env_idx = cmd.index("env")
+        ep_idx = cmd.index("/usr/local/bin/entrypoint-session.sh")
+        assert env_idx < ep_idx
+
+    def test_exec_cmd_with_multiple_port_urls(self) -> None:
+        """Multiple port URLs are semicolon-delimited."""
+        connector = self._make_connector()
+        cmd = connector._build_exec_cmd(
+            "pod-0",
+            "test-ns",
+            port_urls=["http://localhost:8080", "http://localhost:8443"],
+        )
+        env_val = [c for c in cmd if c.startswith("PAUDE_PORT_URLS=")][0]
+        assert env_val == (
+            "PAUDE_PORT_URLS=http://localhost:8080;http://localhost:8443"
+        )
+
+    def test_exec_cmd_with_context_and_port_urls(self) -> None:
+        """Context and port URLs work together."""
+        connector = self._make_connector(context="my-ctx")
+        cmd = connector._build_exec_cmd(
+            "pod-0",
+            "test-ns",
+            port_urls=["http://localhost:18789"],
+        )
+        assert cmd[:4] == ["oc", "--context", "my-ctx", "exec"]
+        assert "env" in cmd
+        assert "PAUDE_PORT_URLS=http://localhost:18789" in cmd
+
+
 class TestCreateBuildConfig:
     """Tests for _builder.create_build_config method."""
 
@@ -2904,9 +2977,7 @@ class TestRewritePluginPaths:
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
         backend._syncer._target = "test-pod-0"
-        backend._syncer._rewrite_plugin_paths(
-            "/credentials/claude", agent, Path.home()
-        )
+        backend._syncer._rewrite_plugin_paths("/credentials/claude", agent, Path.home())
 
         # Find exec calls with jq
         jq_calls = [
@@ -2932,9 +3003,7 @@ class TestRewritePluginPaths:
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
         backend._syncer._target = "test-pod-0"
-        backend._syncer._rewrite_plugin_paths(
-            "/credentials/claude", agent, Path.home()
-        )
+        backend._syncer._rewrite_plugin_paths("/credentials/claude", agent, Path.home())
 
         # Check for installed_plugins.json rewrite
         installed_plugins_calls = [
@@ -2962,9 +3031,7 @@ class TestRewritePluginPaths:
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
         backend._syncer._target = "test-pod-0"
-        backend._syncer._rewrite_plugin_paths(
-            "/credentials/claude", agent, Path.home()
-        )
+        backend._syncer._rewrite_plugin_paths("/credentials/claude", agent, Path.home())
 
         # Check that the container path is used
         all_calls_str = str(mock_run.call_args_list)
@@ -2984,9 +3051,7 @@ class TestRewritePluginPaths:
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
         backend._syncer._target = "test-pod-0"
-        backend._syncer._rewrite_plugin_paths(
-            "/credentials/claude", agent, Path.home()
-        )
+        backend._syncer._rewrite_plugin_paths("/credentials/claude", agent, Path.home())
 
         # The jq expression should include null-safety check
         all_calls_str = str(mock_run.call_args_list)
@@ -3007,9 +3072,7 @@ class TestRewritePluginPaths:
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
         backend._syncer._target = "test-pod-0"
-        backend._syncer._rewrite_plugin_paths(
-            "/credentials/claude", agent, Path.home()
-        )
+        backend._syncer._rewrite_plugin_paths("/credentials/claude", agent, Path.home())
 
         # The jq expression for known_marketplaces should include null-safety
         all_calls_str = str(mock_run.call_args_list)

@@ -63,6 +63,7 @@ class SessionConfig:
         pvc_size: PVC size for OpenShift (e.g., "10Gi").
         storage_class: Storage class for OpenShift.
         network: Podman network name for proxy setup.
+        ports: Ports to expose as (host_port, container_port) tuples.
     """
 
     name: str | None
@@ -83,6 +84,7 @@ class SessionConfig:
     agent: str = "claude"
     gpu: str | None = None
     reuse_volume: bool = False
+    ports: list[tuple[int, int]] = field(default_factory=list)
 
 
 class Backend(Protocol):

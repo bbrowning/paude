@@ -2146,3 +2146,80 @@ class TestPodmanBackendSyncHostConfig:
         ]
         assert len(cp_calls) == 1
         assert "paude-test:/credentials/gitignore-global" in str(cp_calls[0])
+
+
+class TestPodmanPortUrls:
+    """Tests for port URL helpers and env var injection."""
+
+    def test_get_port_urls_returns_urls(self) -> None:
+        """_get_port_urls returns URL strings from agent config."""
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.is_podman = True
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.is_remote = False
+        mock_runner.engine.run.return_value = MagicMock(
+            returncode=0, stdout="", stderr=""
+        )
+        backend = _make_backend(mock_runner)
+
+        # Mock agent lookup to return an agent with exposed ports
+        mock_agent = MagicMock()
+        mock_agent.config.exposed_ports = [(18789, 18789)]
+        with patch("paude.agents.get_agent", return_value=mock_agent):
+            with patch.object(
+                backend, "_get_session_agent_name", return_value="openclaw"
+            ):
+                urls = backend._get_port_urls("test-session")
+
+        assert urls == ["http://localhost:18789"]
+
+    def test_get_port_urls_empty_when_no_ports(self) -> None:
+        """_get_port_urls returns empty list when no exposed ports."""
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.is_podman = True
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.is_remote = False
+        mock_runner.engine.run.return_value = MagicMock(
+            returncode=0, stdout="", stderr=""
+        )
+        backend = _make_backend(mock_runner)
+
+        mock_agent = MagicMock()
+        mock_agent.config.exposed_ports = []
+        with patch("paude.agents.get_agent", return_value=mock_agent):
+            with patch.object(
+                backend, "_get_session_agent_name", return_value="claude"
+            ):
+                urls = backend._get_port_urls("test-session")
+
+        assert urls == []
+
+    def test_build_attach_env_includes_port_urls(self) -> None:
+        """_build_attach_env includes PAUDE_PORT_URLS when agent has ports."""
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.is_podman = True
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.is_remote = False
+        mock_runner.engine.run.return_value = MagicMock(
+            returncode=0, stdout="", stderr=""
+        )
+        backend = _make_backend(mock_runner)
+
+        mock_agent = MagicMock()
+        mock_agent.config.exposed_ports = [(18789, 18789)]
+        mock_agent.config.secret_env_vars = []
+        with patch("paude.agents.get_agent", return_value=mock_agent):
+            with patch.object(
+                backend, "_get_session_agent_name", return_value="openclaw"
+            ):
+                env = backend._build_attach_env("test-session", None)
+
+        assert env is not None
+        assert "PAUDE_PORT_URLS" in env
+        assert env["PAUDE_PORT_URLS"] == "http://localhost:18789"
