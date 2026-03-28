@@ -10,7 +10,7 @@ The container intentionally restricts certain operations:
 | Agent config | copied in, not mounted | Prevents host config poisoning |
 | `~/.gitconfig` | read-only | Git identity |
 | SSH keys | not mounted | Prevents git push via SSH |
-| GitHub CLI config | not mounted (uses /tmp/gh-config) | Prevents cached host credentials |
+| GitHub CLI config | not mounted | Prevents cached host credentials |
 | `GH_TOKEN` (host) | never propagated | Use `PAUDE_GITHUB_TOKEN` or `--github-token` on start/connect |
 | Git credentials | not mounted | Prevents HTTPS git push |
 

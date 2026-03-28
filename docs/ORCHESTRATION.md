@@ -23,7 +23,7 @@ paude status
 
 ```
 SESSION              PROJECT         BACKEND    ACTIVITY   STATE      SUMMARY
-my-project           your-project    podman     14:32      Active     Refactoring auth module
+my-project           your-project    podman     2m ago     Active     Refactoring auth module
 ```
 
 The `STATE` column shows `Active` when the agent is working or `Idle` when waiting.
@@ -46,6 +46,9 @@ Once you're satisfied with the changes, harvest again with `--pr` to push the br
 
 ```bash
 paude harvest my-project -b feature/auth-refactor --pr
+
+# Or with a custom PR title
+paude harvest my-project -b feature/auth-refactor --pr --pr-title "Refactor auth module"
 ```
 
 This pushes `feature/auth-refactor` to origin and runs `gh pr create`.
@@ -58,7 +61,7 @@ After the PR merges, reset the remote session to prepare for the next task:
 paude reset my-project
 ```
 
-Reset performs a `git reset --hard` to `origin/main` (or a custom branch via `--branch`/`-b`) and `git clean -fdx` inside the container, and clears conversation history. Use `--keep-conversation` to preserve history across tasks.
+Reset fetches from origin, checks out the target branch, runs `git reset --hard` to `origin/main` (or a custom branch via `--branch`/`-b`), and runs `git clean -fdx` inside the container. It also clears conversation history (session state, todos, and project subdirectories, while preserving per-project settings). Use `--keep-conversation` to preserve history across tasks. The session must be running before you can reset it.
 
 If the agent has unmerged work, reset warns you. Use `--force` to proceed anyway.
 
