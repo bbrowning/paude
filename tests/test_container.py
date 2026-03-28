@@ -129,6 +129,64 @@ class TestImageManager:
             mock_run.assert_not_called()
             assert "paude-runtime:" in result
 
+    def test_ensure_default_image_uses_agent_base_image(self, tmp_path):
+        """ensure_default_image uses agent's default_base_image when set."""
+        import os
+
+        from paude.agents.base import AgentConfig
+        from paude.container.engine import ContainerEngine
+        from paude.container.image import ImageManager
+
+        # Create test containers directory structure with entrypoint files
+        containers_dir = tmp_path / "containers" / "paude"
+        containers_dir.mkdir(parents=True)
+        (containers_dir / "Dockerfile").write_text("FROM centos:stream9")
+        (containers_dir / "entrypoint.sh").write_text("#!/bin/bash\nexec $@")
+        (containers_dir / "entrypoint-session.sh").write_text("#!/bin/bash\nexec $@")
+        (containers_dir / "tmux.conf").write_text("# tmux")
+
+        # Create a mock agent with default_base_image set
+        mock_agent = MagicMock()
+        mock_agent.config = AgentConfig(
+            name="testagent",
+            display_name="TestAgent",
+            process_name="node",
+            session_name="testagent",
+            install_script="",
+            install_dir=".local/bin",
+            config_dir_name=".testagent",
+            default_base_image="ghcr.io/test/testagent:latest",
+        )
+        mock_agent.dockerfile_install_lines.return_value = [
+            "RUN echo 'agent installed'",
+        ]
+
+        engine = ContainerEngine()
+
+        with (
+            patch.object(engine, "image_exists") as mock_exists,
+            patch.object(engine, "run") as mock_run,
+        ):
+            # Runtime image doesn't exist yet
+            mock_exists.return_value = False
+
+            with patch.dict(os.environ, {"PAUDE_DEV": "1"}):
+                manager = ImageManager(
+                    script_dir=tmp_path, engine=engine, agent=mock_agent
+                )
+                result = manager.ensure_default_image()
+
+            # Should build once (workspace-style, not centos10 base + runtime)
+            assert mock_run.call_count == 1
+            build_call = mock_run.call_args_list[0][0]
+            # Should NOT reference paude-base-centos10
+            assert "paude-base-centos10" not in str(build_call)
+            # Should use paude-runtime tag
+            assert "paude-runtime:" in str(build_call)
+            assert "paude-runtime:" in result
+            # Should pass agent's base image as build arg
+            assert "ghcr.io/test/testagent:latest" in str(build_call)
+
     def test_ensure_proxy_image_builds_when_missing(self, tmp_path):
         """ensure_proxy_image builds proxy image when it doesn't exist."""
         import os

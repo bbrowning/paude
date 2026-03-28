@@ -47,6 +47,7 @@ from paude.constants import (
     GCP_ADC_FILENAME,
     GCP_ADC_SECRET_NAME,
     GCP_ADC_TARGET,
+    SANDBOX_CONFIG_TARGET,
 )
 from paude.container.engine import ContainerEngine
 from paude.container.network import NetworkManager
@@ -201,7 +202,7 @@ class PodmanBackend:
         self._runner.inject_file(
             cname,
             content,
-            "/tmp/agent-sandbox-config.sh",  # noqa: S108
+            SANDBOX_CONFIG_TARGET,
             owner="paude:0",
         )
 

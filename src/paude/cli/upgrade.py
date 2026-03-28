@@ -194,7 +194,7 @@ def _upgrade_podman(
                 config, force_rebuild=rebuild, workspace=workspace
             )
         else:
-            image = image_manager.ensure_default_image()
+            image = image_manager.ensure_default_image(force_rebuild=rebuild)
     except Exception as e:
         typer.echo(f"Error building image: {e}", err=True)
         raise typer.Exit(1) from None
