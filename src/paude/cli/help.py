@@ -133,7 +133,7 @@ _SECTIONS: tuple[HelpSection, ...] = (
             "User defaults: ~/.config/paude/defaults.json"
             " (backend, yolo, git, domains, etc.)\n"
             'Project hints: paude.json "create" section'
-            " (allowed-domains, agent)"
+            " (allowed-domains, agent, provider)"
         ),
     ),
     HelpSection(
@@ -150,12 +150,18 @@ _SECTIONS: tuple[HelpSection, ...] = (
         ),
     ),
     HelpSection(
-        title="Agents",
+        title="Agents & Providers",
         rows=(
             ("--agent claude", "Claude Code (default)"),
             ("--agent cursor", "Cursor CLI"),
             ("--agent gemini", "Gemini CLI"),
             ("--agent openclaw", "OpenClaw (web UI on port 18789)"),
+            ("", ""),
+            ("--provider vertex", "Vertex AI (default for claude, openclaw)"),
+            ("--provider anthropic", "Anthropic API"),
+            ("--provider openai", "OpenAI API"),
+            ("--provider cursor", "Cursor API (default for cursor)"),
+            ("--provider google", "Google AI (default for gemini)"),
         ),
     ),
 )

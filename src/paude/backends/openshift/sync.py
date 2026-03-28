@@ -226,6 +226,7 @@ class ConfigSyncer(BaseConfigSyncer):
         verbose: bool = False,
         github_token: str | None = None,
         agent_name: str = "claude",
+        provider: str | None = None,
         secret_env: dict[str, str] | None = None,
         workspace: str = "",
         args: str = "",
@@ -254,7 +255,7 @@ class ConfigSyncer(BaseConfigSyncer):
         self._sync_config_files(agent_name)
         self._sync_github_token(github_token)
         self._sync_secret_env_vars(secret_env or {})
-        self._sync_sandbox_config(agent_name, workspace, args)
+        self._sync_sandbox_config(agent_name, workspace, args, provider=provider)
         self._finalize_sync()
 
         print("Configuration synced.", file=sys.stderr)
@@ -266,6 +267,7 @@ class ConfigSyncer(BaseConfigSyncer):
         github_token: str | None = None,
         secret_env: dict[str, str] | None = None,
         agent_name: str = "claude",
+        provider: str | None = None,
         workspace: str = "",
         args: str = "",
     ) -> None:
@@ -307,7 +309,7 @@ class ConfigSyncer(BaseConfigSyncer):
 
         self._sync_github_token(github_token)
         self._sync_secret_env_vars(secret_env or {})
-        self._sync_sandbox_config(agent_name, workspace, args)
+        self._sync_sandbox_config(agent_name, workspace, args, provider=provider)
 
         if agent_name == "cursor":
             self._sync_cursor_auth(home)
@@ -330,13 +332,21 @@ class ConfigSyncer(BaseConfigSyncer):
 
     # -- OpenShift-specific internal methods --------------------------------
 
-    def _sync_sandbox_config(self, agent_name: str, workspace: str, args: str) -> None:
+    def _sync_sandbox_config(
+        self,
+        agent_name: str,
+        workspace: str,
+        args: str,
+        provider: str | None = None,
+    ) -> None:
         """Generate and write agent sandbox config script into the pod."""
         from paude.backends.shared import generate_sandbox_config_script
         from paude.constants import CONTAINER_WORKSPACE
 
         ws = workspace or CONTAINER_WORKSPACE
-        content = generate_sandbox_config_script(agent_name, ws, args)
+        content = generate_sandbox_config_script(
+            agent_name, ws, args, provider=provider
+        )
         self._cp_content_to_pod(content, "/tmp/agent-sandbox-config.sh")  # noqa: S108
 
     def _cp_content_to_pod(self, content: str, dest_path: str) -> None:

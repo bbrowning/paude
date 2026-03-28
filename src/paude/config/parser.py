@@ -128,7 +128,9 @@ def _parse_devcontainer(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
 
     # Parse create hints from customizations.paude.create
     create_section = data.get("customizations", {}).get("paude", {}).get("create", {})
-    create_allowed_domains, create_agent = _parse_create_section(create_section)
+    create_allowed_domains, create_agent, create_provider = _parse_create_section(
+        create_section
+    )
 
     return PaudeConfig(
         config_file=config_file,
@@ -142,6 +144,7 @@ def _parse_devcontainer(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
         build_args=build_args,
         create_allowed_domains=create_allowed_domains,
         create_agent=create_agent,
+        create_provider=create_provider,
     )
 
 
@@ -175,7 +178,9 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
         )
 
     # Parse "create" section for create hints
-    create_allowed_domains, create_agent = _parse_create_section(data.get("create", {}))
+    create_allowed_domains, create_agent, create_provider = _parse_create_section(
+        data.get("create", {})
+    )
 
     return PaudeConfig(
         config_file=config_file,
@@ -188,25 +193,26 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
         post_create_command=setup_command,
         create_allowed_domains=create_allowed_domains,
         create_agent=create_agent,
+        create_provider=create_provider,
     )
 
 
-_KNOWN_CREATE_KEYS = {"allowed-domains", "agent"}
+_KNOWN_CREATE_KEYS = {"allowed-domains", "agent", "provider"}
 
 
 def _parse_create_section(
     create_data: dict[str, Any],
-) -> tuple[list[str], str | None]:
+) -> tuple[list[str], str | None, str | None]:
     """Parse the 'create' section from project config.
 
     Args:
         create_data: The parsed "create" object (may be empty).
 
     Returns:
-        Tuple of (allowed_domains, agent).
+        Tuple of (allowed_domains, agent, provider).
     """
     if not isinstance(create_data, dict):
-        return [], None
+        return [], None, None
 
     _warn_unknown_keys(create_data, _KNOWN_CREATE_KEYS, "create section")
 
@@ -218,7 +224,11 @@ def _parse_create_section(
     if agent is not None and not isinstance(agent, str):
         agent = None
 
-    return allowed_domains, agent
+    provider = create_data.get("provider")
+    if provider is not None and not isinstance(provider, str):
+        provider = None
+
+    return allowed_domains, agent, provider
 
 
 def _warn_unsupported_properties(data: dict[str, Any]) -> None:

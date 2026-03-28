@@ -64,6 +64,9 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
         "release-assets.githubusercontent.com",
         "results-receiver.actions.githubusercontent.com",
     ],
+    "openai": [
+        ".openai.com",
+    ],
     "openclaw": [
         ".anthropic.com",
         ".openai.com",

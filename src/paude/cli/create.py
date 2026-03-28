@@ -7,7 +7,7 @@ from typing import Annotated
 
 import typer
 
-from paude.agents import get_agent, list_agents
+from paude.agents import get_agent
 from paude.cli.app import BackendType, app
 from paude.cli.helpers import (
     _expand_allowed_domains,
@@ -125,7 +125,14 @@ def session_create(
         str | None,
         typer.Option(
             "--agent",
-            help="Agent to use: claude (default), cursor, gemini.",
+            help="Agent to use: claude (default), cursor, gemini, openclaw.",
+        ),
+    ] = None,
+    provider: Annotated[
+        str | None,
+        typer.Option(
+            "--provider",
+            help="Inference provider (e.g., vertex, openai, anthropic).",
         ),
     ] = None,
     git: Annotated[
@@ -204,6 +211,7 @@ def session_create(
     resolved = resolve_create_options(
         cli_backend=backend.value if backend is not None else None,
         cli_agent=agent,
+        cli_provider=provider,
         cli_yolo=yolo,
         cli_git=git,
         cli_pvc_size=pvc_size,
@@ -220,6 +228,7 @@ def session_create(
     # Extract resolved values
     r_backend = BackendType(resolved.backend.value)
     r_agent = resolved.agent.value
+    r_provider = resolved.provider.value
     r_yolo = resolved.yolo.value
     r_git = resolved.git.value
     r_pvc_size = resolved.pvc_size.value
@@ -237,26 +246,25 @@ def session_create(
         resolved.allowed_domains if resolved.allowed_domains else None
     )
 
-    # Validate agent name
+    # Validate agent name and provider combination
     try:
-        get_agent(r_agent)
-    except ValueError:
-        available = ", ".join(list_agents())
-        typer.echo(
-            f"Error: Unknown agent '{r_agent}'. Available: {available}",
-            err=True,
-        )
+        get_agent(r_agent, provider=r_provider)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
 
     # Handle dry-run mode
     if dry_run:
+        from paude.cli.helpers import _get_provider_aliases
         from paude.dry_run import show_dry_run
 
         parsed_args = _parse_agent_args(claude_args)
-        agent_instance = get_agent(r_agent)
+        agent_instance = get_agent(r_agent, provider=r_provider)
+
         expanded = _expand_allowed_domains(
             r_allowed_domains,
             extra_aliases=agent_instance.config.extra_domain_aliases,
+            provider_aliases=_get_provider_aliases(r_provider, r_agent),
         )
         show_dry_run(
             flags={
@@ -311,6 +319,7 @@ def session_create(
         claude_args=claude_args,
         config_obj=config,
         agent_name=r_agent,
+        provider_name=r_provider,
     )
 
     if r_backend in (BackendType.podman, BackendType.docker):
@@ -330,6 +339,7 @@ def session_create(
             rebuild=rebuild,
             platform=r_platform,
             agent_name=r_agent,
+            provider_name=r_provider,
             engine_binary=r_backend.value,
             ssh_host=parsed_ssh_host,
             ssh_key=ssh_key,
@@ -357,6 +367,7 @@ def session_create(
             openshift_namespace=r_openshift_namespace,
             credential_timeout=r_credential_timeout,
             agent_name=r_agent,
+            provider_name=r_provider,
             gpu=r_gpu,
             resources=r_openshift_resources,
             build_resources=r_openshift_build_resources,

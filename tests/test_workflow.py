@@ -498,6 +498,7 @@ class TestResetSession:
         mock_session = MagicMock()
         mock_session.status = "running"
         mock_session.agent = "claude"
+        mock_session.provider = None
         mock_session.workspace = Path("/fake/workspace")
         mock_backend.get_session.return_value = mock_session
         mock_backend.exec_in_session.return_value = (0, "", "")

@@ -62,16 +62,64 @@ class AgentConfig:
     extra_domain_aliases: list[str] = field(default_factory=lambda: ["claude"])
     exposed_ports: list[tuple[int, int]] = field(default_factory=list)
     default_base_image: str | None = None
+    provider: str | None = None
+
+
+@dataclass
+class ProviderCredentials:
+    """Resolved provider credentials for an agent."""
+
+    passthrough_env_vars: list[str] = field(default_factory=list)
+    secret_env_vars: list[str] = field(default_factory=list)
+    passthrough_env_prefixes: list[str] = field(default_factory=list)
+    extra_env_vars: dict[str, str] = field(default_factory=dict)
+    resolved_provider_name: str = ""
+    model_config: dict[str, str] = field(default_factory=dict)
+
+
+def build_provider_credentials(
+    agent_name: str, provider: str | None
+) -> ProviderCredentials:
+    """Build credential lists from provider configuration."""
+    from paude.providers.agent_providers import DEFAULT_PROVIDER, resolve_agent_provider
+
+    resolved_name = (
+        provider if provider is not None else DEFAULT_PROVIDER.get(agent_name)
+    )
+    if resolved_name is None:
+        return ProviderCredentials()
+
+    provider_config, agent_config = resolve_agent_provider(agent_name, resolved_name)
+
+    passthrough = list(provider_config.passthrough_env_vars)
+    passthrough.extend(agent_config.extra_passthrough_env_vars)
+
+    secret = list(provider_config.secret_env_vars)
+    secret.extend(agent_config.extra_secret_env_vars)
+
+    prefixes = list(provider_config.passthrough_env_prefixes)
+
+    extra_env = dict(agent_config.extra_env_vars)
+
+    return ProviderCredentials(
+        passthrough_env_vars=passthrough,
+        secret_env_vars=secret,
+        passthrough_env_prefixes=prefixes,
+        extra_env_vars=extra_env,
+        resolved_provider_name=resolved_name,
+        model_config=dict(agent_config.model_config),
+    )
 
 
 def build_environment_from_config(config: AgentConfig) -> dict[str, str]:
-    """Build environment dict by collecting passthrough vars from os.environ.
+    """Build environment dict from static env_vars and passthrough vars from os.environ.
 
     Secret env vars (listed in config.secret_env_vars) are excluded from
     this output. Use build_secret_environment_from_config() for those.
     """
     secret_set = set(config.secret_env_vars)
     env: dict[str, str] = {}
+    env.update(config.env_vars)
     for var in config.passthrough_env_vars:
         if var in secret_set:
             continue

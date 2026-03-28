@@ -215,9 +215,26 @@ def _parse_agent_args(claude_args: str | None) -> list[str]:
 _parse_claude_args = _parse_agent_args
 
 
+def _get_provider_aliases(
+    provider_name: str | None, agent_name: str
+) -> list[str] | None:
+    """Resolve provider domain aliases for an agent."""
+    from paude.providers import get_provider
+    from paude.providers.agent_providers import DEFAULT_PROVIDER
+
+    resolved = provider_name or DEFAULT_PROVIDER.get(agent_name)
+    if not resolved:
+        return None
+    try:
+        return get_provider(resolved).domain_aliases
+    except ValueError:
+        return None
+
+
 def _expand_allowed_domains(
     allowed_domains: list[str] | None,
     extra_aliases: list[str] | None = None,
+    provider_aliases: list[str] | None = None,
 ) -> list[str] | None:
     """Expand domain aliases, defaulting to ["default"].
 
@@ -225,8 +242,16 @@ def _expand_allowed_domains(
         allowed_domains: Raw domain list from CLI, or None for defaults.
         extra_aliases: Agent-specific aliases to add on top of BASE_ALIASES
             when expanding "default". If None, falls back to DEFAULT_ALIASES.
+        provider_aliases: Provider-specific domain aliases to merge in.
     """
     from paude.domains import expand_domains
+
+    if provider_aliases:
+        merged = list(extra_aliases or [])
+        for alias in provider_aliases:
+            if alias not in merged:
+                merged.append(alias)
+        extra_aliases = merged
 
     domains_input = allowed_domains if allowed_domains else ["default"]
     return expand_domains(domains_input, extra_aliases=extra_aliases)
@@ -238,6 +263,7 @@ def _prepare_session_create(
     claude_args: str | None,
     config_obj: PaudeConfig | None,
     agent_name: str = "claude",
+    provider_name: str | None = None,
 ) -> tuple[list[str] | None, list[str], dict[str, str], bool]:
     """Shared pre-create logic for both backends.
 
@@ -249,14 +275,15 @@ def _prepare_session_create(
 
     parsed_args = _parse_agent_args(claude_args)
 
-    # Build environment from agent
-    agent_instance = get_agent(agent_name)
+    agent_instance = get_agent(agent_name, provider=provider_name)
     env = agent_instance.build_environment()
     if config_obj and config_obj.container_env:
         env.update(config_obj.container_env)
 
     expanded_domains = _expand_allowed_domains(
-        allowed_domains, extra_aliases=agent_instance.config.extra_domain_aliases
+        allowed_domains,
+        extra_aliases=agent_instance.config.extra_domain_aliases,
+        provider_aliases=_get_provider_aliases(provider_name, agent_name),
     )
     unrestricted = is_unrestricted(expanded_domains)
 
@@ -267,7 +294,7 @@ def _prepare_session_create(
             err=True,
         )
         typer.echo(
-            "         Claude can exfiltrate files without confirmation.",
+            "         The agent can exfiltrate files without confirmation.",
             err=True,
         )
         typer.echo("", err=True)

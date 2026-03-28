@@ -42,6 +42,7 @@ def create_openshift_session(
     openshift_namespace: str | None,
     credential_timeout: int,
     agent_name: str = "claude",
+    provider_name: str | None = None,
     gpu: str | None = None,
     resources: dict[str, dict[str, str]] | None = None,
     build_resources: dict[str, dict[str, str]] | None = None,
@@ -64,7 +65,7 @@ def create_openshift_session(
     try:
         # Build image via OpenShift binary build
         typer.echo("Building image in OpenShift cluster...")
-        agent = get_agent(agent_name)
+        agent = get_agent(agent_name, provider=provider_name)
         image = os_backend.ensure_image_via_build(
             config=config,
             workspace=workspace,
@@ -106,6 +107,7 @@ def create_openshift_session(
             proxy_image=proxy_image,
             credential_timeout=credential_timeout,
             agent=agent_name,
+            provider=provider_name,
             gpu=gpu,
             ports=agent.config.exposed_ports,
         )

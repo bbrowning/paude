@@ -4,26 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from paude.agents.base import AgentConfig, build_environment_from_config
+from paude.agents.base import (
+    AgentConfig,
+    build_environment_from_config,
+    build_provider_credentials,
+)
 from paude.mounts import resolve_path
-
-_OPENCLAW_SECRET_VARS = [
-    "ANTHROPIC_API_KEY",
-    "OPENAI_API_KEY",
-    "GROQ_API_KEY",
-]
-
-_OPENCLAW_PASSTHROUGH_VARS = [
-    "ANTHROPIC_VERTEX_PROJECT_ID",
-    "GOOGLE_CLOUD_PROJECT",
-    "GOOGLE_CLOUD_PROJECT_ID",
-    "GOOGLE_CLOUD_LOCATION",
-    "CLOUD_ML_REGION",
-]
-
-_OPENCLAW_PASSTHROUGH_PREFIXES = [
-    "CLOUDSDK_AUTH_",
-]
 
 
 class OpenClawAgent:
@@ -34,7 +20,11 @@ class OpenClawAgent:
     The tmux session shows server logs.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, provider: str | None = None) -> None:
+        creds = build_provider_credentials("openclaw", provider)
+        creds.extra_env_vars["NODE_USE_ENV_PROXY"] = "1"
+        self._model_config = creds.model_config
+
         self._config = AgentConfig(
             name="openclaw",
             display_name="OpenClaw",
@@ -42,12 +32,10 @@ class OpenClawAgent:
             session_name="openclaw",
             install_script="",
             install_dir=".local/bin",
-            env_vars={
-                "NODE_USE_ENV_PROXY": "1",
-            },
-            passthrough_env_vars=list(_OPENCLAW_PASSTHROUGH_VARS),
-            secret_env_vars=list(_OPENCLAW_SECRET_VARS),
-            passthrough_env_prefixes=list(_OPENCLAW_PASSTHROUGH_PREFIXES),
+            env_vars=creds.extra_env_vars,
+            passthrough_env_vars=creds.passthrough_env_vars,
+            secret_env_vars=creds.secret_env_vars,
+            passthrough_env_prefixes=creds.passthrough_env_prefixes,
             config_dir_name=".openclaw",
             config_file_name=None,
             config_excludes=[],
@@ -58,6 +46,7 @@ class OpenClawAgent:
             extra_domain_aliases=["openclaw"],
             exposed_ports=[(18789, 18789)],
             default_base_image="ghcr.io/openclaw/openclaw:latest",
+            provider=creds.resolved_provider_name,
         )
 
     @property
@@ -121,6 +110,9 @@ class OpenClawAgent:
         /credentials/env/ and are loaded by the entrypoint into the
         process environment before the agent launches.
         """
+        primary_model = self._model_config.get(
+            "primary", "anthropic-vertex/claude-opus-4-6"
+        )
         return f"""\
 #!/bin/bash
 # Pre-configure OpenClaw for containerized operation
@@ -140,7 +132,7 @@ if [ ! -f "$config_file" ]; then
     "defaults": {{
       "workspace": "{workspace}",
       "model": {{
-        "primary": "anthropic-vertex/claude-opus-4-6"
+        "primary": "{primary_model}"
       }}
     }}
   }}

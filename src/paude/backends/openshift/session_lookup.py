@@ -12,6 +12,7 @@ from paude.backends.openshift.oc import OcClient
 from paude.backends.shared import (
     PAUDE_LABEL_AGENT,
     PAUDE_LABEL_APP,
+    PAUDE_LABEL_PROVIDER,
     PAUDE_LABEL_SESSION,
     PAUDE_LABEL_VERSION,
     decode_path,
@@ -168,6 +169,7 @@ class SessionLookup:
             container_id=pod_name(session_name),
             volume_name=pvc_name(session_name),
             agent=labels.get(PAUDE_LABEL_AGENT, "claude"),
+            provider=labels.get(PAUDE_LABEL_PROVIDER),
             version=labels.get(PAUDE_LABEL_VERSION),
         )
 

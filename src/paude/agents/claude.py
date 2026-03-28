@@ -7,6 +7,7 @@ from pathlib import Path
 from paude.agents.base import (
     AgentConfig,
     build_environment_from_config,
+    build_provider_credentials,
     pipefail_install_lines,
 )
 from paude.mounts import resolve_path
@@ -38,21 +39,12 @@ _CLAUDE_ACTIVITY_FILES = [
     "debug/*",
 ]
 
-_CLAUDE_PASSTHROUGH_VARS = [
-    "CLAUDE_CODE_USE_VERTEX",
-    "ANTHROPIC_VERTEX_PROJECT_ID",
-    "GOOGLE_CLOUD_PROJECT",
-]
-
-_CLAUDE_PASSTHROUGH_PREFIXES = [
-    "CLOUDSDK_AUTH_",
-]
-
 
 class ClaudeAgent:
     """Claude Code agent implementation."""
 
-    def __init__(self) -> None:
+    def __init__(self, provider: str | None = None) -> None:
+        creds = build_provider_credentials("claude", provider)
         self._config = AgentConfig(
             name="claude",
             display_name="Claude Code",
@@ -60,10 +52,11 @@ class ClaudeAgent:
             session_name="claude",
             install_script="curl -fsSL https://claude.ai/install.sh | bash",
             install_dir=".local/bin",
-            env_vars={},
+            env_vars=creds.extra_env_vars,
             skip_install_env_var="PAUDE_SKIP_AGENT_INSTALL",
-            passthrough_env_vars=list(_CLAUDE_PASSTHROUGH_VARS),
-            passthrough_env_prefixes=list(_CLAUDE_PASSTHROUGH_PREFIXES),
+            passthrough_env_vars=creds.passthrough_env_vars,
+            secret_env_vars=creds.secret_env_vars,
+            passthrough_env_prefixes=creds.passthrough_env_prefixes,
             config_dir_name=".claude",
             config_file_name=".claude.json",
             config_excludes=list(_CLAUDE_CONFIG_EXCLUDES),
@@ -71,6 +64,7 @@ class ClaudeAgent:
             yolo_flag="--dangerously-skip-permissions",
             clear_command="/clear",
             args_env_var="PAUDE_AGENT_ARGS",
+            provider=creds.resolved_provider_name,
         )
 
     @property

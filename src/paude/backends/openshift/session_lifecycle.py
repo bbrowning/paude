@@ -129,7 +129,7 @@ class SessionLifecycleManager:
         from paude.agents import get_agent
         from paude.agents.base import build_secret_environment_from_config
 
-        agent = get_agent(config.agent)
+        agent = get_agent(config.agent, provider=config.provider)
         secret_env = build_secret_environment_from_config(agent.config)
         proxy_name = (
             proxy_resource_name(session_name)
@@ -164,6 +164,7 @@ class SessionLifecycleManager:
             pvc_size=config.pvc_size,
             storage_class=config.storage_class,
             agent=config.agent,
+            provider=config.provider,
             gpu=config.gpu,
             yolo=config.yolo,
         )
@@ -185,6 +186,7 @@ class SessionLifecycleManager:
             self._syncer.sync_full_config(
                 pname,
                 agent_name=config.agent,
+                provider=config.provider,
                 secret_env=secret_env,
                 args=session_env.get("PAUDE_AGENT_ARGS", ""),
             )
@@ -347,6 +349,7 @@ class SessionLifecycleManager:
         pvc_size: str = "10Gi",
         storage_class: str | None = None,
         agent: str = "claude",
+        provider: str | None = None,
         gpu: str | None = None,
         yolo: bool = False,
     ) -> dict[str, Any]:
@@ -358,6 +361,7 @@ class SessionLifecycleManager:
                 image=image,
                 resources=self._config.resources,
                 agent=agent,
+                provider=provider,
                 gpu=gpu,
                 yolo=yolo,
             )
