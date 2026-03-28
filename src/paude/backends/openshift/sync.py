@@ -16,7 +16,7 @@ from paude.backends.openshift.oc import (
     OcClient,
 )
 from paude.backends.sync_base import CONFIG_PATH, BaseConfigSyncer
-from paude.constants import CONTAINER_HOME, GCP_ADC_FILENAME
+from paude.constants import CONTAINER_HOME, GCP_ADC_FILENAME, SANDBOX_CONFIG_TARGET
 
 if TYPE_CHECKING:
     from paude.agents.base import Agent
@@ -347,7 +347,7 @@ class ConfigSyncer(BaseConfigSyncer):
         content = generate_sandbox_config_script(
             agent_name, ws, args, provider=provider
         )
-        self._cp_content_to_pod(content, "/tmp/agent-sandbox-config.sh")  # noqa: S108
+        self._cp_content_to_pod(content, SANDBOX_CONFIG_TARGET)
 
     def _cp_content_to_pod(self, content: str, dest_path: str) -> None:
         """Write content to a tempfile and copy it to the pod via ``oc cp``."""

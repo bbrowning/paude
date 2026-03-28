@@ -64,7 +64,7 @@ def create_podman_session(
                 config, force_rebuild=rebuild, workspace=workspace
             )
         else:
-            image = image_manager.ensure_default_image()
+            image = image_manager.ensure_default_image(force_rebuild=rebuild)
     except Exception as e:
         typer.echo(f"Error ensuring image: {e}", err=True)
         raise typer.Exit(1) from None

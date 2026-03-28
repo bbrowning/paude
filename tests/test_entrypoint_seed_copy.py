@@ -142,7 +142,7 @@ class TestEntrypointContract:
         """tmux has-session check must appear before sandbox config sourcing."""
         content = ENTRYPOINT_PATH.read_text()
         tmux_check_pos = content.find("tmux -u has-session")
-        sandbox_source_pos = content.find("source /tmp/agent-sandbox-config.sh")
+        sandbox_source_pos = content.find("agent-sandbox-config.sh")
         assert tmux_check_pos != -1
         assert sandbox_source_pos != -1
         assert tmux_check_pos < sandbox_source_pos, (

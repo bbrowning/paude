@@ -58,14 +58,77 @@ class ImageManager:
         self.agent = agent
         self._engine = engine or ContainerEngine()
 
-    def ensure_default_image(self) -> str:
+    def ensure_default_image(self, force_rebuild: bool = False) -> str:
         """Ensure the default paude image is available.
 
         Returns:
             Image tag to use (the runtime image with agent installed).
         """
+        if self.agent and self.agent.config.default_base_image:
+            return self._ensure_agent_base_image(force_rebuild=force_rebuild)
         base_tag = self._ensure_base_image()
         return self._ensure_runtime_image(base_tag)
+
+    def _ensure_agent_base_image(self, force_rebuild: bool = False) -> str:
+        """Build image using agent's default base image with paude infrastructure.
+
+        Mirrors the OpenShift path in prepare_build_context() for agents
+        that declare their own base image (e.g. openclaw).
+        """
+        import sys
+
+        base_image = self.agent.config.default_base_image
+        if base_image is None:  # pragma: no cover
+            raise ValueError("No default_base_image set")
+
+        empty_config = PaudeConfig()
+        dockerfile_content = generate_dockerfile_content(
+            empty_config, using_default_paude_image=False, agent=self.agent
+        )
+
+        layer_hash = compute_content_hash(
+            base_image.encode(),
+            self.version.encode(),
+            dockerfile_content.encode(),
+        )
+
+        if self.platform:
+            arch = self.platform.split("/")[-1]
+            tag = f"paude-runtime:{layer_hash[:12]}-{arch}"
+        else:
+            tag = f"paude-runtime:{layer_hash[:12]}"
+
+        if not force_rebuild and self._engine.image_exists(tag):
+            print(f"Using cached runtime image: {tag}", file=sys.stderr)
+            return tag
+
+        agent_display = self.agent.config.display_name
+        print(f"Building {agent_display} image from {base_image}...", file=sys.stderr)
+
+        entrypoint = resolve_entrypoint(self.script_dir)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "Dockerfile").write_text(dockerfile_content)
+            copy_entrypoints(entrypoint, Path(tmpdir))
+
+            build_args = {"BASE_IMAGE": base_image}
+            try:
+                self.build_image(
+                    Path(tmpdir) / "Dockerfile", tag, Path(tmpdir), build_args
+                )
+            except Exception:
+                engine_name = self._engine.binary
+                print(
+                    f"\n{agent_display} installation failed. This usually means:\n"
+                    "  - Network connectivity issues (check your connection)\n"
+                    f"  - {engine_name.capitalize()} not running "
+                    f"(run '{engine_name} machine start' if applicable)\n"
+                    "  - Disk space issues\n",
+                    file=sys.stderr,
+                )
+                raise
+
+        print(f"{agent_display} installed successfully.", file=sys.stderr)
+        return tag
 
     def _ensure_base_image(self) -> str:
         """Ensure the base paude image (without agent) is available."""

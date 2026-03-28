@@ -174,7 +174,7 @@ RUN if ! command -v tini >/dev/null 2>&1; then \\
     lines.append(
         "RUN (id paude >/dev/null 2>&1 || useradd -M -d /home/paude -s /bin/bash -g 0 paude 2>/dev/null || adduser -D -s /bin/bash -G root paude) && "
         "umask 0002 && "
-        f"mkdir -p {CONTAINER_HOME}/{config_dir} {CONTAINER_HOME}/.config && "
+        f"mkdir -p {CONTAINER_HOME}/{config_dir} {CONTAINER_HOME}/.config {CONTAINER_HOME}/.paude && "
         f"chown -R paude:0 {CONTAINER_HOME}"
     )
 
