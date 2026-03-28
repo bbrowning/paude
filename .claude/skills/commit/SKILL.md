@@ -9,6 +9,6 @@ description: >
 user_invocable: false
 ---
 
-Spawn an Agent with `model: "sonnet"` to handle this commit. Pass along the user's request as-is. The only addition to the prompt: the Co-Authored-By line must reflect the actual Sonnet model writing the commit (e.g. `Claude Sonnet 4.6 <noreply@anthropic.com>`), not the parent Opus model.
+Spawn an Agent with `model: "sonnet"` to handle this commit. Pass along the user's request as-is. Additional instructions for the agent: the Co-Authored-By line must reflect the actual Sonnet model writing the commit (e.g. `Claude Sonnet 4.6 <noreply@anthropic.com>`), not the parent Opus model. Wrap the commit message body at 72 characters per line.
 
 After the agent completes, relay the result back to the user.
