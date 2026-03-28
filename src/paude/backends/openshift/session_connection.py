@@ -10,7 +10,7 @@ from paude.backends.openshift.config import OpenShiftConfig
 from paude.backends.openshift.oc import OC_EXEC_TIMEOUT, RSYNC_TIMEOUT, OcClient
 from paude.backends.openshift.session_lookup import SessionLookup
 from paude.backends.openshift.sync import ConfigSyncer
-from paude.backends.shared import PAUDE_LABEL_AGENT, resource_name
+from paude.backends.shared import PAUDE_LABEL_AGENT, PAUDE_LABEL_PROVIDER, resource_name
 
 
 class SessionConnector:
@@ -85,8 +85,10 @@ class SessionConnector:
         from paude.agents import get_agent
         from paude.backends.openshift.port_forward import PortForwardManager
 
-        agent_name = self._get_session_agent_name(session_name)
-        agent = get_agent(agent_name)
+        sts = self._lookup.get_statefulset(session_name)
+        agent_name = self._agent_name_from_sts(sts)
+        provider = self._provider_from_sts(sts)
+        agent = get_agent(agent_name, provider=provider)
         ports = agent.config.exposed_ports
         if not ports:
             return []
@@ -105,10 +107,25 @@ class SessionConnector:
         labels: dict[str, object] = metadata.get("labels", {})  # type: ignore[assignment]
         return str(labels.get(PAUDE_LABEL_AGENT, "claude"))
 
+    @staticmethod
+    def _provider_from_sts(sts: dict[str, object] | None) -> str | None:
+        """Extract the provider name from a StatefulSet's labels."""
+        if not sts:
+            return None
+        metadata: dict[str, object] = sts.get("metadata", {})  # type: ignore[assignment]
+        labels: dict[str, object] = metadata.get("labels", {})  # type: ignore[assignment]
+        value = labels.get(PAUDE_LABEL_PROVIDER)
+        return str(value) if value is not None else None
+
     def _get_session_agent_name(self, session_name: str) -> str:
         """Look up the agent name from StatefulSet labels."""
         sts = self._lookup.get_statefulset(session_name)
         return self._agent_name_from_sts(sts)
+
+    def _get_session_provider(self, session_name: str) -> str | None:
+        """Look up the provider name from StatefulSet labels."""
+        sts = self._lookup.get_statefulset(session_name)
+        return self._provider_from_sts(sts)
 
     def _sync_for_connect(
         self, pname: str, name: str, github_token: str | None
@@ -119,9 +136,10 @@ class SessionConnector:
 
         sts = self._lookup.get_statefulset(name)
         agent_name = self._agent_name_from_sts(sts)
+        provider = self._provider_from_sts(sts)
         agent_args = self._extract_env_from_sts(sts, "PAUDE_AGENT_ARGS")
 
-        agent = get_agent(agent_name)
+        agent = get_agent(agent_name, provider=provider)
         secret_env = build_secret_environment_from_config(agent.config)
 
         if self._syncer.is_config_synced(pname):
@@ -131,6 +149,7 @@ class SessionConnector:
                 github_token=github_token,
                 secret_env=secret_env,
                 agent_name=agent_name,
+                provider=provider,
                 args=agent_args,
             )
         else:
@@ -139,6 +158,7 @@ class SessionConnector:
                 verbose=False,
                 github_token=github_token,
                 agent_name=agent_name,
+                provider=provider,
                 secret_env=secret_env,
                 args=agent_args,
             )

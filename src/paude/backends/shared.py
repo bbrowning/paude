@@ -22,6 +22,7 @@ PAUDE_LABEL_PROXY_IMAGE = "paude.io/proxy-image"
 PAUDE_LABEL_VERSION = "paude.io/version"
 PAUDE_LABEL_GPU = "paude.io/gpu"
 PAUDE_LABEL_YOLO = "paude.io/yolo"
+PAUDE_LABEL_PROVIDER = "paude.io/provider"
 
 SQUID_BLOCKED_LOG_PATH = "/tmp/squid-blocked.log"  # noqa: S108
 
@@ -207,12 +208,14 @@ def engine_binary_for_backend(backend_type: str) -> str:
     raise ValueError(f"No engine binary for backend type: {backend_type}")
 
 
-def generate_sandbox_config_script(agent_name: str, workspace: str, args: str) -> str:
+def generate_sandbox_config_script(
+    agent_name: str, workspace: str, args: str, provider: str | None = None
+) -> str:
     """Generate the sandbox config bash script for an agent."""
     from paude.agents import get_agent
     from paude.constants import CONTAINER_HOME
 
-    agent = get_agent(agent_name)
+    agent = get_agent(agent_name, provider=provider)
     return agent.apply_sandbox_config(CONTAINER_HOME, workspace, args)
 
 

@@ -113,7 +113,7 @@ class TestClaudeAgentConfig:
 
     def test_env_vars(self) -> None:
         cfg = ClaudeAgent().config
-        assert cfg.env_vars == {}
+        assert cfg.env_vars == {"CLAUDE_CODE_USE_VERTEX": "1"}
 
     def test_config_dir_name(self) -> None:
         assert ClaudeAgent().config.config_dir_name == ".claude"
@@ -137,7 +137,7 @@ class TestClaudeAgentConfig:
 
     def test_passthrough_vars(self) -> None:
         cfg = ClaudeAgent().config
-        assert "CLAUDE_CODE_USE_VERTEX" in cfg.passthrough_env_vars
+        assert "ANTHROPIC_VERTEX_PROJECT_ID" in cfg.passthrough_env_vars
 
     def test_extra_domain_aliases(self) -> None:
         cfg = ClaudeAgent().config
@@ -234,19 +234,22 @@ class TestClaudeAgentHostConfigMounts:
 class TestClaudeAgentBuildEnvironment:
     """Tests for ClaudeAgent.build_environment."""
 
-    def test_empty_when_no_vars_set(self) -> None:
+    def test_includes_static_env_vars_when_no_host_vars_set(self) -> None:
         with patch.dict("os.environ", {}, clear=True):
             env = ClaudeAgent().build_environment()
-            assert env == {}
+            assert env == {"CLAUDE_CODE_USE_VERTEX": "1"}
 
     def test_passes_through_vertex_vars(self) -> None:
         with patch.dict(
             "os.environ",
-            {"CLAUDE_CODE_USE_VERTEX": "1", "UNRELATED": "x"},
+            {"ANTHROPIC_VERTEX_PROJECT_ID": "proj-1", "UNRELATED": "x"},
             clear=True,
         ):
             env = ClaudeAgent().build_environment()
-            assert env == {"CLAUDE_CODE_USE_VERTEX": "1"}
+            assert env == {
+                "ANTHROPIC_VERTEX_PROJECT_ID": "proj-1",
+                "CLAUDE_CODE_USE_VERTEX": "1",
+            }
 
     def test_passes_through_prefix_vars(self) -> None:
         with patch.dict(
@@ -255,7 +258,10 @@ class TestClaudeAgentBuildEnvironment:
             clear=True,
         ):
             env = ClaudeAgent().build_environment()
-            assert env == {"CLOUDSDK_AUTH_TOKEN": "abc"}
+            assert env == {
+                "CLOUDSDK_AUTH_TOKEN": "abc",
+                "CLAUDE_CODE_USE_VERTEX": "1",
+            }
 
 
 class TestClaudeAgentSandboxConfig:
@@ -634,10 +640,10 @@ class TestCursorAgentHostConfigMounts:
 class TestCursorAgentBuildEnvironment:
     """Tests for CursorAgent.build_environment."""
 
-    def test_empty_when_no_vars_set(self) -> None:
+    def test_includes_static_env_vars_when_no_host_vars_set(self) -> None:
         with patch.dict("os.environ", {}, clear=True):
             env = CursorAgent().build_environment()
-            assert env == {}
+            assert env == {"APPIMAGE_EXTRACT_AND_RUN": "1", "NODE_USE_ENV_PROXY": "1"}
 
     def test_does_not_include_secret_vars(self) -> None:
         with patch.dict(
@@ -919,10 +925,17 @@ class TestOpenClawAgentConfig:
         assert "CLOUDSDK_AUTH_" in cfg.passthrough_env_prefixes
 
     def test_secret_env_vars(self) -> None:
+        # Default provider is vertex, which has no secret env vars
         cfg = OpenClawAgent().config
-        assert "ANTHROPIC_API_KEY" in cfg.secret_env_vars
+        assert cfg.secret_env_vars == []
+
+    def test_secret_env_vars_openai_provider(self) -> None:
+        cfg = OpenClawAgent(provider="openai").config
         assert "OPENAI_API_KEY" in cfg.secret_env_vars
-        assert "GROQ_API_KEY" in cfg.secret_env_vars
+
+    def test_secret_env_vars_anthropic_provider(self) -> None:
+        cfg = OpenClawAgent(provider="anthropic").config
+        assert "ANTHROPIC_API_KEY" in cfg.secret_env_vars
 
     def test_extra_domain_aliases(self) -> None:
         assert OpenClawAgent().config.extra_domain_aliases == ["openclaw"]
@@ -996,10 +1009,10 @@ class TestOpenClawAgentHostConfigMounts:
 class TestOpenClawAgentBuildEnvironment:
     """Tests for OpenClawAgent.build_environment."""
 
-    def test_empty_when_no_vars_set(self) -> None:
+    def test_includes_static_env_vars_when_no_host_vars_set(self) -> None:
         with patch.dict("os.environ", {}, clear=True):
             env = OpenClawAgent().build_environment()
-            assert env == {}
+            assert env == {"NODE_USE_ENV_PROXY": "1"}
 
     def test_does_not_include_secret_vars(self) -> None:
         with patch.dict(
@@ -1011,6 +1024,7 @@ class TestOpenClawAgentBuildEnvironment:
             assert "ANTHROPIC_API_KEY" not in env
 
     def test_secret_env_collects_api_keys(self) -> None:
+        # Default provider (vertex) has no secret env vars
         with patch.dict(
             "os.environ",
             {
@@ -1021,10 +1035,18 @@ class TestOpenClawAgentBuildEnvironment:
             clear=True,
         ):
             env = build_secret_environment_from_config(OpenClawAgent().config)
-            assert env == {
-                "ANTHROPIC_API_KEY": "sk-ant",
-                "OPENAI_API_KEY": "sk-oai",
-            }
+            assert env == {}
+
+    def test_secret_env_collects_openai_key(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"OPENAI_API_KEY": "sk-oai", "UNRELATED": "x"},
+            clear=True,
+        ):
+            env = build_secret_environment_from_config(
+                OpenClawAgent(provider="openai").config
+            )
+            assert env == {"OPENAI_API_KEY": "sk-oai"}
 
 
 class TestOpenClawAgentSandboxConfig:

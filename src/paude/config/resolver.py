@@ -68,6 +68,9 @@ class ResolvedCreateOptions:
     openshift_build_resources: SettingValue[dict[str, dict[str, str]] | None] = field(
         default_factory=lambda: SettingValue(None, "built-in")
     )
+    provider: SettingValue[str | None] = field(
+        default_factory=lambda: SettingValue(None, "built-in")
+    )
     allowed_domains: list[str] = field(default_factory=list)
     allowed_domains_provenance: list[tuple[list[str], Source]] = field(
         default_factory=list
@@ -78,6 +81,7 @@ def resolve_create_options(
     *,
     cli_backend: str | None,
     cli_agent: str | None,
+    cli_provider: str | None = None,
     cli_yolo: bool | None,
     cli_git: bool | None,
     cli_pvc_size: str | None,
@@ -116,6 +120,13 @@ def resolve_create_options(
         project=project_config.create_agent if project_config else None,
         user=user_defaults.agent,
         builtin="claude",
+    )
+
+    result.provider = _resolve_scalar(
+        cli=cli_provider,
+        project=project_config.create_provider if project_config else None,
+        user=user_defaults.provider,
+        builtin=None,
     )
 
     result.yolo = _resolve_scalar(

@@ -10,13 +10,14 @@ from paude.environment import build_environment, build_proxy_environment
 class TestBuildEnvironment:
     """Tests for build_environment."""
 
-    def test_claude_code_use_vertex_passed_through(
-        self, monkeypatch: pytest.MonkeyPatch
-    ):
-        """CLAUDE_CODE_USE_VERTEX passed through when set."""
-        monkeypatch.setenv("CLAUDE_CODE_USE_VERTEX", "1")
-        env = build_environment()
-        assert env.get("CLAUDE_CODE_USE_VERTEX") == "1"
+    def test_claude_code_use_vertex_in_env_vars(self):
+        """CLAUDE_CODE_USE_VERTEX is set as a static env var (not passthrough)."""
+        # With vertex provider (default), CLAUDE_CODE_USE_VERTEX is in env_vars
+        # not passthrough_env_vars, so it's set by the agent's config directly
+        from paude.agents import get_agent
+
+        agent = get_agent("claude")
+        assert agent.config.env_vars.get("CLAUDE_CODE_USE_VERTEX") == "1"
 
     def test_anthropic_vertex_project_id_passed_through(
         self, monkeypatch: pytest.MonkeyPatch
@@ -34,13 +35,16 @@ class TestBuildEnvironment:
         assert env.get("CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE") == "/path/to/creds"
         assert env.get("CLOUDSDK_AUTH_ACCESS_TOKEN") == "token123"
 
-    def test_missing_env_vars_not_included(self, monkeypatch: pytest.MonkeyPatch):
-        """Missing env vars are not included."""
-        # Ensure these are not set
+    def test_missing_passthrough_vars_not_included(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Missing passthrough env vars are not included, but static env vars are."""
         monkeypatch.delenv("CLAUDE_CODE_USE_VERTEX", raising=False)
         monkeypatch.delenv("ANTHROPIC_VERTEX_PROJECT_ID", raising=False)
         env = build_environment()
-        assert "CLAUDE_CODE_USE_VERTEX" not in env
+        # CLAUDE_CODE_USE_VERTEX is a static env_var, always present
+        assert env["CLAUDE_CODE_USE_VERTEX"] == "1"
+        # ANTHROPIC_VERTEX_PROJECT_ID is a passthrough var, absent when unset
         assert "ANTHROPIC_VERTEX_PROJECT_ID" not in env
 
     def test_gh_token_not_auto_propagated(self, monkeypatch: pytest.MonkeyPatch):

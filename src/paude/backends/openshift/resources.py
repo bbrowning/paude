@@ -11,6 +11,7 @@ from typing import Any
 from paude.backends.shared import (
     PAUDE_LABEL_AGENT,
     PAUDE_LABEL_GPU,
+    PAUDE_LABEL_PROVIDER,
     PAUDE_LABEL_VERSION,
     PAUDE_LABEL_YOLO,
     encode_path,
@@ -54,6 +55,7 @@ class StatefulSetBuilder:
         image: str,
         resources: dict[str, dict[str, str]],
         agent: str = "claude",
+        provider: str | None = None,
         gpu: str | None = None,
         yolo: bool = False,
     ) -> None:
@@ -65,6 +67,7 @@ class StatefulSetBuilder:
             image: Container image to use.
             resources: Resource requests/limits for the container.
             agent: Agent name (e.g., "claude").
+            provider: Inference provider name (e.g., "vertex", "openai").
             gpu: GPU spec (e.g., "all", "device=0,1", "2").
             yolo: Whether YOLO mode is enabled.
         """
@@ -73,6 +76,7 @@ class StatefulSetBuilder:
         self._image = image
         self._resources = resources
         self._agent = agent
+        self._provider = provider
         self._gpu = gpu
         self._yolo = yolo
         self._env: dict[str, str] = {}
@@ -133,6 +137,8 @@ class StatefulSetBuilder:
             PAUDE_LABEL_AGENT: self._agent,
             PAUDE_LABEL_VERSION: __version__,
         }
+        if self._provider:
+            labels[PAUDE_LABEL_PROVIDER] = self._provider
         if self._gpu:
             labels[PAUDE_LABEL_GPU] = self._gpu
         if self._yolo:

@@ -30,6 +30,7 @@ class UserDefaults:
 
     backend: str | None = None
     agent: str | None = None
+    provider: str | None = None
     yolo: bool | None = None
     git: bool | None = None
     pvc_size: str | None = None
@@ -44,6 +45,7 @@ class UserDefaults:
 _KNOWN_KEYS = {
     "backend",
     "agent",
+    "provider",
     "yolo",
     "git",
     "pvc-size",
@@ -168,6 +170,7 @@ def _parse_defaults(data: dict[str, Any], path: Path) -> UserDefaults:
     return UserDefaults(
         backend=data.get("backend"),
         agent=data.get("agent"),
+        provider=data.get("provider"),
         yolo=data.get("yolo"),
         git=data.get("git"),
         pvc_size=data.get("pvc-size"),

@@ -7,19 +7,19 @@ from pathlib import Path
 from paude.agents.base import (
     AgentConfig,
     build_environment_from_config,
+    build_provider_credentials,
     pipefail_install_lines,
 )
 from paude.mounts import resolve_path
-
-_CURSOR_SECRET_VARS = [
-    "CURSOR_API_KEY",
-]
 
 
 class CursorAgent:
     """Cursor CLI agent implementation."""
 
-    def __init__(self) -> None:
+    def __init__(self, provider: str | None = None) -> None:
+        creds = build_provider_credentials("cursor", provider)
+        creds.extra_env_vars["APPIMAGE_EXTRACT_AND_RUN"] = "1"
+        creds.extra_env_vars["NODE_USE_ENV_PROXY"] = "1"
         self._config = AgentConfig(
             name="cursor",
             display_name="Cursor",
@@ -27,13 +27,10 @@ class CursorAgent:
             session_name="cursor",
             install_script="curl https://cursor.com/install -fsS | bash",
             install_dir=".local/bin",
-            env_vars={
-                "APPIMAGE_EXTRACT_AND_RUN": "1",
-                "NODE_USE_ENV_PROXY": "1",
-            },
-            passthrough_env_vars=[],
-            secret_env_vars=list(_CURSOR_SECRET_VARS),
-            passthrough_env_prefixes=[],
+            env_vars=creds.extra_env_vars,
+            passthrough_env_vars=creds.passthrough_env_vars,
+            secret_env_vars=creds.secret_env_vars,
+            passthrough_env_prefixes=creds.passthrough_env_prefixes,
             config_dir_name=".cursor",
             config_file_name=None,
             config_excludes=[],
@@ -42,6 +39,7 @@ class CursorAgent:
             yolo_flag="--yolo",
             clear_command="/clear",
             extra_domain_aliases=["cursor"],
+            provider=creds.resolved_provider_name,
         )
 
     @property

@@ -131,6 +131,7 @@ def _upgrade_podman(
         PAUDE_LABEL_AGENT,
         PAUDE_LABEL_DOMAINS,
         PAUDE_LABEL_GPU,
+        PAUDE_LABEL_PROVIDER,
         PAUDE_LABEL_PROXY_IMAGE,
         PAUDE_LABEL_WORKSPACE,
         PAUDE_LABEL_YOLO,
@@ -154,6 +155,7 @@ def _upgrade_podman(
     labels = container.get("Labels", {}) or {}
 
     agent_name = labels.get(PAUDE_LABEL_AGENT, "claude")
+    provider_name = labels.get(PAUDE_LABEL_PROVIDER)
     workspace_encoded = labels.get(PAUDE_LABEL_WORKSPACE, "")
     workspace = (
         decode_path(workspace_encoded, url_safe=True)
@@ -179,7 +181,7 @@ def _upgrade_podman(
 
     # Build new image
     engine = backend._engine
-    agent_instance = get_agent(agent_name)
+    agent_instance = get_agent(agent_name, provider=provider_name)
     image_manager = ImageManager(
         script_dir=_detect_dev_script_dir(),
         agent=agent_instance,
@@ -249,6 +251,7 @@ def _upgrade_podman(
         yolo=yolo,
         proxy_image=proxy_image or proxy_image_label,
         agent=agent_name,
+        provider=provider_name,
         gpu=gpu,
         reuse_volume=True,
         ports=agent_instance.config.exposed_ports,
@@ -269,6 +272,7 @@ def _upgrade_openshift(
     from paude.agents import get_agent
     from paude.backends.shared import (
         PAUDE_LABEL_AGENT,
+        PAUDE_LABEL_PROVIDER,
         PAUDE_LABEL_VERSION,
         decode_path,
         pod_name,
@@ -289,6 +293,7 @@ def _upgrade_openshift(
     annotations = metadata.get("annotations", {})
 
     agent_name = labels.get(PAUDE_LABEL_AGENT, "claude")
+    provider_name = labels.get(PAUDE_LABEL_PROVIDER)
     workspace_encoded = annotations.get("paude.io/workspace", "")
     workspace = decode_path(workspace_encoded) if workspace_encoded else Path.cwd()
 
@@ -307,7 +312,7 @@ def _upgrade_openshift(
         script_dir=script_dir,
         force_rebuild=rebuild,
         session_name=name,
-        agent=get_agent(agent_name),
+        agent=get_agent(agent_name, provider=provider_name),
     )
 
     # Patch StatefulSet with new image
@@ -366,8 +371,8 @@ def _upgrade_openshift(
     # Re-sync config
     from paude.agents.base import build_secret_environment_from_config
 
-    agent_instance = get_agent(agent_name)
+    agent_instance = get_agent(agent_name, provider=provider_name)
     secret_env = build_secret_environment_from_config(agent_instance.config)
     backend._syncer.sync_full_config(
-        pname, agent_name=agent_name, secret_env=secret_env
+        pname, agent_name=agent_name, provider=provider_name, secret_env=secret_env
     )

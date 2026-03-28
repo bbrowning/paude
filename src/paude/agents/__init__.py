@@ -27,23 +27,25 @@ _REGISTRY: dict[str, type] = {
 }
 
 
-def get_agent(name: str) -> Agent:
+def get_agent(name: str, provider: str | None = None) -> Agent:
     """Get an agent instance by name.
 
     Args:
         name: Agent name (e.g., "claude").
+        provider: Inference provider name (e.g., "vertex", "openai"),
+            or None for the agent's default provider.
 
     Returns:
         Agent instance.
 
     Raises:
-        ValueError: If agent name is not registered.
+        ValueError: If agent name is not registered or provider is invalid.
     """
     cls = _REGISTRY.get(name)
     if cls is None:
         available = ", ".join(sorted(_REGISTRY.keys()))
         raise ValueError(f"Unknown agent '{name}'. Available: {available}")
-    return cls()  # type: ignore[no-any-return]
+    return cls(provider=provider)  # type: ignore[no-any-return]
 
 
 def list_agents() -> list[str]:

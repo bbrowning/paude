@@ -440,7 +440,7 @@ def reset_session(
     if not keep_conversation:
         from paude.agents import get_agent
 
-        agent = get_agent(session.agent)
+        agent = get_agent(session.agent, provider=session.provider)
         agent_cfg = agent.config
         config_dir = f"{CONTAINER_HOME}/{agent_cfg.config_dir_name}"
 

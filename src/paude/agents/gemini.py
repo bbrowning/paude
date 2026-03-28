@@ -4,22 +4,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from paude.agents.base import AgentConfig, build_environment_from_config
+from paude.agents.base import (
+    AgentConfig,
+    build_environment_from_config,
+    build_provider_credentials,
+)
 from paude.mounts import resolve_path
-
-_GEMINI_PASSTHROUGH_VARS = [
-    "GOOGLE_CLOUD_PROJECT",
-]
-
-_GEMINI_PASSTHROUGH_PREFIXES = [
-    "CLOUDSDK_AUTH_",
-]
 
 
 class GeminiAgent:
     """Gemini CLI agent implementation."""
 
-    def __init__(self) -> None:
+    def __init__(self, provider: str | None = None) -> None:
+        creds = build_provider_credentials("gemini", provider)
         self._config = AgentConfig(
             name="gemini",
             display_name="Gemini CLI",
@@ -30,9 +27,10 @@ class GeminiAgent:
             # and install_agent() skips via `command -v gemini`.
             install_script="npm install -g @google/gemini-cli",
             install_dir=".local/bin",
-            env_vars={},
-            passthrough_env_vars=list(_GEMINI_PASSTHROUGH_VARS),
-            passthrough_env_prefixes=list(_GEMINI_PASSTHROUGH_PREFIXES),
+            env_vars=creds.extra_env_vars,
+            passthrough_env_vars=creds.passthrough_env_vars,
+            secret_env_vars=creds.secret_env_vars,
+            passthrough_env_prefixes=creds.passthrough_env_prefixes,
             config_dir_name=".gemini",
             config_file_name=None,
             config_excludes=[],
@@ -40,6 +38,7 @@ class GeminiAgent:
             yolo_flag="--yolo",
             clear_command="/clear",
             extra_domain_aliases=["gemini", "nodejs"],
+            provider=creds.resolved_provider_name,
         )
 
     @property

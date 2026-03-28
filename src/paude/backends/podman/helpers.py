@@ -15,6 +15,7 @@ from paude.backends.shared import (
     PAUDE_LABEL_APP,
     PAUDE_LABEL_CREATED,
     PAUDE_LABEL_DOMAINS,
+    PAUDE_LABEL_PROVIDER,
     PAUDE_LABEL_SESSION,
     PAUDE_LABEL_VERSION,
     PAUDE_LABEL_WORKSPACE,
@@ -146,6 +147,7 @@ def build_session_from_container(
     status = _check_proxy_health(runner, name, labels, status)
 
     agent_name = labels.get(PAUDE_LABEL_AGENT, "claude")
+    provider_name = labels.get(PAUDE_LABEL_PROVIDER)
     version = labels.get(PAUDE_LABEL_VERSION)
 
     return Session(
@@ -157,6 +159,7 @@ def build_session_from_container(
         container_id=container.get("Id", ""),
         volume_name=volume_name(name),
         agent=agent_name,
+        provider=provider_name,
         version=version,
     )
 

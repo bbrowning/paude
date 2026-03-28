@@ -90,6 +90,7 @@ def _show_resolved_flags(
     typer.echo(format_setting("backend", resolved.backend))
     typer.echo(f"  verbose: {flags.get('verbose', False)}")
     typer.echo(format_setting("agent", resolved.agent))
+    typer.echo(format_setting("provider", resolved.provider))
     typer.echo(format_setting("yolo", resolved.yolo))
     typer.echo(format_setting("git", resolved.git))
 

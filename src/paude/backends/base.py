@@ -43,6 +43,7 @@ class Session:
     container_id: str | None = None
     volume_name: str | None = None
     agent: str = "claude"
+    provider: str | None = None
     version: str | None = None
 
 
@@ -82,6 +83,7 @@ class SessionConfig:
     credential_timeout: int = 60  # minutes of inactivity before credential removal
     wait_for_ready: bool = True
     agent: str = "claude"
+    provider: str | None = None
     gpu: str | None = None
     reuse_volume: bool = False
     ports: list[tuple[int, int]] = field(default_factory=list)

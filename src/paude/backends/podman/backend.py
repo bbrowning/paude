@@ -5,8 +5,12 @@ from __future__ import annotations
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from paude.backends.base import Session, SessionConfig
+
+if TYPE_CHECKING:
+    from paude.agents.base import Agent
 from paude.backends.podman.exceptions import (
     SessionExistsError,
     SessionNotFoundError,
@@ -27,6 +31,7 @@ from paude.backends.shared import (
     PAUDE_LABEL_CREATED,
     PAUDE_LABEL_DOMAINS,
     PAUDE_LABEL_GPU,
+    PAUDE_LABEL_PROVIDER,
     PAUDE_LABEL_PROXY_IMAGE,
     PAUDE_LABEL_SESSION,
     PAUDE_LABEL_VERSION,
@@ -99,18 +104,28 @@ class PodmanBackend:
             )
         return cname
 
+    def _get_session_labels(self, session_name: str) -> dict[str, str]:
+        """Look up container labels for a session."""
+        container = find_container_by_session_name(self._runner, session_name)
+        return (container.get("Labels", {}) or {}) if container else {}
+
     def _get_session_agent_name(self, session_name: str) -> str:
         """Look up the agent name from container labels."""
-        container = find_container_by_session_name(self._runner, session_name)
-        labels = (container.get("Labels", {}) or {}) if container else {}
+        labels = self._get_session_labels(session_name)
         return str(labels.get(PAUDE_LABEL_AGENT, "claude"))
+
+    def _get_session_agent(self, session_name: str) -> Agent:
+        """Get the agent instance for a session from its container labels."""
+        from paude.agents import get_agent
+
+        labels = self._get_session_labels(session_name)
+        agent_name = str(labels.get(PAUDE_LABEL_AGENT, "claude"))
+        provider = labels.get(PAUDE_LABEL_PROVIDER) or None
+        return get_agent(agent_name, provider=provider)
 
     def _get_port_urls(self, session_name: str) -> list[str]:
         """Get port-forward URL strings for a session's agent."""
-        from paude.agents import get_agent
-
-        agent_name = self._get_session_agent_name(session_name)
-        agent = get_agent(agent_name)
+        agent = self._get_session_agent(session_name)
         return [f"http://localhost:{hp}" for hp, _cp in agent.config.exposed_ports]
 
     def _read_openclaw_token(self, cname: str) -> str | None:
@@ -127,13 +142,11 @@ class PodmanBackend:
 
     def _print_port_urls(self, session_name: str) -> None:
         """Print access URLs for any exposed ports."""
-        from paude.agents import get_agent
         from paude.backends.shared import enrich_port_url
 
-        agent_name = self._get_session_agent_name(session_name)
-        agent = get_agent(agent_name)
+        agent = self._get_session_agent(session_name)
         token = None
-        if agent_name == "openclaw":
+        if agent.config.name == "openclaw":
             token = self._read_openclaw_token(container_name(session_name))
         for host_port, _container_port in agent.config.exposed_ports:
             url = enrich_port_url(f"http://localhost:{host_port}", token)
@@ -146,11 +159,9 @@ class PodmanBackend:
         self, name: str, github_token: str | None
     ) -> dict[str, str] | None:
         """Build extra environment for container attachment."""
-        from paude.agents import get_agent
         from paude.agents.base import build_secret_environment_from_config
 
-        agent_name = self._get_session_agent_name(name)
-        agent = get_agent(agent_name)
+        agent = self._get_session_agent(name)
         secret_env = build_secret_environment_from_config(agent.config)
 
         extra_env: dict[str, str] = {}
@@ -176,13 +187,17 @@ class PodmanBackend:
 
     def _sync_sandbox_config(self, cname: str, session_name: str) -> None:
         """Generate and write agent sandbox config script into container."""
-        agent_name = self._get_session_agent_name(session_name)
+        labels = self._get_session_labels(session_name)
+        agent_name = str(labels.get(PAUDE_LABEL_AGENT, "claude"))
+        provider = labels.get(PAUDE_LABEL_PROVIDER) or None
         workspace = (
             self._runner.get_container_env(cname, "PAUDE_WORKSPACE")
             or CONTAINER_WORKSPACE
         )
         args = self._runner.get_container_env(cname, "PAUDE_AGENT_ARGS") or ""
-        content = generate_sandbox_config_script(agent_name, workspace, args)
+        content = generate_sandbox_config_script(
+            agent_name, workspace, args, provider=provider
+        )
         self._runner.inject_file(
             cname,
             content,
@@ -265,6 +280,8 @@ class PodmanBackend:
             PAUDE_LABEL_AGENT: config.agent,
             PAUDE_LABEL_VERSION: __version__,
         }
+        if config.provider:
+            labels[PAUDE_LABEL_PROVIDER] = config.provider
         if config.gpu:
             labels[PAUDE_LABEL_GPU] = config.gpu
         if config.yolo:
@@ -313,7 +330,7 @@ class PodmanBackend:
         # Prepare environment
         from paude.agents import get_agent
 
-        agent = get_agent(config.agent)
+        agent = get_agent(config.agent, provider=config.provider)
         proxy_name_for_env = (
             (proxy_ip or proxy_container_name(session_name)) if use_proxy else None
         )

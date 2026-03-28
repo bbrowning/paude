@@ -35,6 +35,7 @@ def create_podman_session(
     rebuild: bool,
     platform: str | None,
     agent_name: str = "claude",
+    provider_name: str | None = None,
     engine_binary: str = "podman",
     ssh_host: str | None = None,
     ssh_key: str | None = None,
@@ -48,7 +49,7 @@ def create_podman_session(
 
     engine = ContainerEngine(engine_binary, transport=transport)
     home = Path.home()
-    agent_instance = get_agent(agent_name)
+    agent_instance = get_agent(agent_name, provider=provider_name)
     image_manager = ImageManager(
         script_dir=_detect_dev_script_dir(),
         platform=platform,
@@ -105,6 +106,7 @@ def create_podman_session(
         yolo=yolo,
         proxy_image=podman_proxy_image,
         agent=agent_name,
+        provider=provider_name,
         gpu=gpu,
         ports=agent_instance.config.exposed_ports,
     )
