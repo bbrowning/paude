@@ -45,7 +45,7 @@ MARKER='__paudeProxyAgent'
 # Both http-proxy-agent and https-proxy-agent are already installed in
 # the OpenClaw image at /app/node_modules/.
 read -r -d '' FACTORY_CODE << 'ENDOFCODE' || true
-const __paudeProxyAgent = (() => { const p = process.env.HTTP_PROXY || process.env.http_proxy; if (!p) return null; try { const { HttpProxyAgent } = require("http-proxy-agent"); const { HttpsProxyAgent } = require("https-proxy-agent"); return { create(url) { try { return new URL(url).protocol === "https:" ? new HttpsProxyAgent(p) : new HttpProxyAgent(p); } catch(e) { return new HttpProxyAgent(p); } } }; } catch(e) { return null; } })();
+const __paudeProxyAgent = (() => { const p = process.env.HTTP_PROXY || process.env.http_proxy; if (!p) return null; try { const { HttpProxyAgent } = require("http-proxy-agent"); const { HttpsProxyAgent } = require("https-proxy-agent"); return { create(url) { return String(url).startsWith("https") ? new HttpsProxyAgent(p) : new HttpProxyAgent(p); } }; } catch(e) { return null; } })();
 ENDOFCODE
 
 # Inject the factory code into a file (after "use strict" or at the top).
@@ -88,12 +88,12 @@ for dir in "${SEARCH_DIRS[@]}"; do
                 fi
                 ;;
             */configuration/otlp-node-http-configuration.js)
-                # Config layer: the default agentFactory is set via
-                #   agentFactory: httpAgentFactoryFromOptions({ keepAlive: true })
-                # Replace it so the proxy agent is used when HTTP_PROXY is set.
+                # Config layer: patch the httpAgentFactoryFromOptions function
+                # definition to return a proxy-aware factory.  This covers all
+                # call sites (default and environment) in one shot.
                 if inject_factory "$file"; then
                     sed -i \
-                        -e "s#httpAgentFactoryFromOptions(\\({[^}]*}\\))#(${MARKER} ? (url => ${MARKER}.create(url)) : httpAgentFactoryFromOptions(\\1))#g" \
+                        -e "s#function httpAgentFactoryFromOptions(\\([^)]*\\)) {#function httpAgentFactoryFromOptions(\\1) { if (${MARKER}) return async (url) => ${MARKER}.create(url);#" \
                         "$file"
                     echo "[otel-proxy-patch] Patched config: $file" >&2
                     patched=$((patched + 1))
@@ -112,15 +112,12 @@ done
 BUNDLE_FILE="/app/dist/extensions/diagnostics-otel/index.js"
 if [[ -f "$BUNDLE_FILE" ]]; then
     if inject_factory "$BUNDLE_FILE"; then
-        # In the minified bundle, the OTEL SDK creates http/https Agents via
-        #   new <alias>.Agent({keepAlive:!0})   (minified true)
-        #   new <alias>.Agent({keepAlive:true})  (unminified)
-        # and also sets default agent factories via
-        #   httpAgentFactoryFromOptions({ keepAlive: true })
-        # Replace both patterns with proxy-aware conditionals.
+        # Patch the httpAgentFactoryFromOptions function definition to
+        # return a proxy-aware factory when __paudeProxyAgent is set.
+        # This covers ALL call sites (default, environment, legacy)
+        # regardless of whether they're single-line or multiline.
         sed -i \
-            -e "s#new \([a-zA-Z_\$][a-zA-Z0-9_\$]*\)\.Agent({keepAlive:\(!0\|true\)})#(${MARKER}?${MARKER}.create(process.env.OTEL_EXPORTER_OTLP_ENDPOINT||''):new \1.Agent({keepAlive:true}))#g" \
-            -e "s#httpAgentFactoryFromOptions(\({[^}]*}\))#(${MARKER} ? (url => ${MARKER}.create(url)) : httpAgentFactoryFromOptions(\1))#g" \
+            -e "s#function httpAgentFactoryFromOptions(\([^)]*\)) {#function httpAgentFactoryFromOptions(\1) { if (${MARKER}) return async (url) => ${MARKER}.create(url);#" \
             "$BUNDLE_FILE"
         echo "[otel-proxy-patch] Patched bundle: $BUNDLE_FILE" >&2
         patched=$((patched + 1))
