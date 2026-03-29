@@ -49,12 +49,19 @@ def _build_claude_otel_env(endpoint: str) -> dict[str, str]:
 
 
 def _build_gemini_otel_env(endpoint: str) -> dict[str, str]:
+    # Gemini CLI reads GEMINI_TELEMETRY_* env vars in
+    # packages/core/src/telemetry/config.ts:resolveTelemetrySettings().
+    # It also checks OTEL_EXPORTER_OTLP_ENDPOINT as a fallback for the
+    # endpoint, so we set both for robustness.
+    #
+    # Protocol "http" = HTTP/protobuf (same as "http/protobuf" in the
+    # standard OTEL SDK naming).  Valid values: "grpc" | "http".
     return {
-        "GEMINI_TELEMETRY_ENABLED": "true",
-        "GEMINI_TELEMETRY_TARGET": "local",
-        "GEMINI_TELEMETRY_USE_COLLECTOR": "true",
+        "GEMINI_TELEMETRY_ENABLED": "1",
         "GEMINI_TELEMETRY_OTLP_ENDPOINT": endpoint,
         "GEMINI_TELEMETRY_OTLP_PROTOCOL": "http",
+        "OTEL_EXPORTER_OTLP_ENDPOINT": endpoint,
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
     }
 
 

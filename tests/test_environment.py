@@ -82,3 +82,8 @@ class TestBuildProxyEnvironment:
         env = build_proxy_environment("paude-proxy")
         assert env["NO_PROXY"] == "localhost,127.0.0.1"
         assert env["no_proxy"] == "localhost,127.0.0.1"
+
+    def test_no_node_options(self):
+        """Proxy env does not set NODE_OPTIONS (OTEL proxy handled by sdk.js patch)."""
+        env = build_proxy_environment("paude-proxy")
+        assert "NODE_OPTIONS" not in env

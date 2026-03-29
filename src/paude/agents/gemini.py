@@ -54,6 +54,8 @@ class GeminiAgent:
             "",
             "# Install Gemini CLI",
             "RUN npm install -g @google/gemini-cli",
+            "# Patch OTEL SDK to route exports through HTTP proxy (httpAgentOptions)",
+            "RUN /usr/local/bin/patch-gemini-otel-proxy.sh --force 2>&1",
             "",
             "# Set up home directory",
             "USER paude",

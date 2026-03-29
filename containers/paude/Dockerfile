@@ -91,6 +91,7 @@ COPY --chmod=755 entrypoint-lib-install.sh /usr/local/bin/entrypoint-lib-install
 COPY --chmod=755 entrypoint-lib-openclaw.sh /usr/local/bin/entrypoint-lib-openclaw.sh
 COPY --chmod=755 credential-watchdog.sh /usr/local/bin/credential-watchdog.sh
 COPY --chmod=755 patch-proxy-fetch.sh /usr/local/bin/patch-proxy-fetch.sh
+COPY --chmod=755 patch-gemini-otel-proxy.sh /usr/local/bin/patch-gemini-otel-proxy.sh
 COPY --chmod=664 tmux.conf /home/paude/.tmux.conf
 
 USER paude

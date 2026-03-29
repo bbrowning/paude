@@ -147,6 +147,7 @@ class TestCopyEntrypoints:
             "entrypoint-lib-install.sh",
             "credential-watchdog.sh",
             "patch-proxy-fetch.sh",
+            "patch-gemini-otel-proxy.sh",
         ]:
             (src_dir / lib_name).write_text(f"#!/bin/bash\r\n# {lib_name}\r\n")
 
@@ -160,6 +161,7 @@ class TestCopyEntrypoints:
             "entrypoint-lib-install.sh",
             "credential-watchdog.sh",
             "patch-proxy-fetch.sh",
+            "patch-gemini-otel-proxy.sh",
         ]:
             lib_dest = dest_dir / lib_name
             assert lib_dest.exists(), f"{lib_name} not copied"
@@ -179,6 +181,7 @@ class TestCopyEntrypoints:
             "entrypoint-lib-install.sh",
             "credential-watchdog.sh",
             "patch-proxy-fetch.sh",
+            "patch-gemini-otel-proxy.sh",
         ]:
             assert not (dest_dir / lib_name).exists()
 

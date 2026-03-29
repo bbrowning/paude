@@ -20,13 +20,18 @@ class TestBuildOtelEnv:
         assert env["OTEL_METRIC_EXPORT_INTERVAL"] == "30000"
 
     def test_gemini_env(self):
-        """Gemini CLI gets its specific OTEL env vars."""
+        """Gemini CLI gets its specific OTEL env vars plus standard fallbacks."""
         env = build_otel_env("gemini", "http://collector:4318")
-        assert env["GEMINI_TELEMETRY_ENABLED"] == "true"
-        assert env["GEMINI_TELEMETRY_TARGET"] == "local"
-        assert env["GEMINI_TELEMETRY_USE_COLLECTOR"] == "true"
+        assert env["GEMINI_TELEMETRY_ENABLED"] == "1"
         assert env["GEMINI_TELEMETRY_OTLP_ENDPOINT"] == "http://collector:4318"
         assert env["GEMINI_TELEMETRY_OTLP_PROTOCOL"] == "http"
+        # Standard OTEL env vars set as fallback
+        assert env["OTEL_EXPORTER_OTLP_ENDPOINT"] == "http://collector:4318"
+        assert env["OTEL_EXPORTER_OTLP_PROTOCOL"] == "http/protobuf"
+        # Removed unused vars: TARGET defaults to "local", USE_COLLECTOR is
+        # only relevant for the GCP target path
+        assert "GEMINI_TELEMETRY_TARGET" not in env
+        assert "GEMINI_TELEMETRY_USE_COLLECTOR" not in env
 
     def test_openclaw_env(self):
         """OpenClaw gets standard OTEL env vars."""
