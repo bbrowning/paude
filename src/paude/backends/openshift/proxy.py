@@ -425,18 +425,44 @@ class ProxyManager:
 
         return [d for d in result.stdout.strip().split(",") if d]
 
-    def update_deployment_domains(self, session_name: str, domains: list[str]) -> None:
+    def update_deployment_domains(
+        self,
+        session_name: str,
+        domains: list[str],
+        otel_ports: list[int] | None = None,
+    ) -> None:
         """Update the ALLOWED_DOMAINS env var on the proxy Deployment.
 
         Args:
             session_name: Session name.
             domains: New list of allowed domains.
+            otel_ports: Non-standard OTEL ports to allow.  ``None`` (default)
+                leaves the existing ALLOWED_OTEL_PORTS unchanged; an empty
+                list clears it.
         """
         from paude.domains import format_domains_as_squid_acls
 
         deployment_name = proxy_resource_name(session_name)
         domains_str = ",".join(domains)
         acls = format_domains_as_squid_acls(domains)
+
+        env_entries: list[dict[str, str]] = [
+            {
+                "name": "ALLOWED_DOMAINS",
+                "value": domains_str,
+            },
+            {
+                "name": "ALLOWED_DOMAIN_ACLS",
+                "value": acls,
+            },
+        ]
+        if otel_ports is not None:
+            env_entries.append(
+                {
+                    "name": "ALLOWED_OTEL_PORTS",
+                    "value": ",".join(str(p) for p in otel_ports),
+                }
+            )
 
         patch = json.dumps(
             {
@@ -446,16 +472,7 @@ class ProxyManager:
                             "containers": [
                                 {
                                     "name": "proxy",
-                                    "env": [
-                                        {
-                                            "name": "ALLOWED_DOMAINS",
-                                            "value": domains_str,
-                                        },
-                                        {
-                                            "name": "ALLOWED_DOMAIN_ACLS",
-                                            "value": acls,
-                                        },
-                                    ],
+                                    "env": env_entries,
                                 }
                             ]
                         }

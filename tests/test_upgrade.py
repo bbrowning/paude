@@ -15,6 +15,7 @@ from paude.backends.shared import (
     PAUDE_LABEL_CREATED,
     PAUDE_LABEL_DOMAINS,
     PAUDE_LABEL_GPU,
+    PAUDE_LABEL_OTEL_ENDPOINT,
     PAUDE_LABEL_PROXY_IMAGE,
     PAUDE_LABEL_SESSION,
     PAUDE_LABEL_WORKSPACE,
@@ -544,8 +545,9 @@ class TestUpgradeOpenShift:
         name: str = "test-session",
         agent: str = "claude",
         workspace: str = "L2hvbWUvdXNlci9wcm9qZWN0",  # base64 of /home/user/project
+        otel_endpoint: str | None = None,
     ) -> dict:
-        return {
+        sts: dict = {
             "metadata": {
                 "name": f"paude-{name}",
                 "labels": {
@@ -558,6 +560,9 @@ class TestUpgradeOpenShift:
                 },
             },
         }
+        if otel_endpoint is not None:
+            sts["metadata"]["annotations"][PAUDE_LABEL_OTEL_ENDPOINT] = otel_endpoint
+        return sts
 
     @patch("paude.config.detector.detect_config", return_value=None)
     def test_upgrade_openshift_patches_image(
@@ -758,6 +763,122 @@ class TestUpgradeOpenShift:
                 openshift_context=None,
                 overrides=_NO_OVERRIDES,
             )
+
+    @patch("paude.config.detector.detect_config", return_value=None)
+    def test_upgrade_openshift_otel_updates_proxy_domains(
+        self,
+        mock_detect_config: MagicMock,
+    ) -> None:
+        """Adding --otel-endpoint updates proxy allowed domains and ports."""
+        from paude.backends.openshift import OpenShiftBackend
+
+        backend = MagicMock(spec=OpenShiftBackend)
+        backend.namespace = "test-ns"
+        backend._lookup = MagicMock()
+        backend._lookup.get_statefulset.return_value = self._make_statefulset()
+        backend._lookup.has_proxy_deployment.return_value = True
+        backend._lifecycle = MagicMock()
+        backend._lifecycle._oc = MagicMock()
+        backend._proxy = MagicMock()
+        backend._proxy.get_deployment_domains.return_value = [".googleapis.com"]
+        backend._pod_waiter = MagicMock()
+        backend._syncer = MagicMock()
+        backend.ensure_image_via_build.return_value = "paude:new"
+
+        from paude.cli.upgrade import _upgrade_openshift
+
+        overrides = UpgradeOverrides(otel_endpoint="http://collector.example.com:4318")
+        _upgrade_openshift(
+            "test-session",
+            backend,
+            rebuild=False,
+            openshift_context=None,
+            overrides=overrides,
+        )
+
+        backend._proxy.update_deployment_domains.assert_called_once()
+        call_args = backend._proxy.update_deployment_domains.call_args
+        domains = call_args[0][1]
+        assert "collector.example.com" in domains
+        assert ".googleapis.com" in domains
+        assert call_args[1]["otel_ports"] == [4318]
+
+    @patch("paude.config.detector.detect_config", return_value=None)
+    def test_upgrade_openshift_otel_clear_removes_proxy_domain(
+        self,
+        mock_detect_config: MagicMock,
+    ) -> None:
+        """Clearing --otel-endpoint removes old hostname from proxy domains."""
+        from paude.backends.openshift import OpenShiftBackend
+
+        backend = MagicMock(spec=OpenShiftBackend)
+        backend.namespace = "test-ns"
+        backend._lookup = MagicMock()
+        backend._lookup.get_statefulset.return_value = self._make_statefulset(
+            otel_endpoint="http://old-collector.example.com:4318",
+        )
+        backend._lookup.has_proxy_deployment.return_value = True
+        backend._lifecycle = MagicMock()
+        backend._lifecycle._oc = MagicMock()
+        backend._proxy = MagicMock()
+        backend._proxy.get_deployment_domains.return_value = [
+            ".googleapis.com",
+            "old-collector.example.com",
+        ]
+        backend._pod_waiter = MagicMock()
+        backend._syncer = MagicMock()
+        backend.ensure_image_via_build.return_value = "paude:new"
+
+        from paude.cli.upgrade import _upgrade_openshift
+
+        overrides = UpgradeOverrides(otel_endpoint="")
+        _upgrade_openshift(
+            "test-session",
+            backend,
+            rebuild=False,
+            openshift_context=None,
+            overrides=overrides,
+        )
+
+        backend._proxy.update_deployment_domains.assert_called_once()
+        call_args = backend._proxy.update_deployment_domains.call_args
+        domains = call_args[0][1]
+        assert "old-collector.example.com" not in domains
+        assert ".googleapis.com" in domains
+        assert call_args[1]["otel_ports"] == []
+
+    @patch("paude.config.detector.detect_config", return_value=None)
+    def test_upgrade_openshift_otel_no_proxy_no_domain_update(
+        self,
+        mock_detect_config: MagicMock,
+    ) -> None:
+        """No proxy domain update when proxy deployment doesn't exist."""
+        from paude.backends.openshift import OpenShiftBackend
+
+        backend = MagicMock(spec=OpenShiftBackend)
+        backend.namespace = "test-ns"
+        backend._lookup = MagicMock()
+        backend._lookup.get_statefulset.return_value = self._make_statefulset()
+        backend._lookup.has_proxy_deployment.return_value = False
+        backend._lifecycle = MagicMock()
+        backend._lifecycle._oc = MagicMock()
+        backend._proxy = MagicMock()
+        backend._pod_waiter = MagicMock()
+        backend._syncer = MagicMock()
+        backend.ensure_image_via_build.return_value = "paude:new"
+
+        from paude.cli.upgrade import _upgrade_openshift
+
+        overrides = UpgradeOverrides(otel_endpoint="http://collector:4318")
+        _upgrade_openshift(
+            "test-session",
+            backend,
+            rebuild=False,
+            openshift_context=None,
+            overrides=overrides,
+        )
+
+        backend._proxy.update_deployment_domains.assert_not_called()
 
 
 class TestUpgradeOverrides:

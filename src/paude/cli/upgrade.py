@@ -440,6 +440,7 @@ def _upgrade_openshift(
     workspace_encoded = annotations.get("paude.io/workspace", "")
     workspace = decode_path(workspace_encoded) if workspace_encoded else Path.cwd()
     otel_endpoint = annotations.get(PAUDE_LABEL_OTEL_ENDPOINT)
+    old_otel_endpoint = otel_endpoint
 
     # Apply CLI overrides
     if overrides.provider is not None:
@@ -571,6 +572,27 @@ def _upgrade_openshift(
 
     if backend._lookup.has_proxy_deployment(name):
         from paude.backends.shared import proxy_resource_name
+
+        # Update proxy allowed domains when OTEL endpoint changes
+        if overrides.otel_endpoint is not None:
+            from paude.otel import otel_proxy_ports, parse_otel_endpoint
+
+            current_domains = backend._proxy.get_deployment_domains(name)
+            otel_ports: list[int] = []
+
+            if otel_endpoint:
+                hostname, _ = parse_otel_endpoint(otel_endpoint)
+                if hostname not in current_domains:
+                    current_domains.append(hostname)
+                otel_ports = otel_proxy_ports(otel_endpoint)
+            else:
+                if old_otel_endpoint:
+                    old_hostname, _ = parse_otel_endpoint(old_otel_endpoint)
+                    current_domains = [d for d in current_domains if d != old_hostname]
+
+            backend._proxy.update_deployment_domains(
+                name, current_domains, otel_ports=otel_ports
+            )
 
         backend._lifecycle._scale_deployment(proxy_resource_name(name), 1)
         backend._proxy.wait_for_ready(name)
