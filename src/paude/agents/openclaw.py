@@ -140,6 +140,36 @@ if [ ! -f "$config_file" ]; then
 OCCONFIG
     chmod g+rw "$config_file" 2>/dev/null || true
 fi
+
+# Enable diagnostics-otel plugin when OTEL endpoint is configured
+if [ -n "${{OTEL_EXPORTER_OTLP_ENDPOINT:-}}" ]; then
+    node -e '
+const fs = require("fs");
+const f = process.argv[1];
+const endpoint = process.argv[2];
+const protocol = process.argv[3];
+let cfg = {{}};
+try {{ cfg = JSON.parse(fs.readFileSync(f, "utf8")); }} catch(e) {{}}
+if (!cfg.plugins) cfg.plugins = {{}};
+if (!Array.isArray(cfg.plugins.allow)) cfg.plugins.allow = [];
+const p = "diagnostics-otel";
+if (!cfg.plugins.allow.includes(p)) cfg.plugins.allow.push(p);
+if (!cfg.plugins.entries) cfg.plugins.entries = {{}};
+cfg.plugins.entries[p] = {{ enabled: true }};
+if (!cfg.diagnostics) cfg.diagnostics = {{}};
+cfg.diagnostics.otel = {{
+  enabled: true,
+  endpoint: endpoint,
+  protocol: protocol,
+  traces: true,
+  metrics: true,
+  logs: true
+}};
+fs.writeFileSync(f, JSON.stringify(cfg, null, 2) + "\\n");
+' "$config_file" \
+      "$OTEL_EXPORTER_OTLP_ENDPOINT" \
+      "${{OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}}"
+fi
 """
 
     def launch_command(self, args: str) -> str:
