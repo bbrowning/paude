@@ -98,7 +98,10 @@ class SessionLifecycleManager:
             proxy_image = self._resolve_proxy_image(config)
 
             self._proxy.create_deployment(
-                session_name, proxy_image, config.allowed_domains
+                session_name,
+                proxy_image,
+                config.allowed_domains,
+                otel_ports=config.otel_ports,
             )
             self._proxy.create_service(session_name)
             self._proxy.ensure_proxy_network_policy(session_name)

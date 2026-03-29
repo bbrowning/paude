@@ -71,6 +71,9 @@ class ResolvedCreateOptions:
     provider: SettingValue[str | None] = field(
         default_factory=lambda: SettingValue(None, "built-in")
     )
+    otel_endpoint: SettingValue[str | None] = field(
+        default_factory=lambda: SettingValue(None, "built-in")
+    )
     allowed_domains: list[str] = field(default_factory=list)
     allowed_domains_provenance: list[tuple[list[str], Source]] = field(
         default_factory=list
@@ -91,6 +94,7 @@ def resolve_create_options(
     cli_openshift_namespace: str | None,
     cli_gpu: str | None,
     cli_allowed_domains: list[str] | None,
+    cli_otel_endpoint: str | None = None,
     project_config: PaudeConfig | None,
     user_defaults: UserDefaults,
 ) -> ResolvedCreateOptions:
@@ -126,6 +130,13 @@ def resolve_create_options(
         cli=cli_provider,
         project=project_config.create_provider if project_config else None,
         user=user_defaults.provider,
+        builtin=None,
+    )
+
+    result.otel_endpoint = _resolve_scalar(
+        cli=cli_otel_endpoint,
+        project=project_config.create_otel_endpoint if project_config else None,
+        user=user_defaults.otel_endpoint,
         builtin=None,
     )
 

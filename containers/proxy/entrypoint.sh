@@ -24,6 +24,16 @@ if [[ -n "${ALLOWED_DOMAIN_ACLS:-}" ]]; then
     sed -i "s/^acl SSL_ports/${ALLOWED_DOMAIN_ACLS}\nacl SSL_ports/" "$CONFIG_FILE"
 fi
 
+# If ALLOWED_OTEL_PORTS is set, inject port ACLs for OTEL endpoints
+if [[ -n "${ALLOWED_OTEL_PORTS:-}" ]]; then
+    IFS=',' read -ra PORTS <<< "$ALLOWED_OTEL_PORTS"
+    for port in "${PORTS[@]}"; do
+        port=$(echo "$port" | tr -d ' ')
+        sed -i "/^acl Safe_ports port 443$/a acl Safe_ports port $port" "$CONFIG_FILE"
+        sed -i "/^acl SSL_ports port 443$/a acl SSL_ports port $port" "$CONFIG_FILE"
+    done
+fi
+
 # Validate config before starting (errors go to stderr for pod log visibility)
 if ! /usr/sbin/squid -k parse -f "$CONFIG_FILE" 2>&1; then
     echo "ERROR: squid config validation failed. Generated config:" >&2

@@ -116,6 +116,9 @@ def _show_resolved_flags(
     if resolved.gpu.value:
         typer.echo(format_setting("gpu", resolved.gpu))
 
+    if resolved.otel_endpoint.value:
+        typer.echo(format_setting("otel-endpoint", resolved.otel_endpoint))
+
     if resolved.platform.value is not None:
         typer.echo(format_setting("platform", resolved.platform))
 

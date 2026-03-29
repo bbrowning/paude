@@ -75,6 +75,7 @@ def config_show() -> None:
         ("platform", resolved.platform),
         ("openshift-context", resolved.openshift_context),
         ("openshift-namespace", resolved.openshift_namespace),
+        ("otel-endpoint", resolved.otel_endpoint),
         ("openshift-resources", resolved.openshift_resources),
         ("openshift-build-resources", resolved.openshift_build_resources),
         ("gpu", resolved.gpu),
@@ -119,6 +120,7 @@ def config_init() -> None:
             "platform": None,
             "gpu": None,
             "allowed-domains": [],
+            "otel-endpoint": None,
             "openshift": {
                 "context": None,
                 "namespace": None,

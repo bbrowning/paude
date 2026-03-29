@@ -118,6 +118,10 @@ _SECTIONS: tuple[HelpSection, ...] = (
                 "paude create --gpu all --host user@gpu-box",
                 "Pass all GPUs on remote host",
             ),
+            (
+                "paude create --otel-endpoint http://collector:4318",
+                "Export agent telemetry to OTLP collector",
+            ),
         ),
     ),
     HelpSection(

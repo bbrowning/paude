@@ -264,6 +264,7 @@ def _prepare_session_create(
     config_obj: PaudeConfig | None,
     agent_name: str = "claude",
     provider_name: str | None = None,
+    otel_endpoint: str | None = None,
 ) -> tuple[list[str] | None, list[str], dict[str, str], bool]:
     """Shared pre-create logic for both backends.
 
@@ -285,6 +286,16 @@ def _prepare_session_create(
         extra_aliases=agent_instance.config.extra_domain_aliases,
         provider_aliases=_get_provider_aliases(provider_name, agent_name),
     )
+
+    # Inject OTEL env vars and auto-add endpoint hostname to allowed domains
+    if otel_endpoint:
+        from paude.otel import build_otel_env, parse_otel_endpoint
+
+        env.update(build_otel_env(agent_name, otel_endpoint))
+        hostname, _ = parse_otel_endpoint(otel_endpoint)
+        if expanded_domains is not None and hostname not in expanded_domains:
+            expanded_domains.append(hostname)
+
     unrestricted = is_unrestricted(expanded_domains)
 
     # Show warnings for dangerous configurations

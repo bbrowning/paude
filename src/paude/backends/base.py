@@ -87,6 +87,7 @@ class SessionConfig:
     gpu: str | None = None
     reuse_volume: bool = False
     ports: list[tuple[int, int]] = field(default_factory=list)
+    otel_ports: list[int] = field(default_factory=list)
 
 
 class Backend(Protocol):
