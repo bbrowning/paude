@@ -69,8 +69,8 @@ patch_otel_file() {
     # proxy-aware alternatives that fall back to the original when
     # no proxy is configured.
     sed -i \
-        -e "s|new http\\.Agent(\\({[^}]*}\\))|(${MARKER} ? ${MARKER}.create(${url_expr}) : new http.Agent(\\1))|g" \
-        -e "s|new https\\.Agent(\\({[^}]*}\\))|(${MARKER} ? ${MARKER}.create(${url_expr}) : new https.Agent(\\1))|g" \
+        -e "s#new http\\.Agent(\\({[^}]*}\\))#(${MARKER} ? ${MARKER}.create(${url_expr}) : new http.Agent(\\1))#g" \
+        -e "s#new https\\.Agent(\\({[^}]*}\\))#(${MARKER} ? ${MARKER}.create(${url_expr}) : new https.Agent(\\1))#g" \
         "$file"
 
     return 0
