@@ -6,8 +6,10 @@
 # patches the compiled transport layer to return proxy-aware agents so
 # OTEL exports go through the squid proxy.
 #
-# OpenClaw ships the raw @opentelemetry packages in /app/node_modules
-# (not bundled), so we patch the transport configuration directly.
+# OpenClaw bundles its diagnostics-otel plugin into
+# /app/dist/extensions/diagnostics-otel/index.js, so the primary patch
+# target is that bundle.  The node_modules patches are kept as a fallback
+# in case a future version stops bundling.
 #
 # This script is idempotent, fail-safe, and skips patching when no proxy
 # is set.
@@ -104,8 +106,27 @@ for dir in "${SEARCH_DIRS[@]}"; do
         -print0 2>/dev/null)
 done
 
+# === Part 2: Patch bundled dist file ===
+# The stub at /app/dist/diagnostics-otel-*.js just re-exports; the real
+# bundled code with all inlined OTEL logic lives here.
+BUNDLE_FILE="/app/dist/extensions/diagnostics-otel/index.js"
+if [[ -f "$BUNDLE_FILE" ]]; then
+    if inject_factory "$BUNDLE_FILE"; then
+        # In the minified bundle, the OTEL SDK creates http/https Agents via
+        #   new <alias>.Agent({keepAlive:!0})   (minified true)
+        #   new <alias>.Agent({keepAlive:true})  (unminified)
+        # Replace with proxy-aware conditional.  We use the OTEL endpoint env
+        # var to determine http vs https agent type.
+        sed -i \
+            -e "s#new \([a-zA-Z_\$][a-zA-Z0-9_\$]*\)\.Agent({keepAlive:\(!0\|true\)})#(${MARKER}?${MARKER}.create(process.env.OTEL_EXPORTER_OTLP_ENDPOINT||''):new \1.Agent({keepAlive:true}))#g" \
+            "$BUNDLE_FILE"
+        echo "[otel-proxy-patch] Patched bundle: $BUNDLE_FILE" >&2
+        patched=$((patched + 1))
+    fi
+fi
+
 if [[ $patched -eq 0 ]]; then
-    echo "[otel-proxy-patch] No files needed patching (@opentelemetry/otlp-exporter-base not found or already patched)" >&2
+    echo "[otel-proxy-patch] No files needed patching (OTEL files not found or already patched)" >&2
 fi
 
 exit 0
