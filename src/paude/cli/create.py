@@ -363,6 +363,7 @@ def session_create(
             transport=ssh_transport,
             gpu=r_gpu,
             otel_ports=otel_ports,
+            otel_endpoint=r_otel_endpoint,
         )
     else:
         from paude.cli.create_openshift import create_openshift_session
@@ -390,4 +391,5 @@ def session_create(
             resources=r_openshift_resources,
             build_resources=r_openshift_build_resources,
             otel_ports=otel_ports,
+            otel_endpoint=r_otel_endpoint,
         )

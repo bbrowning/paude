@@ -15,6 +15,7 @@ from paude.backends.shared import (
     PAUDE_LABEL_VERSION,
     PAUDE_LABEL_YOLO,
 )
+from paude.cli.upgrade import UpgradeOverrides
 
 from .conftest import run_oc
 
@@ -120,6 +121,7 @@ class TestOpenShiftUpgrade:
                 openshift_backend,
                 rebuild=False,
                 openshift_context=None,
+                overrides=UpgradeOverrides(),
             )
 
         # 5. Verify pod is running

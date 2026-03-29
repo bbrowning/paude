@@ -170,6 +170,7 @@ class SessionLifecycleManager:
             provider=config.provider,
             gpu=config.gpu,
             yolo=config.yolo,
+            otel_endpoint=config.otel_endpoint,
         )
 
         print(
@@ -355,6 +356,7 @@ class SessionLifecycleManager:
         provider: str | None = None,
         gpu: str | None = None,
         yolo: bool = False,
+        otel_endpoint: str | None = None,
     ) -> dict[str, Any]:
         """Generate a Kubernetes StatefulSet specification."""
         return (
@@ -371,5 +373,6 @@ class SessionLifecycleManager:
             .with_env(env)
             .with_workspace(workspace)
             .with_pvc(size=pvc_size, storage_class=storage_class)
+            .with_otel_endpoint(otel_endpoint)
             .build()
         )

@@ -24,6 +24,7 @@ PAUDE_LABEL_GPU = "paude.io/gpu"
 PAUDE_LABEL_YOLO = "paude.io/yolo"
 PAUDE_LABEL_PROVIDER = "paude.io/provider"
 PAUDE_LABEL_OTEL_PORTS = "paude.io/otel-ports"
+PAUDE_LABEL_OTEL_ENDPOINT = "paude.io/otel-endpoint"
 
 SQUID_BLOCKED_LOG_PATH = "/tmp/squid-blocked.log"  # noqa: S108
 

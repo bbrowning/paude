@@ -32,6 +32,7 @@ from paude.backends.shared import (
     PAUDE_LABEL_CREATED,
     PAUDE_LABEL_DOMAINS,
     PAUDE_LABEL_GPU,
+    PAUDE_LABEL_OTEL_ENDPOINT,
     PAUDE_LABEL_OTEL_PORTS,
     PAUDE_LABEL_PROVIDER,
     PAUDE_LABEL_PROXY_IMAGE,
@@ -298,6 +299,8 @@ class PodmanBackend:
                 labels[PAUDE_LABEL_OTEL_PORTS] = ",".join(
                     str(p) for p in config.otel_ports
                 )
+            if config.otel_endpoint:
+                labels[PAUDE_LABEL_OTEL_ENDPOINT] = config.otel_endpoint
 
         print(f"Creating session '{session_name}'...", file=sys.stderr)
 

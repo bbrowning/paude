@@ -17,6 +17,7 @@ from paude.backends.shared import (
     PAUDE_LABEL_VERSION,
     PAUDE_LABEL_YOLO,
 )
+from paude.cli.upgrade import UpgradeOverrides
 
 from .conftest import cleanup_session
 
@@ -91,7 +92,12 @@ class TestPodmanUpgrade:
             ):
                 from paude.cli.upgrade import _upgrade_podman
 
-                _upgrade_podman(unique_session_name, backend, rebuild=False)
+                _upgrade_podman(
+                    unique_session_name,
+                    backend,
+                    rebuild=False,
+                    overrides=UpgradeOverrides(),
+                )
 
             # 4. Verify session is running with updated version
             session = backend.get_session(unique_session_name)

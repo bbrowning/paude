@@ -48,7 +48,7 @@ _SECTIONS: tuple[HelpSection, ...] = (
             ("paude connect", "Reconnect to running session"),
             ("git push paude-<name> main", "Push more changes to container"),
             ("paude stop", "Stop session (preserves data)"),
-            ("paude upgrade NAME", "Upgrade session to current paude version"),
+            ("paude upgrade NAME", "Upgrade or reconfigure session"),
             ("paude delete NAME --confirm", "Delete session permanently"),
         ),
     ),
