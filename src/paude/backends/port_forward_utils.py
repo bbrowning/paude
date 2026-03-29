@@ -22,12 +22,36 @@ def pid_file(session_name: str) -> Path:
 
 
 def is_process_running(pid: int) -> bool:
-    """Check if a process with the given PID is still running."""
+    """Check if a process with the given PID is still running.
+
+    Detects zombie (defunct) children and reaps them, returning False.
+    Also detects non-child zombies on Linux via /proc.
+    """
     try:
-        os.kill(pid, 0)
-        return True
+        wait_pid, _ = os.waitpid(pid, os.WNOHANG)
+        if wait_pid != 0:
+            return False
+    except ChildProcessError:
+        pass
     except OSError:
         return False
+
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+
+    # Check for zombie state via /proc (catches non-child zombies on Linux)
+    try:
+        with open(f"/proc/{pid}/status") as f:
+            for line in f:
+                if line.startswith("State:"):
+                    state = line.split()[1]
+                    return state != "Z"
+    except OSError:
+        pass
+
+    return True
 
 
 def check_running_pid(session_name: str) -> bool:

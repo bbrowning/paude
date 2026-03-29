@@ -45,7 +45,10 @@ class SessionConnector:
 
         self._sync_for_connect(pname, name, github_token)
         port_urls = self._start_port_forward(name, pname)
-        return self._attach_to_pod(pname, name, ns, port_urls=port_urls)
+        try:
+            return self._attach_to_pod(pname, name, ns, port_urls=port_urls)
+        finally:
+            self._stop_port_forward(name)
 
     def _verify_pod_running(self, name: str) -> tuple[str | None, str]:
         """Check pod exists and is in Running phase.
@@ -97,6 +100,12 @@ class SessionConnector:
         mgr.start(session_name, pod_name, ports)
 
         return [f"http://localhost:{hp}" for hp, _cp in ports]
+
+    def _stop_port_forward(self, session_name: str) -> None:
+        """Stop any active port-forward for this session."""
+        from paude.backends.port_forward_utils import stop_port_forward
+
+        stop_port_forward(session_name)
 
     @staticmethod
     def _agent_name_from_sts(sts: dict[str, object] | None) -> str:
