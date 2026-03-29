@@ -44,8 +44,12 @@ MARKER='__paudeProxyAgent'
 #
 # Both http-proxy-agent and https-proxy-agent are already installed in
 # the OpenClaw image at /app/node_modules/.
+#
+# The bundle runs as ESM ("type": "module" in package.json), where
+# require() is not available.  We fall back to createRequire() via
+# process.getBuiltinModule() (Node 22.3+).
 read -r -d '' FACTORY_CODE << 'ENDOFCODE' || true
-const __paudeProxyAgent = (() => { const p = process.env.HTTP_PROXY || process.env.http_proxy; if (!p) return null; try { const { HttpProxyAgent } = require("http-proxy-agent"); const { HttpsProxyAgent } = require("https-proxy-agent"); return { create(url) { return String(url).startsWith("https") ? new HttpsProxyAgent(p) : new HttpProxyAgent(p); } }; } catch(e) { return null; } })();
+const __paudeProxyAgent = (() => { const p = process.env.HTTP_PROXY || process.env.http_proxy; if (!p) return null; try { let m; try { m = require; } catch(e) { m = process.getBuiltinModule("module").createRequire("/app/package.json"); } const { HttpProxyAgent } = m("http-proxy-agent"); const { HttpsProxyAgent } = m("https-proxy-agent"); return { create(url) { return String(url).startsWith("https") ? new HttpsProxyAgent(p) : new HttpProxyAgent(p); } }; } catch(e) { return null; } })();
 ENDOFCODE
 
 # Inject the factory code into a file (after "use strict" or at the top).
