@@ -79,11 +79,8 @@ def test_dry_run_works():
     assert "Dry-run mode" in result.stdout
 
 
-def test_dry_run_shows_no_config(
-    tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
-):
+def test_dry_run_shows_no_config():
     """--dry-run shows 'none' when no config file exists."""
-    monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["create", "--dry-run"])
     assert result.exit_code == 0
     assert "Configuration: none" in result.stdout
@@ -234,13 +231,13 @@ def _extract_domains_display(stdout: str) -> str:
 class TestAgentSpecificDomainExpansion:
     """Verify that --agent affects which default domains are expanded."""
 
-    @pytest.fixture(scope="class")
+    @pytest.fixture
     def claude_dry_run(self):
         result = runner.invoke(app, ["create", "--agent", "claude", "--dry-run"])
         assert result.exit_code == 0
         return result
 
-    @pytest.fixture(scope="class")
+    @pytest.fixture
     def gemini_dry_run(self):
         result = runner.invoke(app, ["create", "--agent", "gemini", "--dry-run"])
         assert result.exit_code == 0
