@@ -43,6 +43,8 @@ def _build_claude_otel_env(endpoint: str) -> dict[str, str]:
         "OTEL_LOGS_EXPORTER": "otlp",
         "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
         "OTEL_EXPORTER_OTLP_ENDPOINT": endpoint,
+        "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE": "cumulative",
+        "OTEL_METRIC_EXPORT_INTERVAL": "30000",
     }
 
 

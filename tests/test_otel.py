@@ -16,6 +16,8 @@ class TestBuildOtelEnv:
         assert env["OTEL_LOGS_EXPORTER"] == "otlp"
         assert env["OTEL_EXPORTER_OTLP_PROTOCOL"] == "http/protobuf"
         assert env["OTEL_EXPORTER_OTLP_ENDPOINT"] == "http://collector:4318"
+        assert env["OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"] == "cumulative"
+        assert env["OTEL_METRIC_EXPORT_INTERVAL"] == "30000"
 
     def test_gemini_env(self):
         """Gemini CLI gets its specific OTEL env vars."""
