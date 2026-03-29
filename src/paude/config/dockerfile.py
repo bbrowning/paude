@@ -182,6 +182,10 @@ RUN if ! command -v tini >/dev/null 2>&1; then \\
     lines.append(
         "COPY --chmod=755 patch-proxy-fetch.sh /usr/local/bin/patch-proxy-fetch.sh"
     )
+    lines.append(
+        "COPY --chmod=755 patch-openclaw-otel-proxy.sh"
+        " /usr/local/bin/patch-openclaw-otel-proxy.sh"
+    )
 
     lines.extend(agent.dockerfile_install_lines(CONTAINER_HOME))
 

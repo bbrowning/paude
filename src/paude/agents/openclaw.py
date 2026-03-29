@@ -84,6 +84,9 @@ class OpenClawAgent:
             "# Patch web_fetch to respect proxy env vars",
             ("RUN /usr/local/bin/patch-proxy-fetch.sh --force 2>&1 || true"),
             "",
+            "# Patch OTEL SDK to route exports through HTTP proxy",
+            ("RUN /usr/local/bin/patch-openclaw-otel-proxy.sh --force 2>&1 || true"),
+            "",
             "# Install GitHub CLI (gh) via direct binary download",
             "ARG GH_VERSION=2.74.1",
             "RUN if ! command -v gh >/dev/null 2>&1; then"
@@ -157,6 +160,7 @@ if (!cfg.plugins.allow.includes(p)) cfg.plugins.allow.push(p);
 if (!cfg.plugins.entries) cfg.plugins.entries = {{}};
 cfg.plugins.entries[p] = {{ enabled: true }};
 if (!cfg.diagnostics) cfg.diagnostics = {{}};
+cfg.diagnostics.enabled = true;
 cfg.diagnostics.otel = {{
   enabled: true,
   endpoint: endpoint,
