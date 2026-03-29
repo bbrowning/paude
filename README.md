@@ -126,6 +126,16 @@ git pull paude-my-project main
 
 **You'll know it's working when**: For CLI agents, `paude connect` shows the agent interface and `git pull` brings back commits. For OpenClaw, `paude connect` prints a URL — open it in your browser.
 
+### OpenTelemetry Export
+
+Export agent telemetry (metrics, logs, traces) to any OTLP-compatible collector:
+
+```bash
+paude create --otel-endpoint http://collector:4318 my-project
+```
+
+The endpoint hostname is automatically added to the proxy allowlist and non-standard ports (like 4318) are opened in the squid proxy. Supported agents: Claude Code, Gemini CLI, OpenClaw. Set `otel-endpoint` in `~/.config/paude/defaults.json` to apply globally.
+
 ### Passing a Task
 
 ```bash

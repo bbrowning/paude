@@ -214,6 +214,7 @@ class ProxyManager:
         session_name: str,
         proxy_image: str,
         allowed_domains: list[str] | None = None,
+        otel_ports: list[int] | None = None,
     ) -> None:
         """Create a Deployment for the squid proxy pod.
 
@@ -224,6 +225,7 @@ class ProxyManager:
             session_name: Session name for labeling.
             proxy_image: Container image for the proxy.
             allowed_domains: List of domains to allow through the proxy.
+            otel_ports: Non-standard ports to allow for OTEL endpoints.
         """
         deployment_name = proxy_resource_name(session_name)
 
@@ -240,6 +242,13 @@ class ProxyManager:
             env_list.append({"name": "ALLOWED_DOMAINS", "value": domains_str})
             acls = format_domains_as_squid_acls(allowed_domains)
             env_list.append({"name": "ALLOWED_DOMAIN_ACLS", "value": acls})
+        if otel_ports:
+            env_list.append(
+                {
+                    "name": "ALLOWED_OTEL_PORTS",
+                    "value": ",".join(str(p) for p in otel_ports),
+                }
+            )
 
         deployment_spec: dict[str, Any] = {
             "apiVersion": "apps/v1",

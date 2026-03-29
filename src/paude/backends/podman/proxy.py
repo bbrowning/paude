@@ -11,6 +11,7 @@ from paude.backends.podman.helpers import (
 )
 from paude.backends.shared import (
     PAUDE_LABEL_DOMAINS,
+    PAUDE_LABEL_OTEL_PORTS,
     PAUDE_LABEL_PROXY_IMAGE,
     SQUID_BLOCKED_LOG_PATH,
 )
@@ -82,8 +83,14 @@ class PodmanProxyManager:
         """Check if a session has a proxy container."""
         return self._runner.container_exists(proxy_container_name(session_name))
 
-    def get_config_from_labels(self, session_name: str) -> tuple[str, list[str]] | None:
-        """Read proxy configuration from the main container's labels."""
+    def get_config_from_labels(
+        self, session_name: str
+    ) -> tuple[str, list[str], list[int]] | None:
+        """Read proxy configuration from the main container's labels.
+
+        Returns:
+            Tuple of (proxy_image, domains, otel_ports) or None.
+        """
         container = find_container_by_session_name(self._runner, session_name)
         if container is None:
             return None
@@ -99,7 +106,11 @@ class PodmanProxyManager:
             return None
 
         domains = [d for d in domains_str.split(",") if d]
-        return (proxy_image, domains)
+
+        otel_ports_str = labels.get(PAUDE_LABEL_OTEL_PORTS, "")
+        otel_ports = [int(p) for p in otel_ports_str.split(",") if p]
+
+        return (proxy_image, domains, otel_ports)
 
     def start_if_needed(self, session_name: str) -> None:
         """Start or recreate the proxy container for a session."""
@@ -118,7 +129,7 @@ class PodmanProxyManager:
             return
 
         # Recreate the missing proxy
-        proxy_image, domains = proxy_config
+        proxy_image, domains, otel_ports = proxy_config
         nname = network_name(session_name)
 
         self._network_manager.create_internal_network(
@@ -135,6 +146,7 @@ class PodmanProxyManager:
             dns=dns,
             allowed_domains=domains,
             ip=proxy_ip,
+            otel_ports=otel_ports,
         )
         self._proxy_runner.start_session_proxy(pname)
 
@@ -177,6 +189,7 @@ class PodmanProxyManager:
         session_name: str,
         proxy_image: str,
         allowed_domains: list[str] | None,
+        otel_ports: list[int] | None = None,
     ) -> tuple[str, str | None]:
         """Create a proxy container for a session.
 
@@ -205,6 +218,7 @@ class PodmanProxyManager:
                 dns=dns,
                 allowed_domains=allowed_domains,
                 ip=proxy_ip,
+                otel_ports=otel_ports,
             )
         except Exception:
             self._network_manager.remove_network(nname)
@@ -253,6 +267,10 @@ class PodmanProxyManager:
         if not proxy_image:
             raise ValueError(f"Cannot inspect proxy container: {pname}")
 
+        # Preserve OTEL ports from labels across proxy recreate
+        proxy_config = self.get_config_from_labels(session_name)
+        _, _, otel_ports = proxy_config if proxy_config else ("", [], [])
+
         nname = network_name(session_name)
         proxy_ip = self._get_proxy_ip(nname)
         dns = _get_host_dns(self._runner.engine)
@@ -268,4 +286,5 @@ class PodmanProxyManager:
             dns=dns,
             allowed_domains=domains,
             ip=proxy_ip,
+            otel_ports=otel_ports,
         )

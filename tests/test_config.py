@@ -371,6 +371,51 @@ class TestParseConfig:
         assert config.create_allowed_domains == ["golang", ".example.com"]
         assert config.create_agent == "claude"
 
+    def test_parses_paude_json_create_otel_endpoint(self, tmp_path: Path):
+        """parse_config extracts otel-endpoint from paude.json create section."""
+        config_file = tmp_path / "paude.json"
+        config_file.write_text(
+            json.dumps(
+                {
+                    "create": {
+                        "otel-endpoint": "http://collector:4318",
+                    },
+                }
+            )
+        )
+
+        config = parse_config(config_file)
+        assert config.create_otel_endpoint == "http://collector:4318"
+
+    def test_parses_devcontainer_create_otel_endpoint(self, tmp_path: Path):
+        """parse_config extracts otel-endpoint from devcontainer customizations."""
+        config_file = tmp_path / ".devcontainer.json"
+        config_file.write_text(
+            json.dumps(
+                {
+                    "image": "python:3.11",
+                    "customizations": {
+                        "paude": {
+                            "create": {
+                                "otel-endpoint": "http://collector:4318",
+                            }
+                        }
+                    },
+                }
+            )
+        )
+
+        config = parse_config(config_file)
+        assert config.create_otel_endpoint == "http://collector:4318"
+
+    def test_otel_endpoint_defaults_to_none(self, tmp_path: Path):
+        """otel-endpoint defaults to None when not in create section."""
+        config_file = tmp_path / "paude.json"
+        config_file.write_text(json.dumps({"create": {"agent": "claude"}}))
+
+        config = parse_config(config_file)
+        assert config.create_otel_endpoint is None
+
     def test_warns_unknown_create_keys(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ):
@@ -473,7 +518,7 @@ class TestGenerateWorkspaceDockerfile:
         dockerfile = generate_workspace_dockerfile(config)
 
         assert "/etc/profile.d/paude-path.sh" in dockerfile
-        assert 'export PATH=' in dockerfile
+        assert "export PATH=" in dockerfile
 
 
 class TestGeneratePipInstallDockerfile:

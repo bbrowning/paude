@@ -54,6 +54,7 @@ class PaudeConfig:
     create_allowed_domains: list[str] = field(default_factory=list)
     create_agent: str | None = None
     create_provider: str | None = None
+    create_otel_endpoint: str | None = None
 
     @property
     def has_customizations(self) -> bool:

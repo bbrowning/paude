@@ -167,6 +167,13 @@ def session_create(
             help="Explicitly disable GPU passthrough (overrides user defaults).",
         ),
     ] = False,
+    otel_endpoint: Annotated[
+        str | None,
+        typer.Option(
+            "--otel-endpoint",
+            help="OTLP collector endpoint for telemetry export (e.g., http://collector:4318).",
+        ),
+    ] = None,
     host: Annotated[
         str | None,
         typer.Option(
@@ -221,6 +228,7 @@ def session_create(
         cli_openshift_namespace=openshift_namespace,
         cli_gpu=cli_gpu,
         cli_allowed_domains=allowed_domains,
+        cli_otel_endpoint=otel_endpoint,
         project_config=config,
         user_defaults=user_defaults,
     )
@@ -240,6 +248,7 @@ def session_create(
     r_gpu = resolved.gpu.value or None
     r_openshift_resources = resolved.openshift_resources.value
     r_openshift_build_resources = resolved.openshift_build_resources.value
+    r_otel_endpoint = resolved.otel_endpoint.value
 
     # Use resolved domains, or fall back to ["default"] if nothing configured
     r_allowed_domains: list[str] | None = (
@@ -320,7 +329,15 @@ def session_create(
         config_obj=config,
         agent_name=r_agent,
         provider_name=r_provider,
+        otel_endpoint=r_otel_endpoint,
     )
+
+    # Compute OTEL proxy ports (non-standard ports to open in squid)
+    otel_ports: list[int] = []
+    if r_otel_endpoint:
+        from paude.otel import otel_proxy_ports
+
+        otel_ports = otel_proxy_ports(r_otel_endpoint)
 
     if r_backend in (BackendType.podman, BackendType.docker):
         from paude.cli.create_podman import create_podman_session
@@ -345,6 +362,7 @@ def session_create(
             ssh_key=ssh_key,
             transport=ssh_transport,
             gpu=r_gpu,
+            otel_ports=otel_ports,
         )
     else:
         from paude.cli.create_openshift import create_openshift_session
@@ -371,4 +389,5 @@ def session_create(
             gpu=r_gpu,
             resources=r_openshift_resources,
             build_resources=r_openshift_build_resources,
+            otel_ports=otel_ports,
         )

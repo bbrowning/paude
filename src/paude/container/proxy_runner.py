@@ -59,6 +59,7 @@ class ProxyRunner:
         self,
         dns: str | None,
         allowed_domains: list[str] | None,
+        otel_ports: list[int] | None = None,
     ) -> list[str]:
         """Build environment variable arguments for proxy containers."""
         args: list[str] = []
@@ -70,6 +71,10 @@ class ProxyRunner:
             args.extend(["-e", f"ALLOWED_DOMAINS={','.join(allowed_domains)}"])
             acls = format_domains_as_squid_acls(allowed_domains)
             args.extend(["-e", f"ALLOWED_DOMAIN_ACLS={acls}"])
+        if otel_ports:
+            args.extend(
+                ["-e", f"ALLOWED_OTEL_PORTS={','.join(str(p) for p in otel_ports)}"]
+            )
         return args
 
     def run_proxy(
@@ -78,6 +83,7 @@ class ProxyRunner:
         network: str,
         dns: str | None = None,
         allowed_domains: list[str] | None = None,
+        otel_ports: list[int] | None = None,
     ) -> str:
         """Start a proxy container (auto-remove on stop).
 
@@ -92,7 +98,7 @@ class ProxyRunner:
         container_name = f"paude-proxy-{session_id}"
 
         net_args = self._build_multi_network(network)
-        env_args = self._build_env_args(dns, allowed_domains)
+        env_args = self._build_env_args(dns, allowed_domains, otel_ports)
 
         result = self._engine.run(
             "run",
@@ -121,6 +127,7 @@ class ProxyRunner:
         dns: str | None = None,
         allowed_domains: list[str] | None = None,
         ip: str | None = None,
+        otel_ports: list[int] | None = None,
     ) -> str:
         """Create a proxy container for a session (does not start it).
 
@@ -128,7 +135,7 @@ class ProxyRunner:
             Container name.
         """
         net_args = self._build_multi_network(network, ip=ip)
-        env_args = self._build_env_args(dns, allowed_domains)
+        env_args = self._build_env_args(dns, allowed_domains, otel_ports)
 
         ip_args: list[str] = []
         if ip and not self._engine.supports_multi_network_create:
@@ -171,6 +178,7 @@ class ProxyRunner:
         dns: str | None = None,
         allowed_domains: list[str] | None = None,
         ip: str | None = None,
+        otel_ports: list[int] | None = None,
     ) -> str:
         """Recreate a session proxy with new configuration.
 
@@ -187,6 +195,7 @@ class ProxyRunner:
             dns=dns,
             allowed_domains=allowed_domains,
             ip=ip,
+            otel_ports=otel_ports,
         )
         self.start_session_proxy(name)
 

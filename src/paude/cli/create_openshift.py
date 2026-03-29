@@ -46,6 +46,7 @@ def create_openshift_session(
     gpu: str | None = None,
     resources: dict[str, dict[str, str]] | None = None,
     build_resources: dict[str, dict[str, str]] | None = None,
+    otel_ports: list[int] | None = None,
 ) -> None:
     """OpenShift-specific session creation logic."""
     os_script_dir = _detect_dev_script_dir()
@@ -110,6 +111,7 @@ def create_openshift_session(
             provider=provider_name,
             gpu=gpu,
             ports=agent.config.exposed_ports,
+            otel_ports=otel_ports or [],
         )
 
         session = os_backend.create_session(session_config)

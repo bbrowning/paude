@@ -41,6 +41,7 @@ def create_podman_session(
     ssh_key: str | None = None,
     transport: Transport | None = None,
     gpu: str | None = None,
+    otel_ports: list[int] | None = None,
 ) -> None:
     """Local container session creation logic (Podman or Docker)."""
     from paude.container import ImageManager
@@ -109,6 +110,7 @@ def create_podman_session(
         provider=provider_name,
         gpu=gpu,
         ports=agent_instance.config.exposed_ports,
+        otel_ports=otel_ports or [],
     )
 
     try:

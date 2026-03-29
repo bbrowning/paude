@@ -113,19 +113,21 @@ class TestLoadUserDefaults:
         """Loads resources and build-resources from openshift section."""
         config = tmp_path / "defaults.json"
         config.write_text(
-            json.dumps({
-                "defaults": {
-                    "openshift": {
-                        "resources": {
-                            "requests": {"cpu": "500m", "memory": "2Gi"},
-                            "limits": {"cpu": "2", "memory": "4Gi"},
-                        },
-                        "build-resources": {
-                            "requests": {"cpu": "500m", "memory": "1Gi"},
-                        },
+            json.dumps(
+                {
+                    "defaults": {
+                        "openshift": {
+                            "resources": {
+                                "requests": {"cpu": "500m", "memory": "2Gi"},
+                                "limits": {"cpu": "2", "memory": "4Gi"},
+                            },
+                            "build-resources": {
+                                "requests": {"cpu": "500m", "memory": "1Gi"},
+                            },
+                        }
                     }
                 }
-            })
+            )
         )
 
         result = load_user_defaults(config)
@@ -152,7 +154,9 @@ class TestLoadUserDefaults:
         """Non-dict value for resources warns and yields None."""
         config = tmp_path / "defaults.json"
         config.write_text(
-            json.dumps({"defaults": {"openshift": {"resources": "bad", "build-resources": 42}}})
+            json.dumps(
+                {"defaults": {"openshift": {"resources": "bad", "build-resources": 42}}}
+            )
         )
 
         result = load_user_defaults(config)
@@ -372,3 +376,95 @@ class TestUserDefaultsGpu:
 
         result = load_user_defaults(config)
         assert result.gpu is None
+
+
+class TestUserDefaultsOtelEndpoint:
+    """Tests for otel-endpoint in user defaults."""
+
+    def test_otel_endpoint_loads_from_json(self, tmp_path: Path):
+        """otel-endpoint field loads from JSON config."""
+        config = tmp_path / "defaults.json"
+        config.write_text(
+            json.dumps({"defaults": {"otel-endpoint": "http://collector:4318"}})
+        )
+
+        result = load_user_defaults(config)
+        assert result.otel_endpoint == "http://collector:4318"
+
+    def test_otel_endpoint_defaults_to_none(self, tmp_path: Path):
+        """otel-endpoint defaults to None when not in config."""
+        config = tmp_path / "defaults.json"
+        config.write_text(json.dumps({"defaults": {"backend": "podman"}}))
+
+        result = load_user_defaults(config)
+        assert result.otel_endpoint is None
+
+    def test_otel_endpoint_resolves_from_user_defaults(self):
+        """otel-endpoint resolves from user defaults."""
+        from paude.config.resolver import resolve_create_options
+
+        user = UserDefaults(otel_endpoint="http://collector:4318")
+        result = resolve_create_options(
+            cli_backend=None,
+            cli_agent=None,
+            cli_yolo=None,
+            cli_git=None,
+            cli_pvc_size=None,
+            cli_credential_timeout=None,
+            cli_platform=None,
+            cli_openshift_context=None,
+            cli_openshift_namespace=None,
+            cli_gpu=None,
+            cli_allowed_domains=None,
+            project_config=None,
+            user_defaults=user,
+        )
+        assert result.otel_endpoint.value == "http://collector:4318"
+        assert result.otel_endpoint.source == "user defaults"
+
+    def test_otel_endpoint_cli_overrides_user(self):
+        """CLI --otel-endpoint overrides user defaults."""
+        from paude.config.resolver import resolve_create_options
+
+        user = UserDefaults(otel_endpoint="http://old:4318")
+        result = resolve_create_options(
+            cli_backend=None,
+            cli_agent=None,
+            cli_yolo=None,
+            cli_git=None,
+            cli_pvc_size=None,
+            cli_credential_timeout=None,
+            cli_platform=None,
+            cli_openshift_context=None,
+            cli_openshift_namespace=None,
+            cli_gpu=None,
+            cli_allowed_domains=None,
+            cli_otel_endpoint="http://new:4318",
+            project_config=None,
+            user_defaults=user,
+        )
+        assert result.otel_endpoint.value == "http://new:4318"
+        assert result.otel_endpoint.source == "cli"
+
+    def test_otel_endpoint_from_project_config(self):
+        """otel-endpoint resolves from project config."""
+        from paude.config.resolver import resolve_create_options
+
+        project = PaudeConfig(create_otel_endpoint="http://project:4318")
+        result = resolve_create_options(
+            cli_backend=None,
+            cli_agent=None,
+            cli_yolo=None,
+            cli_git=None,
+            cli_pvc_size=None,
+            cli_credential_timeout=None,
+            cli_platform=None,
+            cli_openshift_context=None,
+            cli_openshift_namespace=None,
+            cli_gpu=None,
+            cli_allowed_domains=None,
+            project_config=project,
+            user_defaults=UserDefaults(),
+        )
+        assert result.otel_endpoint.value == "http://project:4318"
+        assert result.otel_endpoint.source == "paude.json"
