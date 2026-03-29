@@ -2,5 +2,16 @@
     "build": {
         "dockerfile": "containers/paude/Dockerfile",
         "context": "containers/paude"
+    },
+    "create": {
+        "allowed-domains": [
+            "default",
+            ".anthropic.com",
+            ".claude.ai",
+            ".claude.com",
+            ".cursor.com",
+            ".geminicli.com",
+            ".openclaw.ai"
+        ]
     }
 }
