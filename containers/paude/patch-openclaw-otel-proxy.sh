@@ -115,10 +115,12 @@ if [[ -f "$BUNDLE_FILE" ]]; then
         # In the minified bundle, the OTEL SDK creates http/https Agents via
         #   new <alias>.Agent({keepAlive:!0})   (minified true)
         #   new <alias>.Agent({keepAlive:true})  (unminified)
-        # Replace with proxy-aware conditional.  We use the OTEL endpoint env
-        # var to determine http vs https agent type.
+        # and also sets default agent factories via
+        #   httpAgentFactoryFromOptions({ keepAlive: true })
+        # Replace both patterns with proxy-aware conditionals.
         sed -i \
             -e "s#new \([a-zA-Z_\$][a-zA-Z0-9_\$]*\)\.Agent({keepAlive:\(!0\|true\)})#(${MARKER}?${MARKER}.create(process.env.OTEL_EXPORTER_OTLP_ENDPOINT||''):new \1.Agent({keepAlive:true}))#g" \
+            -e "s#httpAgentFactoryFromOptions(\({[^}]*}\))#(${MARKER} ? (url => ${MARKER}.create(url)) : httpAgentFactoryFromOptions(\1))#g" \
             "$BUNDLE_FILE"
         echo "[otel-proxy-patch] Patched bundle: $BUNDLE_FILE" >&2
         patched=$((patched + 1))
