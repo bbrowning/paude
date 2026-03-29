@@ -16,14 +16,21 @@ paude
 
 | Command | What It Does |
 |---------|--------------|
-| `create` | Creates session resources (container/StatefulSet, volume/PVC) |
+| `create` | Creates session resources (container/StatefulSet, volume/PVC) and starts them |
 | `start` | Starts container/pod and connects |
 | `stop` | Stops container/pod, preserves volume |
 | `connect` | Attaches to running session |
+| `cp` | Copies files between local machine and session |
 | `upgrade` | Upgrades session to current paude version (preserves data) |
 | `remote` | Manages git remotes for code sync |
 | `delete` | Removes all resources including volume |
 | `list` | Shows all sessions with version info |
+| `status` | Shows enriched session status (activity, state, summary) |
+| `harvest` | Pulls agent changes into a local branch, optionally creates a PR |
+| `reset` | Resets session workspace and clears conversation history |
+| `config` | Manages user defaults (`config show`, `config path`, `config init`) |
+| `allowed-domains` | Views or modifies allowed egress domains for a session |
+| `blocked-domains` | Shows domains blocked by the proxy for a session |
 
 ## Examples
 

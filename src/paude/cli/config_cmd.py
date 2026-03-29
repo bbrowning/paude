@@ -77,6 +77,8 @@ def config_show() -> None:
         ("openshift-namespace", resolved.openshift_namespace),
         ("openshift-resources", resolved.openshift_resources),
         ("openshift-build-resources", resolved.openshift_build_resources),
+        ("gpu", resolved.gpu),
+        ("provider", resolved.provider),
     ]
     for name, setting in settings:
         typer.echo(format_setting(name, setting))
@@ -109,11 +111,13 @@ def config_init() -> None:
         "defaults": {
             "backend": None,
             "agent": None,
+            "provider": None,
             "yolo": None,
             "git": None,
             "pvc-size": None,
             "credential-timeout": None,
             "platform": None,
+            "gpu": None,
             "allowed-domains": [],
             "openshift": {
                 "context": None,

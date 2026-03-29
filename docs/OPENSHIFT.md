@@ -66,9 +66,9 @@ paude delete my-project --confirm --backend=openshift
 
 | State | StatefulSet Replicas | Pod | PVC | Files |
 |-------|---------------------|-----|-----|-------|
-| Created | 0 | None | Created | Empty |
-| Started | 1 | Running | Bound | Push via git |
+| Created | 1 | Running | Bound | Push via git |
 | Stopped | 0 | None | Retained | Preserved |
+| Started | 1 | Running | Bound | Preserved |
 | Deleted | Deleted | Deleted | Deleted | Gone |
 
 ### OpenShift-Specific Options
@@ -151,7 +151,7 @@ By default, sessions run with restricted network access:
 - **Allowed**: DNS resolution, Vertex AI APIs (*.googleapis.com), PyPI (*.pypi.org), GitHub (github.com and related subdomains), plus agent-specific domains
 - **Blocked**: All other external traffic
 
-NetworkPolicy enforces egress restrictions at the Kubernetes level. Use `--allowed-domains all` to disable filtering for unrestricted access.
+NetworkPolicy restricts pod egress to DNS and the squid proxy only. The proxy then enforces fine-grained domain filtering via its allowlist configuration. Use `--allowed-domains all` to disable filtering for unrestricted access.
 
 ### Pod Security
 
@@ -201,14 +201,17 @@ paude create --backend=openshift --openshift-namespace=my-namespace
 Paude builds container images on-cluster using OpenShift Binary Build (BuildConfig + `oc start-build`). If the build fails:
 
 ```bash
-# Check build logs
-oc logs -f bc/paude-build -n <namespace>
+# List BuildConfigs (names are dynamically generated as paude-<hash>)
+oc get bc -n <namespace>
+
+# Check build logs (use the actual BuildConfig name from the list above)
+oc logs -f bc/<bc-name> -n <namespace>
 
 # List builds and their status
 oc get builds -n <namespace>
 
 # Describe a failed build for events and errors
-oc describe build paude-build-1 -n <namespace>
+oc describe build <build-name> -n <namespace>
 ```
 
 Common causes:
@@ -220,7 +223,7 @@ Common causes:
 
 Check pod events:
 ```bash
-oc describe pod paude-session-<ID> -n paude
+oc describe pod paude-<session-name>-0 -n <namespace>
 ```
 
 Common causes:

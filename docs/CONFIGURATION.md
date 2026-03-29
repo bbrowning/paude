@@ -110,7 +110,7 @@ Projects can declare defaults in their `paude.json` or `devcontainer.json` so th
 }
 ```
 
-Only `allowed-domains` and `agent` are supported as project-level create hints.
+Only `allowed-domains`, `agent`, and `provider` are supported as project-level create hints.
 
 ### Domain Merging
 
@@ -148,6 +148,7 @@ paude create --dry-run
 | `openshift.namespace` | yes | — | `--openshift-namespace` | (none) |
 | `openshift.resources` | yes | — | — | (none) |
 | `openshift.build-resources` | yes | — | — | (none) |
+| `provider` | yes | yes | `--provider` | (none) |
 | `storage-class` | — | — | `--storage-class` | (none) |
 
 > **Backend values**: `podman` (default), `docker`, or `openshift`.
