@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
@@ -14,6 +15,27 @@ from paude.cli.helpers import find_session_backend
 if TYPE_CHECKING:
     from paude.backends.openshift import OpenShiftBackend
     from paude.backends.podman.backend import PodmanBackend
+
+
+@dataclass
+class UpgradeOverrides:
+    """CLI overrides for session configuration during upgrade."""
+
+    otel_endpoint: str | None = None
+    allowed_domains: list[str] | None = None
+    gpu: str | None = None  # "" means explicitly disabled
+    yolo: bool | None = None
+    provider: str | None = None
+
+    def has_changes(self) -> bool:
+        """Return True if any override was specified."""
+        return (
+            self.otel_endpoint is not None
+            or self.allowed_domains is not None
+            or self.gpu is not None
+            or self.yolo is not None
+            or self.provider is not None
+        )
 
 
 @app.command("upgrade")
@@ -41,12 +63,85 @@ def session_upgrade(
             help="OpenShift namespace (default: current context namespace).",
         ),
     ] = None,
+    otel_endpoint: Annotated[
+        str | None,
+        typer.Option(
+            "--otel-endpoint",
+            help=(
+                "Set or change the OTLP collector endpoint "
+                "(e.g., http://collector:4318). "
+                'Use --otel-endpoint "" to remove.'
+            ),
+        ),
+    ] = None,
+    allowed_domains: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--allowed-domains",
+            help="Override allowed domains for network filtering.",
+        ),
+    ] = None,
+    gpu: Annotated[
+        str | None,
+        typer.Option(
+            "--gpu",
+            help="Set or change GPU passthrough (e.g., all, device=0,1).",
+        ),
+    ] = None,
+    no_gpu: Annotated[
+        bool,
+        typer.Option(
+            "--no-gpu",
+            help="Disable GPU passthrough.",
+        ),
+    ] = False,
+    yolo: Annotated[
+        bool,
+        typer.Option("--yolo", help="Enable YOLO mode."),
+    ] = False,
+    no_yolo: Annotated[
+        bool,
+        typer.Option("--no-yolo", help="Disable YOLO mode."),
+    ] = False,
+    provider: Annotated[
+        str | None,
+        typer.Option(
+            "--provider",
+            help="Change inference provider (e.g., vertex, openai).",
+        ),
+    ] = None,
 ) -> None:
-    """Upgrade a session to the current paude version."""
+    """Upgrade a session to the current paude version.
+
+    Can also reconfigure session options (e.g., --otel-endpoint, --gpu)
+    without losing workspace data. Use --rebuild to force an image rebuild
+    when only changing configuration at the same version.
+    """
     from paude import __version__
     from paude.backends.openshift import OpenShiftBackend
     from paude.backends.podman.backend import PodmanBackend
     from paude.cli.helpers import _get_backend_instance
+
+    # Resolve --gpu / --no-gpu
+    cli_gpu: str | None = gpu
+    if no_gpu:
+        cli_gpu = ""  # empty string sentinel = explicitly disabled
+
+    # Resolve --yolo / --no-yolo
+    cli_yolo: bool | None = None
+    if yolo:
+        cli_yolo = True
+    elif no_yolo:
+        cli_yolo = False
+
+    # Build overrides dict (only non-None values)
+    overrides = UpgradeOverrides(
+        otel_endpoint=otel_endpoint,
+        allowed_domains=allowed_domains,
+        gpu=cli_gpu,
+        yolo=cli_yolo,
+        provider=provider,
+    )
 
     # Find session backend
     if backend is not None:
@@ -66,19 +161,28 @@ def session_upgrade(
         typer.echo(f"Session '{name}' not found.", err=True)
         raise typer.Exit(1)
 
+    has_overrides = overrides.has_changes()
+
     # Check version
-    if session.version == __version__ and not rebuild:
+    if session.version == __version__ and not rebuild and not has_overrides:
         typer.echo(
             f"Session '{name}' is already at version {__version__}. "
-            "Use --rebuild to force an image rebuild."
+            "Use --rebuild to force an image rebuild, or pass config "
+            "flags (e.g. --otel-endpoint) to reconfigure."
         )
         return
 
-    old_version = session.version or "unknown"
-    typer.echo(
-        f"Upgrading session '{name}' from {old_version} to {__version__}...",
-        err=True,
-    )
+    if has_overrides and not rebuild and session.version == __version__:
+        typer.echo(
+            f"Reconfiguring session '{name}' (version {__version__})...",
+            err=True,
+        )
+    else:
+        old_version = session.version or "unknown"
+        typer.echo(
+            f"Upgrading session '{name}' from {old_version} to {__version__}...",
+            err=True,
+        )
 
     # Auto-stop if running
     if session.status == "running":
@@ -87,9 +191,9 @@ def session_upgrade(
 
     try:
         if isinstance(backend_obj, PodmanBackend):
-            _upgrade_podman(name, backend_obj, rebuild)
+            _upgrade_podman(name, backend_obj, rebuild, overrides)
         elif isinstance(backend_obj, OpenShiftBackend):
-            _upgrade_openshift(name, backend_obj, rebuild, openshift_context)
+            _upgrade_openshift(name, backend_obj, rebuild, openshift_context, overrides)
         else:
             typer.echo("Unsupported backend for upgrade.", err=True)
             raise typer.Exit(1)
@@ -118,6 +222,7 @@ def _upgrade_podman(
     name: str,
     backend: PodmanBackend,
     rebuild: bool,
+    overrides: UpgradeOverrides,
 ) -> None:
     """Upgrade a Podman/Docker session in place."""
     from paude.agents import get_agent
@@ -131,6 +236,7 @@ def _upgrade_podman(
         PAUDE_LABEL_AGENT,
         PAUDE_LABEL_DOMAINS,
         PAUDE_LABEL_GPU,
+        PAUDE_LABEL_OTEL_ENDPOINT,
         PAUDE_LABEL_PROVIDER,
         PAUDE_LABEL_PROXY_IMAGE,
         PAUDE_LABEL_WORKSPACE,
@@ -164,6 +270,7 @@ def _upgrade_podman(
     )
     gpu = labels.get(PAUDE_LABEL_GPU)
     yolo = labels.get(PAUDE_LABEL_YOLO) == "1"
+    otel_endpoint = labels.get(PAUDE_LABEL_OTEL_ENDPOINT)
 
     # Domain config
     domains_str = labels.get(PAUDE_LABEL_DOMAINS)
@@ -172,6 +279,19 @@ def _upgrade_podman(
         allowed_domains = domains_str.split(",") if domains_str else []
 
     proxy_image_label = labels.get(PAUDE_LABEL_PROXY_IMAGE)
+
+    # Apply CLI overrides
+    if overrides.provider is not None:
+        provider_name = overrides.provider
+    if overrides.gpu is not None:
+        gpu = overrides.gpu if overrides.gpu != "" else None
+    if overrides.yolo is not None:
+        yolo = overrides.yolo
+    if overrides.otel_endpoint is not None:
+        # Empty string means "remove OTEL"
+        otel_endpoint = overrides.otel_endpoint if overrides.otel_endpoint else None
+    if overrides.allowed_domains is not None:
+        allowed_domains = overrides.allowed_domains
 
     # Detect project config from workspace
     config = None
@@ -227,16 +347,33 @@ def _upgrade_podman(
     if config and config.container_env:
         env.update(config.container_env)
 
-    # Only expand domains if the original session had domain filtering.
-    # allowed_domains=None means the session had no proxy (unrestricted);
+    # Only expand domains if the session has domain filtering.
+    # allowed_domains=None means no proxy (unrestricted);
     # passing None to _prepare_session_create would incorrectly add defaults.
     if allowed_domains is not None:
         expanded_domains, parsed_args, _env, unrestricted = _prepare_session_create(
-            allowed_domains, yolo, None, config, agent_name=agent_name
+            allowed_domains,
+            yolo,
+            None,
+            config,
+            agent_name=agent_name,
+            otel_endpoint=otel_endpoint,
         )
         session_domains = expanded_domains if not unrestricted else allowed_domains
     else:
         session_domains = None
+        # Even without proxy, inject OTEL env vars
+        if otel_endpoint:
+            from paude.otel import build_otel_env
+
+            env.update(build_otel_env(agent_name, otel_endpoint))
+
+    # Compute OTEL proxy ports
+    otel_ports: list[int] = []
+    if otel_endpoint:
+        from paude.otel import otel_proxy_ports
+
+        otel_ports = otel_proxy_ports(otel_endpoint)
 
     # Create new session config with reuse_volume=True
     from paude.backends import SessionConfig
@@ -255,6 +392,8 @@ def _upgrade_podman(
         gpu=gpu,
         reuse_volume=True,
         ports=agent_instance.config.exposed_ports,
+        otel_ports=otel_ports,
+        otel_endpoint=otel_endpoint,
     )
 
     backend.create_session(session_config)
@@ -266,14 +405,18 @@ def _upgrade_openshift(
     backend: OpenShiftBackend,
     rebuild: bool,
     openshift_context: str | None,
+    overrides: UpgradeOverrides,
 ) -> None:
     """Upgrade an OpenShift session in place."""
     from paude import __version__
     from paude.agents import get_agent
     from paude.backends.shared import (
         PAUDE_LABEL_AGENT,
+        PAUDE_LABEL_GPU,
+        PAUDE_LABEL_OTEL_ENDPOINT,
         PAUDE_LABEL_PROVIDER,
         PAUDE_LABEL_VERSION,
+        PAUDE_LABEL_YOLO,
         decode_path,
         pod_name,
         resource_name,
@@ -296,6 +439,13 @@ def _upgrade_openshift(
     provider_name = labels.get(PAUDE_LABEL_PROVIDER)
     workspace_encoded = annotations.get("paude.io/workspace", "")
     workspace = decode_path(workspace_encoded) if workspace_encoded else Path.cwd()
+    otel_endpoint = annotations.get(PAUDE_LABEL_OTEL_ENDPOINT)
+
+    # Apply CLI overrides
+    if overrides.provider is not None:
+        provider_name = overrides.provider
+    if overrides.otel_endpoint is not None:
+        otel_endpoint = overrides.otel_endpoint if overrides.otel_endpoint else None
 
     # Detect project config from workspace
     config = None
@@ -322,16 +472,56 @@ def _upgrade_openshift(
 
     import json as _json
 
-    typer.echo(f"Patching StatefulSet {sts_name} with new image...", err=True)
-    patch = _json.dumps(
-        [
+    # Build JSON patches -- always update image and version
+    patches: list[dict[str, str]] = [
+        {
+            "op": "replace",
+            "path": "/spec/template/spec/containers/0/image",
+            "value": image,
+        },
+    ]
+
+    # If overrides change env vars, we need to patch the container env.
+    # Build a map of env var overrides to apply.
+    env_overrides: dict[str, str | None] = {}
+    if overrides.otel_endpoint is not None:
+        if otel_endpoint:
+            from paude.otel import build_otel_env
+
+            env_overrides.update(build_otel_env(agent_name, otel_endpoint))
+        else:
+            # Clearing OTEL -- remove known OTEL env vars
+            from paude.otel import OTEL_ENV_KEYS
+
+            for key in OTEL_ENV_KEYS:
+                env_overrides[key] = None  # sentinel for removal
+
+    if env_overrides:
+        # Get current env list from StatefulSet spec
+        containers = (
+            sts.get("spec", {})
+            .get("template", {})
+            .get("spec", {})
+            .get("containers", [])
+        )
+        current_env = containers[0].get("env", []) if containers else []
+
+        # Apply overrides
+        new_env = [e for e in current_env if e["name"] not in env_overrides]
+        for key, value in env_overrides.items():
+            if value is not None:
+                new_env.append({"name": key, "value": value})
+
+        patches.append(
             {
                 "op": "replace",
-                "path": "/spec/template/spec/containers/0/image",
-                "value": image,
+                "path": "/spec/template/spec/containers/0/env",
+                "value": new_env,  # type: ignore[dict-item]
             }
-        ]
-    )
+        )
+
+    typer.echo(f"Patching StatefulSet {sts_name}...", err=True)
+    patch_json = _json.dumps(patches)
     oc.run(
         "patch",
         "statefulset",
@@ -340,19 +530,40 @@ def _upgrade_openshift(
         ns,
         "--type=json",
         "-p",
-        patch,
+        patch_json,
     )
 
-    # Update version label
+    # Update labels and annotations
+    label_updates = [f"{PAUDE_LABEL_VERSION}={__version__}"]
+    if overrides.provider is not None:
+        label_updates.append(f"{PAUDE_LABEL_PROVIDER}={provider_name or ''}")
+    if overrides.gpu is not None:
+        label_updates.append(f"{PAUDE_LABEL_GPU}={overrides.gpu}")
+    if overrides.yolo is not None:
+        label_updates.append(f"{PAUDE_LABEL_YOLO}={'1' if overrides.yolo else '0'}")
+
     oc.run(
         "label",
         "statefulset",
         sts_name,
         "-n",
         ns,
-        f"{PAUDE_LABEL_VERSION}={__version__}",
+        *label_updates,
         "--overwrite",
     )
+
+    # Update otel-endpoint annotation
+    if overrides.otel_endpoint is not None:
+        ann_value = otel_endpoint or ""
+        oc.run(
+            "annotate",
+            "statefulset",
+            sts_name,
+            "-n",
+            ns,
+            f"{PAUDE_LABEL_OTEL_ENDPOINT}={ann_value}",
+            "--overwrite",
+        )
 
     # Scale to 1 and wait
     typer.echo(f"Starting session '{name}'...", err=True)

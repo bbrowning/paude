@@ -72,6 +72,25 @@ def _build_openclaw_otel_env(endpoint: str) -> dict[str, str]:
     }
 
 
+def _all_otel_env_keys() -> frozenset[str]:
+    """Compute union of all env var keys that build_otel_env may set."""
+    dummy = "http://dummy:4318"
+    keys: set[str] = set()
+    builders = (
+        _build_claude_otel_env,
+        _build_gemini_otel_env,
+        _build_openclaw_otel_env,
+    )
+    for builder in builders:
+        keys.update(builder(dummy))
+    return frozenset(keys)
+
+
+# All env var keys that build_otel_env may set (union across all agents).
+# Used to clear OTEL configuration when removing --otel-endpoint.
+OTEL_ENV_KEYS: frozenset[str] = _all_otel_env_keys()
+
+
 def parse_otel_endpoint(endpoint: str) -> tuple[str, int]:
     """Extract hostname and port from an OTEL endpoint URL.
 

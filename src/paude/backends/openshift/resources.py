@@ -79,10 +79,23 @@ class StatefulSetBuilder:
         self._provider = provider
         self._gpu = gpu
         self._yolo = yolo
+        self._otel_endpoint: str | None = None
         self._env: dict[str, str] = {}
         self._workspace: Path | None = None
         self._pvc_size = "10Gi"
         self._storage_class: str | None = None
+
+    def with_otel_endpoint(self, endpoint: str | None) -> StatefulSetBuilder:
+        """Set the OTEL endpoint (for annotation).
+
+        Args:
+            endpoint: OTLP collector endpoint URL.
+
+        Returns:
+            Self for method chaining.
+        """
+        self._otel_endpoint = endpoint
+        return self
 
     def with_env(self, env: dict[str, str]) -> StatefulSetBuilder:
         """Set environment variables for the container.
@@ -155,6 +168,8 @@ class StatefulSetBuilder:
         if self._workspace:
             encoded = encode_path(self._workspace)
             metadata["annotations"]["paude.io/workspace"] = encoded
+        if self._otel_endpoint:
+            metadata["annotations"]["paude.io/otel-endpoint"] = self._otel_endpoint
         return metadata
 
     def _build_volumes(self) -> list[dict[str, Any]]:

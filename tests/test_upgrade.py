@@ -22,7 +22,10 @@ from paude.backends.shared import (
     encode_path,
 )
 from paude.cli import app
+from paude.cli.upgrade import UpgradeOverrides
 from paude.registry import RegistryEntry, SessionRegistry
+
+_NO_OVERRIDES = UpgradeOverrides()
 
 runner = CliRunner()
 
@@ -181,7 +184,7 @@ class TestUpgradePodman:
 
         from paude.cli.upgrade import _upgrade_podman
 
-        _upgrade_podman("test-session", backend, rebuild=False)
+        _upgrade_podman("test-session", backend, rebuild=False, overrides=_NO_OVERRIDES)
 
         # Old container and proxy container removed
         backend._runner.remove_container.assert_any_call(
@@ -242,7 +245,7 @@ class TestUpgradePodman:
 
         from paude.cli.upgrade import _upgrade_podman
 
-        _upgrade_podman("test-session", backend, rebuild=False)
+        _upgrade_podman("test-session", backend, rebuild=False, overrides=_NO_OVERRIDES)
 
         config = backend.create_session.call_args[0][0]
         assert config.agent == "gemini"
@@ -283,7 +286,7 @@ class TestUpgradePodman:
 
         from paude.cli.upgrade import _upgrade_podman
 
-        _upgrade_podman("test-session", backend, rebuild=False)
+        _upgrade_podman("test-session", backend, rebuild=False, overrides=_NO_OVERRIDES)
 
         mock_image_manager.ensure_default_image.assert_called_once()
 
@@ -323,7 +326,7 @@ class TestUpgradePodman:
 
         from paude.cli.upgrade import _upgrade_podman
 
-        _upgrade_podman("test-session", backend, rebuild=False)
+        _upgrade_podman("test-session", backend, rebuild=False, overrides=_NO_OVERRIDES)
 
         # Proxy container removed
         backend._runner.remove_container.assert_any_call(
@@ -367,7 +370,7 @@ class TestUpgradePodman:
 
         from paude.cli.upgrade import _upgrade_podman
 
-        _upgrade_podman("test-session", backend, rebuild=False)
+        _upgrade_podman("test-session", backend, rebuild=False, overrides=_NO_OVERRIDES)
 
         # Proxy image not built
         mock_image_manager.ensure_proxy_image.assert_not_called()
@@ -406,7 +409,7 @@ class TestUpgradePodman:
 
         from paude.cli.upgrade import _upgrade_podman
 
-        _upgrade_podman("test-session", backend, rebuild=False)
+        _upgrade_podman("test-session", backend, rebuild=False, overrides=_NO_OVERRIDES)
 
         config = backend.create_session.call_args[0][0]
         assert config.allowed_domains is None, (
@@ -581,7 +584,11 @@ class TestUpgradeOpenShift:
         from paude.cli.upgrade import _upgrade_openshift
 
         _upgrade_openshift(
-            "test-session", backend, rebuild=False, openshift_context=None
+            "test-session",
+            backend,
+            rebuild=False,
+            openshift_context=None,
+            overrides=_NO_OVERRIDES,
         )
 
         # Verify oc patch was called
@@ -618,7 +625,11 @@ class TestUpgradeOpenShift:
         from paude.cli.upgrade import _upgrade_openshift
 
         _upgrade_openshift(
-            "test-session", backend, rebuild=False, openshift_context=None
+            "test-session",
+            backend,
+            rebuild=False,
+            openshift_context=None,
+            overrides=_NO_OVERRIDES,
         )
 
         oc = backend._lifecycle._oc
@@ -649,7 +660,11 @@ class TestUpgradeOpenShift:
         from paude.cli.upgrade import _upgrade_openshift
 
         _upgrade_openshift(
-            "test-session", backend, rebuild=False, openshift_context=None
+            "test-session",
+            backend,
+            rebuild=False,
+            openshift_context=None,
+            overrides=_NO_OVERRIDES,
         )
 
         backend._lifecycle._scale_deployment.assert_called_once()
@@ -678,7 +693,11 @@ class TestUpgradeOpenShift:
         from paude.cli.upgrade import _upgrade_openshift
 
         _upgrade_openshift(
-            "test-session", backend, rebuild=False, openshift_context=None
+            "test-session",
+            backend,
+            rebuild=False,
+            openshift_context=None,
+            overrides=_NO_OVERRIDES,
         )
 
         backend._lifecycle._scale_deployment.assert_not_called()
@@ -707,7 +726,11 @@ class TestUpgradeOpenShift:
         from paude.cli.upgrade import _upgrade_openshift
 
         _upgrade_openshift(
-            "test-session", backend, rebuild=False, openshift_context=None
+            "test-session",
+            backend,
+            rebuild=False,
+            openshift_context=None,
+            overrides=_NO_OVERRIDES,
         )
 
         backend._syncer.sync_full_config.assert_called_once()
@@ -729,5 +752,261 @@ class TestUpgradeOpenShift:
 
         with pytest.raises(click.exceptions.Exit):
             _upgrade_openshift(
-                "nonexistent", backend, rebuild=False, openshift_context=None
+                "nonexistent",
+                backend,
+                rebuild=False,
+                openshift_context=None,
+                overrides=_NO_OVERRIDES,
             )
+
+
+class TestUpgradeOverrides:
+    """Tests for config overrides during upgrade."""
+
+    def test_has_changes_empty(self) -> None:
+        """No changes when all fields are None."""
+        overrides = UpgradeOverrides()
+        assert overrides.has_changes() is False
+
+    def test_has_changes_otel(self) -> None:
+        overrides = UpgradeOverrides(otel_endpoint="http://collector:4318")
+        assert overrides.has_changes() is True
+
+    def test_has_changes_gpu(self) -> None:
+        overrides = UpgradeOverrides(gpu="all")
+        assert overrides.has_changes() is True
+
+    def test_has_changes_yolo(self) -> None:
+        overrides = UpgradeOverrides(yolo=True)
+        assert overrides.has_changes() is True
+
+    def test_has_changes_empty_string_gpu_disables(self) -> None:
+        """Empty string for gpu means explicitly disabled, still a change."""
+        overrides = UpgradeOverrides(gpu="")
+        assert overrides.has_changes() is True
+
+
+class TestUpgradePodmanWithOverrides:
+    """Tests for _upgrade_podman with config overrides."""
+
+    def _make_container_labels(
+        self,
+        workspace: Path | None = None,
+        agent: str = "claude",
+        domains: str | None = None,
+        otel_endpoint: str | None = None,
+    ) -> dict[str, str]:
+        from paude.backends.shared import PAUDE_LABEL_OTEL_ENDPOINT
+
+        ws = workspace or Path("/home/user/project")
+        labels: dict[str, str] = {
+            PAUDE_LABEL_AGENT: agent,
+            PAUDE_LABEL_WORKSPACE: encode_path(ws, url_safe=True),
+            PAUDE_LABEL_SESSION: "test-session",
+            PAUDE_LABEL_CREATED: "2026-01-01T00:00:00+00:00",
+        }
+        if domains is not None:
+            labels[PAUDE_LABEL_DOMAINS] = domains
+        if otel_endpoint is not None:
+            labels[PAUDE_LABEL_OTEL_ENDPOINT] = otel_endpoint
+        return labels
+
+    @patch("paude.mounts.build_mounts", return_value=[])
+    @patch("paude.cli.helpers._prepare_session_create")
+    @patch("paude.container.ImageManager")
+    @patch("paude.config.detector.detect_config", return_value=None)
+    @patch("paude.backends.podman.helpers.find_container_by_session_name")
+    def test_upgrade_adds_otel_endpoint(
+        self,
+        mock_find_container: MagicMock,
+        mock_detect_config: MagicMock,
+        mock_image_manager_class: MagicMock,
+        mock_prepare: MagicMock,
+        mock_build_mounts: MagicMock,
+    ) -> None:
+        """Upgrade with --otel-endpoint stores it in SessionConfig."""
+        labels = self._make_container_labels(
+            domains=".googleapis.com",
+        )
+        mock_find_container.return_value = {"Labels": labels}
+
+        mock_image_manager = MagicMock()
+        mock_image_manager.ensure_default_image.return_value = "paude:latest"
+        mock_image_manager.ensure_proxy_image.return_value = "proxy:latest"
+        mock_image_manager_class.return_value = mock_image_manager
+
+        mock_prepare.return_value = ([".googleapis.com"], [], {}, False)
+
+        from paude.backends.podman.backend import PodmanBackend
+
+        backend = MagicMock(spec=PodmanBackend)
+        backend._runner = MagicMock()
+        backend._network_manager = MagicMock()
+        backend._engine = MagicMock()
+
+        from paude.cli.upgrade import _upgrade_podman
+
+        overrides = UpgradeOverrides(otel_endpoint="http://collector:4318")
+        _upgrade_podman("test-session", backend, rebuild=False, overrides=overrides)
+
+        config = backend.create_session.call_args[0][0]
+        assert config.otel_endpoint == "http://collector:4318"
+        assert config.otel_ports == [4318]
+
+    @patch("paude.mounts.build_mounts", return_value=[])
+    @patch("paude.cli.helpers._prepare_session_create")
+    @patch("paude.container.ImageManager")
+    @patch("paude.config.detector.detect_config", return_value=None)
+    @patch("paude.backends.podman.helpers.find_container_by_session_name")
+    def test_upgrade_clears_otel_endpoint(
+        self,
+        mock_find_container: MagicMock,
+        mock_detect_config: MagicMock,
+        mock_image_manager_class: MagicMock,
+        mock_prepare: MagicMock,
+        mock_build_mounts: MagicMock,
+    ) -> None:
+        """Upgrade with --otel-endpoint '' clears OTEL config."""
+        labels = self._make_container_labels(
+            domains=".googleapis.com",
+            otel_endpoint="http://old-collector:4318",
+        )
+        mock_find_container.return_value = {"Labels": labels}
+
+        mock_image_manager = MagicMock()
+        mock_image_manager.ensure_default_image.return_value = "paude:latest"
+        mock_image_manager.ensure_proxy_image.return_value = "proxy:latest"
+        mock_image_manager_class.return_value = mock_image_manager
+
+        mock_prepare.return_value = ([".googleapis.com"], [], {}, False)
+
+        from paude.backends.podman.backend import PodmanBackend
+
+        backend = MagicMock(spec=PodmanBackend)
+        backend._runner = MagicMock()
+        backend._network_manager = MagicMock()
+        backend._engine = MagicMock()
+
+        from paude.cli.upgrade import _upgrade_podman
+
+        overrides = UpgradeOverrides(otel_endpoint="")
+        _upgrade_podman("test-session", backend, rebuild=False, overrides=overrides)
+
+        config = backend.create_session.call_args[0][0]
+        assert config.otel_endpoint is None
+        assert config.otel_ports == []
+
+    @patch("paude.mounts.build_mounts", return_value=[])
+    @patch("paude.cli.helpers._prepare_session_create")
+    @patch("paude.container.ImageManager")
+    @patch("paude.config.detector.detect_config", return_value=None)
+    @patch("paude.backends.podman.helpers.find_container_by_session_name")
+    def test_upgrade_preserves_existing_otel(
+        self,
+        mock_find_container: MagicMock,
+        mock_detect_config: MagicMock,
+        mock_image_manager_class: MagicMock,
+        mock_prepare: MagicMock,
+        mock_build_mounts: MagicMock,
+    ) -> None:
+        """Upgrade without --otel-endpoint preserves existing OTEL config."""
+        labels = self._make_container_labels(
+            domains=".googleapis.com",
+            otel_endpoint="http://existing:4318",
+        )
+        mock_find_container.return_value = {"Labels": labels}
+
+        mock_image_manager = MagicMock()
+        mock_image_manager.ensure_default_image.return_value = "paude:latest"
+        mock_image_manager.ensure_proxy_image.return_value = "proxy:latest"
+        mock_image_manager_class.return_value = mock_image_manager
+
+        mock_prepare.return_value = ([".googleapis.com"], [], {}, False)
+
+        from paude.backends.podman.backend import PodmanBackend
+
+        backend = MagicMock(spec=PodmanBackend)
+        backend._runner = MagicMock()
+        backend._network_manager = MagicMock()
+        backend._engine = MagicMock()
+
+        from paude.cli.upgrade import _upgrade_podman
+
+        _upgrade_podman("test-session", backend, rebuild=False, overrides=_NO_OVERRIDES)
+
+        config = backend.create_session.call_args[0][0]
+        assert config.otel_endpoint == "http://existing:4318"
+        assert config.otel_ports == [4318]
+
+    @patch("paude.mounts.build_mounts", return_value=[])
+    @patch("paude.container.ImageManager")
+    @patch("paude.config.detector.detect_config", return_value=None)
+    @patch("paude.backends.podman.helpers.find_container_by_session_name")
+    def test_upgrade_overrides_gpu(
+        self,
+        mock_find_container: MagicMock,
+        mock_detect_config: MagicMock,
+        mock_image_manager_class: MagicMock,
+        mock_build_mounts: MagicMock,
+    ) -> None:
+        """Upgrade with --gpu overrides label value."""
+        labels = self._make_container_labels()
+        mock_find_container.return_value = {"Labels": labels}
+
+        mock_image_manager = MagicMock()
+        mock_image_manager.ensure_default_image.return_value = "paude:latest"
+        mock_image_manager_class.return_value = mock_image_manager
+
+        from paude.backends.podman.backend import PodmanBackend
+
+        backend = MagicMock(spec=PodmanBackend)
+        backend._runner = MagicMock()
+        backend._runner.container_exists.return_value = False
+        backend._network_manager = MagicMock()
+        backend._engine = MagicMock()
+
+        from paude.cli.upgrade import _upgrade_podman
+
+        overrides = UpgradeOverrides(gpu="all")
+        _upgrade_podman("test-session", backend, rebuild=False, overrides=overrides)
+
+        config = backend.create_session.call_args[0][0]
+        assert config.gpu == "all"
+
+    @patch("paude.mounts.build_mounts", return_value=[])
+    @patch("paude.container.ImageManager")
+    @patch("paude.config.detector.detect_config", return_value=None)
+    @patch("paude.backends.podman.helpers.find_container_by_session_name")
+    def test_upgrade_disables_gpu(
+        self,
+        mock_find_container: MagicMock,
+        mock_detect_config: MagicMock,
+        mock_image_manager_class: MagicMock,
+        mock_build_mounts: MagicMock,
+    ) -> None:
+        """Upgrade with --no-gpu (gpu='') disables GPU."""
+        from paude.backends.shared import PAUDE_LABEL_GPU
+
+        labels = self._make_container_labels()
+        labels[PAUDE_LABEL_GPU] = "all"  # Had GPU before
+        mock_find_container.return_value = {"Labels": labels}
+
+        mock_image_manager = MagicMock()
+        mock_image_manager.ensure_default_image.return_value = "paude:latest"
+        mock_image_manager_class.return_value = mock_image_manager
+
+        from paude.backends.podman.backend import PodmanBackend
+
+        backend = MagicMock(spec=PodmanBackend)
+        backend._runner = MagicMock()
+        backend._runner.container_exists.return_value = False
+        backend._network_manager = MagicMock()
+        backend._engine = MagicMock()
+
+        from paude.cli.upgrade import _upgrade_podman
+
+        overrides = UpgradeOverrides(gpu="")
+        _upgrade_podman("test-session", backend, rebuild=False, overrides=overrides)
+
+        config = backend.create_session.call_args[0][0]
+        assert config.gpu is None
