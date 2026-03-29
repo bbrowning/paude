@@ -3,14 +3,94 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
+import threading
 
 from paude.backends.openshift.config import OpenShiftConfig
 from paude.backends.openshift.oc import OC_EXEC_TIMEOUT, RSYNC_TIMEOUT, OcClient
 from paude.backends.openshift.session_lookup import SessionLookup
 from paude.backends.openshift.sync import ConfigSyncer
+from paude.backends.port_forward_utils import log_file
 from paude.backends.shared import PAUDE_LABEL_AGENT, PAUDE_LABEL_PROVIDER, resource_name
+
+
+def _format_exit_reason(retcode: int) -> str:
+    """Format a process exit code into a human-readable reason."""
+    if retcode < 0:
+        sig_num = -retcode
+        try:
+            sig_name = signal.Signals(sig_num).name
+        except ValueError:
+            sig_name = f"signal {sig_num}"
+        return f"killed by {sig_name}"
+    return f"exited with code {retcode}"
+
+
+def _monitor_port_forward(
+    proc: subprocess.Popen[bytes],
+    session_name: str,
+    stop_event: threading.Event,
+    check_interval: float = 5.0,
+) -> None:
+    """Background thread that watches the port-forward process.
+
+    When the process dies unexpectedly (stop_event not set), writes a
+    warning to stderr so the user sees it in their terminal.
+    """
+    while not stop_event.is_set():
+        stop_event.wait(check_interval)
+        if stop_event.is_set():
+            return
+        retcode = proc.poll()
+        if retcode is not None:
+            lf = log_file(session_name)
+            reason = _format_exit_reason(retcode)
+            log_hint = f"\r\n[paude] Log: {lf}" if lf.exists() else ""
+            msg = (
+                f"\r\n\033[33m[paude] WARNING: port-forward for "
+                f"'{session_name}' {reason}{log_hint}\033[0m\r\n"
+            )
+            sys.stderr.write(msg)
+            sys.stderr.flush()
+            return
+
+
+def _show_port_forward_diagnostics(
+    session_name: str,
+    proc: subprocess.Popen[bytes] | None,
+) -> None:
+    """After disconnect, show port-forward diagnostics if it died."""
+    if proc is None:
+        return
+
+    retcode = proc.poll()
+    if retcode is None:
+        return
+
+    reason = _format_exit_reason(retcode)
+    print(
+        f"\n--- Port-forward for '{session_name}' {reason} ---",
+        file=sys.stderr,
+    )
+
+    lf = log_file(session_name)
+    if lf.exists():
+        content = lf.read_text()
+        lines = content.strip().splitlines()
+        if lines:
+            print(f"Log ({lf}):", file=sys.stderr)
+            for line in lines[-20:]:
+                print(f"  {line}", file=sys.stderr)
+        else:
+            print("Log file was empty.", file=sys.stderr)
+
+    print(
+        "Run 'paude connect' again to re-establish port-forwarding.",
+        file=sys.stderr,
+    )
+    print("---", file=sys.stderr)
 
 
 class SessionConnector:
@@ -44,10 +124,22 @@ class SessionConnector:
             return 1
 
         self._sync_for_connect(pname, name, github_token)
-        port_urls = self._start_port_forward(name, pname)
+        pf_proc, port_urls = self._start_port_forward(name, pname)
+
+        stop_event = threading.Event()
+        if pf_proc is not None:
+            monitor = threading.Thread(
+                target=_monitor_port_forward,
+                args=(pf_proc, name, stop_event),
+                daemon=True,
+            )
+            monitor.start()
+
         try:
             return self._attach_to_pod(pname, name, ns, port_urls=port_urls)
         finally:
+            stop_event.set()
+            _show_port_forward_diagnostics(name, pf_proc)
             self._stop_port_forward(name)
 
     def _verify_pod_running(self, name: str) -> tuple[str | None, str]:
@@ -79,11 +171,13 @@ class SessionConnector:
 
         return pname, ns
 
-    def _start_port_forward(self, session_name: str, pod_name: str) -> list[str]:
+    def _start_port_forward(
+        self, session_name: str, pod_name: str
+    ) -> tuple[subprocess.Popen[bytes] | None, list[str]]:
         """Start port-forwarding if the agent has exposed ports.
 
         Returns:
-            List of port-forward URL strings.
+            Tuple of (process or None, list of port-forward URL strings).
         """
         from paude.agents import get_agent
         from paude.backends.openshift.port_forward import PortForwardManager
@@ -94,12 +188,12 @@ class SessionConnector:
         agent = get_agent(agent_name, provider=provider)
         ports = agent.config.exposed_ports
         if not ports:
-            return []
+            return None, []
 
         mgr = PortForwardManager(self._namespace, self._config.context)
-        mgr.start(session_name, pod_name, ports)
+        proc = mgr.start(session_name, pod_name, ports)
 
-        return [f"http://localhost:{hp}" for hp, _cp in ports]
+        return proc, [f"http://localhost:{hp}" for hp, _cp in ports]
 
     def _stop_port_forward(self, session_name: str) -> None:
         """Stop any active port-forward for this session."""

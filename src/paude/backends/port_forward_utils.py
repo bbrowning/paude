@@ -21,6 +21,11 @@ def pid_file(session_name: str) -> Path:
     return pid_dir() / f"{session_name}.pid"
 
 
+def log_file(session_name: str) -> Path:
+    """Return the log file path for a session's port-forward."""
+    return pid_dir() / f"{session_name}.log"
+
+
 def is_process_running(pid: int) -> bool:
     """Check if a process with the given PID is still running.
 
@@ -86,3 +91,4 @@ def stop_port_forward(session_name: str) -> None:
         pass
 
     pf.unlink(missing_ok=True)
+    log_file(session_name).unlink(missing_ok=True)
