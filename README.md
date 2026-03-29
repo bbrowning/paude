@@ -30,7 +30,7 @@ Run AI coding agents in secure containers. They make commits, you pull them back
 
 ### Prerequisites
 
-**Container runtime**: [Podman](https://podman.io/getting-started/installation) or [Docker](https://docs.docker.com/get-docker/) (for local backend).
+**Container runtime**: [Podman](https://podman.io/getting-started/installation) or [Docker](https://docs.docker.com/get-docker/) for local use, or an [OpenShift](docs/OPENSHIFT.md) cluster for remote execution.
 
 **Authentication** — set up credentials for your chosen provider:
 
@@ -105,7 +105,6 @@ uv tool install paude
 
 ```bash
 # OpenClaw — browser-based, no local agent install needed
-# Web UI opens at http://localhost:18789
 paude create --agent openclaw --allowed-domains "default openclaw" my-project
 
 # Claude Code (default)
@@ -125,7 +124,7 @@ paude connect my-project
 git pull paude-my-project main
 ```
 
-**You'll know it's working when**: For CLI agents, `paude connect` shows the agent interface and `git pull` brings back commits. For OpenClaw, open `http://localhost:18789` in your browser.
+**You'll know it's working when**: For CLI agents, `paude connect` shows the agent interface and `git pull` brings back commits. For OpenClaw, `paude connect` prints a URL — open it in your browser.
 
 ### Passing a Task
 
