@@ -573,6 +573,13 @@ def _upgrade_openshift(
     if backend._lookup.has_proxy_deployment(name):
         from paude.backends.shared import proxy_resource_name
 
+        proxy_image: str | None = None
+        if script_dir is not None:
+            typer.echo("Building proxy image in OpenShift cluster...", err=True)
+            proxy_image = backend.ensure_proxy_image_via_build(
+                script_dir, force_rebuild=rebuild, session_name=name
+            )
+
         # Update proxy allowed domains when OTEL endpoint changes
         if overrides.otel_endpoint is not None:
             from paude.otel import otel_proxy_ports, parse_otel_endpoint
@@ -591,8 +598,10 @@ def _upgrade_openshift(
                     current_domains = [d for d in current_domains if d != old_hostname]
 
             backend._proxy.update_deployment_domains(
-                name, current_domains, otel_ports=otel_ports
+                name, current_domains, otel_ports=otel_ports, image=proxy_image
             )
+        elif proxy_image is not None:
+            backend._proxy.update_deployment_image(name, proxy_image)
 
         backend._lifecycle._scale_deployment(proxy_resource_name(name), 1)
         backend._proxy.wait_for_ready(name)

@@ -425,11 +425,37 @@ class ProxyManager:
 
         return [d for d in result.stdout.strip().split(",") if d]
 
+    def _patch_deployment_container(
+        self,
+        session_name: str,
+        container_fields: dict[str, Any],
+    ) -> None:
+        """Apply a strategic merge patch to the proxy container spec."""
+        deployment_name = proxy_resource_name(session_name)
+        patch = json.dumps(
+            {
+                "spec": {
+                    "template": {
+                        "spec": {"containers": [{"name": "proxy", **container_fields}]}
+                    }
+                }
+            }
+        )
+        self._oc.run(
+            "patch",
+            f"deployment/{deployment_name}",
+            "-n",
+            self._namespace,
+            "--type=strategic",
+            f"-p={patch}",
+        )
+
     def update_deployment_domains(
         self,
         session_name: str,
         domains: list[str],
         otel_ports: list[int] | None = None,
+        image: str | None = None,
     ) -> None:
         """Update the ALLOWED_DOMAINS env var on the proxy Deployment.
 
@@ -439,10 +465,11 @@ class ProxyManager:
             otel_ports: Non-standard OTEL ports to allow.  ``None`` (default)
                 leaves the existing ALLOWED_OTEL_PORTS unchanged; an empty
                 list clears it.
+            image: If provided, also update the container image in the same
+                patch to avoid a double pod restart.
         """
         from paude.domains import format_domains_as_squid_acls
 
-        deployment_name = proxy_resource_name(session_name)
         domains_str = ",".join(domains)
         acls = format_domains_as_squid_acls(domains)
 
@@ -464,31 +491,23 @@ class ProxyManager:
                 }
             )
 
-        patch = json.dumps(
-            {
-                "spec": {
-                    "template": {
-                        "spec": {
-                            "containers": [
-                                {
-                                    "name": "proxy",
-                                    "env": env_entries,
-                                }
-                            ]
-                        }
-                    }
-                }
-            }
-        )
+        container_fields: dict[str, Any] = {"env": env_entries}
+        if image is not None:
+            container_fields["image"] = image
+        self._patch_deployment_container(session_name, container_fields)
 
-        self._oc.run(
-            "patch",
-            f"deployment/{deployment_name}",
-            "-n",
-            self._namespace,
-            "--type=strategic",
-            f"-p={patch}",
-        )
+    def update_deployment_image(
+        self,
+        session_name: str,
+        image: str,
+    ) -> None:
+        """Update the container image on the proxy Deployment.
+
+        Args:
+            session_name: Session name.
+            image: New container image reference.
+        """
+        self._patch_deployment_container(session_name, {"image": image})
 
     def delete_resources(self, session_name: str) -> None:
         """Delete proxy Deployment and Service for a session.

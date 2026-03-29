@@ -784,6 +784,7 @@ class TestUpgradeOpenShift:
         backend._pod_waiter = MagicMock()
         backend._syncer = MagicMock()
         backend.ensure_image_via_build.return_value = "paude:new"
+        backend.ensure_proxy_image_via_build.return_value = "paude-proxy:new"
 
         from paude.cli.upgrade import _upgrade_openshift
 
@@ -796,12 +797,15 @@ class TestUpgradeOpenShift:
             overrides=overrides,
         )
 
+        backend.ensure_proxy_image_via_build.assert_called_once()
         backend._proxy.update_deployment_domains.assert_called_once()
         call_args = backend._proxy.update_deployment_domains.call_args
         domains = call_args[0][1]
         assert "collector.example.com" in domains
         assert ".googleapis.com" in domains
         assert call_args[1]["otel_ports"] == [4318]
+        assert call_args[1]["image"] == "paude-proxy:new"
+        backend._proxy.update_deployment_image.assert_not_called()
 
     @patch("paude.config.detector.detect_config", return_value=None)
     def test_upgrade_openshift_otel_clear_removes_proxy_domain(
@@ -828,6 +832,7 @@ class TestUpgradeOpenShift:
         backend._pod_waiter = MagicMock()
         backend._syncer = MagicMock()
         backend.ensure_image_via_build.return_value = "paude:new"
+        backend.ensure_proxy_image_via_build.return_value = "paude-proxy:new"
 
         from paude.cli.upgrade import _upgrade_openshift
 
@@ -840,12 +845,15 @@ class TestUpgradeOpenShift:
             overrides=overrides,
         )
 
+        backend.ensure_proxy_image_via_build.assert_called_once()
         backend._proxy.update_deployment_domains.assert_called_once()
         call_args = backend._proxy.update_deployment_domains.call_args
         domains = call_args[0][1]
         assert "old-collector.example.com" not in domains
         assert ".googleapis.com" in domains
         assert call_args[1]["otel_ports"] == []
+        assert call_args[1]["image"] == "paude-proxy:new"
+        backend._proxy.update_deployment_image.assert_not_called()
 
     @patch("paude.config.detector.detect_config", return_value=None)
     def test_upgrade_openshift_otel_no_proxy_no_domain_update(
@@ -879,6 +887,81 @@ class TestUpgradeOpenShift:
         )
 
         backend._proxy.update_deployment_domains.assert_not_called()
+        backend.ensure_proxy_image_via_build.assert_not_called()
+        backend._proxy.update_deployment_image.assert_not_called()
+
+    @patch("paude.config.detector.detect_config", return_value=None)
+    def test_upgrade_openshift_rebuilds_proxy_image_without_otel(
+        self,
+        mock_detect_config: MagicMock,
+    ) -> None:
+        """Proxy image is rebuilt during upgrade even without OTEL changes."""
+        from paude.backends.openshift import OpenShiftBackend
+
+        backend = MagicMock(spec=OpenShiftBackend)
+        backend.namespace = "test-ns"
+        backend._lookup = MagicMock()
+        backend._lookup.get_statefulset.return_value = self._make_statefulset()
+        backend._lookup.has_proxy_deployment.return_value = True
+        backend._lifecycle = MagicMock()
+        backend._lifecycle._oc = MagicMock()
+        backend._proxy = MagicMock()
+        backend._pod_waiter = MagicMock()
+        backend._syncer = MagicMock()
+        backend.ensure_image_via_build.return_value = "paude:new"
+        backend.ensure_proxy_image_via_build.return_value = "paude-proxy:new"
+
+        from paude.cli.upgrade import _upgrade_openshift
+
+        overrides = UpgradeOverrides()
+        _upgrade_openshift(
+            "test-session",
+            backend,
+            rebuild=False,
+            openshift_context=None,
+            overrides=overrides,
+        )
+
+        backend.ensure_proxy_image_via_build.assert_called_once()
+        backend._proxy.update_deployment_image.assert_called_once_with(
+            "test-session", "paude-proxy:new"
+        )
+        backend._proxy.update_deployment_domains.assert_not_called()
+
+    @patch("paude.config.detector.detect_config", return_value=None)
+    def test_upgrade_openshift_rebuild_flag_forces_proxy_rebuild(
+        self,
+        mock_detect_config: MagicMock,
+    ) -> None:
+        """--rebuild flag forces proxy image rebuild."""
+        from paude.backends.openshift import OpenShiftBackend
+
+        backend = MagicMock(spec=OpenShiftBackend)
+        backend.namespace = "test-ns"
+        backend._lookup = MagicMock()
+        backend._lookup.get_statefulset.return_value = self._make_statefulset()
+        backend._lookup.has_proxy_deployment.return_value = True
+        backend._lifecycle = MagicMock()
+        backend._lifecycle._oc = MagicMock()
+        backend._proxy = MagicMock()
+        backend._pod_waiter = MagicMock()
+        backend._syncer = MagicMock()
+        backend.ensure_image_via_build.return_value = "paude:new"
+        backend.ensure_proxy_image_via_build.return_value = "paude-proxy:rebuilt"
+
+        from paude.cli.upgrade import _upgrade_openshift
+
+        overrides = UpgradeOverrides()
+        _upgrade_openshift(
+            "test-session",
+            backend,
+            rebuild=True,
+            openshift_context=None,
+            overrides=overrides,
+        )
+
+        call_args = backend.ensure_proxy_image_via_build.call_args
+        assert call_args[1]["force_rebuild"] is True
 
 
 class TestUpgradeOverrides:
