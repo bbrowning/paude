@@ -1911,6 +1911,7 @@ class TestCreateGitEnvVar:
         ],
         ids=["with-git", "without-git"],
     )
+    @patch("paude.cli.create_openshift.is_git_repository", return_value=True)
     @patch("paude.cli.remote_git_setup._setup_git_after_create")
     @patch("paude.cli.create_openshift.OpenShiftBackend")
     @patch("paude.cli.create_openshift.OpenShiftConfig")
@@ -1923,6 +1924,7 @@ class TestCreateGitEnvVar:
         mock_os_config_class,
         mock_os_backend_class,
         mock_git_setup,
+        mock_is_git_repo,
         extra_flags,
         expect_env_var,
     ):
@@ -1948,6 +1950,43 @@ class TestCreateGitEnvVar:
             assert session_config.env.get("PAUDE_WAIT_FOR_GIT") == "1"
         else:
             assert "PAUDE_WAIT_FOR_GIT" not in session_config.env
+
+    @patch("paude.cli.create_openshift.is_git_repository", return_value=False)
+    @patch("paude.cli.remote_git_setup._setup_git_after_create")
+    @patch("paude.cli.create_openshift.OpenShiftBackend")
+    @patch("paude.cli.create_openshift.OpenShiftConfig")
+    @patch("paude.config.detect_config", return_value=None)
+    @patch("paude.environment.build_environment")
+    def test_openshift_create_git_no_repo_skips_wait(
+        self,
+        mock_build_env,
+        mock_detect_config,
+        mock_os_config_class,
+        mock_os_backend_class,
+        mock_git_setup,
+        mock_is_git_repo,
+    ):
+        """PAUDE_WAIT_FOR_GIT is NOT set when --git is used outside a git repo."""
+        mock_build_env.return_value = {}
+        mock_backend = MagicMock()
+        mock_backend.namespace = "test-ns"
+        mock_backend.ensure_image_via_build.return_value = "test-image:latest"
+        mock_backend.ensure_proxy_image_via_build.return_value = None
+        mock_session = MagicMock()
+        mock_session.name = "test-session"
+        mock_backend.create_session.return_value = mock_session
+        mock_os_backend_class.return_value = mock_backend
+
+        result = runner.invoke(
+            app,
+            ["create", "--backend", "openshift", "--git", "test-session"],
+        )
+
+        mock_backend.create_session.assert_called_once()
+        session_config = mock_backend.create_session.call_args[0][0]
+        assert "PAUDE_WAIT_FOR_GIT" not in session_config.env
+        mock_git_setup.assert_not_called()
+        assert "Not in a git repository" in result.output
 
 
 # ---------------------------------------------------------------------------
