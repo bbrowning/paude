@@ -431,6 +431,30 @@ class PodmanBackend:
         agent = self._get_session_agent(name)
         self._sync_host_config(cname, agent.config.name)
         self._sync_sandbox_config(cname, name)
+        self._start_agent_headless_in_container(cname, agent)
+
+    def start_agent_headless(self, name: str) -> None:
+        """Start the agent in headless mode inside the container."""
+        cname = self._require_running_session(name)
+        agent = self._get_session_agent(name)
+        self._start_agent_headless_in_container(cname, agent)
+
+    def _start_agent_headless_in_container(self, cname: str, agent: Agent) -> None:
+        """Start the agent in headless mode (internal, skips session lookup)."""
+        env_vars = self._build_attach_env(agent, github_token=None)
+        cmd: list[str] = ["env", "PAUDE_HEADLESS=1"]
+        if env_vars:
+            for key, value in env_vars.items():
+                cmd.append(f"{key}={value}")
+        cmd.append(CONTAINER_ENTRYPOINT)
+        print("Starting agent in container...", file=sys.stderr)
+        result = self._runner.exec_in_container(cname, cmd, check=False)
+        if result.returncode != 0:
+            print(
+                f"Warning: headless agent start failed (exit {result.returncode}). "
+                f"Agent will start on next 'paude connect'.",
+                file=sys.stderr,
+            )
 
     def delete_session(self, name: str, confirm: bool = False) -> None:
         """Delete a session and all its resources."""

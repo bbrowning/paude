@@ -114,6 +114,15 @@ export LANG="${LANG:-C.UTF-8}"
 export LC_ALL="${LC_ALL:-C.UTF-8}"
 export SHELL=/bin/bash
 
+# In headless mode (PAUDE_HEADLESS=1), exit after starting/detecting the
+# tmux session instead of attaching an interactive terminal.
+exit_if_headless() {
+    if [[ "${PAUDE_HEADLESS:-}" == "1" ]]; then
+        echo "$AGENT_NAME session $1 (headless)."
+        exit 0
+    fi
+}
+
 # Attach to an existing tmux session.
 # Used by both the reconnect early-exit and the normal attach path.
 attach_to_session() {
@@ -136,6 +145,7 @@ attach_to_session() {
 # config — re-copying from host seed mounts would overwrite in-container
 # state (prompt history, project data, conversation context).
 if tmux -u has-session -t "$AGENT_SESSION_NAME" 2>/dev/null; then
+    exit_if_headless "already running"
     attach_to_session reconnect
 fi
 
@@ -173,6 +183,7 @@ if [[ -d "$WORKSPACE/$AGENT_CONFIG_DIR" ]]; then
 fi
 
 if tmux -u has-session -t "$AGENT_SESSION_NAME" 2>/dev/null; then
+    exit_if_headless "already running"
     attach_to_session reconnect
 else
     echo "Starting new $AGENT_NAME session..."
@@ -180,5 +191,6 @@ else
     tmux send-keys -t "$AGENT_SESSION_NAME" "export HOME=$HOME PATH='$PATH'" Enter
     tmux send-keys -t "$AGENT_SESSION_NAME" "cd $WORKSPACE" Enter
     tmux send-keys -t "$AGENT_SESSION_NAME" "clear && $AGENT_LAUNCH_CMD $AGENT_ARGS" Enter
+    exit_if_headless "started"
     attach_to_session new
 fi

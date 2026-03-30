@@ -618,3 +618,5 @@ def _upgrade_openshift(
     backend._syncer.sync_full_config(
         pname, agent_name=agent_name, provider=provider_name, secret_env=secret_env
     )
+
+    backend.start_agent_headless(name)

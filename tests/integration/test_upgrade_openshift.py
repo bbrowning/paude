@@ -118,6 +118,7 @@ class TestOpenShiftUpgrade:
                 return_value=kubernetes_test_image,
             ),
             patch.object(openshift_backend, "_syncer_instance", MagicMock()),
+            patch.object(openshift_backend, "start_agent_headless"),
         ):
             from paude.cli.upgrade import _upgrade_openshift
 
