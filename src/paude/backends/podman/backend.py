@@ -36,6 +36,7 @@ from paude.backends.shared import (
     PAUDE_LABEL_OTEL_PORTS,
     PAUDE_LABEL_PROVIDER,
     PAUDE_LABEL_PROXY_IMAGE,
+    PAUDE_LABEL_SECRET_ENV,
     PAUDE_LABEL_SESSION,
     PAUDE_LABEL_VERSION,
     PAUDE_LABEL_WORKSPACE,
@@ -123,6 +124,13 @@ class PodmanBackend:
         provider = labels.get(PAUDE_LABEL_PROVIDER) or None
         return get_agent(agent_name, provider=provider)
 
+    def _get_secret_env_names(self, session_name: str) -> list[str]:
+        """Get custom secret env var names from session labels."""
+        from paude.backends.shared import parse_secret_env_label
+
+        labels = self._get_session_labels(session_name)
+        return parse_secret_env_label(labels.get(PAUDE_LABEL_SECRET_ENV))
+
     def _get_port_urls(self, agent: Agent) -> list[str]:
         """Get port-forward URL strings for an agent."""
         return [f"http://localhost:{hp}" for hp, _cp in agent.config.exposed_ports]
@@ -162,10 +170,14 @@ class PodmanBackend:
         self._port_forward.start(session_name, cname, ports)
 
     def _build_attach_env(
-        self, agent: Agent, github_token: str | None
+        self,
+        agent: Agent,
+        github_token: str | None,
+        secret_env_names: list[str] | None = None,
     ) -> dict[str, str] | None:
         """Build extra environment for container attachment."""
         from paude.agents.base import build_secret_environment_from_config
+        from paude.backends.shared import build_custom_secret_env
 
         secret_env = build_secret_environment_from_config(agent.config)
 
@@ -173,6 +185,9 @@ class PodmanBackend:
         if github_token:
             extra_env["GH_TOKEN"] = github_token
         extra_env.update(secret_env)
+
+        if secret_env_names:
+            extra_env.update(build_custom_secret_env(secret_env_names))
 
         port_urls = self._get_port_urls(agent)
         if port_urls:
@@ -301,6 +316,8 @@ class PodmanBackend:
                 )
             if config.otel_endpoint:
                 labels[PAUDE_LABEL_OTEL_ENDPOINT] = config.otel_endpoint
+        if config.secret_env_names:
+            labels[PAUDE_LABEL_SECRET_ENV] = ",".join(config.secret_env_names)
 
         print(f"Creating session '{session_name}'...", file=sys.stderr)
 
@@ -433,19 +450,31 @@ class PodmanBackend:
         agent = self._get_session_agent(name)
         self._sync_host_config(cname, agent.config.name)
         self._sync_sandbox_config(cname, name)
-        self._start_agent_headless_in_container(cname, agent, github_token)
+        secret_names = self._get_secret_env_names(name)
+        self._start_agent_headless_in_container(
+            cname, agent, github_token, secret_env_names=secret_names
+        )
 
     def start_agent_headless(self, name: str, github_token: str | None = None) -> None:
         """Start the agent in headless mode inside the container."""
         cname = self._require_running_session(name)
         agent = self._get_session_agent(name)
-        self._start_agent_headless_in_container(cname, agent, github_token)
+        secret_names = self._get_secret_env_names(name)
+        self._start_agent_headless_in_container(
+            cname, agent, github_token, secret_env_names=secret_names
+        )
 
     def _start_agent_headless_in_container(
-        self, cname: str, agent: Agent, github_token: str | None = None
+        self,
+        cname: str,
+        agent: Agent,
+        github_token: str | None = None,
+        secret_env_names: list[str] | None = None,
     ) -> None:
         """Start the agent in headless mode (internal, skips session lookup)."""
-        env_vars = self._build_attach_env(agent, github_token=github_token)
+        env_vars = self._build_attach_env(
+            agent, github_token=github_token, secret_env_names=secret_env_names
+        )
         cmd: list[str] = ["env", "PAUDE_HEADLESS=1"]
         if env_vars:
             for key, value in env_vars.items():
@@ -528,12 +557,15 @@ class PodmanBackend:
         self._sync_host_config(cname, agent.config.name)
         self._sync_sandbox_config(cname, name)
 
+        secret_names = self._get_secret_env_names(name)
         self._start_port_forward(name, agent)
         self._print_port_urls(name, agent)
         exit_code = self._runner.attach_container(
             cname,
             entrypoint=CONTAINER_ENTRYPOINT,
-            extra_env=self._build_attach_env(agent, github_token),
+            extra_env=self._build_attach_env(
+                agent, github_token, secret_env_names=secret_names
+            ),
         )
         self._print_port_urls(name, agent)
         return exit_code
@@ -595,6 +627,7 @@ class PodmanBackend:
         self._sync_host_config(cname, agent.config.name)
         self._sync_sandbox_config(cname, name)
 
+        secret_names = self._get_secret_env_names(name)
         self._start_port_forward(name, agent)
         print(f"Connecting to session '{name}'...", file=sys.stderr)
         self._print_port_urls(name, agent)
@@ -602,7 +635,9 @@ class PodmanBackend:
             exit_code = self._runner.attach_container(
                 cname,
                 entrypoint=CONTAINER_ENTRYPOINT,
-                extra_env=self._build_attach_env(agent, github_token),
+                extra_env=self._build_attach_env(
+                    agent, github_token, secret_env_names=secret_names
+                ),
             )
         finally:
             self._port_forward.stop(name)

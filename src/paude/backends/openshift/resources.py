@@ -12,6 +12,7 @@ from paude.backends.shared import (
     PAUDE_LABEL_AGENT,
     PAUDE_LABEL_GPU,
     PAUDE_LABEL_PROVIDER,
+    PAUDE_LABEL_SECRET_ENV,
     PAUDE_LABEL_VERSION,
     PAUDE_LABEL_YOLO,
     encode_path,
@@ -82,6 +83,7 @@ class StatefulSetBuilder:
         self._otel_endpoint: str | None = None
         self._env: dict[str, str] = {}
         self._workspace: Path | None = None
+        self._secret_env_names: list[str] = []
         self._pvc_size = "10Gi"
         self._storage_class: str | None = None
 
@@ -119,6 +121,18 @@ class StatefulSetBuilder:
             Self for method chaining.
         """
         self._workspace = workspace
+        return self
+
+    def with_secret_env_names(self, names: list[str]) -> StatefulSetBuilder:
+        """Set custom secret env var names.
+
+        Args:
+            names: List of env var names to inject securely.
+
+        Returns:
+            Self for method chaining.
+        """
+        self._secret_env_names = names
         return self
 
     def with_pvc(
@@ -170,6 +184,10 @@ class StatefulSetBuilder:
             metadata["annotations"]["paude.io/workspace"] = encoded
         if self._otel_endpoint:
             metadata["annotations"]["paude.io/otel-endpoint"] = self._otel_endpoint
+        if self._secret_env_names:
+            metadata["annotations"][PAUDE_LABEL_SECRET_ENV] = ",".join(
+                self._secret_env_names
+            )
         return metadata
 
     def _build_volumes(self) -> list[dict[str, Any]]:

@@ -173,7 +173,7 @@ class TestUpgradePodman:
         mock_image_manager.ensure_default_image.return_value = "paude:latest"
         mock_image_manager_class.return_value = mock_image_manager
 
-        mock_prepare.return_value = (None, [], {}, False)
+        mock_prepare.return_value = (None, [], {}, False, [])
 
         from paude.backends.podman.backend import PodmanBackend
 
@@ -236,6 +236,7 @@ class TestUpgradePodman:
             [],
             {},
             False,
+            [],
         )
 
         from paude.backends.podman.backend import PodmanBackend
@@ -277,7 +278,7 @@ class TestUpgradePodman:
         mock_image_manager.ensure_default_image.return_value = "paude:latest"
         mock_image_manager_class.return_value = mock_image_manager
 
-        mock_prepare.return_value = (None, [], {}, False)
+        mock_prepare.return_value = (None, [], {}, False, [])
 
         from paude.backends.podman.backend import PodmanBackend
 
@@ -318,7 +319,7 @@ class TestUpgradePodman:
         mock_image_manager.ensure_proxy_image.return_value = "proxy:rebuilt"
         mock_image_manager_class.return_value = mock_image_manager
 
-        mock_prepare.return_value = ([".googleapis.com"], [], {}, False)
+        mock_prepare.return_value = ([".googleapis.com"], [], {}, False, [])
 
         from paude.backends.podman.backend import PodmanBackend
 
@@ -361,7 +362,7 @@ class TestUpgradePodman:
         mock_image_manager.ensure_default_image.return_value = "paude:latest"
         mock_image_manager_class.return_value = mock_image_manager
 
-        mock_prepare.return_value = (None, [], {}, False)
+        mock_prepare.return_value = (None, [], {}, False, [])
 
         from paude.backends.podman.backend import PodmanBackend
 
@@ -1041,7 +1042,7 @@ class TestUpgradePodmanWithOverrides:
         mock_image_manager.ensure_proxy_image.return_value = "proxy:latest"
         mock_image_manager_class.return_value = mock_image_manager
 
-        mock_prepare.return_value = ([".googleapis.com"], [], {}, False)
+        mock_prepare.return_value = ([".googleapis.com"], [], {}, False, [])
 
         from paude.backends.podman.backend import PodmanBackend
 
@@ -1084,7 +1085,7 @@ class TestUpgradePodmanWithOverrides:
         mock_image_manager.ensure_proxy_image.return_value = "proxy:latest"
         mock_image_manager_class.return_value = mock_image_manager
 
-        mock_prepare.return_value = ([".googleapis.com"], [], {}, False)
+        mock_prepare.return_value = ([".googleapis.com"], [], {}, False, [])
 
         from paude.backends.podman.backend import PodmanBackend
 
@@ -1127,7 +1128,7 @@ class TestUpgradePodmanWithOverrides:
         mock_image_manager.ensure_proxy_image.return_value = "proxy:latest"
         mock_image_manager_class.return_value = mock_image_manager
 
-        mock_prepare.return_value = ([".googleapis.com"], [], {}, False)
+        mock_prepare.return_value = ([".googleapis.com"], [], {}, False, [])
 
         from paude.backends.podman.backend import PodmanBackend
 

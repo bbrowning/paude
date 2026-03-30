@@ -264,6 +264,11 @@ class SessionConnector:
         """Sync credentials/config for a connect operation."""
         from paude.agents import get_agent
         from paude.agents.base import build_secret_environment_from_config
+        from paude.backends.shared import (
+            PAUDE_LABEL_SECRET_ENV,
+            build_custom_secret_env,
+            parse_secret_env_label,
+        )
 
         sts = self._lookup.get_statefulset(name)
         agent_name = self._agent_name_from_sts(sts)
@@ -272,6 +277,12 @@ class SessionConnector:
 
         agent = get_agent(agent_name, provider=provider)
         secret_env = build_secret_environment_from_config(agent.config)
+
+        # Merge custom secret env vars from STS annotations
+        annotations = (sts or {}).get("metadata", {}).get("annotations", {})
+        custom_names = parse_secret_env_label(annotations.get(PAUDE_LABEL_SECRET_ENV))
+        if custom_names:
+            secret_env.update(build_custom_secret_env(custom_names))
 
         if self._syncer.is_config_synced(pname):
             self._syncer.sync_credentials(

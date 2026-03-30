@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import os
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -25,6 +27,7 @@ PAUDE_LABEL_YOLO = "paude.io/yolo"
 PAUDE_LABEL_PROVIDER = "paude.io/provider"
 PAUDE_LABEL_OTEL_PORTS = "paude.io/otel-ports"
 PAUDE_LABEL_OTEL_ENDPOINT = "paude.io/otel-endpoint"
+PAUDE_LABEL_SECRET_ENV = "paude.io/secret-env"  # noqa: S105 - label key, not a password
 
 SQUID_BLOCKED_LOG_PATH = "/tmp/squid-blocked.log"  # noqa: S108
 
@@ -219,6 +222,43 @@ def generate_sandbox_config_script(
 
     agent = get_agent(agent_name, provider=provider)
     return agent.apply_sandbox_config(CONTAINER_HOME, workspace, args)
+
+
+def build_custom_secret_env(secret_env_names: list[str]) -> dict[str, str]:
+    """Build secret env dict from a list of var names, reading values from os.environ.
+
+    Args:
+        secret_env_names: List of environment variable names to look up.
+
+    Returns:
+        Dictionary of var_name -> value for vars present in os.environ.
+    """
+    env: dict[str, str] = {}
+    for var_name in secret_env_names:
+        value = os.environ.get(var_name)
+        if value is not None:
+            env[var_name] = value
+        else:
+            print(
+                f"Warning: secretEnv variable '{var_name}' "
+                "not found in host environment",
+                file=sys.stderr,
+            )
+    return env
+
+
+def parse_secret_env_label(label_value: str | None) -> list[str]:
+    """Parse the secret-env label value into a list of env var names.
+
+    Args:
+        label_value: Comma-separated env var names, or None.
+
+    Returns:
+        List of env var names.
+    """
+    if not label_value:
+        return []
+    return [n.strip() for n in label_value.split(",") if n.strip()]
 
 
 def build_ssh_backend(

@@ -50,6 +50,7 @@ def create_openshift_session(
     build_resources: dict[str, dict[str, str]] | None = None,
     otel_ports: list[int] | None = None,
     otel_endpoint: str | None = None,
+    secret_env_names: list[str] | None = None,
 ) -> None:
     """OpenShift-specific session creation logic."""
     os_script_dir = _detect_dev_script_dir()
@@ -123,6 +124,7 @@ def create_openshift_session(
             ports=agent.config.exposed_ports,
             otel_ports=otel_ports or [],
             otel_endpoint=otel_endpoint,
+            secret_env_names=secret_env_names or [],
         )
 
         session = os_backend.create_session(session_config)

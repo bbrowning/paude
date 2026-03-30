@@ -265,11 +265,11 @@ def _prepare_session_create(
     agent_name: str = "claude",
     provider_name: str | None = None,
     otel_endpoint: str | None = None,
-) -> tuple[list[str] | None, list[str], dict[str, str], bool]:
+) -> tuple[list[str] | None, list[str], dict[str, str], bool, list[str]]:
     """Shared pre-create logic for both backends.
 
     Returns:
-        Tuple of (expanded_domains, parsed_args, env, unrestricted).
+        Tuple of (expanded_domains, parsed_args, env, unrestricted, secret_env_names).
     """
     from paude.agents import get_agent
     from paude.domains import is_unrestricted
@@ -298,6 +298,18 @@ def _prepare_session_create(
 
     unrestricted = is_unrestricted(expanded_domains)
 
+    # Extract secret env var names from config
+    secret_env_names: list[str] = []
+    if config_obj and config_obj.container_secret_env:
+        invalid = [n for n in config_obj.container_secret_env if "," in n]
+        if invalid:
+            typer.echo(
+                f"Error: secretEnv names cannot contain commas: {invalid}",
+                err=True,
+            )
+            raise typer.Exit(1)
+        secret_env_names = list(config_obj.container_secret_env)
+
     # Show warnings for dangerous configurations
     if yolo and unrestricted:
         typer.echo(
@@ -310,7 +322,7 @@ def _prepare_session_create(
         )
         typer.echo("", err=True)
 
-    return expanded_domains, parsed_args, env, unrestricted
+    return expanded_domains, parsed_args, env, unrestricted, secret_env_names
 
 
 def _finalize_session_create(
