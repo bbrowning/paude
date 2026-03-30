@@ -178,7 +178,9 @@ class Agent(Protocol):
         """
         ...
 
-    def apply_sandbox_config(self, home: str, workspace: str, args: str) -> str:
+    def apply_sandbox_config(
+        self, home: str, workspace: str, args: str, *, yolo: bool = False
+    ) -> str:
         """Return shell script content to apply sandbox config.
 
         This script suppresses interactive prompts inside the container.

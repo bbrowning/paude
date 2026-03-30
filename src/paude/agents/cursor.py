@@ -65,7 +65,9 @@ class CursorAgent:
         ]
         return lines
 
-    def apply_sandbox_config(self, home: str, workspace: str, args: str) -> str:
+    def apply_sandbox_config(
+        self, home: str, workspace: str, args: str, *, yolo: bool = False
+    ) -> str:
         return f"""\
 #!/bin/bash
 # Pre-configure Cursor CLI to suppress onboarding prompts

@@ -211,14 +211,19 @@ def engine_binary_for_backend(backend_type: str) -> str:
 
 
 def generate_sandbox_config_script(
-    agent_name: str, workspace: str, args: str, provider: str | None = None
+    agent_name: str,
+    workspace: str,
+    args: str,
+    provider: str | None = None,
+    *,
+    yolo: bool = False,
 ) -> str:
     """Generate the sandbox config bash script for an agent."""
     from paude.agents import get_agent
     from paude.constants import CONTAINER_HOME
 
     agent = get_agent(agent_name, provider=provider)
-    return agent.apply_sandbox_config(CONTAINER_HOME, workspace, args)
+    return agent.apply_sandbox_config(CONTAINER_HOME, workspace, args, yolo=yolo)
 
 
 def build_ssh_backend(

@@ -200,8 +200,9 @@ class PodmanBackend:
             or CONTAINER_WORKSPACE
         )
         args = self._runner.get_container_env(cname, "PAUDE_AGENT_ARGS") or ""
+        yolo = labels.get(PAUDE_LABEL_YOLO) == "1"
         content = generate_sandbox_config_script(
-            agent_name, workspace, args, provider=provider
+            agent_name, workspace, args, provider=provider, yolo=yolo
         )
         self._runner.inject_file(
             cname,

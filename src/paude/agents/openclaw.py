@@ -109,7 +109,9 @@ class OpenClawAgent:
             f"WORKDIR {container_home}",
         ]
 
-    def apply_sandbox_config(self, home: str, workspace: str, args: str) -> str:
+    def apply_sandbox_config(
+        self, home: str, workspace: str, args: str, *, yolo: bool = False
+    ) -> str:
         """Return shell script to pre-configure OpenClaw for containerized use.
 
         API keys are NOT written here. They arrive securely via
@@ -119,6 +121,21 @@ class OpenClawAgent:
         primary_model = self._model_config.get(
             "primary", "anthropic-vertex/claude-opus-4-6"
         )
+        exec_block = (
+            '"host": "gateway", "security": "full", "ask": "off"'
+            if yolo
+            else (
+                '"host": "gateway", "security": "allowlist", '
+                '"ask": "on-miss", "strictInlineEval": true'
+            )
+        )
+        tools_block = f"""\
+"tools": {{
+    "profile": "coding",
+    "fs": {{ "workspaceOnly": true }},
+    "exec": {{ {exec_block} }},
+    "elevated": {{ "enabled": false }}
+  }}"""
         return f"""\
 #!/bin/bash
 # Pre-configure OpenClaw for containerized operation
@@ -141,7 +158,8 @@ if [ ! -f "$config_file" ]; then
         "primary": "{primary_model}"
       }}
     }}
-  }}
+  }},
+  {tools_block}
 }}
 OCCONFIG
     chmod g+rw "$config_file" 2>/dev/null || true

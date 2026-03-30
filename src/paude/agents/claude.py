@@ -87,7 +87,9 @@ class ClaudeAgent:
         ]
         return lines
 
-    def apply_sandbox_config(self, home: str, workspace: str, args: str) -> str:
+    def apply_sandbox_config(
+        self, home: str, workspace: str, args: str, *, yolo: bool = False
+    ) -> str:
         return f"""\
 #!/bin/bash
 # Auto-generated sandbox config for Claude Code
