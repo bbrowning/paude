@@ -371,6 +371,22 @@ def _finalize_session_create(
     typer.echo(f"  paude connect {session.name}")
 
 
+def _run_post_create_command(backend: Backend, session_name: str, command: str) -> None:
+    """Run a devcontainer postCreateCommand in the session container."""
+    typer.echo("Running postCreateCommand...", err=True)
+    rc, stdout, stderr = backend.exec_in_session(
+        session_name, f"cd /pvc/workspace && {command}"
+    )
+    if stdout:
+        typer.echo(stdout.rstrip(), err=True)
+    if stderr:
+        typer.echo(stderr.rstrip(), err=True)
+    if rc != 0:
+        typer.echo(f"Warning: postCreateCommand failed (exit {rc})", err=True)
+    else:
+        typer.echo("postCreateCommand completed.", err=True)
+
+
 def _parse_copy_path(path_arg: str) -> tuple[str | None, str]:
     """Parse a copy path argument into (session_name, path).
 
