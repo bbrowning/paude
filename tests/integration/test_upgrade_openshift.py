@@ -112,6 +112,11 @@ class TestOpenShiftUpgrade:
                 "ensure_image_via_build",
                 return_value=kubernetes_test_image,
             ),
+            patch.object(
+                openshift_backend,
+                "ensure_proxy_image_via_build",
+                return_value=kubernetes_test_image,
+            ),
             patch.object(openshift_backend, "_syncer_instance", MagicMock()),
         ):
             from paude.cli.upgrade import _upgrade_openshift
