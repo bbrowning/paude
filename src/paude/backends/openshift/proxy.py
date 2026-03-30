@@ -425,45 +425,22 @@ class ProxyManager:
 
         return [d for d in result.stdout.strip().split(",") if d]
 
-    def update_deployment_domains(self, session_name: str, domains: list[str]) -> None:
-        """Update the ALLOWED_DOMAINS env var on the proxy Deployment.
-
-        Args:
-            session_name: Session name.
-            domains: New list of allowed domains.
-        """
-        from paude.domains import format_domains_as_squid_acls
-
+    def _patch_deployment_container(
+        self,
+        session_name: str,
+        container_fields: dict[str, Any],
+    ) -> None:
+        """Apply a strategic merge patch to the proxy container spec."""
         deployment_name = proxy_resource_name(session_name)
-        domains_str = ",".join(domains)
-        acls = format_domains_as_squid_acls(domains)
-
         patch = json.dumps(
             {
                 "spec": {
                     "template": {
-                        "spec": {
-                            "containers": [
-                                {
-                                    "name": "proxy",
-                                    "env": [
-                                        {
-                                            "name": "ALLOWED_DOMAINS",
-                                            "value": domains_str,
-                                        },
-                                        {
-                                            "name": "ALLOWED_DOMAIN_ACLS",
-                                            "value": acls,
-                                        },
-                                    ],
-                                }
-                            ]
-                        }
+                        "spec": {"containers": [{"name": "proxy", **container_fields}]}
                     }
                 }
             }
         )
-
         self._oc.run(
             "patch",
             f"deployment/{deployment_name}",
@@ -472,6 +449,65 @@ class ProxyManager:
             "--type=strategic",
             f"-p={patch}",
         )
+
+    def update_deployment_domains(
+        self,
+        session_name: str,
+        domains: list[str],
+        otel_ports: list[int] | None = None,
+        image: str | None = None,
+    ) -> None:
+        """Update the ALLOWED_DOMAINS env var on the proxy Deployment.
+
+        Args:
+            session_name: Session name.
+            domains: New list of allowed domains.
+            otel_ports: Non-standard OTEL ports to allow.  ``None`` (default)
+                leaves the existing ALLOWED_OTEL_PORTS unchanged; an empty
+                list clears it.
+            image: If provided, also update the container image in the same
+                patch to avoid a double pod restart.
+        """
+        from paude.domains import format_domains_as_squid_acls
+
+        domains_str = ",".join(domains)
+        acls = format_domains_as_squid_acls(domains)
+
+        env_entries: list[dict[str, str]] = [
+            {
+                "name": "ALLOWED_DOMAINS",
+                "value": domains_str,
+            },
+            {
+                "name": "ALLOWED_DOMAIN_ACLS",
+                "value": acls,
+            },
+        ]
+        if otel_ports is not None:
+            env_entries.append(
+                {
+                    "name": "ALLOWED_OTEL_PORTS",
+                    "value": ",".join(str(p) for p in otel_ports),
+                }
+            )
+
+        container_fields: dict[str, Any] = {"env": env_entries}
+        if image is not None:
+            container_fields["image"] = image
+        self._patch_deployment_container(session_name, container_fields)
+
+    def update_deployment_image(
+        self,
+        session_name: str,
+        image: str,
+    ) -> None:
+        """Update the container image on the proxy Deployment.
+
+        Args:
+            session_name: Session name.
+            image: New container image reference.
+        """
+        self._patch_deployment_container(session_name, {"image": image})
 
     def delete_resources(self, session_name: str) -> None:
         """Delete proxy Deployment and Service for a session.
