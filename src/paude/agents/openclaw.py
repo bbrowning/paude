@@ -87,6 +87,9 @@ class OpenClawAgent:
             "# Patch OTEL SDK to route exports through HTTP proxy",
             ("RUN /usr/local/bin/patch-openclaw-otel-proxy.sh --force 2>&1 || true"),
             "",
+            "# Patch OTEL log transport to bridge gateway and plugin-sdk modules",
+            ("RUN /usr/local/bin/patch-openclaw-otel-logs.sh 2>&1 || true"),
+            "",
             "# Install GitHub CLI (gh) via direct binary download",
             "ARG GH_VERSION=2.74.1",
             "RUN if ! command -v gh >/dev/null 2>&1; then"
