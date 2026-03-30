@@ -145,3 +145,6 @@ def create_openshift_session(
         no_clone_origin=no_clone_origin,
         paude_version=__version__,
     )
+
+    # Start the agent after git push so wait_for_git finds .git immediately
+    os_backend.start_agent_headless(session.name)

@@ -195,29 +195,41 @@ class SessionLifecycleManager:
                 args=session_env.get("PAUDE_AGENT_ARGS", ""),
             )
 
-            self.start_agent_headless_in_pod(pname)
-
     def start_agent_headless_in_pod(self, pname: str) -> None:
         """Start the agent in headless mode inside the pod."""
+        from paude.backends.openshift.exceptions import OcTimeoutError
         from paude.backends.openshift.oc import OC_EXEC_TIMEOUT
         from paude.constants import CONTAINER_ENTRYPOINT
 
         print(f"Starting agent in {pname}...", file=sys.stderr)
-        result = self._oc.run(
-            "exec",
-            pname,
-            "-n",
-            self._namespace,
-            "--",
-            "env",
-            "PAUDE_HEADLESS=1",
-            CONTAINER_ENTRYPOINT,
-            check=False,
-            timeout=OC_EXEC_TIMEOUT,
-        )
-        if result.returncode != 0:
+        try:
+            result = self._oc.run(
+                "exec",
+                pname,
+                "-n",
+                self._namespace,
+                "--",
+                "env",
+                "PAUDE_HEADLESS=1",
+                CONTAINER_ENTRYPOINT,
+                check=False,
+                timeout=OC_EXEC_TIMEOUT,
+            )
+            if result.returncode != 0:
+                print(
+                    f"Warning: headless agent start failed (exit {result.returncode}). "
+                    f"Agent will start on next 'paude connect'.",
+                    file=sys.stderr,
+                )
+        except OcTimeoutError:
             print(
-                f"Warning: headless agent start failed (exit {result.returncode}). "
+                "Warning: headless agent start timed out. "
+                "Agent will start on next 'paude connect'.",
+                file=sys.stderr,
+            )
+        except Exception as exc:
+            print(
+                f"Warning: headless agent start failed ({exc}). "
                 f"Agent will start on next 'paude connect'.",
                 file=sys.stderr,
             )
