@@ -149,3 +149,6 @@ def create_openshift_session(
 
     if config and config.post_create_command:
         _run_post_create_command(os_backend, session.name, config.post_create_command)
+
+    # Start the agent after git push so wait_for_git finds .git immediately
+    os_backend.start_agent_headless(session.name)
