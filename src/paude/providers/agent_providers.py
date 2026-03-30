@@ -34,7 +34,7 @@ AGENT_PROVIDERS: dict[str, dict[str, AgentProviderConfig]] = {
     },
     "openclaw": {
         "vertex": AgentProviderConfig(
-            model_config={"primary": "anthropic-vertex/claude-opus-4-6"},
+            model_config={"primary": "anthropic-vertex/claude-sonnet-4-6"},
         ),
         "openai": AgentProviderConfig(
             model_config={"primary": "openai/gpt-5.4-mini"},
