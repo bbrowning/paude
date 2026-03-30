@@ -22,6 +22,7 @@ from paude.cli.helpers import (
     _run_post_create_command,
 )
 from paude.config.models import PaudeConfig
+from paude.git_remote import is_git_repository
 
 
 def create_openshift_session(
@@ -92,7 +93,14 @@ def create_openshift_session(
 
         # Signal entrypoint to wait for git repo before launching Claude
         if git:
-            env["PAUDE_WAIT_FOR_GIT"] = "1"
+            if is_git_repository():
+                env["PAUDE_WAIT_FOR_GIT"] = "1"
+            else:
+                typer.echo(
+                    "Warning: Not in a git repository. Skipping --git setup.",
+                    err=True,
+                )
+                git = False
 
         # Create session config
         session_config = SessionConfig(
