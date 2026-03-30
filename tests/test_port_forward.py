@@ -8,11 +8,12 @@ import subprocess
 import threading
 import time
 from io import StringIO
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from paude.backends.openshift.port_forward import PortForwardManager
+from paude.backends.openshift.port_forward import PortForwardManager, PortForwardResult
 from paude.backends.openshift.session_connection import (
     SessionConnector,
     _format_exit_reason,
@@ -42,16 +43,20 @@ class TestPortForwardManagerStart:
         mgr = PortForwardManager("test-ns")
         result = mgr.start("my-session", "pod-0", [(18789, 18789)])
 
-        assert result is mock_proc
+        assert result is not None
+        assert isinstance(result, PortForwardResult)
+        assert result.proc is mock_proc
+        assert "oc" in result.cmd
+        assert "port-forward" in result.cmd
+        assert "18789:18789" in result.cmd
+        assert result.log_path == tmp_path / "my-session.log"
+
         mock_popen.assert_called_once()
         call_args = mock_popen.call_args
         cmd = call_args[0][0]
-        assert "oc" in cmd
-        assert "port-forward" in cmd
         assert "-n" in cmd
         assert "test-ns" in cmd
         assert "pod-0" in cmd
-        assert "18789:18789" in cmd
 
         # stdout/stderr should be file handles, not DEVNULL
         assert call_args[1]["stdout"] is not subprocess.DEVNULL
@@ -77,11 +82,11 @@ class TestPortForwardManagerStart:
         mock_popen.return_value = mock_proc
 
         mgr = PortForwardManager("test-ns", context="my-ctx")
-        mgr.start("my-session", "pod-0", [(18789, 18789)])
+        result = mgr.start("my-session", "pod-0", [(18789, 18789)])
 
-        cmd = mock_popen.call_args[0][0]
-        assert "--context" in cmd
-        assert "my-ctx" in cmd
+        assert result is not None
+        assert "--context" in result.cmd
+        assert "my-ctx" in result.cmd
 
     @patch("paude.backends.port_forward_utils.is_process_running")
     @patch("paude.backends.openshift.port_forward.subprocess.Popen")
@@ -210,32 +215,118 @@ class TestFormatExitReason:
 class TestMonitorPortForward:
     """Tests for _monitor_port_forward."""
 
+    @patch("paude.backends.openshift.port_forward.subprocess.Popen")
     @patch("paude.backends.port_forward_utils.pid_dir")
-    def test_detects_process_death(self, mock_pid_dir, tmp_path) -> None:
-        """Monitor should detect when the process dies and write a warning."""
+    def test_warns_after_max_restarts(self, mock_pid_dir, mock_popen, tmp_path) -> None:
+        """Monitor should warn after exhausting all restart attempts."""
         mock_pid_dir.return_value = tmp_path
-        # Use a real short-lived process
-        proc = subprocess.Popen(["sleep", "0.1"])  # noqa: S603, S607
+
+        # All restarted processes also die immediately
+        dying_proc = MagicMock()
+        dying_proc.pid = 88888
+        dying_proc.poll.return_value = 1
+        mock_popen.return_value = dying_proc
+
+        # Initial process dies
+        initial_proc = MagicMock()
+        initial_proc.poll.return_value = 1
+
         stop_event = threading.Event()
+        log_path = tmp_path / "test-session.log"
+        log_path.touch()
+        cmd = ["oc", "port-forward", "-n", "ns", "pod-0", "18789:18789"]
+        pf_result = PortForwardResult(proc=initial_proc, cmd=cmd, log_path=log_path)
 
         stderr_capture = StringIO()
         with patch(
             "paude.backends.openshift.session_connection.sys.stderr", stderr_capture
         ):
-            _monitor_port_forward(proc, "test-session", stop_event, check_interval=0.3)
+            _monitor_port_forward(
+                pf_result,
+                "test-session",
+                stop_event,
+                check_interval=0.3,
+                max_restarts=2,
+                restart_delay=0.1,
+            )
 
         output = stderr_capture.getvalue()
         assert "WARNING" in output
         assert "test-session" in output
+        # Should have attempted 2 restarts
+        assert mock_popen.call_count == 2
 
-    def test_exits_on_stop_event(self) -> None:
+    @patch("paude.backends.openshift.port_forward.subprocess.Popen")
+    @patch("paude.backends.port_forward_utils.pid_dir")
+    def test_silently_restarts_on_death(
+        self, mock_pid_dir, mock_popen, tmp_path
+    ) -> None:
+        """Monitor should silently restart the process without warning."""
+        mock_pid_dir.return_value = tmp_path
+
+        # Initial process that dies immediately
+        initial_proc = MagicMock()
+        initial_proc.poll.return_value = 1
+
+        # Restarted process that stays alive
+        restart_proc = MagicMock()
+        restart_proc.pid = 99999
+        restart_proc.poll.return_value = None
+        mock_popen.return_value = restart_proc
+
+        stop_event = threading.Event()
+        log_path = tmp_path / "test-session.log"
+        log_path.touch()
+        cmd = ["oc", "port-forward", "-n", "ns", "pod-0", "18789:18789"]
+        pf_result = PortForwardResult(proc=initial_proc, cmd=cmd, log_path=log_path)
+
+        stderr_capture = StringIO()
+
+        def stop_after_restart() -> None:
+            time.sleep(1.5)
+            stop_event.set()
+
+        stopper = threading.Thread(target=stop_after_restart)
+        stopper.start()
+
+        with patch(
+            "paude.backends.openshift.session_connection.sys.stderr", stderr_capture
+        ):
+            _monitor_port_forward(
+                pf_result,
+                "test-session",
+                stop_event,
+                check_interval=0.3,
+                restart_delay=0.1,
+            )
+
+        stopper.join()
+
+        # No warning should have been printed
+        assert stderr_capture.getvalue() == ""
+        # Popen should have been called once for the restart
+        mock_popen.assert_called_once()
+        # PID file should be updated
+        assert (tmp_path / "test-session.pid").read_text() == "99999"
+
+    @patch("paude.backends.port_forward_utils.pid_dir")
+    def test_exits_on_stop_event(self, mock_pid_dir, tmp_path) -> None:
         """Monitor should exit cleanly when stop_event is set."""
+        mock_pid_dir.return_value = tmp_path
         proc = subprocess.Popen(["sleep", "60"])  # noqa: S603, S607
         stop_event = threading.Event()
+        log_path = tmp_path / "test-session.log"
+        log_path.touch()
+        pf_result = PortForwardResult(
+            proc=proc,
+            cmd=["oc", "port-forward", "pod-0", "18789:18789"],
+            log_path=log_path,
+        )
 
         thread = threading.Thread(
             target=_monitor_port_forward,
-            args=(proc, "test-session", stop_event, 0.3),
+            args=(pf_result, "test-session", stop_event),
+            kwargs={"check_interval": 0.3},
         )
         thread.start()
 
@@ -250,10 +341,16 @@ class TestMonitorPortForward:
 
 
 class TestShowPortForwardDiagnostics:
-    """Tests for SessionConnector._show_port_forward_diagnostics."""
+    """Tests for _show_port_forward_diagnostics."""
 
+    @patch(
+        "paude.backends.openshift.session_connection.check_running_pid",
+        return_value=False,
+    )
     @patch("paude.backends.port_forward_utils.pid_dir")
-    def test_shows_log_tail_on_death(self, mock_pid_dir, tmp_path) -> None:
+    def test_shows_log_tail_on_death(
+        self, mock_pid_dir, mock_running, tmp_path
+    ) -> None:  # noqa: ARG002
         mock_pid_dir.return_value = tmp_path
 
         log_f = tmp_path / "test-session.log"
@@ -273,7 +370,11 @@ class TestShowPortForwardDiagnostics:
         assert "error: connection refused" in output
         assert "paude connect" in output
 
-    def test_no_output_when_still_running(self) -> None:
+    @patch(
+        "paude.backends.openshift.session_connection.check_running_pid",
+        return_value=False,
+    )
+    def test_no_output_when_still_running(self, mock_running) -> None:  # noqa: ARG002
         mock_proc = MagicMock()
         mock_proc.poll.return_value = None  # still running
 
@@ -294,8 +395,12 @@ class TestShowPortForwardDiagnostics:
 
         assert stderr_capture.getvalue() == ""
 
+    @patch(
+        "paude.backends.openshift.session_connection.check_running_pid",
+        return_value=False,
+    )
     @patch("paude.backends.port_forward_utils.pid_dir")
-    def test_shows_signal_death(self, mock_pid_dir, tmp_path) -> None:
+    def test_shows_signal_death(self, mock_pid_dir, mock_running, tmp_path) -> None:  # noqa: ARG002
         mock_pid_dir.return_value = tmp_path
 
         mock_proc = MagicMock()
@@ -309,6 +414,23 @@ class TestShowPortForwardDiagnostics:
 
         output = stderr_capture.getvalue()
         assert "killed by SIGKILL" in output
+
+    @patch(
+        "paude.backends.openshift.session_connection.check_running_pid",
+        return_value=True,
+    )
+    def test_suppressed_when_restarted_process_alive(self, mock_running) -> None:  # noqa: ARG002
+        """Diagnostics suppressed when a restarted process is still running."""
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = 1  # original proc dead
+
+        stderr_capture = StringIO()
+        with patch(
+            "paude.backends.openshift.session_connection.sys.stderr", stderr_capture
+        ):
+            _show_port_forward_diagnostics("test-session", mock_proc)
+
+        assert stderr_capture.getvalue() == ""
 
 
 class TestSessionConnectorCleanup:
@@ -356,3 +478,44 @@ class TestSessionConnectorCleanup:
         with pytest.raises(RuntimeError):
             connector.connect_session("test-session")
         mock_stop_pf.assert_called_once_with("test-session")
+
+    @patch("paude.backends.openshift.session_connection._show_port_forward_diagnostics")
+    @patch.object(SessionConnector, "_stop_port_forward")
+    @patch.object(SessionConnector, "_attach_to_pod", return_value=0)
+    @patch.object(SessionConnector, "_sync_for_connect")
+    @patch.object(SessionConnector, "_verify_pod_running", return_value=("pod-0", "ns"))
+    def test_connect_passes_restart_info_to_monitor(
+        self,
+        mock_verify: MagicMock,  # noqa: ARG002
+        mock_sync: MagicMock,  # noqa: ARG002
+        mock_attach: MagicMock,  # noqa: ARG002
+        mock_stop_pf: MagicMock,  # noqa: ARG002
+        mock_diag: MagicMock,  # noqa: ARG002
+    ) -> None:
+        """connect_session should pass PortForwardResult to monitor thread."""
+        mock_proc = MagicMock()
+        mock_proc.pid = 12345
+        pf_result = PortForwardResult(
+            proc=mock_proc,
+            cmd=["oc", "port-forward", "pod-0", "18789:18789"],
+            log_path=Path("/tmp/test.log"),
+        )
+
+        connector = SessionConnector(
+            MagicMock(), "ns", MagicMock(), MagicMock(), MagicMock()
+        )
+        with (
+            patch.object(
+                SessionConnector,
+                "_start_port_forward",
+                return_value=(pf_result, ["http://localhost:18789"]),
+            ),
+            patch(
+                "paude.backends.openshift.session_connection._monitor_port_forward"
+            ) as mock_monitor,
+        ):
+            connector.connect_session("test-session")
+
+        mock_monitor.assert_called_once()
+        call_args = mock_monitor.call_args
+        assert call_args[0][0] is pf_result
