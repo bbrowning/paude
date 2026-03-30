@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
@@ -397,7 +398,8 @@ def _upgrade_podman(
     )
 
     backend.create_session(session_config)
-    backend.start_session_no_attach(name)
+    github_token = os.environ.get("PAUDE_GITHUB_TOKEN")
+    backend.start_session_no_attach(name, github_token=github_token)
 
 
 def _upgrade_openshift(
@@ -619,4 +621,5 @@ def _upgrade_openshift(
         pname, agent_name=agent_name, provider=provider_name, secret_env=secret_env
     )
 
-    backend.start_agent_headless(name)
+    github_token = os.environ.get("PAUDE_GITHUB_TOKEN")
+    backend.start_agent_headless(name, github_token=github_token)
