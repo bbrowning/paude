@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 
@@ -79,17 +78,18 @@ def create_openshift_session(
             agent=agent,
         )
 
-        # Build proxy image when needed (PAUDE_DEV=1 and proxy is used)
+        # Build proxy image when running from source (ensures entrypoint.sh
+        # stays in sync with CLI features like --otel-endpoint port injection).
+        # os_script_dir is None for pip installs, which fall back to the
+        # registry image via _resolve_proxy_image().
         proxy_image: str | None = None
-        if not unrestricted:
-            dev_mode = os.environ.get("PAUDE_DEV", "0") == "1"
-            if dev_mode and os_script_dir:
-                typer.echo("Building proxy image in OpenShift cluster...")
-                proxy_image = os_backend.ensure_proxy_image_via_build(
-                    script_dir=os_script_dir,
-                    force_rebuild=rebuild,
-                    session_name=session_name,
-                )
+        if not unrestricted and os_script_dir:
+            typer.echo("Building proxy image in OpenShift cluster...")
+            proxy_image = os_backend.ensure_proxy_image_via_build(
+                script_dir=os_script_dir,
+                force_rebuild=rebuild,
+                session_name=session_name,
+            )
 
         # Signal entrypoint to wait for git repo before launching Claude
         if git:
