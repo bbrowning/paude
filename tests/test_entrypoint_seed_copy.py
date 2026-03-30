@@ -1345,3 +1345,22 @@ class TestGenerateSandboxConfigScript:
             "claude", "/pvc/workspace", "--dangerously-skip-permissions"
         )
         assert "skipDangerousModePermissionPrompt" in script
+
+    def test_generates_openclaw_hardened_script(self) -> None:
+        from paude.backends.shared import generate_sandbox_config_script
+
+        script = generate_sandbox_config_script("openclaw", "/pvc/workspace", "")
+        assert '"host": "gateway"' in script
+        assert '"security": "allowlist"' in script
+        assert '"ask": "on-miss"' in script
+        assert '"workspaceOnly": true' in script
+
+    def test_generates_openclaw_yolo_script(self) -> None:
+        from paude.backends.shared import generate_sandbox_config_script
+
+        script = generate_sandbox_config_script(
+            "openclaw", "/pvc/workspace", "", yolo=True
+        )
+        assert '"host": "gateway"' in script
+        assert '"security": "full"' in script
+        assert '"ask": "off"' in script

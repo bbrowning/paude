@@ -63,7 +63,9 @@ class GeminiAgent:
         ]
         return lines
 
-    def apply_sandbox_config(self, home: str, workspace: str, args: str) -> str:
+    def apply_sandbox_config(
+        self, home: str, workspace: str, args: str, *, yolo: bool = False
+    ) -> str:
         return f"""\
 #!/bin/bash
 # Pre-trust the workspace folder so Gemini doesn't prompt on every connect

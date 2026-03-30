@@ -193,6 +193,7 @@ class SessionLifecycleManager:
                 provider=config.provider,
                 secret_env=secret_env,
                 args=session_env.get("PAUDE_AGENT_ARGS", ""),
+                yolo=config.yolo,
             )
 
     def start_agent_headless_in_pod(self, pname: str) -> None:

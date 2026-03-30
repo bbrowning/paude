@@ -17,7 +17,12 @@ from paude.backends.openshift.port_forward import (
 from paude.backends.openshift.session_lookup import SessionLookup
 from paude.backends.openshift.sync import ConfigSyncer
 from paude.backends.port_forward_utils import check_running_pid, log_file
-from paude.backends.shared import PAUDE_LABEL_AGENT, PAUDE_LABEL_PROVIDER, resource_name
+from paude.backends.shared import (
+    PAUDE_LABEL_AGENT,
+    PAUDE_LABEL_PROVIDER,
+    PAUDE_LABEL_YOLO,
+    resource_name,
+)
 
 
 def _format_exit_reason(retcode: int) -> str:
@@ -248,6 +253,15 @@ class SessionConnector:
         value = labels.get(PAUDE_LABEL_PROVIDER)
         return str(value) if value is not None else None
 
+    @staticmethod
+    def _yolo_from_sts(sts: dict[str, object] | None) -> bool:
+        """Extract the YOLO flag from a StatefulSet's labels."""
+        if not sts:
+            return False
+        metadata: dict[str, object] = sts.get("metadata", {})  # type: ignore[assignment]
+        labels: dict[str, object] = metadata.get("labels", {})  # type: ignore[assignment]
+        return labels.get(PAUDE_LABEL_YOLO) == "1"
+
     def _get_session_agent_name(self, session_name: str) -> str:
         """Look up the agent name from StatefulSet labels."""
         sts = self._lookup.get_statefulset(session_name)
@@ -268,6 +282,7 @@ class SessionConnector:
         sts = self._lookup.get_statefulset(name)
         agent_name = self._agent_name_from_sts(sts)
         provider = self._provider_from_sts(sts)
+        yolo = self._yolo_from_sts(sts)
         agent_args = self._extract_env_from_sts(sts, "PAUDE_AGENT_ARGS")
 
         agent = get_agent(agent_name, provider=provider)
@@ -282,6 +297,7 @@ class SessionConnector:
                 agent_name=agent_name,
                 provider=provider,
                 args=agent_args,
+                yolo=yolo,
             )
         else:
             self._syncer.sync_full_config(
@@ -292,6 +308,7 @@ class SessionConnector:
                 provider=provider,
                 secret_env=secret_env,
                 args=agent_args,
+                yolo=yolo,
             )
 
     @staticmethod

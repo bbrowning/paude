@@ -1085,3 +1085,73 @@ class TestOpenClawAgentSandboxConfig:
     def test_otel_configures_diagnostics_section(self) -> None:
         script = OpenClawAgent().apply_sandbox_config("/home/paude", "/workspace", "")
         assert "cfg.diagnostics.otel" in script
+
+    def test_default_exec_host_gateway(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert '"host": "gateway"' in script
+
+    def test_default_exec_security_allowlist(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert '"security": "allowlist"' in script
+
+    def test_default_exec_ask_on_miss(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert '"ask": "on-miss"' in script
+
+    def test_default_exec_strict_inline_eval(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert '"strictInlineEval": true' in script
+
+    def test_default_fs_workspace_only(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert '"workspaceOnly": true' in script
+
+    def test_default_elevated_disabled(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert '"enabled": false' in script
+
+    def test_yolo_exec_host_gateway(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config(
+            "/home/paude", "/workspace", "", yolo=True
+        )
+        assert '"host": "gateway"' in script
+
+    def test_yolo_exec_security_full(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config(
+            "/home/paude", "/workspace", "", yolo=True
+        )
+        assert '"security": "full"' in script
+
+    def test_yolo_exec_ask_off(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config(
+            "/home/paude", "/workspace", "", yolo=True
+        )
+        assert '"ask": "off"' in script
+
+    def test_yolo_no_strict_inline_eval(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config(
+            "/home/paude", "/workspace", "", yolo=True
+        )
+        assert '"strictInlineEval"' not in script
+
+    def test_yolo_fs_still_workspace_only(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config(
+            "/home/paude", "/workspace", "", yolo=True
+        )
+        assert '"workspaceOnly": true' in script
+
+    def test_yolo_elevated_still_disabled(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config(
+            "/home/paude", "/workspace", "", yolo=True
+        )
+        assert '"enabled": false' in script
+
+    def test_default_tools_profile_coding(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert '"profile": "coding"' in script
+
+    def test_yolo_tools_profile_coding(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config(
+            "/home/paude", "/workspace", "", yolo=True
+        )
+        assert '"profile": "coding"' in script
