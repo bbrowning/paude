@@ -119,7 +119,7 @@ class OpenClawAgent:
         process environment before the agent launches.
         """
         primary_model = self._model_config.get(
-            "primary", "anthropic-vertex/claude-opus-4-6"
+            "primary", "anthropic-vertex/claude-sonnet-4-6"
         )
         exec_block = (
             '"host": "gateway", "security": "full", "ask": "off"'

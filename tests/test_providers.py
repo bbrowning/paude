@@ -88,7 +88,7 @@ class TestAgentProviderResolution:
 
     def test_resolve_openclaw_vertex(self) -> None:
         _, agent_cfg = resolve_agent_provider("openclaw", "vertex")
-        assert agent_cfg.model_config["primary"] == "anthropic-vertex/claude-opus-4-6"
+        assert agent_cfg.model_config["primary"] == "anthropic-vertex/claude-sonnet-4-6"
 
     def test_resolve_openclaw_openai(self) -> None:
         _, agent_cfg = resolve_agent_provider("openclaw", "openai")
