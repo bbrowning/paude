@@ -233,6 +233,18 @@ class Backend(Protocol):
         """
         ...
 
+    def start_agent_headless(self, name: str) -> None:
+        """Start the agent in headless mode in a running session.
+
+        Launches the agent in a background tmux session without attaching
+        an interactive terminal. If the agent is already running, this is
+        a no-op. Failures are logged but not raised.
+
+        Args:
+            name: Session name.
+        """
+        ...
+
     def exec_in_session(self, name: str, command: str) -> tuple[int, str, str]:
         """Execute a command inside a running session's container.
 
