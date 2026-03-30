@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -121,7 +122,10 @@ def create_podman_session(
         session = backend_instance.create_session(session_config)
 
         # Auto-start the container (entrypoint is tini -- sleep infinity)
-        backend_instance.start_session_no_attach(session.name)
+        github_token = os.environ.get("PAUDE_GITHUB_TOKEN")
+        backend_instance.start_session_no_attach(
+            session.name, github_token=github_token
+        )
     except SessionExistsError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None

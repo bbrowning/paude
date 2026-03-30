@@ -199,7 +199,9 @@ class TestUpgradePodman:
         config = backend.create_session.call_args[0][0]
         assert config.reuse_volume is True
         # start_session_no_attach called
-        backend.start_session_no_attach.assert_called_once_with("test-session")
+        backend.start_session_no_attach.assert_called_once_with(
+            "test-session", github_token=None
+        )
 
     @patch("paude.mounts.build_mounts", return_value=[])
     @patch("paude.cli.helpers._prepare_session_create")

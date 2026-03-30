@@ -233,7 +233,7 @@ class Backend(Protocol):
         """
         ...
 
-    def start_agent_headless(self, name: str) -> None:
+    def start_agent_headless(self, name: str, github_token: str | None = None) -> None:
         """Start the agent in headless mode in a running session.
 
         Launches the agent in a background tmux session without attaching
@@ -242,6 +242,7 @@ class Backend(Protocol):
 
         Args:
             name: Session name.
+            github_token: Optional GitHub PAT to inject as GH_TOKEN.
         """
         ...
 

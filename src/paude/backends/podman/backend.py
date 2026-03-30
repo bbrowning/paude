@@ -418,7 +418,9 @@ class PodmanBackend:
             check=False,
         )
 
-    def start_session_no_attach(self, name: str) -> None:
+    def start_session_no_attach(
+        self, name: str, github_token: str | None = None
+    ) -> None:
         """Start containers without attaching (for git setup, etc.)."""
         cname = self._require_session(name)
         if self._runner.container_running(cname):
@@ -431,17 +433,19 @@ class PodmanBackend:
         agent = self._get_session_agent(name)
         self._sync_host_config(cname, agent.config.name)
         self._sync_sandbox_config(cname, name)
-        self._start_agent_headless_in_container(cname, agent)
+        self._start_agent_headless_in_container(cname, agent, github_token)
 
-    def start_agent_headless(self, name: str) -> None:
+    def start_agent_headless(self, name: str, github_token: str | None = None) -> None:
         """Start the agent in headless mode inside the container."""
         cname = self._require_running_session(name)
         agent = self._get_session_agent(name)
-        self._start_agent_headless_in_container(cname, agent)
+        self._start_agent_headless_in_container(cname, agent, github_token)
 
-    def _start_agent_headless_in_container(self, cname: str, agent: Agent) -> None:
+    def _start_agent_headless_in_container(
+        self, cname: str, agent: Agent, github_token: str | None = None
+    ) -> None:
         """Start the agent in headless mode (internal, skips session lookup)."""
-        env_vars = self._build_attach_env(agent, github_token=None)
+        env_vars = self._build_attach_env(agent, github_token=github_token)
         cmd: list[str] = ["env", "PAUDE_HEADLESS=1"]
         if env_vars:
             for key, value in env_vars.items():
