@@ -78,6 +78,8 @@ def copy_entrypoints(entrypoint: Path, dest_dir: Path) -> None:
         "credential-watchdog.sh",
         "patch-proxy-fetch.sh",
         "patch-gemini-otel-proxy.sh",
+        "patch-openclaw-otel-proxy.sh",
+        "patch-openclaw-otel-logs.sh",
     ]:
         lib_src = entrypoint.parent / lib_name
         lib_dest = dest_dir / lib_name

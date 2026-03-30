@@ -148,6 +148,8 @@ class TestCopyEntrypoints:
             "credential-watchdog.sh",
             "patch-proxy-fetch.sh",
             "patch-gemini-otel-proxy.sh",
+            "patch-openclaw-otel-proxy.sh",
+            "patch-openclaw-otel-logs.sh",
         ]:
             (src_dir / lib_name).write_text(f"#!/bin/bash\r\n# {lib_name}\r\n")
 
@@ -162,6 +164,8 @@ class TestCopyEntrypoints:
             "credential-watchdog.sh",
             "patch-proxy-fetch.sh",
             "patch-gemini-otel-proxy.sh",
+            "patch-openclaw-otel-proxy.sh",
+            "patch-openclaw-otel-logs.sh",
         ]:
             lib_dest = dest_dir / lib_name
             assert lib_dest.exists(), f"{lib_name} not copied"
@@ -182,6 +186,8 @@ class TestCopyEntrypoints:
             "credential-watchdog.sh",
             "patch-proxy-fetch.sh",
             "patch-gemini-otel-proxy.sh",
+            "patch-openclaw-otel-proxy.sh",
+            "patch-openclaw-otel-logs.sh",
         ]:
             assert not (dest_dir / lib_name).exists()
 

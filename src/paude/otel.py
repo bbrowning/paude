@@ -69,6 +69,7 @@ def _build_openclaw_otel_env(endpoint: str) -> dict[str, str]:
     return {
         "OTEL_EXPORTER_OTLP_ENDPOINT": endpoint,
         "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+        "OTEL_LOG_LEVEL": "debug",
     }
 
 

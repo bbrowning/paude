@@ -7,6 +7,7 @@ import sys
 
 from paude.backends.port_forward_utils import (
     check_running_pid,
+    log_file,
     pid_file,
     stop_port_forward,
 )
@@ -24,7 +25,7 @@ class PortForwardManager:
         session_name: str,
         pod_name: str,
         ports: list[tuple[int, int]],
-    ) -> None:
+    ) -> subprocess.Popen[bytes] | None:
         """Start port-forwarding for a session (idempotent).
 
         If a port-forward is already running for this session, does nothing.
@@ -33,12 +34,15 @@ class PortForwardManager:
             session_name: Paude session name.
             pod_name: Kubernetes pod name to forward to.
             ports: List of (host_port, container_port) tuples.
+
+        Returns:
+            The spawned process, or None if no ports or already running.
         """
         if not ports:
-            return
+            return None
 
         if check_running_pid(session_name):
-            return
+            return None
 
         cmd = ["oc"]
         if self._context:
@@ -47,13 +51,17 @@ class PortForwardManager:
         for host_port, container_port in ports:
             cmd.append(f"{host_port}:{container_port}")
 
-        proc = subprocess.Popen(  # noqa: S603
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        log_fh = open(log_file(session_name), "a")  # noqa: SIM115, PTH123
+        try:
+            proc = subprocess.Popen(  # noqa: S603
+                cmd,
+                stdout=log_fh,
+                stderr=log_fh,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        finally:
+            log_fh.close()
 
         pid_file(session_name).write_text(str(proc.pid))
 
@@ -62,6 +70,8 @@ class PortForwardManager:
                 f"Port-forward active: http://localhost:{host_port}",
                 file=sys.stderr,
             )
+
+        return proc
 
     def stop(self, session_name: str) -> None:
         """Stop port-forwarding for a session."""
