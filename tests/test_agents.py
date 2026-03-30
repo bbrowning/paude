@@ -1069,3 +1069,19 @@ class TestOpenClawAgentSandboxConfig:
     def test_home_path_parameterized(self) -> None:
         script = OpenClawAgent().apply_sandbox_config("/custom/home", "/workspace", "")
         assert "/custom/home/.openclaw" in script
+
+    def test_otel_block_conditional_on_env(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert "${OTEL_EXPORTER_OTLP_ENDPOINT:-}" in script
+
+    def test_otel_uses_node_for_json_merge(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert "node -e" in script
+
+    def test_otel_enables_diagnostics_plugin(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert "diagnostics-otel" in script
+
+    def test_otel_configures_diagnostics_section(self) -> None:
+        script = OpenClawAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert "cfg.diagnostics.otel" in script
