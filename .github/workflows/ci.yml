@@ -14,9 +14,9 @@ jobs:
       code: ${{ steps.filter.outputs.code }}
       containers: ${{ steps.filter.outputs.containers }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
@@ -35,10 +35,10 @@ jobs:
     if: needs.detect-changes.outputs.code == 'true'
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.11"
 
@@ -57,10 +57,10 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -73,10 +73,10 @@ jobs:
     if: always() && !failure() && !cancelled() && (needs.detect-changes.outputs.code == 'true' || needs.detect-changes.outputs.containers == 'true')
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.11"
 
@@ -97,10 +97,10 @@ jobs:
     if: always() && !failure() && !cancelled() && (needs.detect-changes.outputs.code == 'true' || needs.detect-changes.outputs.containers == 'true')
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.11"
 
