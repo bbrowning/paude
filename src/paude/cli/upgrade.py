@@ -581,6 +581,12 @@ def _upgrade_openshift(
             proxy_image = backend.ensure_proxy_image_via_build(
                 script_dir, force_rebuild=rebuild, session_name=name
             )
+        else:
+            from paude.backends.openshift.session_lifecycle import (
+                resolve_proxy_image,
+            )
+
+            proxy_image = resolve_proxy_image(image)
 
         # Update proxy allowed domains when OTEL endpoint changes
         if overrides.otel_endpoint is not None:

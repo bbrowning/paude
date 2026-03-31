@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -29,6 +30,18 @@ from paude.backends.shared import (
     pvc_name,
     resource_name,
 )
+
+
+def resolve_proxy_image(base_image: str) -> str:
+    """Derive the proxy image reference from a base agent image."""
+    from paude import __version__
+
+    proxy_image = base_image.replace("paude-base-centos10", "paude-proxy-centos10")
+    if proxy_image != base_image:
+        return proxy_image
+
+    registry = os.environ.get("PAUDE_REGISTRY", "quay.io/bbrowning")
+    return f"{registry}/paude-proxy-centos10:{__version__}"
 
 
 class SessionLifecycleManager:
@@ -114,17 +127,7 @@ class SessionLifecycleManager:
         if config.proxy_image:
             return config.proxy_image
 
-        proxy_image = config.image.replace(
-            "paude-base-centos10", "paude-proxy-centos10"
-        )
-        if proxy_image == config.image:
-            import os
-
-            from paude import __version__
-
-            registry = os.environ.get("PAUDE_REGISTRY", "quay.io/bbrowning")
-            return f"{registry}/paude-proxy-centos10:{__version__}"
-        return proxy_image
+        return resolve_proxy_image(config.image)
 
     def _build_session_env(
         self, config: SessionConfig, session_name: str
