@@ -134,7 +134,6 @@ def build_session_env(
     # Override with the agent's actual launch command (no args — those are
     # passed separately via PAUDE_AGENT_ARGS).
     env["PAUDE_AGENT_LAUNCH_CMD"] = agent.launch_command("")
-    env["PAUDE_HOST_WORKSPACE"] = str(config.workspace)
 
     agent_args = list(config.args)
     if config.yolo and agent.config.yolo_flag:
