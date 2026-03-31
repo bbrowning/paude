@@ -20,6 +20,7 @@ make clean && make run # Rebuild after container changes
 - **Before committing**, run `make lint` and `make typecheck`. Do not commit if either fails.
 - When adding or changing user-facing features, update `README.md` and `src/paude/cli/help.py`.
 - Use agent-agnostic language in user-facing text. Say "the agent" not "Claude" (except in agent-specific examples).
+- When adding scripts to `containers/paude/`, also add them to `[tool.hatch.build.targets.wheel.force-include]` in `pyproject.toml` so they get bundled into the installed package.
 - When discovering unrelated bugs or tech debt, add them to `KNOWN_ISSUES.md` and continue with the current task.
 
 ## Project Layout
