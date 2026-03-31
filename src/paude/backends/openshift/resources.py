@@ -284,6 +284,8 @@ class StatefulSetBuilder:
                         },
                     },
                     "spec": {
+                        "automountServiceAccountToken": False,
+                        "enableServiceLinks": False,
                         "containers": [self._build_container_spec()],
                         "volumes": self._build_volumes(),
                         "restartPolicy": "Always",

@@ -277,6 +277,8 @@ class ProxyManager:
                         },
                     },
                     "spec": {
+                        "automountServiceAccountToken": False,
+                        "enableServiceLinks": False,
                         "containers": [
                             {
                                 "name": "proxy",

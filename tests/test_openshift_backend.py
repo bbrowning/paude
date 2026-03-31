@@ -1450,7 +1450,11 @@ class TestCreateProxyDeployment:
         assert spec["metadata"]["labels"]["paude.io/session-name"] == "my-session"
         assert spec["spec"]["replicas"] == 1
 
-        container = spec["spec"]["template"]["spec"]["containers"][0]
+        pod_spec = spec["spec"]["template"]["spec"]
+        assert pod_spec["automountServiceAccountToken"] is False
+        assert pod_spec["enableServiceLinks"] is False
+
+        container = pod_spec["containers"][0]
         assert container["name"] == "proxy"
         assert container["image"] == "quay.io/test/proxy:latest"
         assert container["ports"][0]["containerPort"] == 3128
