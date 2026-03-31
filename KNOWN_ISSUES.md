@@ -82,19 +82,17 @@ GitHub's GraphQL API uses POST for ALL operations, including reads (`gh pr list`
 
 ### SEC-002: K8s service account token auto-mounted
 
-**Status**: Open
+**Status**: Resolved
 **Severity**: Medium
 **Discovered**: 2026-03-06 during network egress security audit
-
-Kubernetes auto-mounts a service account token into every pod. This token could be used to interact with the K8s API if the container process is compromised. Needs testing with `automountServiceAccountToken: false` in the pod spec.
+**Resolved**: 2026-03-31 — Added `automountServiceAccountToken: false` to both StatefulSet (main container) and Deployment (proxy container) pod specs. Neither container needs Kubernetes API access.
 
 ### SEC-003: K8s service environment variables leak cluster info
 
-**Status**: Open
+**Status**: Resolved
 **Severity**: Low
 **Discovered**: 2026-03-06 during network egress security audit
-
-Kubernetes injects environment variables for every service in the namespace (e.g., `KUBERNETES_SERVICE_HOST`, `KUBERNETES_SERVICE_PORT`). These leak internal cluster information. Needs testing with `enableServiceLinks: false` in the pod spec.
+**Resolved**: 2026-03-31 — Added `enableServiceLinks: false` to both StatefulSet (main container) and Deployment (proxy container) pod specs.
 
 ### SEC-004: DNS tunneling via cluster DNS
 
