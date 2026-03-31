@@ -352,7 +352,7 @@ def _upgrade_podman(
     # allowed_domains=None means no proxy (unrestricted);
     # passing None to _prepare_session_create would incorrectly add defaults.
     if allowed_domains is not None:
-        expanded_domains, parsed_args, _env, unrestricted, _secret_names = (
+        expanded_domains, parsed_args, _env, unrestricted, _secret_mapping = (
             _prepare_session_create(
                 allowed_domains,
                 yolo,
@@ -378,17 +378,13 @@ def _upgrade_podman(
 
         otel_ports = otel_proxy_ports(otel_endpoint)
 
-    # Extract secret env names from config
-    secret_env_names: list[str] = []
+    # Extract secret env mapping from config
+    secret_env_mapping: dict[str, str] = {}
     if config and config.container_secret_env:
-        invalid = [n for n in config.container_secret_env if "," in n]
-        if invalid:
-            typer.echo(
-                f"Error: secretEnv names cannot contain commas: {invalid}",
-                err=True,
-            )
-            raise typer.Exit(1)
-        secret_env_names = list(config.container_secret_env)
+        from paude.cli.helpers import _validate_secret_env_names
+
+        _validate_secret_env_names(config.container_secret_env)
+        secret_env_mapping = dict(config.container_secret_env)
 
     # Create new session config with reuse_volume=True
     from paude.backends import SessionConfig
@@ -409,7 +405,7 @@ def _upgrade_podman(
         ports=agent_instance.config.exposed_ports,
         otel_ports=otel_ports,
         otel_endpoint=otel_endpoint,
-        secret_env_names=secret_env_names,
+        secret_env_mapping=secret_env_mapping,
     )
 
     backend.create_session(session_config)
@@ -585,17 +581,18 @@ def _upgrade_openshift(
 
     # Update secret-env annotation from project config (clear if empty)
     if config is not None:
-        from paude.backends.shared import PAUDE_LABEL_SECRET_ENV
+        from paude.backends.shared import (
+            PAUDE_LABEL_SECRET_ENV,
+            serialize_secret_env_mapping,
+        )
+        from paude.cli.helpers import _validate_secret_env_names
 
-        secret_names = config.container_secret_env
-        invalid = [n for n in secret_names if "," in n]
-        if invalid:
-            typer.echo(
-                f"Error: secretEnv names cannot contain commas: {invalid}",
-                err=True,
-            )
-            raise typer.Exit(1)
-        ann_value = ",".join(secret_names) if secret_names else ""
+        secret_mapping = config.container_secret_env
+        if secret_mapping:
+            _validate_secret_env_names(secret_mapping)
+        ann_value = (
+            serialize_secret_env_mapping(secret_mapping) if secret_mapping else ""
+        )
         oc.run(
             "annotate",
             "statefulset",

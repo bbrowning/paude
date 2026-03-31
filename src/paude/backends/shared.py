@@ -224,41 +224,78 @@ def generate_sandbox_config_script(
     return agent.apply_sandbox_config(CONTAINER_HOME, workspace, args)
 
 
-def build_custom_secret_env(secret_env_names: list[str]) -> dict[str, str]:
-    """Build secret env dict from a list of var names, reading values from os.environ.
+def build_custom_secret_env(
+    secret_env_mapping: dict[str, str],
+) -> dict[str, str]:
+    """Build secret env dict from a mapping, reading values from os.environ.
 
     Args:
-        secret_env_names: List of environment variable names to look up.
+        secret_env_mapping: Mapping of container_name -> host_name.
 
     Returns:
-        Dictionary of var_name -> value for vars present in os.environ.
+        Dictionary of container_name -> value for vars present in os.environ.
     """
     env: dict[str, str] = {}
-    for var_name in secret_env_names:
-        value = os.environ.get(var_name)
+    for container_name, host_name in secret_env_mapping.items():
+        value = os.environ.get(host_name)
         if value is not None:
-            env[var_name] = value
+            env[container_name] = value
         else:
+            if container_name == host_name:
+                msg = f"Warning: secretEnv variable '{host_name}'"
+            else:
+                msg = (
+                    f"Warning: secretEnv variable '{host_name}'"
+                    f" (mapped to '{container_name}')"
+                )
             print(
-                f"Warning: secretEnv variable '{var_name}' "
-                "not found in host environment",
+                f"{msg} not found in host environment",
                 file=sys.stderr,
             )
     return env
 
 
-def parse_secret_env_label(label_value: str | None) -> list[str]:
-    """Parse the secret-env label value into a list of env var names.
+def serialize_secret_env_mapping(mapping: dict[str, str]) -> str:
+    """Serialize a secret env mapping for storage in labels/annotations.
+
+    Same-name mappings are stored as just the name.
+    Renamed mappings are stored as container_name=host_name.
+    Entries are comma-separated.
+    """
+    parts: list[str] = []
+    for container_name, host_name in mapping.items():
+        if container_name == host_name:
+            parts.append(container_name)
+        else:
+            parts.append(f"{container_name}={host_name}")
+    return ",".join(parts)
+
+
+def parse_secret_env_label(label_value: str | None) -> dict[str, str]:
+    """Parse a secret-env label/annotation into a mapping.
 
     Args:
-        label_value: Comma-separated env var names, or None.
+        label_value: Serialized mapping string, or None.
 
     Returns:
-        List of env var names.
+        Mapping of container_name -> host_name.
     """
     if not label_value:
-        return []
-    return [n.strip() for n in label_value.split(",") if n.strip()]
+        return {}
+    mapping: dict[str, str] = {}
+    for entry in label_value.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        if "=" in entry:
+            container_name, host_name = entry.split("=", 1)
+            container_name = container_name.strip()
+            host_name = host_name.strip()
+            if container_name and host_name:
+                mapping[container_name] = host_name
+        else:
+            mapping[entry] = entry
+    return mapping
 
 
 def build_ssh_backend(

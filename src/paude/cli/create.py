@@ -322,7 +322,7 @@ def session_create(
             raise typer.Exit(1) from None
 
     # Shared pre-create: parse args, build env, expand domains, show warnings
-    expanded_domains, parsed_args, env, unrestricted, secret_env_names = (
+    expanded_domains, parsed_args, env, unrestricted, secret_env_mapping = (
         _prepare_session_create(
             allowed_domains=r_allowed_domains,
             yolo=r_yolo,
@@ -366,7 +366,7 @@ def session_create(
             gpu=r_gpu,
             otel_ports=otel_ports,
             otel_endpoint=r_otel_endpoint,
-            secret_env_names=secret_env_names,
+            secret_env_mapping=secret_env_mapping,
         )
     else:
         from paude.cli.create_openshift import create_openshift_session
@@ -395,5 +395,5 @@ def session_create(
             build_resources=r_openshift_build_resources,
             otel_ports=otel_ports,
             otel_endpoint=r_otel_endpoint,
-            secret_env_names=secret_env_names,
+            secret_env_mapping=secret_env_mapping,
         )

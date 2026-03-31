@@ -83,7 +83,7 @@ class StatefulSetBuilder:
         self._otel_endpoint: str | None = None
         self._env: dict[str, str] = {}
         self._workspace: Path | None = None
-        self._secret_env_names: list[str] = []
+        self._secret_env_mapping: dict[str, str] = {}
         self._pvc_size = "10Gi"
         self._storage_class: str | None = None
 
@@ -123,16 +123,16 @@ class StatefulSetBuilder:
         self._workspace = workspace
         return self
 
-    def with_secret_env_names(self, names: list[str]) -> StatefulSetBuilder:
-        """Set custom secret env var names.
+    def with_secret_env_mapping(self, mapping: dict[str, str]) -> StatefulSetBuilder:
+        """Set custom secret env var mapping.
 
         Args:
-            names: List of env var names to inject securely.
+            mapping: Container name -> host name mapping.
 
         Returns:
             Self for method chaining.
         """
-        self._secret_env_names = names
+        self._secret_env_mapping = mapping
         return self
 
     def with_pvc(
@@ -184,9 +184,11 @@ class StatefulSetBuilder:
             metadata["annotations"]["paude.io/workspace"] = encoded
         if self._otel_endpoint:
             metadata["annotations"]["paude.io/otel-endpoint"] = self._otel_endpoint
-        if self._secret_env_names:
-            metadata["annotations"][PAUDE_LABEL_SECRET_ENV] = ",".join(
-                self._secret_env_names
+        if self._secret_env_mapping:
+            from paude.backends.shared import serialize_secret_env_mapping
+
+            metadata["annotations"][PAUDE_LABEL_SECRET_ENV] = (
+                serialize_secret_env_mapping(self._secret_env_mapping)
             )
         return metadata
 

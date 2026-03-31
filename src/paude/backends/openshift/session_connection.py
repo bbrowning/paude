@@ -280,9 +280,9 @@ class SessionConnector:
 
         # Merge custom secret env vars from STS annotations
         annotations = (sts or {}).get("metadata", {}).get("annotations", {})
-        custom_names = parse_secret_env_label(annotations.get(PAUDE_LABEL_SECRET_ENV))
-        if custom_names:
-            secret_env.update(build_custom_secret_env(custom_names))
+        custom_mapping = parse_secret_env_label(annotations.get(PAUDE_LABEL_SECRET_ENV))
+        if custom_mapping:
+            secret_env.update(build_custom_secret_env(custom_mapping))
 
         if self._syncer.is_config_synced(pname):
             self._syncer.sync_credentials(

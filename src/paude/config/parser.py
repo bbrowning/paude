@@ -125,10 +125,7 @@ def _parse_devcontainer(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
 
     # Parse secretEnv from customizations.paude.secretEnv
     paude_customizations = data.get("customizations", {}).get("paude", {})
-    container_secret_env = paude_customizations.get("secretEnv", [])
-    if not isinstance(container_secret_env, list):
-        container_secret_env = []
-    container_secret_env = [s for s in container_secret_env if isinstance(s, str)]
+    container_secret_env = _parse_secret_env(paude_customizations.get("secretEnv"))
 
     # Warn about unsupported properties
     _warn_unsupported_properties(data)
@@ -187,10 +184,7 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
         )
 
     # Parse secretEnv
-    container_secret_env = data.get("secretEnv", [])
-    if not isinstance(container_secret_env, list):
-        container_secret_env = []
-    container_secret_env = [s for s in container_secret_env if isinstance(s, str)]
+    container_secret_env = _parse_secret_env(data.get("secretEnv"))
 
     # Parse "create" section for create hints
     create_allowed_domains, create_agent, create_provider, create_otel_endpoint = (
@@ -212,6 +206,24 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
         create_provider=create_provider,
         create_otel_endpoint=create_otel_endpoint,
     )
+
+
+def _parse_secret_env(raw: object) -> dict[str, str]:
+    """Parse secretEnv config into a container_name -> host_name mapping.
+
+    Accepts either:
+    - list of strings: ["FOO", "BAR"] -> {"FOO": "FOO", "BAR": "BAR"}
+    - dict: {"CONTAINER_NAME": "HOST_NAME"} -> passed through
+    """
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return {
+            k: v for k, v in raw.items() if isinstance(k, str) and isinstance(v, str)
+        }
+    if isinstance(raw, list):
+        return {s: s for s in raw if isinstance(s, str)}
+    return {}
 
 
 _KNOWN_CREATE_KEYS = {"allowed-domains", "agent", "provider", "otel-endpoint"}
