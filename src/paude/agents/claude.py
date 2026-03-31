@@ -95,15 +95,12 @@ class ClaudeAgent:
 # Auto-generated sandbox config for Claude Code
 claude_json="{home}/.claude.json"
 settings_json="{home}/.claude/settings.json"
-host_ws="${{PAUDE_HOST_WORKSPACE:-}}"
 
-# Suppress trust prompt and onboarding, rewriting host project entry
+# Suppress trust prompt and onboarding
 if [ -f "$claude_json" ]; then
-    jq --arg ws "{workspace}" --arg host_ws "$host_ws" '
-        (.projects[$host_ws] // {{}}) as $host_data |
-        ($host_data * {{hasTrustDialogAccepted: true}}) as $ws_entry |
+    jq --arg ws "{workspace}" '
         .hasCompletedOnboarding = true |
-        .projects = {{($ws): $ws_entry}}
+        .projects = {{($ws): {{hasTrustDialogAccepted: true}}}}
     ' "$claude_json" > "${{claude_json}}.tmp" \\
         && cp -f "${{claude_json}}.tmp" "$claude_json" \\
         && rm -f "${{claude_json}}.tmp"

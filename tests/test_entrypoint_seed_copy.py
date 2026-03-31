@@ -441,7 +441,6 @@ def _build_sandbox_script(
     workspace: str,
     suppress_prompts: bool,
     claude_args: str = "",
-    host_workspace: str = "",
 ) -> str:
     """Build a script using Python-generated Claude sandbox config."""
     if not suppress_prompts:
@@ -453,7 +452,6 @@ def _build_sandbox_script(
     config_script = agent.apply_sandbox_config(home_dir, workspace, claude_args)
 
     env_lines = f'export HOME="{home_dir}"\n'
-    env_lines += f'export PAUDE_HOST_WORKSPACE="{host_workspace}"\n'
     return f"#!/bin/bash\nset -e\n{env_lines}{config_script}"
 
 
@@ -633,59 +631,50 @@ class TestGeminiSandboxConfig:
 
 
 class TestProjectRewriting:
-    """Tests for rewriting host project entries to container workspace path."""
+    """Tests for project entry creation in container workspace."""
 
-    def test_rewrites_host_project_to_container_path(self, tmp_path: Path) -> None:
-        """Host project data is copied to the container workspace key."""
+    def test_creates_fresh_project_entry(self, tmp_path: Path) -> None:
+        """Fresh project entry with just hasTrustDialogAccepted for container ws."""
         home = tmp_path / "home"
         home.mkdir()
         workspace = "/pvc/workspace"
-        host_ws = "/Volumes/SourceCode/paude"
 
         existing = {
             "hasCompletedOnboarding": True,
             "projects": {
-                host_ws: {
+                "/Volumes/SourceCode/paude": {
                     "hasTrustDialogAccepted": True,
-                    "projectOnboardingSeenCount": 3,
-                    "hasCompletedProjectOnboarding": True,
                     "allowedTools": ["Bash", "Read"],
                 }
             },
         }
         (home / ".claude.json").write_text(json.dumps(existing))
 
-        script = _build_sandbox_script(
-            str(home), workspace, suppress_prompts=True, host_workspace=host_ws
-        )
+        script = _build_sandbox_script(str(home), workspace, suppress_prompts=True)
         result = _run_script(script)
         assert result.returncode == 0, result.stderr
 
         claude_json = json.loads((home / ".claude.json").read_text())
-        ws_entry = claude_json["projects"][workspace]
-        assert ws_entry["hasTrustDialogAccepted"] is True
-        assert ws_entry["projectOnboardingSeenCount"] == 3
-        assert ws_entry["hasCompletedProjectOnboarding"] is True
-        assert ws_entry["allowedTools"] == ["Bash", "Read"]
+        assert list(claude_json["projects"].keys()) == [workspace]
+        assert claude_json["projects"][workspace] == {
+            "hasTrustDialogAccepted": True,
+        }
 
-    def test_removes_other_project_entries(self, tmp_path: Path) -> None:
-        """Only the container workspace key survives after rewriting."""
+    def test_discards_host_project_entries(self, tmp_path: Path) -> None:
+        """Host project entries are not carried over."""
         home = tmp_path / "home"
         home.mkdir()
         workspace = "/pvc/workspace"
-        host_ws = "/Volumes/SourceCode/paude"
 
         existing = {
             "projects": {
-                host_ws: {"hasTrustDialogAccepted": True},
+                "/Volumes/SourceCode/paude": {"hasTrustDialogAccepted": True},
                 "/other/project": {"hasTrustDialogAccepted": True},
             }
         }
         (home / ".claude.json").write_text(json.dumps(existing))
 
-        script = _build_sandbox_script(
-            str(home), workspace, suppress_prompts=True, host_workspace=host_ws
-        )
+        script = _build_sandbox_script(str(home), workspace, suppress_prompts=True)
         result = _run_script(script)
         assert result.returncode == 0, result.stderr
 
@@ -693,99 +682,25 @@ class TestProjectRewriting:
         assert list(claude_json["projects"].keys()) == [workspace]
 
     def test_preserves_root_level_keys(self, tmp_path: Path) -> None:
-        """Top-level .claude.json keys are preserved during rewrite."""
+        """Top-level .claude.json keys are preserved."""
         home = tmp_path / "home"
         home.mkdir()
         workspace = "/pvc/workspace"
-        host_ws = "/Volumes/SourceCode/paude"
 
         existing = {
             "customKey": "preserved",
             "numericField": 42,
-            "projects": {host_ws: {"hasTrustDialogAccepted": True}},
+            "projects": {"/host/path": {"hasTrustDialogAccepted": True}},
         }
         (home / ".claude.json").write_text(json.dumps(existing))
 
-        script = _build_sandbox_script(
-            str(home), workspace, suppress_prompts=True, host_workspace=host_ws
-        )
+        script = _build_sandbox_script(str(home), workspace, suppress_prompts=True)
         result = _run_script(script)
         assert result.returncode == 0, result.stderr
 
         claude_json = json.loads((home / ".claude.json").read_text())
         assert claude_json["customKey"] == "preserved"
         assert claude_json["numericField"] == 42
-
-    def test_no_host_workspace_falls_back(self, tmp_path: Path) -> None:
-        """Without host workspace env var, creates minimal entry."""
-        home = tmp_path / "home"
-        home.mkdir()
-        workspace = "/pvc/workspace"
-
-        existing = {"someKey": "value"}
-        (home / ".claude.json").write_text(json.dumps(existing))
-
-        script = _build_sandbox_script(
-            str(home), workspace, suppress_prompts=True, host_workspace=""
-        )
-        result = _run_script(script)
-        assert result.returncode == 0, result.stderr
-
-        claude_json = json.loads((home / ".claude.json").read_text())
-        assert claude_json["projects"][workspace]["hasTrustDialogAccepted"] is True
-        assert claude_json["someKey"] == "value"
-
-    def test_host_project_not_found_falls_back(self, tmp_path: Path) -> None:
-        """Unknown host path produces minimal entry with just trust flag."""
-        home = tmp_path / "home"
-        home.mkdir()
-        workspace = "/pvc/workspace"
-        host_ws = "/nonexistent/path"
-
-        existing = {
-            "projects": {
-                "/some/other/project": {"someData": True},
-            }
-        }
-        (home / ".claude.json").write_text(json.dumps(existing))
-
-        script = _build_sandbox_script(
-            str(home), workspace, suppress_prompts=True, host_workspace=host_ws
-        )
-        result = _run_script(script)
-        assert result.returncode == 0, result.stderr
-
-        claude_json = json.loads((home / ".claude.json").read_text())
-        ws_entry = claude_json["projects"][workspace]
-        assert ws_entry == {"hasTrustDialogAccepted": True}
-
-    def test_trust_flag_always_set(self, tmp_path: Path) -> None:
-        """hasTrustDialogAccepted is true even if host had it false."""
-        home = tmp_path / "home"
-        home.mkdir()
-        workspace = "/pvc/workspace"
-        host_ws = "/Volumes/SourceCode/paude"
-
-        existing = {
-            "projects": {
-                host_ws: {
-                    "hasTrustDialogAccepted": False,
-                    "hasCompletedProjectOnboarding": True,
-                }
-            }
-        }
-        (home / ".claude.json").write_text(json.dumps(existing))
-
-        script = _build_sandbox_script(
-            str(home), workspace, suppress_prompts=True, host_workspace=host_ws
-        )
-        result = _run_script(script)
-        assert result.returncode == 0, result.stderr
-
-        claude_json = json.loads((home / ".claude.json").read_text())
-        ws_entry = claude_json["projects"][workspace]
-        assert ws_entry["hasTrustDialogAccepted"] is True
-        assert ws_entry["hasCompletedProjectOnboarding"] is True
 
 
 class TestTerminalEnvBeforeTmux:
@@ -1325,12 +1240,6 @@ class TestGenerateSandboxConfigScript:
         script = generate_sandbox_config_script("cursor", "/pvc/workspace", "")
         assert "cli-config.json" in script
         assert "workspace-trusted" in script
-
-    def test_claude_script_includes_host_workspace(self) -> None:
-        from paude.backends.shared import generate_sandbox_config_script
-
-        script = generate_sandbox_config_script("claude", "/pvc/workspace", "")
-        assert "PAUDE_HOST_WORKSPACE" in script
 
     def test_claude_script_uses_container_home(self) -> None:
         from paude.backends.shared import generate_sandbox_config_script
