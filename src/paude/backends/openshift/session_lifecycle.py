@@ -118,7 +118,12 @@ class SessionLifecycleManager:
             "paude-base-centos10", "paude-proxy-centos10"
         )
         if proxy_image == config.image:
-            return "quay.io/bbrowning/paude-proxy-centos10:latest"
+            import os
+
+            from paude import __version__
+
+            registry = os.environ.get("PAUDE_REGISTRY", "quay.io/bbrowning")
+            return f"{registry}/paude-proxy-centos10:{__version__}"
         return proxy_image
 
     def _build_session_env(
