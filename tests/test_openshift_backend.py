@@ -2024,8 +2024,13 @@ class TestProxyImageDerivation:
         deployment_spec = json.loads(deployment_calls[0][1]["input"])
         container = deployment_spec["spec"]["template"]["spec"]["containers"][0]
 
-        # Verify fallback to default proxy image
-        assert container["image"] == "quay.io/bbrowning/paude-proxy-centos10:latest"
+        # Verify fallback to versioned proxy image from registry
+        from paude import __version__
+
+        assert (
+            container["image"]
+            == f"quay.io/bbrowning/paude-proxy-centos10:{__version__}"
+        )
 
 
 class TestStartSessionWaitsForProxy:
