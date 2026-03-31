@@ -254,6 +254,22 @@ def resource_exists(kind: str, name: str, namespace: str | None = None) -> bool:
     return result.returncode == 0
 
 
+def wait_for_resource(
+    kind: str,
+    name: str,
+    namespace: str | None = None,
+    timeout: int = 30,
+    interval: float = 2,
+) -> bool:
+    """Poll until a Kubernetes resource exists, or timeout is reached."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if resource_exists(kind, name, namespace):
+            return True
+        time.sleep(interval)
+    return False
+
+
 @pytest.fixture(scope="session")
 def test_namespace(kubernetes_available: bool) -> str:
     """Get or create a test namespace."""

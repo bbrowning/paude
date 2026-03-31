@@ -15,7 +15,7 @@ from paude.backends.openshift.exceptions import (
     SessionNotFoundError,
 )
 
-from .conftest import resource_exists, run_oc
+from .conftest import resource_exists, run_oc, wait_for_resource
 
 pytestmark = [pytest.mark.integration, pytest.mark.kubernetes]
 
@@ -58,7 +58,7 @@ class TestOpenShiftSessionLifecycle:
 
         # Verify PVC exists (created by StatefulSet volumeClaimTemplate)
         pvc_name = f"workspace-{sts_name}-0"
-        assert resource_exists("pvc", pvc_name, test_namespace)
+        assert wait_for_resource("pvc", pvc_name, test_namespace, timeout=30)
 
         # Verify NetworkPolicy exists
         result = run_oc(
