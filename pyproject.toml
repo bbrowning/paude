@@ -53,6 +53,10 @@ packages = ["src/paude"]
 "containers/paude/entrypoint-lib-openclaw.sh" = "paude/container/data/entrypoint-lib-openclaw.sh"
 "containers/paude/credential-watchdog.sh" = "paude/container/data/credential-watchdog.sh"
 "containers/paude/tmux.conf" = "paude/container/data/tmux.conf"
+"containers/paude/patch-proxy-fetch.sh" = "paude/container/data/patch-proxy-fetch.sh"
+"containers/paude/patch-gemini-otel-proxy.sh" = "paude/container/data/patch-gemini-otel-proxy.sh"
+"containers/paude/patch-openclaw-otel-proxy.sh" = "paude/container/data/patch-openclaw-otel-proxy.sh"
+"containers/paude/patch-openclaw-otel-logs.sh" = "paude/container/data/patch-openclaw-otel-logs.sh"
 
 [tool.ruff]
 line-length = 88
