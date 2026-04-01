@@ -21,8 +21,6 @@ class ProxyRunner:
     operations. Handles engine differences (e.g. Docker multi-network).
     """
 
-    _proxy_counter = 0
-
     def __init__(self, runner: ContainerRunner) -> None:
         self._runner = runner
 
@@ -86,55 +84,6 @@ class ProxyRunner:
         if ca_volume:
             args.extend(["-v", f"{ca_volume}:/data/ca"])
         return args
-
-    def run_proxy(
-        self,
-        image: str,
-        network: str,
-        dns: str | None = None,
-        allowed_domains: list[str] | None = None,
-        otel_ports: list[int] | None = None,
-        ca_volume: str | None = None,
-        credentials: dict[str, str] | None = None,
-        allowed_clients: str | None = None,
-    ) -> str:
-        """Start a proxy container (auto-remove on stop).
-
-        Returns:
-            Container name.
-
-        Raises:
-            ProxyStartError: If the proxy container fails to start.
-        """
-        ProxyRunner._proxy_counter += 1
-        session_id = f"{int(time.time())}-{ProxyRunner._proxy_counter}"
-        container_name = f"paude-proxy-{session_id}"
-
-        net_args = self._build_multi_network(network)
-        env_args = self._build_env_args(
-            dns, allowed_domains, otel_ports, credentials, allowed_clients
-        )
-        vol_args = self._build_volume_args(ca_volume)
-
-        result = self._engine.run(
-            "run",
-            "-d",
-            "--rm",
-            "--name",
-            container_name,
-            *net_args,
-            *env_args,
-            *vol_args,
-            image,
-            check=False,
-        )
-        if result.returncode != 0:
-            raise ProxyStartError(f"Failed to start proxy: {result.stderr}")
-
-        self._connect_bridge_if_needed(container_name)
-        time.sleep(1)
-
-        return container_name
 
     def create_session_proxy(
         self,

@@ -31,10 +31,9 @@ DNSMASQ_CONF="/tmp/dnsmasq.conf"
         done < /etc/resolv.conf
     fi
 
-    # Use custom DNS if provided (PROXY_DNS preferred, SQUID_DNS for backward compat)
-    _dns="${PROXY_DNS:-${SQUID_DNS:-}}"
-    if [[ -n "$_dns" ]]; then
-        echo "server=$_dns"
+    # Use custom DNS if provided
+    if [[ -n "${PROXY_DNS:-}" ]]; then
+        echo "server=$PROXY_DNS"
     fi
 
     # Fallback public DNS

@@ -419,7 +419,7 @@ class TestProxyDeployment:
                         f"\n=== Stderr for {pod_name} ===\n{pod_logs.stderr.strip()}"
                     )
                 # Read proxy log files from the container
-                for log_file in ["/tmp/squid-blocked.log"]:
+                for log_file in ["/tmp/paude-proxy-blocked.log"]:
                     proxy_log = run_oc(
                         "exec",
                         pod_name,

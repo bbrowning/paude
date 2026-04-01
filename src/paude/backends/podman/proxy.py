@@ -12,6 +12,9 @@ from paude.backends.podman.helpers import (
     proxy_container_name,
 )
 from paude.backends.shared import (
+    CA_CERT_CONTAINER_PATH,
+    CA_CERT_POLL_INTERVAL,
+    CA_CERT_POLL_TIMEOUT,
     PAUDE_LABEL_DOMAINS,
     PAUDE_LABEL_OTEL_PORTS,
     PAUDE_LABEL_PROXY_IMAGE,
@@ -67,11 +70,6 @@ def _read_resolv_conf(engine: ContainerEngine) -> str | None:
     except Exception:  # noqa: S110 - best-effort DNS discovery
         pass
     return None
-
-
-CA_CERT_CONTAINER_PATH = "/etc/pki/ca-trust/source/anchors/paude-proxy-ca.crt"
-CA_CERT_POLL_INTERVAL = 1
-CA_CERT_POLL_TIMEOUT = 30
 
 
 def ca_volume_name(session_name: str) -> str:

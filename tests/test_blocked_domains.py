@@ -1,8 +1,4 @@
-"""Tests for the blocked-domains backend methods.
-
-Note: The log path /tmp/squid-blocked.log is a backward-compat path
-used by paude-proxy. The constant was renamed to PROXY_BLOCKED_LOG_PATH.
-"""
+"""Tests for the blocked-domains backend methods."""
 
 from __future__ import annotations
 
@@ -107,7 +103,7 @@ class TestPodmanGetProxyBlockedLog:
         assert result == log_content
         mock_runner.exec_in_container.assert_called_once_with(
             "paude-proxy-my-session",
-            ["cat", "/tmp/squid-blocked.log"],
+            ["cat", "/tmp/paude-proxy-blocked.log"],
             check=False,
         )
 

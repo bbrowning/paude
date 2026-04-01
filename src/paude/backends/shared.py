@@ -26,7 +26,14 @@ PAUDE_LABEL_PROVIDER = "paude.io/provider"
 PAUDE_LABEL_OTEL_PORTS = "paude.io/otel-ports"
 PAUDE_LABEL_OTEL_ENDPOINT = "paude.io/otel-endpoint"
 
-PROXY_BLOCKED_LOG_PATH = "/tmp/squid-blocked.log"  # noqa: S108
+PROXY_BLOCKED_LOG_PATH = "/tmp/paude-proxy-blocked.log"  # noqa: S108
+
+# Path where the proxy CA cert is injected into agent containers.
+CA_CERT_CONTAINER_PATH = "/etc/pki/ca-trust/source/anchors/paude-proxy-ca.crt"
+
+# CA certificate polling constants (shared by Podman and OpenShift backends).
+CA_CERT_POLL_INTERVAL = 1
+CA_CERT_POLL_TIMEOUT = 30
 
 # Sentinel value for credentials managed by paude-proxy.
 # Agent containers see this instead of real API keys.

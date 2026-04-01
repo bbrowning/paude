@@ -9,11 +9,12 @@ import time
 from typing import Any
 
 from paude.backends.openshift.oc import OcClient
-from paude.backends.shared import proxy_resource_name
-
-CA_CERT_CONTAINER_PATH = "/etc/pki/ca-trust/source/anchors/paude-proxy-ca.crt"
-CA_CERT_POLL_INTERVAL = 2
-CA_CERT_POLL_TIMEOUT = 60
+from paude.backends.shared import (
+    CA_CERT_CONTAINER_PATH,
+    CA_CERT_POLL_INTERVAL,
+    CA_CERT_POLL_TIMEOUT,
+    proxy_resource_name,
+)
 
 
 class ProxyManager:
