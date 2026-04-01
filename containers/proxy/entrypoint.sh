@@ -1,82 +1,53 @@
-#!/bin/bash
-# Generate squid config in writable location (required for OpenShift random UIDs)
-CONFIG_FILE=/tmp/squid.conf
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Copy base config to writable location
-cp /etc/squid/squid.conf "$CONFIG_FILE"
+# ── DNS Configuration ────────────────────────────────────────────────
+# Start dnsmasq for local DNS forwarding. This is required for tools
+# that bypass the system resolver (e.g., Rust reqwest) and need a DNS
+# server on localhost.
 
-# Inject DNS server if provided, otherwise use system resolv.conf nameservers.
-# Public fallbacks are always appended. When running in OpenShift/Kubernetes,
-# the pod's /etc/resolv.conf contains the cluster DNS server, which is needed
-# to resolve cluster-internal names (e.g. svc.cluster.local).
-FALLBACK_DNS="8.8.8.8 1.1.1.1"
-if [[ -n "$SQUID_DNS" ]]; then
-    echo "dns_nameservers $SQUID_DNS $FALLBACK_DNS" >> "$CONFIG_FILE"
-else
-    # Extract nameservers from /etc/resolv.conf (cluster DNS in k8s)
-    SYSTEM_DNS=$(awk '/^nameserver/ {printf "%s ", $2}' /etc/resolv.conf)
-    echo "dns_nameservers ${SYSTEM_DNS}$FALLBACK_DNS" >> "$CONFIG_FILE"
-fi
+DNSMASQ_CONF="/tmp/dnsmasq.conf"
 
-# If ALLOWED_DOMAIN_ACLS is set (pre-formatted by Python), inject directly.
-# ALLOWED_DOMAINS is kept for backward-compatible read-back (paude allow-domain list).
-if [[ -n "${ALLOWED_DOMAIN_ACLS:-}" ]]; then
-    # Remove existing allowed_domains ACL lines and related comments
-    sed -i -e '/^acl allowed_domains\(_regex\)\? dst/d' \
-           -e '/^# Regional endpoints/d' "$CONFIG_FILE"
+# Build dnsmasq config from resolv.conf
+{
+    echo "# Auto-generated dnsmasq config"
+    echo "listen-address=127.0.0.1"
+    echo "port=53"
+    echo "bind-interfaces"
+    echo "no-resolv"
+    echo "no-poll"
+    echo "no-daemon"
 
-    # Insert pre-formatted ACLs before the SSL_ports ACL
-    sed -i "s/^acl SSL_ports/${ALLOWED_DOMAIN_ACLS}\nacl SSL_ports/" "$CONFIG_FILE"
-fi
+    # Forward to upstream DNS servers from resolv.conf
+    if [[ -f /etc/resolv.conf ]]; then
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^nameserver[[:space:]]+(.+) ]]; then
+                server="${BASH_REMATCH[1]}"
+                # Skip localhost (that would be us)
+                if [[ "$server" != "127.0.0.1" && "$server" != "::1" ]]; then
+                    echo "server=$server"
+                fi
+            fi
+        done < /etc/resolv.conf
+    fi
 
-# If ALLOWED_OTEL_PORTS is set, inject port ACLs for OTEL endpoints
-if [[ -n "${ALLOWED_OTEL_PORTS:-}" ]]; then
-    IFS=',' read -ra PORTS <<< "$ALLOWED_OTEL_PORTS"
-    for port in "${PORTS[@]}"; do
-        port=$(echo "$port" | tr -d ' ')
-        sed -i "/^acl Safe_ports port 443$/a acl Safe_ports port $port" "$CONFIG_FILE"
-        sed -i "/^acl SSL_ports port 443$/a acl SSL_ports port $port" "$CONFIG_FILE"
-    done
-fi
+    # Use custom DNS if provided (backward compat with SQUID_DNS env var)
+    if [[ -n "${SQUID_DNS:-}" ]]; then
+        echo "server=$SQUID_DNS"
+    fi
 
-# Validate config before starting (errors go to stderr for pod log visibility)
-if ! /usr/sbin/squid -k parse -f "$CONFIG_FILE" 2>&1; then
-    echo "ERROR: squid config validation failed. Generated config:" >&2
-    cat -n "$CONFIG_FILE" >&2
-    exit 1
-fi
+    # Fallback public DNS
+    echo "server=8.8.8.8"
+    echo "server=1.1.1.1"
+} > "$DNSMASQ_CONF"
 
-# Configure and start dnsmasq for DNS forwarding to main container
-# This allows tools that resolve DNS locally (e.g. Rust reqwest) to work
-# even on --internal networks where external DNS is unreachable.
-DNSMASQ_CONF=/tmp/dnsmasq.conf
-cat > "$DNSMASQ_CONF" <<DNSEOF
-port=53
-# Don't read /etc/resolv.conf or /etc/hosts — configure servers explicitly
-no-resolv
-no-hosts
-DNSEOF
+echo "Starting dnsmasq..."
+dnsmasq --conf-file="$DNSMASQ_CONF" &
+DNSMASQ_PID=$!
 
-# Use the same upstream DNS servers as Squid
-if [[ -n "$SQUID_DNS" ]]; then
-    echo "server=$SQUID_DNS" >> "$DNSMASQ_CONF"
-else
-    # Use system nameservers (cluster DNS in k8s)
-    for dns in $SYSTEM_DNS; do
-        echo "server=$dns" >> "$DNSMASQ_CONF"
-    done
-fi
-for dns in $FALLBACK_DNS; do
-    echo "server=$dns" >> "$DNSMASQ_CONF"
-done
+# Give dnsmasq a moment to start
+sleep 0.2
 
-# Start dnsmasq as a background daemon
-dnsmasq --conf-file="$DNSMASQ_CONF" --log-facility=/tmp/dnsmasq.log \
-    || echo "WARNING: dnsmasq failed to start" >&2
-
-# Clean up stale PID file from previous run (container restart)
-rm -f /tmp/squid.pid
-
-# Run squid under tini with process-group signaling (-g) so that
-# SIGTERM reaches both squid and the background dnsmasq daemon.
-exec tini -g -- /usr/sbin/squid -f "$CONFIG_FILE" "$@"
+# ── Paude Proxy ─────────────────────────────────────────────────────
+echo "Starting paude-proxy..."
+exec /usr/local/bin/paude-proxy

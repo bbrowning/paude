@@ -1,13 +1,17 @@
+# Build stage — compile paude-proxy from source
+FROM golang:1.23 AS builder
+WORKDIR /app
+ARG PAUDE_PROXY_VERSION=main
+RUN git clone --depth 1 --branch ${PAUDE_PROXY_VERSION} \
+        https://github.com/bbrowning/paude-proxy.git . && \
+    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /paude-proxy ./cmd/paude-proxy/
+
+# Runtime stage
 FROM quay.io/centos/centos:stream10
 
-# Enable CRB and EPEL repository, install Squid + dnsmasq + debugging tools
-RUN dnf install -y dnf-plugins-core && \
-    dnf config-manager --set-enabled crb && \
-    dnf install -y epel-release && \
-    dnf install -y --allowerasing squid dnsmasq curl wget bind-utils iputils && \
-    dnf clean all && \
-    # Ensure squid runtime directories are writable (needed for OpenShift random UIDs)
-    chmod -R 777 /var/spool/squid /var/log/squid /run/squid 2>/dev/null || true
+# dnsmasq for DNS forwarding (needed by tools like Rust reqwest on internal networks)
+# curl for health checks and debugging
+RUN dnf install -y dnsmasq curl && dnf clean all
 
 # Install tini init process for multi-process signal handling
 ARG TINI_VERSION=v0.19.0
@@ -22,13 +26,14 @@ RUN ARCH=$(uname -m) && \
     chmod +x /usr/local/bin/tini && \
     tini --version
 
-# Copy allowlist configuration, custom error page, and entrypoint
-COPY squid.conf /etc/squid/squid.conf
-COPY ERR_CUSTOM_ACCESS_DENIED /usr/share/squid/errors/en/ERR_CUSTOM_ACCESS_DENIED
+COPY --from=builder /paude-proxy /usr/local/bin/paude-proxy
 COPY --chmod=755 entrypoint.sh /usr/local/bin/paude-entrypoint.sh
 
-# Squid runs on port 3128
+# Writable directories for OpenShift arbitrary UIDs
+RUN mkdir -p /data/ca /tmp && chmod 777 /data/ca /tmp
+# dnsmasq needs writable pid directory
+RUN mkdir -p /run/dnsmasq && chmod 777 /run/dnsmasq
+
 EXPOSE 3128
 
-ENTRYPOINT ["/usr/local/bin/paude-entrypoint.sh"]
-CMD ["-NYC"]
+ENTRYPOINT ["/usr/local/bin/tini", "--", "/usr/local/bin/paude-entrypoint.sh"]

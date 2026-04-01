@@ -801,14 +801,15 @@ class TestProxyDockerfileCopyFiles:
         assert dockerfile.exists(), f"Proxy Dockerfile not found: {dockerfile}"
 
         content = dockerfile.read_text()
-        # Match COPY lines, skipping --chmod=... or --from=... flags
-        copy_pattern = re.compile(r"^COPY\s+(?:--\S+\s+)*(\S+)\s+\S+", re.MULTILINE)
+        # Match COPY lines, capturing all flags and the source path
+        copy_pattern = re.compile(r"^COPY\s+((?:--\S+\s+)*)(\S+)\s+\S+", re.MULTILINE)
 
         sources = []
         for match in copy_pattern.finditer(content):
-            src = match.group(1)
-            # Skip multi-stage references like --from=builder
-            if src.startswith("--"):
+            flags = match.group(1)
+            src = match.group(2)
+            # Skip multi-stage COPY (--from=builder etc.)
+            if "--from=" in flags:
                 continue
             sources.append(src)
 

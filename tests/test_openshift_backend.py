@@ -3168,7 +3168,6 @@ class TestEnsureProxyImageViaBuild:
         proxy_dir = tmp_path / "containers" / "proxy"
         proxy_dir.mkdir(parents=True)
         (proxy_dir / "Dockerfile").write_text("FROM centos:9")
-        (proxy_dir / "squid.conf").write_text("http_port 3128")
         (proxy_dir / "entrypoint.sh").write_text("#!/bin/bash")
 
         def run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
@@ -3226,7 +3225,6 @@ class TestEnsureProxyImageViaBuild:
         proxy_dir = tmp_path / "containers" / "proxy"
         proxy_dir.mkdir(parents=True)
         (proxy_dir / "Dockerfile").write_text("FROM centos:9")
-        (proxy_dir / "squid.conf").write_text("http_port 3128")
         (proxy_dir / "entrypoint.sh").write_text("#!/bin/bash")
 
         def run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
@@ -3267,7 +3265,6 @@ class TestEnsureProxyImageViaBuild:
         proxy_dir = tmp_path / "containers" / "proxy"
         proxy_dir.mkdir(parents=True)
         (proxy_dir / "Dockerfile").write_text("FROM centos:9")
-        (proxy_dir / "squid.conf").write_text("http_port 3128")
         (proxy_dir / "entrypoint.sh").write_text("#!/bin/bash")
 
         def run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
@@ -3328,7 +3325,6 @@ class TestEnsureProxyImageViaBuild:
         # Create proxy directory but without Dockerfile
         proxy_dir = tmp_path / "containers" / "proxy"
         proxy_dir.mkdir(parents=True)
-        (proxy_dir / "squid.conf").write_text("http_port 3128")
         (proxy_dir / "entrypoint.sh").write_text("#!/bin/bash")
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
