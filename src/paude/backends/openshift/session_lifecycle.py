@@ -210,7 +210,6 @@ class SessionLifecycleManager:
         from paude.backends.openshift.oc import OC_EXEC_TIMEOUT
         from paude.constants import CONTAINER_ENTRYPOINT
 
-        print(f"Starting agent in {pname}...", file=sys.stderr)
         try:
             result = self._oc.run(
                 "exec",

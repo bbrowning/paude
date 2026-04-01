@@ -452,7 +452,6 @@ class PodmanBackend:
             for key, value in env_vars.items():
                 cmd.append(f"{key}={value}")
         cmd.append(CONTAINER_ENTRYPOINT)
-        print("Starting agent in container...", file=sys.stderr)
         result = self._runner.exec_in_container(cname, cmd, check=False)
         if result.returncode != 0:
             print(
