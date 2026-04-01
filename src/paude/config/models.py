@@ -46,7 +46,7 @@ class PaudeConfig:
 
     # Secret environment variable mapping (container_name -> host_name).
     # Values read from host os.environ, injected securely via tmpfs/exec,
-    # never in container spec. Supports both list (same name) and dict (rename).
+    # never in container spec.
     container_secret_env: dict[str, str] = field(default_factory=dict)
 
     # Additional packages to install (paude.json format)

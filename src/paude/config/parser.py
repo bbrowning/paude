@@ -211,9 +211,8 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
 def _parse_secret_env(raw: object) -> dict[str, str]:
     """Parse secretEnv config into a container_name -> host_name mapping.
 
-    Accepts either:
-    - list of strings: ["FOO", "BAR"] -> {"FOO": "FOO", "BAR": "BAR"}
-    - dict: {"CONTAINER_NAME": "HOST_NAME"} -> passed through
+    Format: {"CONTAINER_NAME": "HOST_NAME"}
+    Use the same name for both when no remapping is needed.
     """
     if raw is None:
         return {}
@@ -221,8 +220,6 @@ def _parse_secret_env(raw: object) -> dict[str, str]:
         return {
             k: v for k, v in raw.items() if isinstance(k, str) and isinstance(v, str)
         }
-    if isinstance(raw, list):
-        return {s: s for s in raw if isinstance(s, str)}
     return {}
 
 

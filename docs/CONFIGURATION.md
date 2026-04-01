@@ -328,6 +328,47 @@ See [`examples/README.md`](../examples/README.md) for more configurations (Pytho
 | `features` | Dev container features (ghcr.io OCI artifacts) |
 | `postCreateCommand` | Run after first start |
 | `containerEnv` | Environment variables |
+| `customizations.paude.secretEnv` | Secret env vars (see below) |
+
+## Secret Environment Variables
+
+Inject security-sensitive environment variables (API tokens, credentials) into sessions without exposing them in container specs or process listings. Values are read from your host environment at connect/start time and injected securely.
+
+The format is `"CONTAINER_NAME": "HOST_NAME"` — the key is the variable name inside the container, the value is the variable name on your host. Use the same name for both when no remapping is needed.
+
+**paude.json** — use a top-level `secretEnv`:
+
+```json
+{
+  "secretEnv": {
+    "JIRA_API_TOKEN": "JIRA_TOKEN_READONLY",
+    "SLACK_BOT_TOKEN": "SLACK_BOT_TOKEN"
+  }
+}
+```
+
+**devcontainer.json** — use `customizations.paude.secretEnv`:
+
+```json
+{
+  "customizations": {
+    "paude": {
+      "secretEnv": {
+        "JIRA_API_TOKEN": "JIRA_TOKEN_READONLY"
+      }
+    }
+  }
+}
+```
+
+In the examples above, the host's `JIRA_TOKEN_READONLY` is read and exposed as `JIRA_API_TOKEN` inside the container. `SLACK_BOT_TOKEN` uses the same name on both sides.
+
+### How It Works
+
+- **Podman/Docker**: Injected via `podman exec -e` on connect — never stored in the container spec.
+- **OpenShift**: Written to tmpfs at `/credentials/env/` on connect — RAM-only, never persisted to disk.
+- Fresh values are read on every `paude connect` or `paude start`, so rotated tokens propagate without restarting the container.
+- If a declared variable is missing from your host environment, a warning is printed and that variable is skipped (not set in the container). The session still starts normally.
 
 ## GPU Passthrough
 

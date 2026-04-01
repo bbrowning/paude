@@ -12,6 +12,7 @@ The container intentionally restricts certain operations:
 | SSH keys | not mounted | Prevents git push via SSH |
 | GitHub CLI config | not mounted | Prevents cached host credentials |
 | `GH_TOKEN` (host) | never propagated | Use `PAUDE_GITHUB_TOKEN` or `--github-token` on start/connect |
+| Custom secrets (`secretEnv`) | injected (exec -e / tmpfs) | User-defined secret env vars; never in container spec |
 | Git credentials | not mounted | Prevents HTTPS git push |
 
 ## Verified Attack Vectors
