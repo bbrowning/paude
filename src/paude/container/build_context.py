@@ -75,7 +75,6 @@ def copy_entrypoints(entrypoint: Path, dest_dir: Path) -> None:
         "entrypoint-lib-config.sh",
         "entrypoint-lib-install.sh",
         "entrypoint-lib-openclaw.sh",
-        "credential-watchdog.sh",
         "patch-proxy-fetch.sh",
         "patch-gemini-otel-proxy.sh",
         "patch-openclaw-otel-proxy.sh",

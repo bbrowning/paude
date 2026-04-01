@@ -36,7 +36,6 @@ class TestLoadUserDefaults:
                         "yolo": True,
                         "git": True,
                         "pvc-size": "20Gi",
-                        "credential-timeout": 120,
                         "platform": "linux/amd64",
                         "allowed-domains": ["default", "golang"],
                         "openshift": {
@@ -54,7 +53,6 @@ class TestLoadUserDefaults:
         assert result.yolo is True
         assert result.git is True
         assert result.pvc_size == "20Gi"
-        assert result.credential_timeout == 120
         assert result.platform == "linux/amd64"
         assert result.allowed_domains == ["default", "golang"]
         assert result.openshift.context == "my-cluster"
@@ -178,7 +176,6 @@ class TestResolveCreateOptions:
             "cli_yolo": None,
             "cli_git": None,
             "cli_pvc_size": None,
-            "cli_credential_timeout": None,
             "cli_platform": None,
             "cli_openshift_context": None,
             "cli_openshift_namespace": None,
@@ -199,7 +196,6 @@ class TestResolveCreateOptions:
         assert result.yolo.value is False
         assert result.git.value is False
         assert result.pvc_size.value == "10Gi"
-        assert result.credential_timeout.value == 60
 
     def test_cli_overrides_all(self):
         """CLI flags take highest precedence."""
@@ -410,7 +406,6 @@ class TestUserDefaultsOtelEndpoint:
             cli_yolo=None,
             cli_git=None,
             cli_pvc_size=None,
-            cli_credential_timeout=None,
             cli_platform=None,
             cli_openshift_context=None,
             cli_openshift_namespace=None,
@@ -433,7 +428,6 @@ class TestUserDefaultsOtelEndpoint:
             cli_yolo=None,
             cli_git=None,
             cli_pvc_size=None,
-            cli_credential_timeout=None,
             cli_platform=None,
             cli_openshift_context=None,
             cli_openshift_namespace=None,
@@ -457,7 +451,6 @@ class TestUserDefaultsOtelEndpoint:
             cli_yolo=None,
             cli_git=None,
             cli_pvc_size=None,
-            cli_credential_timeout=None,
             cli_platform=None,
             cli_openshift_context=None,
             cli_openshift_namespace=None,

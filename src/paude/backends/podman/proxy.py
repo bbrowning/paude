@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import sys
 import time
 
@@ -153,6 +154,7 @@ class PodmanProxyManager:
         )
 
         proxy_ip = self._get_proxy_ip(nname)
+        agent_ip = self._derive_agent_ip(proxy_ip) if proxy_ip else None
         dns = _get_host_dns(self._runner.engine)
         print(f"Recreating missing proxy {pname}...", file=sys.stderr)
         self._proxy_runner.create_session_proxy(
@@ -165,6 +167,7 @@ class PodmanProxyManager:
             otel_ports=otel_ports,
             ca_volume=ca_vol,
             credentials=credentials,
+            allowed_clients=agent_ip,
         )
         self._proxy_runner.start_session_proxy(pname)
 
@@ -263,6 +266,16 @@ class PodmanProxyManager:
             return None
         return NetworkManager.derive_proxy_ip(gateway)
 
+    @staticmethod
+    def _derive_agent_ip(proxy_ip: str) -> str:
+        """Derive the expected agent container IP from the proxy IP.
+
+        The agent container is the next host on the internal network
+        after the proxy (e.g. proxy=10.89.0.2 → agent=10.89.0.3).
+        Used for defense-in-depth source IP filtering.
+        """
+        return str(ipaddress.ip_address(proxy_ip) + 1)
+
     def create_proxy(
         self,
         session_name: str,
@@ -294,6 +307,9 @@ class PodmanProxyManager:
         volume_mgr = VolumeManager(self._runner.engine)
         volume_mgr.create_volume(ca_vol)
 
+        # Compute expected agent IP for source IP filtering
+        agent_ip = self._derive_agent_ip(proxy_ip) if proxy_ip else None
+
         pname = proxy_container_name(session_name)
         dns = _get_host_dns(self._runner.engine)
         print(f"Creating proxy {pname}...", file=sys.stderr)
@@ -308,6 +324,7 @@ class PodmanProxyManager:
                 otel_ports=otel_ports,
                 ca_volume=ca_vol,
                 credentials=credentials,
+                allowed_clients=agent_ip,
             )
         except Exception:
             volume_mgr.remove_volume(ca_vol, force=True)
@@ -369,6 +386,7 @@ class PodmanProxyManager:
         nname = network_name(session_name)
         ca_vol = ca_volume_name(session_name)
         proxy_ip = self._get_proxy_ip(nname)
+        agent_ip = self._derive_agent_ip(proxy_ip) if proxy_ip else None
         dns = _get_host_dns(self._runner.engine)
 
         print(
@@ -385,4 +403,5 @@ class PodmanProxyManager:
             otel_ports=otel_ports,
             ca_volume=ca_vol,
             credentials=credentials,
+            allowed_clients=agent_ip,
         )

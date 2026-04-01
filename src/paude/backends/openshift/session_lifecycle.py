@@ -181,11 +181,6 @@ class SessionLifecycleManager:
             config, agent, proxy_name=proxy_name
         )
 
-        session_env["PAUDE_CREDENTIAL_TIMEOUT"] = str(config.credential_timeout)
-        session_env["PAUDE_CREDENTIAL_WATCHDOG"] = (
-            "1" if config.credential_timeout > 0 else "0"
-        )
-
         return session_env, secret_env
 
     def _apply_and_wait(

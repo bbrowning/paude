@@ -111,8 +111,6 @@ def _show_resolved_flags(
         typer.echo(format_setting("openshift-context", resolved.openshift_context))
         typer.echo(format_setting("openshift-namespace", resolved.openshift_namespace))
         typer.echo(format_setting("pvc-size", resolved.pvc_size))
-        typer.echo(format_setting("credential-timeout", resolved.credential_timeout))
-
     if resolved.gpu.value:
         typer.echo(format_setting("gpu", resolved.gpu))
 

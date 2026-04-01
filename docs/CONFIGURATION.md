@@ -45,7 +45,6 @@ Then edit it to set the values you want. Any field set to `null` or omitted uses
     "yolo": true,
     "git": true,
     "pvc-size": "10Gi",
-    "credential-timeout": 60,
     "platform": "linux/amd64",
     "gpu": "all",
     "allowed-domains": ["default", "golang"],
@@ -140,7 +139,6 @@ paude create --dry-run
 | `yolo` | yes | — | `--yolo` | `false` |
 | `git` | yes | — | `--git` | `false` |
 | `pvc-size` | yes | — | `--pvc-size` | `10Gi` |
-| `credential-timeout` | yes | — | `--credential-timeout` | `60` |
 | `platform` | yes | — | `--platform` | (none) |
 | `allowed-domains` | yes | yes | `--allowed-domains` | `["default"]` |
 | `gpu` | yes | — | `--gpu` / `--no-gpu` | (none) |
@@ -252,7 +250,7 @@ paude connect --github-token ghp_yourtoken my-project
 
 The token is injected at connect time only:
 - **Podman**: passed as `-e GH_TOKEN=...` to `podman exec` (not stored in the container definition)
-- **OpenShift**: written to `/credentials/github_token` in the pod's tmpfs, wiped by the credential watchdog on inactivity
+- **OpenShift**: written to `/credentials/github_token` in the pod's tmpfs
 - `GH_CONFIG_DIR=/tmp/gh-config` ensures no cached host credentials are ever consulted
 
 **Security notes**:

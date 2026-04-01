@@ -61,6 +61,7 @@ class ProxyRunner:
         allowed_domains: list[str] | None,
         otel_ports: list[int] | None = None,
         credentials: dict[str, str] | None = None,
+        allowed_clients: str | None = None,
     ) -> list[str]:
         """Build environment variable arguments for proxy containers."""
         args: list[str] = []
@@ -75,6 +76,8 @@ class ProxyRunner:
         if credentials:
             for key, value in credentials.items():
                 args.extend(["-e", f"{key}={value}"])
+        if allowed_clients:
+            args.extend(["-e", f"PAUDE_PROXY_ALLOWED_CLIENTS={allowed_clients}"])
         return args
 
     def _build_volume_args(self, ca_volume: str | None = None) -> list[str]:
@@ -93,6 +96,7 @@ class ProxyRunner:
         otel_ports: list[int] | None = None,
         ca_volume: str | None = None,
         credentials: dict[str, str] | None = None,
+        allowed_clients: str | None = None,
     ) -> str:
         """Start a proxy container (auto-remove on stop).
 
@@ -107,7 +111,9 @@ class ProxyRunner:
         container_name = f"paude-proxy-{session_id}"
 
         net_args = self._build_multi_network(network)
-        env_args = self._build_env_args(dns, allowed_domains, otel_ports, credentials)
+        env_args = self._build_env_args(
+            dns, allowed_domains, otel_ports, credentials, allowed_clients
+        )
         vol_args = self._build_volume_args(ca_volume)
 
         result = self._engine.run(
@@ -141,6 +147,7 @@ class ProxyRunner:
         otel_ports: list[int] | None = None,
         ca_volume: str | None = None,
         credentials: dict[str, str] | None = None,
+        allowed_clients: str | None = None,
     ) -> str:
         """Create a proxy container for a session (does not start it).
 
@@ -148,7 +155,9 @@ class ProxyRunner:
             Container name.
         """
         net_args = self._build_multi_network(network, ip=ip)
-        env_args = self._build_env_args(dns, allowed_domains, otel_ports, credentials)
+        env_args = self._build_env_args(
+            dns, allowed_domains, otel_ports, credentials, allowed_clients
+        )
         vol_args = self._build_volume_args(ca_volume)
 
         ip_args: list[str] = []
@@ -196,6 +205,7 @@ class ProxyRunner:
         otel_ports: list[int] | None = None,
         ca_volume: str | None = None,
         credentials: dict[str, str] | None = None,
+        allowed_clients: str | None = None,
     ) -> str:
         """Recreate a session proxy with new configuration.
 
@@ -215,6 +225,7 @@ class ProxyRunner:
             otel_ports=otel_ports,
             ca_volume=ca_volume,
             credentials=credentials,
+            allowed_clients=allowed_clients,
         )
         self.start_session_proxy(name)
 

@@ -176,7 +176,6 @@ paude/
 │   │   ├── Dockerfile             # Agent container image
 │   │   ├── entrypoint.sh          # Container entrypoint
 │   │   ├── entrypoint-session.sh  # Session entrypoint
-│   │   ├── credential-watchdog.sh # Credential refresh watchdog
 │   │   └── tmux.conf              # Tmux configuration
 │   └── proxy/
 │       ├── Dockerfile             # Squid proxy container image

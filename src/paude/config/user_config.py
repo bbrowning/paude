@@ -34,7 +34,6 @@ class UserDefaults:
     yolo: bool | None = None
     git: bool | None = None
     pvc_size: str | None = None
-    credential_timeout: int | None = None
     platform: str | None = None
     gpu: str | None = None
     allowed_domains: list[str] = field(default_factory=list)
@@ -50,7 +49,6 @@ _KNOWN_KEYS = {
     "yolo",
     "git",
     "pvc-size",
-    "credential-timeout",
     "platform",
     "gpu",
     "allowed-domains",
@@ -176,7 +174,6 @@ def _parse_defaults(data: dict[str, Any], path: Path) -> UserDefaults:
         yolo=data.get("yolo"),
         git=data.get("git"),
         pvc_size=data.get("pvc-size"),
-        credential_timeout=data.get("credential-timeout"),
         platform=data.get("platform"),
         gpu=data.get("gpu"),
         allowed_domains=allowed_domains,

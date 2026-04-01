@@ -69,16 +69,6 @@ setup_credentials
 persist_agent_config
 wait_for_git
 
-# Start credential watchdog in background (OpenShift only)
-# The watchdog removes credentials after inactivity when no tmux clients are attached
-# Only start if not already running (avoid duplicates on reconnect)
-if [[ -d /credentials ]] && [[ "${PAUDE_CREDENTIAL_WATCHDOG:-1}" == "1" ]]; then
-    if ! pgrep -f "credential-watchdog.sh" >/dev/null 2>&1; then
-        nohup /usr/local/bin/credential-watchdog.sh >> /tmp/credential-watchdog.log 2>&1 &
-        echo "Credential watchdog started (timeout: ${PAUDE_CREDENTIAL_TIMEOUT:-60}m)"
-    fi
-fi
-
 # Add PVC local bin to PATH (for agent and other tools installed to PVC)
 # Also keep home .local/bin for tools installed during image build
 export PATH="/pvc/.local/bin:$HOME/.local/bin:$PATH"

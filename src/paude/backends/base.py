@@ -80,7 +80,6 @@ class SessionConfig:
     storage_class: str | None = None
     network: str | None = None
     proxy_image: str | None = None
-    credential_timeout: int = 60  # minutes of inactivity before credential removal
     wait_for_ready: bool = True
     agent: str = "claude"
     provider: str | None = None
