@@ -83,6 +83,8 @@ class TestPodmanProxyManagerDnsLogging:
         mock_runner = _make_mock_runner()
         mock_runner.container_exists.return_value = True
         mock_runner.get_container_image.return_value = "proxy:latest"
+        # Disable CA verification (not the focus of this test)
+        mock_runner.container_running.return_value = False
         mock_network = MagicMock()
         mock_network.get_network_gateway.return_value = "10.89.0.1"
 
@@ -533,6 +535,8 @@ class TestProxyCredentials:
         mock_runner = _make_mock_runner()
         mock_runner.container_exists.return_value = True
         mock_runner.get_container_image.return_value = "proxy:latest"
+        # Disable CA verification (not the focus of this test)
+        mock_runner.container_running.return_value = False
         mock_network = MagicMock()
         mock_network.get_network_gateway.return_value = "10.89.0.1"
 
@@ -551,3 +555,165 @@ class TestProxyCredentials:
         env_indices = [i for i, a in enumerate(call_args) if a == "-e"]
         env_vals = [call_args[i + 1] for i in env_indices]
         assert "ANTHROPIC_API_KEY=sk-real-key" in env_vals
+
+
+class TestUpdateDomainsCaResilience:
+    """Tests for CA cert resilience across proxy recreates in update_domains."""
+
+    @patch("paude.backends.podman.proxy._get_host_dns")
+    def test_update_domains_passes_ca_volume_to_recreate(
+        self, mock_dns: MagicMock
+    ) -> None:
+        """update_domains passes the CA volume name to recreate_session_proxy."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = True
+        mock_runner.container_running.return_value = True
+        mock_runner.get_container_image.return_value = "proxy:latest"
+        cert = "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n"
+        mock_runner.exec_in_container.side_effect = [
+            MagicMock(returncode=0),  # test -f in proxy
+            MagicMock(returncode=0, stdout=cert),  # cat in proxy
+            MagicMock(returncode=0, stdout=cert),  # cat in agent
+        ]
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        manager.update_domains(
+            session_name="test-session",
+            domains=[".googleapis.com", ".pypi.org"],
+        )
+
+        # Verify CA volume is in the create call
+        engine_calls = mock_runner.engine.run.call_args_list
+        create_call = [c for c in engine_calls if c[0] and c[0][0] == "create"]
+        assert create_call
+        call_args = create_call[0][0]
+        vol_indices = [i for i, a in enumerate(call_args) if a == "-v"]
+        vol_args = [call_args[i + 1] for i in vol_indices]
+        assert "paude-ca-test-session:/data/ca" in vol_args
+
+    @patch("paude.backends.podman.proxy._get_host_dns")
+    def test_update_domains_skips_redistribution_when_cert_matches(
+        self, mock_dns: MagicMock, capsys
+    ) -> None:
+        """update_domains does not redistribute CA cert when it matches."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = True
+        mock_runner.container_running.return_value = True
+        mock_runner.get_container_image.return_value = "proxy:latest"
+        cert = "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n"
+        mock_runner.exec_in_container.side_effect = [
+            MagicMock(returncode=0),  # test -f in proxy
+            MagicMock(returncode=0, stdout=cert),  # cat proxy cert
+            MagicMock(returncode=0, stdout=cert),  # cat agent cert (matches)
+        ]
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        manager.update_domains(
+            session_name="test-session",
+            domains=[".googleapis.com"],
+        )
+
+        captured = capsys.readouterr()
+        assert "Redistributing CA certificate" not in captured.err
+        mock_runner.inject_file.assert_not_called()
+
+    @patch("paude.backends.podman.proxy._get_host_dns")
+    def test_update_domains_redistributes_when_cert_differs(
+        self, mock_dns: MagicMock, capsys
+    ) -> None:
+        """update_domains redistributes CA cert when agent has stale cert."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = True
+        mock_runner.container_running.return_value = True
+        mock_runner.get_container_image.return_value = "proxy:latest"
+        new_cert = "-----BEGIN CERTIFICATE-----\nnew\n-----END CERTIFICATE-----\n"
+        old_cert = "-----BEGIN CERTIFICATE-----\nold\n-----END CERTIFICATE-----\n"
+        mock_runner.exec_in_container.side_effect = [
+            # _redistribute_ca_if_needed checks
+            MagicMock(returncode=0),  # test -f in proxy
+            MagicMock(returncode=0, stdout=new_cert),  # cat proxy cert
+            MagicMock(returncode=0, stdout=old_cert),  # cat agent cert (differs)
+            # distribute_ca_cert calls
+            MagicMock(returncode=0),  # test -f in proxy
+            MagicMock(returncode=0, stdout=new_cert),  # cat proxy cert
+            MagicMock(returncode=0),  # update-ca-trust
+        ]
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        manager.update_domains(
+            session_name="test-session",
+            domains=[".googleapis.com"],
+        )
+
+        captured = capsys.readouterr()
+        assert "Redistributing CA certificate" in captured.err
+        mock_runner.inject_file.assert_called_once()
+
+    @patch("paude.backends.podman.proxy._get_host_dns")
+    def test_update_domains_redistributes_when_agent_cert_missing(
+        self, mock_dns: MagicMock, capsys
+    ) -> None:
+        """update_domains redistributes when agent has no CA cert."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = True
+        mock_runner.container_running.return_value = True
+        mock_runner.get_container_image.return_value = "proxy:latest"
+        cert = "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n"
+        mock_runner.exec_in_container.side_effect = [
+            # _redistribute_ca_if_needed checks
+            MagicMock(returncode=0),  # test -f in proxy
+            MagicMock(returncode=0, stdout=cert),  # cat proxy cert
+            MagicMock(returncode=1, stdout=""),  # cat agent cert (missing)
+            # distribute_ca_cert calls
+            MagicMock(returncode=0),  # test -f in proxy
+            MagicMock(returncode=0, stdout=cert),  # cat proxy cert
+            MagicMock(returncode=0),  # update-ca-trust
+        ]
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        manager.update_domains(
+            session_name="test-session",
+            domains=[".googleapis.com"],
+        )
+
+        captured = capsys.readouterr()
+        assert "Redistributing CA certificate" in captured.err
+        mock_runner.inject_file.assert_called_once()
+
+    @patch("paude.backends.podman.proxy._get_host_dns")
+    def test_update_domains_warns_when_ca_cert_missing_after_recreate(
+        self, mock_dns: MagicMock, capsys
+    ) -> None:
+        """update_domains warns if CA cert is missing after proxy recreate."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = True
+        mock_runner.container_running.return_value = True
+        mock_runner.get_container_image.return_value = "proxy:latest"
+        # test -f always fails (cert never appears)
+        mock_runner.exec_in_container.return_value = MagicMock(returncode=1)
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        with patch("paude.backends.podman.proxy.CA_CERT_POLL_TIMEOUT", 0):
+            manager.update_domains(
+                session_name="test-session",
+                domains=[".googleapis.com"],
+            )
+
+        captured = capsys.readouterr()
+        assert "CA certificate missing after proxy recreate" in captured.err
+        mock_runner.inject_file.assert_not_called()

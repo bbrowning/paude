@@ -410,6 +410,8 @@ class TestPodmanUpdateAllowedDomains:
         # Both main and proxy containers exist
         mock_runner.container_exists.return_value = True
         mock_runner.get_container_image.return_value = "proxy:latest"
+        # Disable CA verification polling (not the focus of this test)
+        mock_runner.container_running.return_value = False
         mock_runner_class.return_value = mock_runner
         mock_dns.return_value = None
 

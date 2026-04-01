@@ -78,6 +78,11 @@ def _make_backend(
     from paude.backends.podman.proxy import PodmanProxyManager
 
     backend._proxy = PodmanProxyManager(runner, network)
+    # No-op CA distribution to avoid 30s polling timeouts in tests
+    # that don't test CA distribution. Tests in test_podman_proxy.py
+    # create their own PodmanProxyManager with proper mocks.
+    backend._proxy.distribute_ca_cert = MagicMock()  # type: ignore[method-assign]
+    backend._proxy._redistribute_ca_if_needed = MagicMock()  # type: ignore[method-assign]
     return backend
 
 
@@ -673,9 +678,7 @@ class TestPodmanBackendConnectSession:
         ]
         mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
+        backend = _make_backend(mock_runner)
 
         with patch.object(backend, "_sync_host_config"):
             exit_code = backend.connect_session("my-session")
@@ -1110,9 +1113,7 @@ class TestPodmanBackendGcpAdcSecret:
         )
         mock_path_class.home.return_value = mock_home
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
+        backend = _make_backend(mock_runner)
 
         with patch.object(backend, "_sync_host_config"):
             backend.start_session("my-session")

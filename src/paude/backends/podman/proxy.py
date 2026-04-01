@@ -361,6 +361,62 @@ class PodmanProxyManager:
             return ""
         return result.stdout
 
+    def _redistribute_ca_if_needed(self, session_name: str) -> None:
+        """Verify the CA cert is still valid after a proxy recreate.
+
+        The named CA volume persists across container removal, so the
+        same cert should be reused. This method checks that the cert
+        is present in the recreated proxy and that the agent container
+        still has a matching cert. If the agent cert is missing or
+        differs, it redistributes.
+        """
+        from paude.backends.podman.helpers import container_name
+
+        pname = proxy_container_name(session_name)
+        cname = container_name(session_name)
+
+        if not self._runner.container_running(pname):
+            return
+        if not self._runner.container_running(cname):
+            return
+
+        # Wait for CA cert to be available in the recreated proxy
+        elapsed = 0
+        while elapsed < CA_CERT_POLL_TIMEOUT:
+            result = self._runner.exec_in_container(
+                pname, ["test", "-f", "/data/ca/ca.crt"], check=False
+            )
+            if result.returncode == 0:
+                break
+            time.sleep(CA_CERT_POLL_INTERVAL)
+            elapsed += CA_CERT_POLL_INTERVAL
+        else:
+            print(
+                "WARNING: CA certificate missing after proxy recreate.",
+                file=sys.stderr,
+            )
+            return
+
+        # Read the current proxy CA cert
+        proxy_cert = self._runner.exec_in_container(
+            pname, ["cat", "/data/ca/ca.crt"], check=False
+        )
+        if proxy_cert.returncode != 0 or not proxy_cert.stdout.strip():
+            return
+
+        # Read the agent's current CA cert (may be absent on first recreate)
+        agent_cert = self._runner.exec_in_container(
+            cname, ["cat", CA_CERT_CONTAINER_PATH], check=False
+        )
+
+        # Redistribute only if the agent cert is missing or differs
+        if agent_cert.returncode != 0 or agent_cert.stdout != proxy_cert.stdout:
+            print(
+                "Redistributing CA certificate after proxy recreate...",
+                file=sys.stderr,
+            )
+            self.distribute_ca_cert(session_name)
+
     def update_domains(
         self,
         session_name: str,
@@ -405,3 +461,7 @@ class PodmanProxyManager:
             credentials=credentials,
             allowed_clients=agent_ip,
         )
+
+        # Verify CA cert survived the recreate (same named volume = same cert).
+        # If the cert is missing or changed, redistribute to the agent.
+        self._redistribute_ca_if_needed(session_name)
