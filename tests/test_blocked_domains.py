@@ -1,4 +1,8 @@
-"""Tests for the blocked-domains backend methods."""
+"""Tests for the blocked-domains backend methods.
+
+Note: The log path /tmp/squid-blocked.log is a backward-compat path
+used by paude-proxy. The constant was renamed to PROXY_BLOCKED_LOG_PATH.
+"""
 
 from __future__ import annotations
 

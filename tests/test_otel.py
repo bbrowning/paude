@@ -106,7 +106,7 @@ class TestOtelProxyPorts:
     """Tests for otel_proxy_ports."""
 
     def test_non_standard_port(self):
-        """Non-standard port is returned for squid injection."""
+        """Non-standard port is returned for proxy injection."""
         ports = otel_proxy_ports("http://collector:4318")
         assert ports == [4318]
 

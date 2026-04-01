@@ -151,7 +151,7 @@ By default, sessions run with restricted network access:
 - **Allowed**: DNS resolution, Vertex AI APIs (*.googleapis.com), PyPI (*.pypi.org), GitHub (github.com and related subdomains), plus agent-specific domains
 - **Blocked**: All other external traffic
 
-NetworkPolicy restricts pod egress to DNS and the squid proxy only. The proxy then enforces fine-grained domain filtering via its allowlist configuration. Use `--allowed-domains all` to disable filtering for unrestricted access.
+NetworkPolicy restricts pod egress to DNS and the proxy only. The proxy then enforces fine-grained domain filtering via its allowlist configuration. Use `--allowed-domains all` to disable filtering for unrestricted access.
 
 ### Pod Security
 

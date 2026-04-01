@@ -15,7 +15,7 @@ from paude.backends.shared import (
     PAUDE_LABEL_DOMAINS,
     PAUDE_LABEL_OTEL_PORTS,
     PAUDE_LABEL_PROXY_IMAGE,
-    SQUID_BLOCKED_LOG_PATH,
+    PROXY_BLOCKED_LOG_PATH,
 )
 from paude.container.engine import ContainerEngine
 from paude.container.network import NetworkManager
@@ -346,7 +346,7 @@ class PodmanProxyManager:
         return [d for d in domains_str.split(",") if d]
 
     def get_blocked_log(self, session_name: str) -> str | None:
-        """Get raw squid blocked log from the proxy container."""
+        """Get raw blocked-domain log from the proxy container."""
         pname = proxy_container_name(session_name)
         if not self._runner.container_exists(pname):
             return None
@@ -355,7 +355,7 @@ class PodmanProxyManager:
             raise ValueError(f"Proxy for session '{session_name}' is not running.")
 
         result = self._runner.exec_in_container(
-            pname, ["cat", SQUID_BLOCKED_LOG_PATH], check=False
+            pname, ["cat", PROXY_BLOCKED_LOG_PATH], check=False
         )
         if result.returncode != 0:
             return ""

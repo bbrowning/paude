@@ -5,7 +5,7 @@
 # which does NOT respect HTTP_PROXY / HTTPS_PROXY env vars.  This script
 # patches the compiled sdk.js to pass an httpAgentOptions factory that
 # returns an HttpsProxyAgent (already a gemini-cli dependency) so OTEL
-# exports go through the squid proxy.
+# exports go through the proxy.
 #
 # The OTEL SDK v0.211.0 (used by gemini-cli v0.35.3) supports
 # httpAgentOptions as either AgentOptions or an HttpAgentFactory function.

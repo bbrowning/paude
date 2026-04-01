@@ -768,7 +768,7 @@ class PodmanBackend:
         return self._proxy.get_allowed_domains(name)
 
     def get_proxy_blocked_log(self, name: str) -> str | None:
-        """Get raw squid blocked log from the proxy container."""
+        """Get raw blocked-domain log from the proxy container."""
         self._require_session(name)
         return self._proxy.get_blocked_log(name)
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from paude.backends.openshift.oc import OcClient
 from paude.backends.openshift.proxy import ProxyManager
 from paude.backends.openshift.session_lookup import SessionLookup
-from paude.backends.shared import PAUDE_LABEL_SESSION, SQUID_BLOCKED_LOG_PATH
+from paude.backends.shared import PAUDE_LABEL_SESSION, PROXY_BLOCKED_LOG_PATH
 
 
 class SessionDomainManager:
@@ -40,7 +40,7 @@ class SessionDomainManager:
         return self._proxy.get_deployment_domains(name)
 
     def get_proxy_blocked_log(self, name: str) -> str | None:
-        """Get raw squid blocked log from the proxy container.
+        """Get raw blocked-domain log from the proxy container.
 
         Returns:
             Raw log content, empty string if no blocks yet,
@@ -77,7 +77,7 @@ class SessionDomainManager:
             self._namespace,
             "--",
             "cat",
-            SQUID_BLOCKED_LOG_PATH,
+            PROXY_BLOCKED_LOG_PATH,
             check=False,
         )
         if log_result.returncode != 0:

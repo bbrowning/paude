@@ -159,7 +159,7 @@ By default, paude runs a proxy sidecar that filters network access to Vertex AI,
 ┌─────────────────────────────────────────────────────────┐
 │  paude-internal network (no direct internet)            │
 │  ┌───────────┐        ┌───────────────────────────────┐ │
-│  │  Agent    │───────▶│  Proxy (squid allowlist)      │─┼──▶ *.googleapis.com
+│  │  Agent    │───────▶│  Proxy (domain allowlist)     │─┼──▶ *.googleapis.com
 │  │ Container │        │                               │ │    *.pypi.org
 │  └───────────┘        └───────────────────────────────┘ │
 └─────────────────────────────────────────────────────────┘

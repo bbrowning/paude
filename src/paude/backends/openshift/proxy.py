@@ -41,8 +41,8 @@ class ProxyManager:
         - Allows egress to this session's proxy pod on port 3128
         - Denies all other egress traffic
 
-        The paude pod can ONLY reach DNS and the squid proxy. The proxy handles
-        domain-based filtering via squid.conf.
+        The paude pod can ONLY reach DNS and the proxy. The proxy handles
+        domain-based filtering via its allowlist configuration.
 
         Args:
             session_id: The session ID to scope the policy to.
@@ -169,7 +169,7 @@ class ProxyManager:
         """Create a NetworkPolicy that allows all egress for the proxy pod.
 
         The proxy pod needs unrestricted egress to reach the internet.
-        Domain-based filtering is handled by squid.conf, not NetworkPolicy.
+        Domain-based filtering is handled by the proxy, not NetworkPolicy.
 
         Args:
             session_name: Session name for labeling.
@@ -312,7 +312,7 @@ class ProxyManager:
         )
 
     def create_service(self, session_name: str) -> str:
-        """Create a Service for the squid proxy pod.
+        """Create a Service for the proxy pod.
 
         Args:
             session_name: Session name for labeling.

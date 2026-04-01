@@ -211,7 +211,7 @@ class Backend(Protocol):
         ...
 
     def get_proxy_blocked_log(self, name: str) -> str | None:
-        """Get raw squid blocked log from the proxy container.
+        """Get raw blocked-domain log from the proxy container.
 
         Returns:
             Raw log content string, empty string if no blocks yet,

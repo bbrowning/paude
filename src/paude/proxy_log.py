@@ -1,4 +1,4 @@
-"""Parse squid proxy blocked-domain logs."""
+"""Parse proxy blocked-domain logs."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ class BlockedDomain:
 
 
 def parse_blocked_log(raw_log: str) -> list[BlockedDomain]:
-    """Parse squid blocked log into aggregated domain entries.
+    """Parse proxy blocked log into aggregated domain entries.
 
     Each log line has the format:
         <date> <timezone> <client-ip> <status/code> <method> <url> BLOCKED

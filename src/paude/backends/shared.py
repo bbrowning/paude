@@ -26,7 +26,7 @@ PAUDE_LABEL_PROVIDER = "paude.io/provider"
 PAUDE_LABEL_OTEL_PORTS = "paude.io/otel-ports"
 PAUDE_LABEL_OTEL_ENDPOINT = "paude.io/otel-endpoint"
 
-SQUID_BLOCKED_LOG_PATH = "/tmp/squid-blocked.log"  # noqa: S108
+PROXY_BLOCKED_LOG_PATH = "/tmp/squid-blocked.log"  # noqa: S108
 
 # Sentinel value for credentials managed by paude-proxy.
 # Agent containers see this instead of real API keys.

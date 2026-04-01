@@ -323,7 +323,7 @@ def session_create(
         otel_endpoint=r_otel_endpoint,
     )
 
-    # Compute OTEL proxy ports (non-standard ports to open in squid)
+    # Compute OTEL proxy ports (non-standard ports to allow through proxy)
     otel_ports: list[int] = []
     if r_otel_endpoint:
         from paude.otel import otel_proxy_ports

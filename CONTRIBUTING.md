@@ -178,10 +178,8 @@ paude/
 │   │   ├── entrypoint-session.sh  # Session entrypoint
 │   │   └── tmux.conf              # Tmux configuration
 │   └── proxy/
-│       ├── Dockerfile             # Squid proxy container image
-│       ├── entrypoint.sh          # Proxy container entrypoint
-│       ├── squid.conf             # Proxy allowlist configuration
-│       └── ERR_CUSTOM_ACCESS_DENIED  # Custom error page
+│       ├── Dockerfile             # Proxy container image (paude-proxy)
+│       └── entrypoint.sh          # Proxy container entrypoint
 ├── tests/                 # Python tests (pytest)
 ├── examples/              # Example configurations
 ├── docs/                  # Documentation

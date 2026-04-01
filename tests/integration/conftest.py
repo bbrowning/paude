@@ -378,7 +378,7 @@ def _start_proxy_session(
     )
     backend.create_session(config)
     backend.start_session_no_attach(session_name)
-    time.sleep(1)  # Extra time for squid to fully initialize
+    time.sleep(1)  # Extra time for proxy to fully initialize
 
     # Get proxy IP on the internal network
     proxy_name = f"paude-proxy-{session_name}"

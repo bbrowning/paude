@@ -492,8 +492,8 @@ class TestContainerRunner:
         network_idx = call_args.index("--network")
         assert call_args[network_idx + 1] == "test-network,podman"
 
-    def test_run_proxy_passes_dns_as_squid_env_var(self):
-        """run_proxy passes DNS as SQUID_DNS env var, not --dns flag."""
+    def test_run_proxy_passes_dns_as_proxy_env_var(self):
+        """run_proxy passes DNS as PROXY_DNS env var, not --dns flag."""
         from paude.container.proxy_runner import ProxyRunner
 
         mock_runner = MagicMock()
@@ -509,7 +509,7 @@ class TestContainerRunner:
         assert "--dns" not in call_args
         assert "-e" in call_args
         env_idx = call_args.index("-e")
-        assert call_args[env_idx + 1] == "SQUID_DNS=192.168.127.1"
+        assert call_args[env_idx + 1] == "PROXY_DNS=192.168.127.1"
 
     def test_run_proxy_passes_allowed_domains_as_env_var(self):
         """run_proxy passes allowed_domains as ALLOWED_DOMAINS env var."""
@@ -600,7 +600,7 @@ class TestContainerRunner:
         runner.stop_container("test-container")
 
         call_args = mock_run.call_args[0][0]
-        # Should use 'stop' with 1-second timeout (squid has shutdown_lifetime=0)
+        # Should use 'stop' with 1-second timeout
         assert call_args[0] == "podman"
         assert call_args[1] == "stop"
         assert "-t" in call_args

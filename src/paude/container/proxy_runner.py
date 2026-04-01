@@ -66,7 +66,7 @@ class ProxyRunner:
         """Build environment variable arguments for proxy containers."""
         args: list[str] = []
         if dns:
-            args.extend(["-e", f"SQUID_DNS={dns}"])
+            args.extend(["-e", f"PROXY_DNS={dns}"])
         if allowed_domains:
             args.extend(["-e", f"ALLOWED_DOMAINS={','.join(allowed_domains)}"])
         if otel_ports:
