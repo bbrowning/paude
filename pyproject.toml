@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "paude"
-version = "0.15.0rc6"
+version = "0.15.0"
 description = "Container wrapper for running AI coding agents in isolated, secure containers"
 readme = "README.md"
 license = "MIT"
