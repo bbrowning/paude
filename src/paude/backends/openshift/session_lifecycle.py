@@ -118,22 +118,13 @@ class SessionLifecycleManager:
         if config.allowed_domains is not None:
             proxy_image = self._resolve_proxy_image(config)
 
-            from paude.agents.base import build_secret_environment_from_config
-            from paude.backends.shared import PROXY_GCP_ADC_PATH
-
-            proxy_creds = build_secret_environment_from_config(agent.config)
-            import os
-
-            gh_token = os.environ.get("PAUDE_GITHUB_TOKEN")
-            if gh_token:
-                proxy_creds["GH_TOKEN"] = gh_token
-            # GCP ADC: OpenShift proxy gets real creds synced via oc cp,
-            # set the path env var so the proxy knows where to find it
+            from paude.backends.shared import gather_proxy_credentials
             from paude.constants import GCP_ADC_FILENAME
 
             gcp_adc_path = Path.home() / ".config" / "gcloud" / GCP_ADC_FILENAME
-            if gcp_adc_path.is_file():
-                proxy_creds["GOOGLE_APPLICATION_CREDENTIALS"] = PROXY_GCP_ADC_PATH
+            proxy_creds = gather_proxy_credentials(
+                agent.config, gcp_adc_exists=gcp_adc_path.is_file()
+            )
 
             self._proxy.create_deployment(
                 session_name,

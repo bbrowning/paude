@@ -229,6 +229,40 @@ def engine_binary_for_backend(backend_type: str) -> str:
     raise ValueError(f"No engine binary for backend type: {backend_type}")
 
 
+def gather_proxy_credentials(
+    agent_config: AgentConfig,
+    *,
+    gcp_adc_exists: bool = False,
+) -> dict[str, str]:
+    """Gather real credentials from the host for the proxy container.
+
+    Reads secret env vars (API keys) and GH_TOKEN from the host
+    environment. Also sets GOOGLE_APPLICATION_CREDENTIALS if GCP ADC
+    exists locally (the actual file is injected separately by each backend).
+
+    Args:
+        agent_config: Agent configuration with secret_env_vars.
+        gcp_adc_exists: Whether GCP ADC file exists on the host.
+
+    Returns:
+        Dict of environment variables for the proxy container.
+    """
+    import os
+
+    from paude.agents.base import build_secret_environment_from_config
+
+    creds = build_secret_environment_from_config(agent_config)
+
+    gh_token = os.environ.get("PAUDE_GITHUB_TOKEN")
+    if gh_token:
+        creds["GH_TOKEN"] = gh_token
+
+    if gcp_adc_exists:
+        creds["GOOGLE_APPLICATION_CREDENTIALS"] = PROXY_GCP_ADC_PATH
+
+    return creds
+
+
 def generate_sandbox_config_script(
     agent_name: str,
     workspace: str,

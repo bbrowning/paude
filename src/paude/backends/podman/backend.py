@@ -228,27 +228,12 @@ class PodmanBackend:
         return path if path.is_file() else None
 
     def _gather_proxy_credentials(self, agent: Agent) -> dict[str, str]:
-        """Gather real credentials from host environment for the proxy container.
+        """Gather real credentials from host environment for the proxy container."""
+        from paude.backends.shared import gather_proxy_credentials
 
-        Reads secret env vars (API keys) and GH_TOKEN from the host
-        environment. Also sets GOOGLE_APPLICATION_CREDENTIALS if GCP ADC
-        exists locally (the actual file is injected separately).
-        """
-        import os
-
-        from paude.agents.base import build_secret_environment_from_config
-        from paude.backends.shared import PROXY_GCP_ADC_PATH
-
-        creds = build_secret_environment_from_config(agent.config)
-
-        gh_token = os.environ.get("PAUDE_GITHUB_TOKEN")
-        if gh_token:
-            creds["GH_TOKEN"] = gh_token
-
-        if self._local_adc_path() is not None:
-            creds["GOOGLE_APPLICATION_CREDENTIALS"] = PROXY_GCP_ADC_PATH
-
-        return creds
+        return gather_proxy_credentials(
+            agent.config, gcp_adc_exists=self._local_adc_path() is not None
+        )
 
     def _inject_proxy_gcp_credentials(self, session_name: str) -> None:
         """Inject real GCP ADC into the proxy container after it starts."""
@@ -488,13 +473,14 @@ class PodmanBackend:
             check=False,
         )
 
-    def start_session_no_attach(
-        self, name: str, github_token: str | None = None
-    ) -> None:
-        """Start containers without attaching (for git setup, etc.)."""
-        cname = self._require_session(name)
-        if self._runner.container_running(cname):
-            return
+    def _start_session_containers(self, name: str, cname: str) -> tuple[Agent, bool]:
+        """Start proxy and agent containers, inject credentials and config.
+
+        Shared startup sequence used by both interactive and headless paths.
+
+        Returns:
+            Tuple of (agent, proxy_active).
+        """
         agent = self._get_session_agent(name)
         proxy_active = self._proxy.has_proxy(name)
         if proxy_active:
@@ -510,6 +496,16 @@ class PodmanBackend:
         self._inject_credentials(cname, proxy_active=proxy_active)
         self._sync_host_config(cname, agent.config.name)
         self._sync_sandbox_config(cname, name)
+        return agent, proxy_active
+
+    def start_session_no_attach(
+        self, name: str, github_token: str | None = None
+    ) -> None:
+        """Start containers without attaching (for git setup, etc.)."""
+        cname = self._require_session(name)
+        if self._runner.container_running(cname):
+            return
+        agent, proxy_active = self._start_session_containers(name, cname)
         self._start_agent_headless_in_container(
             cname, agent, github_token, proxy_active=proxy_active
         )
@@ -614,21 +610,7 @@ class PodmanBackend:
 
         print(f"Starting session '{name}'...", file=sys.stderr)
 
-        agent = self._get_session_agent(name)
-        proxy_active = self._proxy.has_proxy(name)
-        if proxy_active:
-            proxy_creds = self._gather_proxy_credentials(agent)
-            self._proxy.start_if_needed(name, credentials=proxy_creds)
-            self._inject_proxy_gcp_credentials(name)
-        else:
-            self._ensure_gcp_credentials()
-            self._proxy.start_if_needed(name)
-        self._runner.start_container(cname)
-        self._fix_volume_permissions(cname)
-        self._proxy.distribute_ca_cert(name)
-        self._inject_credentials(cname, proxy_active=proxy_active)
-        self._sync_host_config(cname, agent.config.name)
-        self._sync_sandbox_config(cname, name)
+        agent, proxy_active = self._start_session_containers(name, cname)
 
         self._start_port_forward(name, agent)
         self._print_port_urls(name, agent)

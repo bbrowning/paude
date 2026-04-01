@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from paude.agents.claude import ClaudeAgent
 from paude.backends.base import SessionConfig
 from paude.backends.shared import (
+    PROXY_GCP_ADC_PATH,
     build_session_env,
+    gather_proxy_credentials,
     network_name,
     pod_name,
     proxy_resource_name,
@@ -92,6 +96,56 @@ class TestBuildSessionEnvProxyCredentials:
         assert "GH_TOKEN" not in env
         for var in agent.config.secret_env_vars:
             assert var not in env
+
+
+class TestGatherProxyCredentials:
+    """Tests for gather_proxy_credentials()."""
+
+    def test_includes_secret_env_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Agent secret env vars are included in proxy credentials."""
+        monkeypatch.delenv("PAUDE_GITHUB_TOKEN", raising=False)
+        agent = ClaudeAgent(provider="anthropic")
+        # Set the secret env var that the anthropic provider defines
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-value")  # noqa: S105
+
+        creds = gather_proxy_credentials(agent.config)
+
+        assert "ANTHROPIC_API_KEY" in creds
+        assert creds["ANTHROPIC_API_KEY"] == "test-key-value"  # noqa: S105
+
+    def test_includes_gh_token_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """GH_TOKEN is picked up from PAUDE_GITHUB_TOKEN env var."""
+        monkeypatch.setenv("PAUDE_GITHUB_TOKEN", "test-token-value")  # noqa: S105
+        agent = ClaudeAgent()
+
+        creds = gather_proxy_credentials(agent.config)
+
+        assert creds["GH_TOKEN"] == "test-token-value"  # noqa: S105
+
+    def test_no_gh_token_when_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """GH_TOKEN is absent when PAUDE_GITHUB_TOKEN is not set."""
+        monkeypatch.delenv("PAUDE_GITHUB_TOKEN", raising=False)
+        agent = ClaudeAgent()
+
+        creds = gather_proxy_credentials(agent.config)
+
+        assert "GH_TOKEN" not in creds
+
+    def test_includes_gcp_adc_path_when_exists(self) -> None:
+        """GOOGLE_APPLICATION_CREDENTIALS is set when GCP ADC exists."""
+        agent = ClaudeAgent()
+
+        creds = gather_proxy_credentials(agent.config, gcp_adc_exists=True)
+
+        assert creds["GOOGLE_APPLICATION_CREDENTIALS"] == PROXY_GCP_ADC_PATH
+
+    def test_no_gcp_adc_when_not_exists(self) -> None:
+        """GOOGLE_APPLICATION_CREDENTIALS is absent when GCP ADC doesn't exist."""
+        agent = ClaudeAgent()
+
+        creds = gather_proxy_credentials(agent.config, gcp_adc_exists=False)
+
+        assert "GOOGLE_APPLICATION_CREDENTIALS" not in creds
 
 
 class TestNamingHelpers:
