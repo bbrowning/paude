@@ -90,7 +90,7 @@ class ClaudeAgent:
     def apply_sandbox_config(
         self, home: str, workspace: str, args: str, *, yolo: bool = False
     ) -> str:
-        return f"""\
+        script = f"""\
 #!/bin/bash
 # Auto-generated sandbox config for Claude Code
 claude_json="{home}/.claude.json"
@@ -111,22 +111,23 @@ else
     }}' > "$claude_json"
 fi
 chmod g+rw "$claude_json" 2>/dev/null || true
-
-# Suppress bypass permissions warning when yolo flag is in args
-if echo "{args}" | grep -q -- "--dangerously-skip-permissions"; then
-    mkdir -p "{home}/.claude" 2>/dev/null || true
-    skip_patch='{{"skipDangerousModePermissionPrompt": true}}'
-    if [ -f "$settings_json" ]; then
-        jq --argjson patch "$skip_patch" '. * $patch' \
-            "$settings_json" > "${{settings_json}}.tmp" \\
-            && cp -f "${{settings_json}}.tmp" "$settings_json" \\
-            && rm -f "${{settings_json}}.tmp"
-    else
-        echo "$skip_patch" > "$settings_json"
-    fi
-    chmod g+rw "$settings_json" 2>/dev/null || true
-fi
 """
+        if yolo:
+            script += f"""
+# Suppress bypass permissions warning when yolo mode is enabled
+mkdir -p "{home}/.claude" 2>/dev/null || true
+skip_patch='{{"skipDangerousModePermissionPrompt": true}}'
+if [ -f "$settings_json" ]; then
+    jq --argjson patch "$skip_patch" '. * $patch' \
+        "$settings_json" > "${{settings_json}}.tmp" \\
+        && cp -f "${{settings_json}}.tmp" "$settings_json" \\
+        && rm -f "${{settings_json}}.tmp"
+else
+    echo "$skip_patch" > "$settings_json"
+fi
+chmod g+rw "$settings_json" 2>/dev/null || true
+"""
+        return script
 
     def launch_command(self, args: str) -> str:
         if args:

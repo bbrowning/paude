@@ -282,9 +282,15 @@ class TestClaudeAgentSandboxConfig:
 
     def test_yolo_flag_in_script(self) -> None:
         script = ClaudeAgent().apply_sandbox_config(
-            "/home/paude", "/workspace", "--dangerously-skip-permissions"
+            "/home/paude", "/workspace", "", yolo=True
         )
         assert "skipDangerousModePermissionPrompt" in script
+
+    def test_no_yolo_flag_without_yolo(self) -> None:
+        script = ClaudeAgent().apply_sandbox_config(
+            "/home/paude", "/workspace", "--dangerously-skip-permissions"
+        )
+        assert "skipDangerousModePermissionPrompt" not in script
 
 
 class TestGeminiAgentConfig:
