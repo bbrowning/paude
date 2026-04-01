@@ -17,7 +17,7 @@ make clean && make run # Rebuild after container changes
 ## Development Rules
 
 - **All new features must include tests.** Add tests in `tests/test_<module>.py`; CLI flag tests go in `tests/test_cli.py`.
-- **Before committing**, run `make lint` and `make typecheck`. Do not commit if either fails.
+- **After any code change**, run `make test`, `make lint`, and `make typecheck`. Do not commit if any fail.
 - When adding or changing user-facing features, update `README.md` and `src/paude/cli/help.py`.
 - Use agent-agnostic language in user-facing text. Say "the agent" not "Claude" (except in agent-specific examples).
 - When adding scripts to `containers/paude/`, also add them to `[tool.hatch.build.targets.wheel.force-include]` in `pyproject.toml` so they get bundled into the installed package.
