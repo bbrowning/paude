@@ -231,6 +231,7 @@ class ConfigSyncer(BaseConfigSyncer):
         workspace: str = "",
         args: str = "",
         yolo: bool = False,
+        proxy_active: bool = False,
     ) -> None:
         """Sync all configuration to pod /credentials/ directory.
 
@@ -253,7 +254,10 @@ class ConfigSyncer(BaseConfigSyncer):
         print("Syncing configuration to pod...", file=sys.stderr)
 
         self._prepare_config_directory(agent_name=agent_name)
-        self._sync_gcloud_credentials()
+        if proxy_active:
+            self._sync_stub_gcloud_credentials()
+        else:
+            self._sync_gcloud_credentials()
         self._sync_config_files(agent_name)
         self._sync_github_token(github_token)
         self._sync_secret_env_vars(secret_env or {})
@@ -275,6 +279,7 @@ class ConfigSyncer(BaseConfigSyncer):
         workspace: str = "",
         args: str = "",
         yolo: bool = False,
+        proxy_active: bool = False,
     ) -> None:
         """Refresh gcloud credentials on the pod (fast, every connect).
 
@@ -298,20 +303,23 @@ class ConfigSyncer(BaseConfigSyncer):
 
         print("Refreshing credentials...", file=sys.stderr)
 
-        gcloud_dir = home / ".config" / "gcloud"
-        gcloud_files = [
-            GCP_ADC_FILENAME,
-            "credentials.db",
-            "access_tokens.db",
-        ]
-        for filename in gcloud_files:
-            filepath = gcloud_dir / filename
-            if filepath.exists():
-                self._copy_file(
-                    str(filepath),
-                    f"{CONFIG_PATH}/gcloud/{filename}",
-                    context=f"refresh gcloud {filename}",
-                )
+        if proxy_active:
+            self._sync_stub_gcloud_credentials()
+        else:
+            gcloud_dir = home / ".config" / "gcloud"
+            gcloud_files = [
+                GCP_ADC_FILENAME,
+                "credentials.db",
+                "access_tokens.db",
+            ]
+            for filename in gcloud_files:
+                filepath = gcloud_dir / filename
+                if filepath.exists():
+                    self._copy_file(
+                        str(filepath),
+                        f"{CONFIG_PATH}/gcloud/{filename}",
+                        context=f"refresh gcloud {filename}",
+                    )
 
         self._sync_github_token(github_token)
         self._sync_secret_env_vars(secret_env or {})
@@ -439,6 +447,26 @@ class ConfigSyncer(BaseConfigSyncer):
             raise OpenShiftError(
                 f"Failed to prepare config directory: {prep_result.stderr}"
             )
+
+    def _sync_stub_gcloud_credentials(self) -> None:
+        """Sync stub GCP ADC to the pod (proxy handles real auth)."""
+        from paude.backends.shared import STUB_ADC_JSON
+
+        self._oc.run(
+            "exec",
+            self._target,
+            "-n",
+            self._namespace,
+            "--",
+            "mkdir",
+            "-p",
+            f"{CONFIG_PATH}/gcloud",
+            check=False,
+            timeout=OC_EXEC_TIMEOUT,
+        )
+        self._cp_content_to_pod(
+            STUB_ADC_JSON, f"{CONFIG_PATH}/gcloud/{GCP_ADC_FILENAME}"
+        )
 
     def _sync_gcloud_credentials(self) -> None:
         """Sync gcloud credentials to the pod."""

@@ -278,6 +278,7 @@ class SessionConnector:
         """Sync credentials/config for a connect operation."""
         from paude.agents import get_agent
         from paude.agents.base import build_secret_environment_from_config
+        from paude.backends.shared import PROXY_MANAGED_CREDENTIAL
 
         sts = self._lookup.get_statefulset(name)
         agent_name = self._agent_name_from_sts(sts)
@@ -286,7 +287,15 @@ class SessionConnector:
         agent_args = self._extract_env_from_sts(sts, "PAUDE_AGENT_ARGS")
 
         agent = get_agent(agent_name, provider=provider)
-        secret_env = build_secret_environment_from_config(agent.config)
+        proxy_active = self._lookup.has_proxy_deployment(name)
+        if proxy_active:
+            secret_env = dict.fromkeys(
+                agent.config.secret_env_vars, PROXY_MANAGED_CREDENTIAL
+            )
+            # Don't pass real GH_TOKEN to agent when proxy handles credentials
+            github_token = None
+        else:
+            secret_env = build_secret_environment_from_config(agent.config)
 
         if self._syncer.is_config_synced(pname):
             self._syncer.sync_credentials(
@@ -298,6 +307,7 @@ class SessionConnector:
                 provider=provider,
                 args=agent_args,
                 yolo=yolo,
+                proxy_active=proxy_active,
             )
         else:
             self._syncer.sync_full_config(
@@ -309,6 +319,7 @@ class SessionConnector:
                 secret_env=secret_env,
                 args=agent_args,
                 yolo=yolo,
+                proxy_active=proxy_active,
             )
 
     @staticmethod

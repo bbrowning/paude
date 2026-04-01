@@ -605,8 +605,19 @@ def _upgrade_openshift(
                     old_hostname, _ = parse_otel_endpoint(old_otel_endpoint)
                     current_domains = [d for d in current_domains if d != old_hostname]
 
+            from paude.agents.base import build_secret_environment_from_config as _bsec
+
+            _upgrade_agent = get_agent(agent_name, provider=provider_name)
+            _proxy_creds = _bsec(_upgrade_agent.config)
+            _gh = os.environ.get("PAUDE_GITHUB_TOKEN")
+            if _gh:
+                _proxy_creds["GH_TOKEN"] = _gh
             backend._proxy.update_deployment_domains(
-                name, current_domains, otel_ports=otel_ports, image=proxy_image
+                name,
+                current_domains,
+                otel_ports=otel_ports,
+                image=proxy_image,
+                credentials=_proxy_creds,
             )
         elif proxy_image is not None:
             backend._proxy.update_deployment_image(name, proxy_image)
@@ -620,11 +631,22 @@ def _upgrade_openshift(
 
     # Re-sync config
     from paude.agents.base import build_secret_environment_from_config
+    from paude.backends.shared import PROXY_MANAGED_CREDENTIAL
 
     agent_instance = get_agent(agent_name, provider=provider_name)
-    secret_env = build_secret_environment_from_config(agent_instance.config)
+    _proxy_active = backend._lookup.has_proxy_deployment(name)
+    if _proxy_active:
+        secret_env = dict.fromkeys(
+            agent_instance.config.secret_env_vars, PROXY_MANAGED_CREDENTIAL
+        )
+    else:
+        secret_env = build_secret_environment_from_config(agent_instance.config)
     backend._syncer.sync_full_config(
-        pname, agent_name=agent_name, provider=provider_name, secret_env=secret_env
+        pname,
+        agent_name=agent_name,
+        provider=provider_name,
+        secret_env=secret_env,
+        proxy_active=_proxy_active,
     )
 
     github_token = os.environ.get("PAUDE_GITHUB_TOKEN")

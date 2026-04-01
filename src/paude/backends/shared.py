@@ -28,6 +28,22 @@ PAUDE_LABEL_OTEL_ENDPOINT = "paude.io/otel-endpoint"
 
 SQUID_BLOCKED_LOG_PATH = "/tmp/squid-blocked.log"  # noqa: S108
 
+# Sentinel value for credentials managed by paude-proxy.
+# Agent containers see this instead of real API keys.
+PROXY_MANAGED_CREDENTIAL = "paude-proxy-managed"  # noqa: S105
+
+# Stub GCP ADC JSON that satisfies Google client library structure checks.
+# The proxy handles real authentication.
+STUB_ADC_JSON = (
+    '{"type": "authorized_user",'
+    ' "client_id": "paude-proxy-managed",'
+    ' "client_secret": "paude-proxy-managed",'
+    ' "refresh_token": "paude-proxy-managed"}'
+)
+
+# Path where real GCP ADC is stored in the proxy container.
+PROXY_GCP_ADC_PATH = "/data/gcloud/application_default_credentials.json"  # noqa: S105
+
 # Python snippet executed inside containers to extract the OpenClaw auth token.
 # Used by both Podman and OpenShift backends via exec.
 OPENCLAW_AUTH_READER_SCRIPT = (
@@ -149,6 +165,10 @@ def build_session_env(
 
     if proxy_name is not None:
         env.update(build_proxy_environment(proxy_name))
+        # Set dummy credential values — real creds live in the proxy container
+        for var in agent.config.secret_env_vars:
+            env[var] = PROXY_MANAGED_CREDENTIAL
+        env["GH_TOKEN"] = PROXY_MANAGED_CREDENTIAL
 
     return env, agent_args
 

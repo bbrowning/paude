@@ -47,6 +47,53 @@ class TestBuildSessionEnv:
         assert env["PAUDE_SUPPRESS_PROMPTS"] == "1"
 
 
+class TestBuildSessionEnvProxyCredentials:
+    """Tests for dummy credential injection when proxy is active."""
+
+    def test_proxy_active_sets_dummy_api_key(self) -> None:
+        """Secret env vars are set to proxy-managed sentinel when proxy active."""
+        from paude.backends.shared import PROXY_MANAGED_CREDENTIAL
+
+        config = SessionConfig(
+            name="test",
+            workspace=Path("/home/user/project"),
+            image="test-image",
+        )
+        agent = ClaudeAgent()
+        env, _args = build_session_env(config, agent, proxy_name="10.89.0.2")
+
+        for var in agent.config.secret_env_vars:
+            assert env[var] == PROXY_MANAGED_CREDENTIAL
+
+    def test_proxy_active_sets_dummy_gh_token(self) -> None:
+        """GH_TOKEN is set to proxy-managed sentinel when proxy active."""
+        from paude.backends.shared import PROXY_MANAGED_CREDENTIAL
+
+        config = SessionConfig(
+            name="test",
+            workspace=Path("/home/user/project"),
+            image="test-image",
+        )
+        agent = ClaudeAgent()
+        env, _args = build_session_env(config, agent, proxy_name="10.89.0.2")
+
+        assert env["GH_TOKEN"] == PROXY_MANAGED_CREDENTIAL
+
+    def test_no_proxy_does_not_set_dummy_credentials(self) -> None:
+        """Secret env vars are NOT set when no proxy is active."""
+        config = SessionConfig(
+            name="test",
+            workspace=Path("/home/user/project"),
+            image="test-image",
+        )
+        agent = ClaudeAgent()
+        env, _args = build_session_env(config, agent, proxy_name=None)
+
+        assert "GH_TOKEN" not in env
+        for var in agent.config.secret_env_vars:
+            assert var not in env
+
+
 class TestNamingHelpers:
     """Tests for resource naming helper functions."""
 

@@ -468,3 +468,86 @@ class TestCreateProxyCaVolume:
         vol_indices = [i for i, a in enumerate(call_args) if a == "-v"]
         vol_args = [call_args[i + 1] for i in vol_indices]
         assert "paude-ca-test-session:/data/ca" in vol_args
+
+
+class TestProxyCredentials:
+    """Tests for credential passing to the proxy container."""
+
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    def test_create_proxy_passes_credentials_as_env_vars(
+        self, mock_dns: MagicMock
+    ) -> None:
+        """create_proxy passes credential env vars to the proxy container."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = False
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        with patch("paude.container.volume.VolumeManager"):
+            manager.create_proxy(
+                session_name="test-session",
+                proxy_image="proxy:latest",
+                allowed_domains=[".googleapis.com"],
+                credentials={
+                    "ANTHROPIC_API_KEY": "sk-real-key",
+                    "GH_TOKEN": "ghp_real",
+                },
+            )
+
+        # Check that credentials appear as -e flags in the create call
+        engine_calls = mock_runner.engine.run.call_args_list
+        create_call = [c for c in engine_calls if c[0] and c[0][0] == "create"]
+        assert create_call
+        call_args = create_call[0][0]
+        env_indices = [i for i, a in enumerate(call_args) if a == "-e"]
+        env_vals = [call_args[i + 1] for i in env_indices]
+        assert "ANTHROPIC_API_KEY=sk-real-key" in env_vals
+        assert "GH_TOKEN=ghp_real" in env_vals
+
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    def test_create_proxy_without_credentials(self, mock_dns: MagicMock) -> None:
+        """create_proxy works without credentials (backward compat)."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = False
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        with patch("paude.container.volume.VolumeManager"):
+            nname, proxy_ip = manager.create_proxy(
+                session_name="test-session",
+                proxy_image="proxy:latest",
+                allowed_domains=[".googleapis.com"],
+            )
+
+        assert nname == "paude-net-test-session"
+        assert proxy_ip == "10.89.0.2"
+
+    @patch("paude.backends.podman.proxy._get_host_dns")
+    def test_update_domains_passes_credentials(self, mock_dns: MagicMock) -> None:
+        """update_domains passes credentials to recreated proxy."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = True
+        mock_runner.get_container_image.return_value = "proxy:latest"
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        manager.update_domains(
+            session_name="test-session",
+            domains=[".googleapis.com"],
+            credentials={"ANTHROPIC_API_KEY": "sk-real-key"},
+        )
+
+        # Check credentials in the recreate call
+        engine_calls = mock_runner.engine.run.call_args_list
+        create_call = [c for c in engine_calls if c[0] and c[0][0] == "create"]
+        assert create_call
+        call_args = create_call[0][0]
+        env_indices = [i for i, a in enumerate(call_args) if a == "-e"]
+        env_vals = [call_args[i + 1] for i in env_indices]
+        assert "ANTHROPIC_API_KEY=sk-real-key" in env_vals

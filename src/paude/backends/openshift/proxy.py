@@ -219,10 +219,11 @@ class ProxyManager:
         proxy_image: str,
         allowed_domains: list[str] | None = None,
         otel_ports: list[int] | None = None,
+        credentials: dict[str, str] | None = None,
     ) -> None:
-        """Create a Deployment for the squid proxy pod.
+        """Create a Deployment for the proxy pod.
 
-        The proxy pod handles domain-based filtering using squid.conf.
+        The proxy pod handles domain-based filtering and credential injection.
         The paude container routes all HTTP/HTTPS traffic through this proxy.
 
         Args:
@@ -230,6 +231,7 @@ class ProxyManager:
             proxy_image: Container image for the proxy.
             allowed_domains: List of domains to allow through the proxy.
             otel_ports: Non-standard ports to allow for OTEL endpoints.
+            credentials: Real credential env vars for the proxy to inject.
         """
         deployment_name = proxy_resource_name(session_name)
 
@@ -249,6 +251,9 @@ class ProxyManager:
                     "value": ",".join(str(p) for p in otel_ports),
                 }
             )
+        if credentials:
+            for key, value in credentials.items():
+                env_list.append({"name": key, "value": value})
 
         deployment_spec: dict[str, Any] = {
             "apiVersion": "apps/v1",
@@ -556,6 +561,7 @@ class ProxyManager:
         domains: list[str],
         otel_ports: list[int] | None = None,
         image: str | None = None,
+        credentials: dict[str, str] | None = None,
     ) -> None:
         """Update the ALLOWED_DOMAINS env var on the proxy Deployment.
 
@@ -567,6 +573,7 @@ class ProxyManager:
                 list clears it.
             image: If provided, also update the container image in the same
                 patch to avoid a double pod restart.
+            credentials: Real credential env vars to preserve across updates.
         """
         domains_str = ",".join(domains)
 
@@ -583,6 +590,9 @@ class ProxyManager:
                     "value": ",".join(str(p) for p in otel_ports),
                 }
             )
+        if credentials:
+            for key, value in credentials.items():
+                env_entries.append({"name": key, "value": value})
 
         container_fields: dict[str, Any] = {"env": env_entries}
         if image is not None:

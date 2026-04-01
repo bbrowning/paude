@@ -385,3 +385,54 @@ class TestDockerCredentialInjection:
         assert len(exec_calls) == 1
         shell_cmd = exec_calls[0][0][0][-1]
         assert "chown paude:0" in shell_cmd
+
+
+class TestProxyActiveCredentialInjection:
+    """Tests for stub ADC injection when proxy is active."""
+
+    @patch("subprocess.run")
+    def test_inject_credentials_stub_adc_when_proxy_active(
+        self, mock_run: MagicMock
+    ) -> None:
+        """_inject_credentials injects stub ADC when proxy_active=True."""
+        from paude.backends.shared import STUB_ADC_JSON
+        from paude.constants import GCP_ADC_TARGET
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        engine = ContainerEngine("docker")
+        backend = PodmanBackend(engine=engine)
+        backend._inject_credentials("paude-test", proxy_active=True)
+
+        # Should inject stub ADC content
+        exec_calls = [
+            c
+            for c in mock_run.call_args_list
+            if "exec" in c[0][0] and "cat" in " ".join(c[0][0])
+        ]
+        assert len(exec_calls) == 1
+        assert exec_calls[0][1].get("input") == STUB_ADC_JSON
+        shell_cmd = exec_calls[0][0][0][-1]
+        assert GCP_ADC_TARGET in shell_cmd
+
+    @patch("subprocess.run")
+    def test_inject_credentials_stub_adc_podman_when_proxy_active(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Podman also injects stub ADC when proxy_active (not no-op)."""
+        from paude.backends.shared import STUB_ADC_JSON
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        engine = ContainerEngine("podman")
+        backend = PodmanBackend(engine=engine)
+        backend._inject_credentials("paude-test", proxy_active=True)
+
+        # Should still inject stub (not skip like normal Podman path)
+        exec_calls = [
+            c
+            for c in mock_run.call_args_list
+            if "exec" in c[0][0] and "cat" in " ".join(c[0][0])
+        ]
+        assert len(exec_calls) == 1
+        assert exec_calls[0][1].get("input") == STUB_ADC_JSON

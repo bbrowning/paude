@@ -84,7 +84,12 @@ class SessionDomainManager:
             return ""
         return log_result.stdout
 
-    def update_allowed_domains(self, name: str, domains: list[str]) -> None:
+    def update_allowed_domains(
+        self,
+        name: str,
+        domains: list[str],
+        credentials: dict[str, str] | None = None,
+    ) -> None:
         """Update allowed domains for a session.
 
         Raises:
@@ -99,4 +104,4 @@ class SessionDomainManager:
                 "Cannot update domains."
             )
 
-        self._proxy.update_deployment_domains(name, domains)
+        self._proxy.update_deployment_domains(name, domains, credentials=credentials)

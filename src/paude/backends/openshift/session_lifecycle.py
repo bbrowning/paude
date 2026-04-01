@@ -8,7 +8,10 @@ import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from paude.agents.base import Agent
 
 from paude.backends.base import Session, SessionConfig
 from paude.backends.openshift.build import BuildOrchestrator
@@ -87,7 +90,10 @@ class SessionLifecycleManager:
 
         print(f"Creating session '{session_name}'...", file=sys.stderr)
 
-        self._setup_proxy(config, session_name)
+        from paude.agents import get_agent as _get_agent
+
+        agent = _get_agent(config.agent, provider=config.provider)
+        self._setup_proxy(config, session_name, agent)
         session_env, secret_env = self._build_session_env(config, session_name)
         self._apply_and_wait(session_name, config, session_env, secret_env)
 
@@ -105,16 +111,36 @@ class SessionLifecycleManager:
             agent=config.agent,
         )
 
-    def _setup_proxy(self, config: SessionConfig, session_name: str) -> None:
+    def _setup_proxy(
+        self, config: SessionConfig, session_name: str, agent: Agent
+    ) -> None:
         """Set up proxy deployment and network policies."""
         if config.allowed_domains is not None:
             proxy_image = self._resolve_proxy_image(config)
+
+            from paude.agents.base import build_secret_environment_from_config
+            from paude.backends.shared import PROXY_GCP_ADC_PATH
+
+            proxy_creds = build_secret_environment_from_config(agent.config)
+            import os
+
+            gh_token = os.environ.get("PAUDE_GITHUB_TOKEN")
+            if gh_token:
+                proxy_creds["GH_TOKEN"] = gh_token
+            # GCP ADC: OpenShift proxy gets real creds synced via oc cp,
+            # set the path env var so the proxy knows where to find it
+            from paude.constants import GCP_ADC_FILENAME
+
+            gcp_adc_path = Path.home() / ".config" / "gcloud" / GCP_ADC_FILENAME
+            if gcp_adc_path.is_file():
+                proxy_creds["GOOGLE_APPLICATION_CREDENTIALS"] = PROXY_GCP_ADC_PATH
 
             self._proxy.create_deployment(
                 session_name,
                 proxy_image,
                 config.allowed_domains,
                 otel_ports=config.otel_ports,
+                credentials=proxy_creds,
             )
             self._proxy.create_service(session_name)
             self._proxy.ensure_proxy_network_policy(session_name)
@@ -139,14 +165,18 @@ class SessionLifecycleManager:
         """
         from paude.agents import get_agent
         from paude.agents.base import build_secret_environment_from_config
+        from paude.backends.shared import PROXY_MANAGED_CREDENTIAL
 
         agent = get_agent(config.agent, provider=config.provider)
-        secret_env = build_secret_environment_from_config(agent.config)
-        proxy_name = (
-            proxy_resource_name(session_name)
-            if config.allowed_domains is not None
-            else None
-        )
+        proxy_active = config.allowed_domains is not None
+        if proxy_active:
+            # Agent gets dummy credential values; proxy handles real auth
+            secret_env = dict.fromkeys(
+                agent.config.secret_env_vars, PROXY_MANAGED_CREDENTIAL
+            )
+        else:
+            secret_env = build_secret_environment_from_config(agent.config)
+        proxy_name = proxy_resource_name(session_name) if proxy_active else None
         session_env, _agent_args = build_session_env(
             config, agent, proxy_name=proxy_name
         )
@@ -205,6 +235,7 @@ class SessionLifecycleManager:
                 secret_env=secret_env,
                 args=session_env.get("PAUDE_AGENT_ARGS", ""),
                 yolo=config.yolo,
+                proxy_active=config.allowed_domains is not None,
             )
 
     def start_agent_headless_in_pod(self, pname: str) -> None:

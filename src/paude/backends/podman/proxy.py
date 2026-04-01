@@ -123,7 +123,11 @@ class PodmanProxyManager:
 
         return (proxy_image, domains, otel_ports)
 
-    def start_if_needed(self, session_name: str) -> None:
+    def start_if_needed(
+        self,
+        session_name: str,
+        credentials: dict[str, str] | None = None,
+    ) -> None:
         """Start or recreate the proxy container for a session."""
         pname = proxy_container_name(session_name)
 
@@ -160,6 +164,7 @@ class PodmanProxyManager:
             ip=proxy_ip,
             otel_ports=otel_ports,
             ca_volume=ca_vol,
+            credentials=credentials,
         )
         self._proxy_runner.start_session_proxy(pname)
 
@@ -264,6 +269,7 @@ class PodmanProxyManager:
         proxy_image: str,
         allowed_domains: list[str] | None,
         otel_ports: list[int] | None = None,
+        credentials: dict[str, str] | None = None,
     ) -> tuple[str, str | None]:
         """Create a proxy container for a session.
 
@@ -301,6 +307,7 @@ class PodmanProxyManager:
                 ip=proxy_ip,
                 otel_ports=otel_ports,
                 ca_volume=ca_vol,
+                credentials=credentials,
             )
         except Exception:
             volume_mgr.remove_volume(ca_vol, force=True)
@@ -337,7 +344,12 @@ class PodmanProxyManager:
             return ""
         return result.stdout
 
-    def update_domains(self, session_name: str, domains: list[str]) -> None:
+    def update_domains(
+        self,
+        session_name: str,
+        domains: list[str],
+        credentials: dict[str, str] | None = None,
+    ) -> None:
         """Update allowed domains for a session."""
         pname = proxy_container_name(session_name)
         if not self._runner.container_exists(pname):
@@ -372,4 +384,5 @@ class PodmanProxyManager:
             ip=proxy_ip,
             otel_ports=otel_ports,
             ca_volume=ca_vol,
+            credentials=credentials,
         )

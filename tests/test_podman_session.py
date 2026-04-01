@@ -1088,9 +1088,12 @@ class TestPodmanBackendGcpAdcSecret:
     def test_start_session_recreates_secret(
         self, mock_runner_class: MagicMock, mock_path_class: MagicMock
     ) -> None:
-        """start_session recreates the secret before starting."""
+        """start_session recreates the secret before starting (no proxy)."""
         mock_runner = MagicMock()
-        mock_runner.container_exists.return_value = True
+        # Main container exists, proxy container does not
+        mock_runner.container_exists.side_effect = lambda name: (
+            not name.startswith("paude-proxy-")
+        )
         mock_runner.get_container_state.return_value = "exited"
         mock_runner.attach_container.return_value = 0
         mock_runner_class.return_value = mock_runner
