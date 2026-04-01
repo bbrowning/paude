@@ -138,9 +138,16 @@ Configuration is synced via `oc cp` to tmpfs on session start and reconnect:
 
 Plugin paths are automatically rewritten from host paths to container paths.
 
+**Custom Secret Env Vars (`secretEnv`):**
+- Declared in `paude.json` or `devcontainer.json` (see [CONFIGURATION.md](CONFIGURATION.md#secret-environment-variables))
+- Written to tmpfs at `/credentials/env/<VAR_NAME>` alongside built-in credentials
+- Supports name mapping: host env var names can differ from container names
+- Mapping is stored in StatefulSet annotations so it survives across connect/start/upgrade
+- Values are read fresh from the host on every connect
+
 **Credential Refresh:**
-- **First connect** (after pod start): Full sync of gcloud, claude config, and gitconfig
-- **Reconnect** (subsequent connects): Only gcloud credentials refreshed (fast)
+- **First connect** (after pod start): Full sync of gcloud, claude config, gitconfig, and secretEnv
+- **Reconnect** (subsequent connects): Only gcloud credentials and secretEnv refreshed (fast)
 - This ensures fresh OAuth tokens propagate if you re-authenticate locally
 - Long-running pods stay current with local credential changes
 

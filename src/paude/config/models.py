@@ -44,6 +44,11 @@ class PaudeConfig:
     # Container environment variables
     container_env: dict[str, str] = field(default_factory=dict)
 
+    # Secret environment variable mapping (container_name -> host_name).
+    # Values read from host os.environ, injected securely via tmpfs/exec,
+    # never in container spec.
+    container_secret_env: dict[str, str] = field(default_factory=dict)
+
     # Additional packages to install (paude.json format)
     packages: list[str] = field(default_factory=list)
 

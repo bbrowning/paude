@@ -352,13 +352,15 @@ def _upgrade_podman(
     # allowed_domains=None means no proxy (unrestricted);
     # passing None to _prepare_session_create would incorrectly add defaults.
     if allowed_domains is not None:
-        expanded_domains, parsed_args, _env, unrestricted = _prepare_session_create(
-            allowed_domains,
-            yolo,
-            None,
-            config,
-            agent_name=agent_name,
-            otel_endpoint=otel_endpoint,
+        expanded_domains, parsed_args, _env, unrestricted, _secret_mapping = (
+            _prepare_session_create(
+                allowed_domains,
+                yolo,
+                None,
+                config,
+                agent_name=agent_name,
+                otel_endpoint=otel_endpoint,
+            )
         )
         session_domains = expanded_domains if not unrestricted else allowed_domains
     else:
@@ -375,6 +377,14 @@ def _upgrade_podman(
         from paude.otel import otel_proxy_ports
 
         otel_ports = otel_proxy_ports(otel_endpoint)
+
+    # Extract secret env mapping from config
+    secret_env_mapping: dict[str, str] = {}
+    if config and config.container_secret_env:
+        from paude.cli.helpers import _validate_secret_env_names
+
+        _validate_secret_env_names(config.container_secret_env)
+        secret_env_mapping = dict(config.container_secret_env)
 
     # Create new session config with reuse_volume=True
     from paude.backends import SessionConfig
@@ -395,6 +405,7 @@ def _upgrade_podman(
         ports=agent_instance.config.exposed_ports,
         otel_ports=otel_ports,
         otel_endpoint=otel_endpoint,
+        secret_env_mapping=secret_env_mapping,
     )
 
     backend.create_session(session_config)
@@ -568,6 +579,30 @@ def _upgrade_openshift(
             "--overwrite",
         )
 
+    # Update secret-env annotation from project config (clear if empty)
+    if config is not None:
+        from paude.backends.shared import (
+            PAUDE_LABEL_SECRET_ENV,
+            serialize_secret_env_mapping,
+        )
+        from paude.cli.helpers import _validate_secret_env_names
+
+        secret_mapping = config.container_secret_env
+        if secret_mapping:
+            _validate_secret_env_names(secret_mapping)
+        ann_value = (
+            serialize_secret_env_mapping(secret_mapping) if secret_mapping else ""
+        )
+        oc.run(
+            "annotate",
+            "statefulset",
+            sts_name,
+            "-n",
+            ns,
+            f"{PAUDE_LABEL_SECRET_ENV}={ann_value}",
+            "--overwrite",
+        )
+
     # Scale to 1 and wait
     typer.echo(f"Starting session '{name}'...", err=True)
     backend._lifecycle._scale_statefulset(name, 1)
@@ -618,11 +653,14 @@ def _upgrade_openshift(
     typer.echo(f"Waiting for pod {pname} to be ready...", err=True)
     backend._pod_waiter.wait_for_ready(pname)
 
-    # Re-sync config
+    # Re-sync config (including custom secret env vars from project config)
     from paude.agents.base import build_secret_environment_from_config
+    from paude.backends.shared import build_custom_secret_env
 
     agent_instance = get_agent(agent_name, provider=provider_name)
     secret_env = build_secret_environment_from_config(agent_instance.config)
+    if config and config.container_secret_env:
+        secret_env.update(build_custom_secret_env(config.container_secret_env))
     backend._syncer.sync_full_config(
         pname, agent_name=agent_name, provider=provider_name, secret_env=secret_env
     )

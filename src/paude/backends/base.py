@@ -89,6 +89,7 @@ class SessionConfig:
     ports: list[tuple[int, int]] = field(default_factory=list)
     otel_ports: list[int] = field(default_factory=list)
     otel_endpoint: str | None = None
+    secret_env_mapping: dict[str, str] = field(default_factory=dict)
 
 
 class Backend(Protocol):

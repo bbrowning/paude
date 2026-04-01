@@ -257,6 +257,20 @@ def _expand_allowed_domains(
     return expand_domains(domains_input, extra_aliases=extra_aliases)
 
 
+def _validate_secret_env_names(mapping: dict[str, str]) -> None:
+    """Validate that secret env names don't contain commas or equals signs.
+
+    These characters are used as separators in label/annotation storage.
+    """
+    bad = [n for n in (*mapping.keys(), *mapping.values()) if "," in n or "=" in n]
+    if bad:
+        typer.echo(
+            f"Error: secretEnv names cannot contain commas or equals signs: {bad}",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+
 def _prepare_session_create(
     allowed_domains: list[str] | None,
     yolo: bool,
@@ -265,11 +279,12 @@ def _prepare_session_create(
     agent_name: str = "claude",
     provider_name: str | None = None,
     otel_endpoint: str | None = None,
-) -> tuple[list[str] | None, list[str], dict[str, str], bool]:
+) -> tuple[list[str] | None, list[str], dict[str, str], bool, dict[str, str]]:
     """Shared pre-create logic for both backends.
 
     Returns:
-        Tuple of (expanded_domains, parsed_args, env, unrestricted).
+        Tuple of (expanded_domains, parsed_args, env, unrestricted,
+        secret_env_mapping).
     """
     from paude.agents import get_agent
     from paude.domains import is_unrestricted
@@ -298,6 +313,12 @@ def _prepare_session_create(
 
     unrestricted = is_unrestricted(expanded_domains)
 
+    # Extract secret env mapping from config
+    secret_env_mapping: dict[str, str] = {}
+    if config_obj and config_obj.container_secret_env:
+        _validate_secret_env_names(config_obj.container_secret_env)
+        secret_env_mapping = dict(config_obj.container_secret_env)
+
     # Show warnings for dangerous configurations
     if yolo and unrestricted:
         typer.echo(
@@ -310,7 +331,7 @@ def _prepare_session_create(
         )
         typer.echo("", err=True)
 
-    return expanded_domains, parsed_args, env, unrestricted
+    return expanded_domains, parsed_args, env, unrestricted, secret_env_mapping
 
 
 def _finalize_session_create(

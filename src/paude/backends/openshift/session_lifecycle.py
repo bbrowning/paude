@@ -139,9 +139,12 @@ class SessionLifecycleManager:
         """
         from paude.agents import get_agent
         from paude.agents.base import build_secret_environment_from_config
+        from paude.backends.shared import build_custom_secret_env
 
         agent = get_agent(config.agent, provider=config.provider)
         secret_env = build_secret_environment_from_config(agent.config)
+        if config.secret_env_mapping:
+            secret_env.update(build_custom_secret_env(config.secret_env_mapping))
         proxy_name = (
             proxy_resource_name(session_name)
             if config.allowed_domains is not None
@@ -179,6 +182,7 @@ class SessionLifecycleManager:
             gpu=config.gpu,
             yolo=config.yolo,
             otel_endpoint=config.otel_endpoint,
+            secret_env_mapping=config.secret_env_mapping,
         )
 
         print(
@@ -405,6 +409,7 @@ class SessionLifecycleManager:
         gpu: str | None = None,
         yolo: bool = False,
         otel_endpoint: str | None = None,
+        secret_env_mapping: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Generate a Kubernetes StatefulSet specification."""
         return (
@@ -422,5 +427,6 @@ class SessionLifecycleManager:
             .with_workspace(workspace)
             .with_pvc(size=pvc_size, storage_class=storage_class)
             .with_otel_endpoint(otel_endpoint)
+            .with_secret_env_mapping(secret_env_mapping or {})
             .build()
         )

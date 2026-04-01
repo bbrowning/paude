@@ -123,11 +123,15 @@ def _parse_devcontainer(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
     # Parse containerEnv
     container_env = data.get("containerEnv", {})
 
+    # Parse secretEnv from customizations.paude.secretEnv
+    paude_customizations = data.get("customizations", {}).get("paude", {})
+    container_secret_env = _parse_secret_env(paude_customizations.get("secretEnv"))
+
     # Warn about unsupported properties
     _warn_unsupported_properties(data)
 
     # Parse create hints from customizations.paude.create
-    create_section = data.get("customizations", {}).get("paude", {}).get("create", {})
+    create_section = paude_customizations.get("create", {})
     create_allowed_domains, create_agent, create_provider, create_otel_endpoint = (
         _parse_create_section(create_section)
     )
@@ -141,6 +145,7 @@ def _parse_devcontainer(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
         features=features,
         post_create_command=post_create_command,
         container_env=container_env,
+        container_secret_env=container_secret_env,
         build_args=build_args,
         create_allowed_domains=create_allowed_domains,
         create_agent=create_agent,
@@ -178,6 +183,9 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
             file=sys.stderr,
         )
 
+    # Parse secretEnv
+    container_secret_env = _parse_secret_env(data.get("secretEnv"))
+
     # Parse "create" section for create hints
     create_allowed_domains, create_agent, create_provider, create_otel_endpoint = (
         _parse_create_section(data.get("create", {}))
@@ -192,11 +200,27 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
         build_args=build_args,
         packages=packages,
         post_create_command=setup_command,
+        container_secret_env=container_secret_env,
         create_allowed_domains=create_allowed_domains,
         create_agent=create_agent,
         create_provider=create_provider,
         create_otel_endpoint=create_otel_endpoint,
     )
+
+
+def _parse_secret_env(raw: object) -> dict[str, str]:
+    """Parse secretEnv config into a container_name -> host_name mapping.
+
+    Format: {"CONTAINER_NAME": "HOST_NAME"}
+    Use the same name for both when no remapping is needed.
+    """
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return {
+            k: v for k, v in raw.items() if isinstance(k, str) and isinstance(v, str)
+        }
+    return {}
 
 
 _KNOWN_CREATE_KEYS = {"allowed-domains", "agent", "provider", "otel-endpoint"}
