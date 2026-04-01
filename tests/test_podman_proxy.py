@@ -717,3 +717,125 @@ class TestUpdateDomainsCaResilience:
         captured = capsys.readouterr()
         assert "CA certificate missing after proxy recreate" in captured.err
         mock_runner.inject_file.assert_not_called()
+
+
+class TestSourceIpFiltering:
+    """Tests for source IP filtering (allowed_clients) in proxy creation."""
+
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    def test_create_proxy_passes_allowed_clients(self, mock_dns: MagicMock) -> None:
+        """create_proxy derives agent IP and passes it as allowed_clients."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = False
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        with patch("paude.container.volume.VolumeManager"):
+            manager.create_proxy(
+                session_name="test-session",
+                proxy_image="proxy:latest",
+                allowed_domains=[".googleapis.com"],
+            )
+
+        # proxy_ip = gateway + 1 = 10.89.0.2, agent_ip = proxy_ip + 1 = 10.89.0.3
+        engine_calls = mock_runner.engine.run.call_args_list
+        create_call = [c for c in engine_calls if c[0] and c[0][0] == "create"]
+        assert create_call
+        call_args = create_call[0][0]
+        env_indices = [i for i, a in enumerate(call_args) if a == "-e"]
+        env_vals = [call_args[i + 1] for i in env_indices]
+        assert "PAUDE_PROXY_ALLOWED_CLIENTS=10.89.0.3" in env_vals
+
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    def test_create_proxy_no_allowed_clients_when_no_gateway(
+        self, mock_dns: MagicMock
+    ) -> None:
+        """create_proxy omits allowed_clients when gateway is unavailable."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = False
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = None
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        with patch("paude.container.volume.VolumeManager"):
+            manager.create_proxy(
+                session_name="test-session",
+                proxy_image="proxy:latest",
+                allowed_domains=[".googleapis.com"],
+            )
+
+        engine_calls = mock_runner.engine.run.call_args_list
+        create_call = [c for c in engine_calls if c[0] and c[0][0] == "create"]
+        assert create_call
+        call_args = create_call[0][0]
+        env_indices = [i for i, a in enumerate(call_args) if a == "-e"]
+        env_vals = [call_args[i + 1] for i in env_indices]
+        assert not any("PAUDE_PROXY_ALLOWED_CLIENTS" in v for v in env_vals)
+
+    @patch("paude.backends.podman.proxy._get_host_dns")
+    def test_update_domains_passes_allowed_clients(self, mock_dns: MagicMock) -> None:
+        """update_domains passes allowed_clients to the recreated proxy."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = True
+        mock_runner.get_container_image.return_value = "proxy:latest"
+        mock_runner.container_running.return_value = False
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        manager.update_domains(
+            session_name="test-session",
+            domains=[".googleapis.com"],
+        )
+
+        engine_calls = mock_runner.engine.run.call_args_list
+        create_call = [c for c in engine_calls if c[0] and c[0][0] == "create"]
+        assert create_call
+        call_args = create_call[0][0]
+        env_indices = [i for i, a in enumerate(call_args) if a == "-e"]
+        env_vals = [call_args[i + 1] for i in env_indices]
+        assert "PAUDE_PROXY_ALLOWED_CLIENTS=10.89.0.3" in env_vals
+
+    @patch("paude.backends.podman.proxy._get_host_dns")
+    def test_start_if_needed_recreate_passes_allowed_clients(
+        self, mock_dns: MagicMock
+    ) -> None:
+        """start_if_needed passes allowed_clients when recreating missing proxy."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        # Proxy doesn't exist, so it should be recreated from labels
+        mock_runner.container_exists.return_value = False
+        mock_runner.engine.run.return_value = MagicMock(
+            returncode=0, stdout="", stderr=""
+        )
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        # Patch get_config_from_labels to return proxy config
+        with patch.object(
+            manager,
+            "get_config_from_labels",
+            return_value=("proxy:latest", [".googleapis.com"], []),
+        ):
+            manager.start_if_needed(
+                session_name="test-session",
+                credentials={"ANTHROPIC_API_KEY": "sk-real"},
+            )
+
+        engine_calls = mock_runner.engine.run.call_args_list
+        create_call = [c for c in engine_calls if c[0] and c[0][0] == "create"]
+        assert create_call
+        call_args = create_call[0][0]
+        env_indices = [i for i, a in enumerate(call_args) if a == "-e"]
+        env_vals = [call_args[i + 1] for i in env_indices]
+        assert "PAUDE_PROXY_ALLOWED_CLIENTS=10.89.0.3" in env_vals
+
+    def test_derive_agent_ip(self) -> None:
+        """_derive_agent_ip returns proxy IP + 1."""
+        assert PodmanProxyManager._derive_agent_ip("10.89.0.2") == "10.89.0.3"
+        assert PodmanProxyManager._derive_agent_ip("172.16.0.10") == "172.16.0.11"

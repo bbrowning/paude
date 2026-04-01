@@ -1643,3 +1643,106 @@ class TestProxyRunnerFixedIp:
 
         call_args = mock_runner.engine.run.call_args[0]
         assert "--ip" not in call_args
+
+
+class TestProxyRunnerAllowedClients:
+    """Tests for allowed_clients parameter in ProxyRunner."""
+
+    def test_create_session_proxy_passes_allowed_clients_env(self):
+        """create_session_proxy sets PAUDE_PROXY_ALLOWED_CLIENTS env var."""
+        from paude.container.proxy_runner import ProxyRunner
+
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.run.return_value = MagicMock(returncode=0)
+
+        proxy = ProxyRunner(mock_runner)
+        proxy.create_session_proxy(
+            name="paude-proxy-test",
+            image="proxy:latest",
+            network="paude-net-test",
+            ip="10.89.0.2",
+            allowed_clients="10.89.0.3",
+        )
+
+        call_args = mock_runner.engine.run.call_args_list[0][0]
+        env_indices = [i for i, a in enumerate(call_args) if a == "-e"]
+        env_vals = [call_args[i + 1] for i in env_indices]
+        assert "PAUDE_PROXY_ALLOWED_CLIENTS=10.89.0.3" in env_vals
+
+    def test_create_session_proxy_omits_allowed_clients_when_none(self):
+        """create_session_proxy omits PAUDE_PROXY_ALLOWED_CLIENTS when not set."""
+        from paude.container.proxy_runner import ProxyRunner
+
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.run.return_value = MagicMock(returncode=0)
+
+        proxy = ProxyRunner(mock_runner)
+        proxy.create_session_proxy(
+            name="paude-proxy-test",
+            image="proxy:latest",
+            network="paude-net-test",
+        )
+
+        call_args = mock_runner.engine.run.call_args_list[0][0]
+        env_indices = [i for i, a in enumerate(call_args) if a == "-e"]
+        env_vals = [call_args[i + 1] for i in env_indices]
+        assert not any("PAUDE_PROXY_ALLOWED_CLIENTS" in v for v in env_vals)
+
+    def test_run_proxy_passes_allowed_clients_env(self):
+        """run_proxy sets PAUDE_PROXY_ALLOWED_CLIENTS env var."""
+        from paude.container.proxy_runner import ProxyRunner
+
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.run.return_value = MagicMock(returncode=0)
+
+        proxy = ProxyRunner(mock_runner)
+        proxy.run_proxy(
+            image="proxy:latest",
+            network="paude-net-test",
+            allowed_clients="10.89.0.3",
+        )
+
+        call_args = mock_runner.engine.run.call_args_list[0][0]
+        env_indices = [i for i, a in enumerate(call_args) if a == "-e"]
+        env_vals = [call_args[i + 1] for i in env_indices]
+        assert "PAUDE_PROXY_ALLOWED_CLIENTS=10.89.0.3" in env_vals
+
+    def test_recreate_session_proxy_passes_allowed_clients(self):
+        """recreate_session_proxy forwards allowed_clients to create."""
+        from paude.container.proxy_runner import ProxyRunner
+
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.run.return_value = MagicMock(returncode=0)
+
+        proxy = ProxyRunner(mock_runner)
+        proxy.recreate_session_proxy(
+            name="paude-proxy-test",
+            image="proxy:latest",
+            network="paude-net-test",
+            ip="10.89.0.2",
+            allowed_clients="10.89.0.3",
+        )
+
+        # Find the "create" call (after stop and rm)
+        create_calls = [
+            c
+            for c in mock_runner.engine.run.call_args_list
+            if c[0] and c[0][0] == "create"
+        ]
+        assert create_calls
+        call_args = create_calls[0][0]
+        env_indices = [i for i, a in enumerate(call_args) if a == "-e"]
+        env_vals = [call_args[i + 1] for i in env_indices]
+        assert "PAUDE_PROXY_ALLOWED_CLIENTS=10.89.0.3" in env_vals
