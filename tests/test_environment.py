@@ -87,3 +87,20 @@ class TestBuildProxyEnvironment:
         """Proxy env does not set NODE_OPTIONS (OTEL proxy handled by sdk.js patch)."""
         env = build_proxy_environment("paude-proxy")
         assert "NODE_OPTIONS" not in env
+
+    def test_includes_ca_cert_env_vars(self):
+        """Proxy environment includes CA certificate trust env vars."""
+        env = build_proxy_environment("paude-proxy")
+        assert env["NODE_EXTRA_CA_CERTS"] == (
+            "/etc/pki/ca-trust/source/anchors/paude-proxy-ca.crt"
+        )
+        assert env["REQUESTS_CA_BUNDLE"] == (
+            "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+        )
+        assert env["SSL_CERT_FILE"] == (
+            "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+        )
+        assert env["SSL_CERT_DIR"] == "/etc/pki/tls/certs"
+        assert env["CURL_CA_BUNDLE"] == (
+            "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+        )

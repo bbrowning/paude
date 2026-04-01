@@ -56,6 +56,10 @@ fi
 # git config --global creates .gitconfig if it doesn't exist
 git config --global --add safe.directory '*' 2>/dev/null || true
 
+# Update CA trust early (before any HTTPS calls like agent install)
+# The CA cert is injected by the host after the container starts.
+setup_ca_trust
+
 # Wait for and set up tmpfs-based credentials
 # Order matters: setup_credentials copies host config into ~/.claude (real dir),
 # then persist_agent_config merges it into /pvc/.claude (preserving existing

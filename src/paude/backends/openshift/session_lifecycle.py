@@ -195,6 +195,9 @@ class SessionLifecycleManager:
             print(f"Waiting for pod {pname} to be ready...", file=sys.stderr)
             self._pod_waiter.wait_for_ready(pname)
 
+            if config.allowed_domains is not None:
+                self._proxy.distribute_ca_cert(session_name, pname)
+
             self._syncer.sync_full_config(
                 pname,
                 agent_name=config.agent,
@@ -331,7 +334,8 @@ class SessionLifecycleManager:
         print(f"Starting session '{name}'...", file=sys.stderr)
         self._scale_statefulset(name, 1)
 
-        if self._lookup.has_proxy_deployment(name):
+        has_proxy = self._lookup.has_proxy_deployment(name)
+        if has_proxy:
             self._scale_deployment(proxy_resource_name(name), 1)
             self._proxy.wait_for_ready(name)
 
@@ -341,6 +345,9 @@ class SessionLifecycleManager:
         except PodNotReadyError as e:
             print(f"Pod failed to start: {e}", file=sys.stderr)
             return 1
+
+        if has_proxy:
+            self._proxy.distribute_ca_cert(name, pname)
 
         assert self._connect_fn is not None  # noqa: S101
         return self._connect_fn(name, github_token)

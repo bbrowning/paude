@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from paude.backends.podman.proxy import PodmanProxyManager, _get_host_dns
+from paude.backends.podman.proxy import (
+    CA_CERT_CONTAINER_PATH,
+    PodmanProxyManager,
+    _get_host_dns,
+    ca_volume_name,
+)
 
 
 def _make_mock_runner(engine_binary: str = "podman") -> MagicMock:
@@ -182,7 +187,9 @@ class TestProxyManagerFixedIp:
 
         # Check IP was embedded in --network spec (Podman multi-network)
         engine_calls = mock_runner.engine.run.call_args_list
-        create_call = [c for c in engine_calls if "create" in str(c)]
+        create_call = [
+            c for c in engine_calls if c[0] and len(c[0]) > 0 and c[0][0] == "create"
+        ]
         assert create_call, "Expected a create call"
         call_args = create_call[0][0]
         assert "--ip" not in call_args
@@ -349,3 +356,115 @@ class TestGetHostDns:
 
         assert result == "172.16.0.1"
         engine.transport.run.assert_called_once()
+
+
+class TestCaVolumeName:
+    """Tests for ca_volume_name helper."""
+
+    def test_ca_volume_name_format(self) -> None:
+        assert ca_volume_name("my-session") == "paude-ca-my-session"
+
+
+class TestDistributeCaCert:
+    """Tests for PodmanProxyManager.distribute_ca_cert."""
+
+    def test_distribute_ca_cert_copies_cert(self) -> None:
+        """distribute_ca_cert reads cert from proxy and injects into agent."""
+        mock_runner = _make_mock_runner()
+        mock_runner.container_running.return_value = True
+        # First exec: test -f succeeds (cert exists)
+        # Second exec: cat returns cert content
+        # Third exec: update-ca-trust succeeds
+        mock_runner.exec_in_container.side_effect = [
+            MagicMock(returncode=0),  # test -f
+            MagicMock(
+                returncode=0,
+                stdout="-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n",
+            ),  # cat
+            MagicMock(returncode=0),  # update-ca-trust
+        ]
+        mock_network = MagicMock()
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        manager.distribute_ca_cert("test-session")
+
+        # Verify inject_file was called with cert content
+        mock_runner.inject_file.assert_called_once()
+        call_args = mock_runner.inject_file.call_args
+        assert call_args[0][0] == "paude-test-session"  # agent container
+        assert "BEGIN CERTIFICATE" in call_args[0][1]
+        assert call_args[0][2] == CA_CERT_CONTAINER_PATH
+
+    def test_distribute_ca_cert_skips_when_proxy_not_running(self) -> None:
+        """distribute_ca_cert is a no-op if proxy is not running."""
+        mock_runner = _make_mock_runner()
+        mock_runner.container_running.side_effect = lambda name: (
+            name != "paude-proxy-test-session"
+        )
+        mock_network = MagicMock()
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        manager.distribute_ca_cert("test-session")
+
+        mock_runner.inject_file.assert_not_called()
+
+    def test_distribute_ca_cert_skips_when_agent_not_running(self) -> None:
+        """distribute_ca_cert is a no-op if agent container is not running."""
+        mock_runner = _make_mock_runner()
+        mock_runner.container_running.side_effect = lambda name: (
+            name != "paude-test-session"
+        )
+        mock_network = MagicMock()
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        manager.distribute_ca_cert("test-session")
+
+        mock_runner.inject_file.assert_not_called()
+
+    def test_distribute_ca_cert_warns_on_timeout(self, capsys) -> None:
+        """distribute_ca_cert warns if CA cert not generated in time."""
+        mock_runner = _make_mock_runner()
+        mock_runner.container_running.return_value = True
+        # test -f always fails (cert never appears)
+        mock_runner.exec_in_container.return_value = MagicMock(returncode=1)
+        mock_network = MagicMock()
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        with patch("paude.backends.podman.proxy.CA_CERT_POLL_TIMEOUT", 0):
+            manager.distribute_ca_cert("test-session")
+
+        captured = capsys.readouterr()
+        assert "Timed out waiting for proxy CA certificate" in captured.err
+        mock_runner.inject_file.assert_not_called()
+
+
+class TestCreateProxyCaVolume:
+    """Tests for CA volume creation in PodmanProxyManager.create_proxy."""
+
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    def test_create_proxy_creates_ca_volume(self, mock_dns: MagicMock) -> None:
+        """create_proxy creates a named CA volume and passes it to the proxy."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = False
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        with patch("paude.container.volume.VolumeManager") as mock_vm_cls:
+            mock_vm = mock_vm_cls.return_value
+            manager.create_proxy(
+                session_name="test-session",
+                proxy_image="proxy:latest",
+                allowed_domains=[".googleapis.com"],
+            )
+            mock_vm.create_volume.assert_called_once_with("paude-ca-test-session")
+
+        # Check that -v ca_volume:/data/ca is in the create call
+        engine_calls = mock_runner.engine.run.call_args_list
+        create_call = [c for c in engine_calls if "create" in str(c)]
+        assert create_call
+        call_args = create_call[0][0]
+        vol_indices = [i for i, a in enumerate(call_args) if a == "-v"]
+        vol_args = [call_args[i + 1] for i in vol_indices]
+        assert "paude-ca-test-session:/data/ca" in vol_args

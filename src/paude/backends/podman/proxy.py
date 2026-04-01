@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 
 from paude.backends.podman.helpers import (
     find_container_by_session_name,
@@ -65,6 +66,16 @@ def _read_resolv_conf(engine: ContainerEngine) -> str | None:
     except Exception:  # noqa: S110 - best-effort DNS discovery
         pass
     return None
+
+
+CA_CERT_CONTAINER_PATH = "/etc/pki/ca-trust/source/anchors/paude-proxy-ca.crt"
+CA_CERT_POLL_INTERVAL = 1
+CA_CERT_POLL_TIMEOUT = 30
+
+
+def ca_volume_name(session_name: str) -> str:
+    """Get the CA certificate volume name for a session."""
+    return f"paude-ca-{session_name}"
 
 
 class PodmanProxyManager:
@@ -131,6 +142,7 @@ class PodmanProxyManager:
         # Recreate the missing proxy
         proxy_image, domains, otel_ports = proxy_config
         nname = network_name(session_name)
+        ca_vol = ca_volume_name(session_name)
 
         self._network_manager.create_internal_network(
             nname, disable_dns=self._runner.engine.is_podman
@@ -147,6 +159,7 @@ class PodmanProxyManager:
             allowed_domains=domains,
             ip=proxy_ip,
             otel_ports=otel_ports,
+            ca_volume=ca_vol,
         )
         self._proxy_runner.start_session_proxy(pname)
 
@@ -154,6 +167,67 @@ class PodmanProxyManager:
         """Start the proxy container for a session."""
         pname = proxy_container_name(session_name)
         self._proxy_runner.start_session_proxy(pname)
+
+    def distribute_ca_cert(self, session_name: str) -> None:
+        """Copy the proxy's CA certificate into the agent container.
+
+        Waits for the proxy to generate its CA cert at /data/ca/ca.crt,
+        then copies it into the agent container's trust store and runs
+        update-ca-trust.
+        """
+        from paude.backends.podman.helpers import container_name
+
+        pname = proxy_container_name(session_name)
+        cname = container_name(session_name)
+
+        if not self._runner.container_running(pname):
+            return
+        if not self._runner.container_running(cname):
+            return
+
+        # Poll for CA cert generation in proxy container
+        elapsed = 0
+        while elapsed < CA_CERT_POLL_TIMEOUT:
+            result = self._runner.exec_in_container(
+                pname, ["test", "-f", "/data/ca/ca.crt"], check=False
+            )
+            if result.returncode == 0:
+                break
+            time.sleep(CA_CERT_POLL_INTERVAL)
+            elapsed += CA_CERT_POLL_INTERVAL
+        else:
+            print(
+                "WARNING: Timed out waiting for proxy CA certificate.",
+                file=sys.stderr,
+            )
+            return
+
+        # Read CA cert from proxy container
+        result = self._runner.exec_in_container(
+            pname, ["cat", "/data/ca/ca.crt"], check=False
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            print(
+                "WARNING: Failed to read CA certificate from proxy.",
+                file=sys.stderr,
+            )
+            return
+
+        # Inject into agent container and update trust store
+        self._runner.inject_file(
+            cname,
+            result.stdout,
+            CA_CERT_CONTAINER_PATH,
+            owner="root:0",
+        )
+        update_result = self._runner.exec_in_container(
+            cname, ["update-ca-trust"], check=False
+        )
+        if update_result.returncode != 0:
+            print(
+                "WARNING: update-ca-trust failed in agent container.",
+                file=sys.stderr,
+            )
 
     def stop_if_needed(self, session_name: str) -> None:
         """Stop the proxy container for a session if one exists."""
@@ -207,6 +281,13 @@ class PodmanProxyManager:
 
         proxy_ip = self._get_proxy_ip(nname)
 
+        # Create a named volume for the CA certificate
+        from paude.container.volume import VolumeManager
+
+        ca_vol = ca_volume_name(session_name)
+        volume_mgr = VolumeManager(self._runner.engine)
+        volume_mgr.create_volume(ca_vol)
+
         pname = proxy_container_name(session_name)
         dns = _get_host_dns(self._runner.engine)
         print(f"Creating proxy {pname}...", file=sys.stderr)
@@ -219,8 +300,10 @@ class PodmanProxyManager:
                 allowed_domains=allowed_domains,
                 ip=proxy_ip,
                 otel_ports=otel_ports,
+                ca_volume=ca_vol,
             )
         except Exception:
+            volume_mgr.remove_volume(ca_vol, force=True)
             self._network_manager.remove_network(nname)
             raise
 
@@ -272,6 +355,7 @@ class PodmanProxyManager:
         _, _, otel_ports = proxy_config if proxy_config else ("", [], [])
 
         nname = network_name(session_name)
+        ca_vol = ca_volume_name(session_name)
         proxy_ip = self._get_proxy_ip(nname)
         dns = _get_host_dns(self._runner.engine)
 
@@ -287,4 +371,5 @@ class PodmanProxyManager:
             allowed_domains=domains,
             ip=proxy_ip,
             otel_ports=otel_ports,
+            ca_volume=ca_vol,
         )

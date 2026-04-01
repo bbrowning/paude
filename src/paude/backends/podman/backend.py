@@ -338,6 +338,9 @@ class PodmanBackend:
             # Start the proxy now so it's ready when the session starts
             self._proxy.start_proxy(session_name)
 
+            # Note: CA cert distribution happens in start_session/connect_session
+            # after the agent container is also running.
+
         # Build mounts with session volume
         mounts = list(config.mounts)
         mounts.extend(["-v", f"{vname}:/pvc"])
@@ -430,6 +433,7 @@ class PodmanBackend:
         self._proxy.start_if_needed(name)
         self._runner.start_container(cname)
         self._fix_volume_permissions(cname)
+        self._proxy.distribute_ca_cert(name)
         self._inject_credentials(cname)
         agent = self._get_session_agent(name)
         self._sync_host_config(cname, agent.config.name)
@@ -499,6 +503,13 @@ class PodmanBackend:
         # Remove network
         self._network_manager.remove_network(network_name(name))
 
+        # Remove CA volume if it exists
+        from paude.backends.podman.proxy import ca_volume_name
+
+        ca_vol = ca_volume_name(name)
+        if self._volume_manager.volume_exists(ca_vol):
+            self._volume_manager.remove_volume(ca_vol, force=True)
+
         # Remove volume and secret
         print(f"Removing volume {vname}...", file=sys.stderr)
         self._volume_manager.remove_volume_verified(vname)
@@ -523,6 +534,7 @@ class PodmanBackend:
         self._proxy.start_if_needed(name)
         self._runner.start_container(cname)
         self._fix_volume_permissions(cname)
+        self._proxy.distribute_ca_cert(name)
         self._inject_credentials(cname)
         agent = self._get_session_agent(name)
         self._sync_host_config(cname, agent.config.name)
@@ -576,6 +588,7 @@ class PodmanBackend:
 
         # Ensure proxy is running (recreates if missing)
         self._proxy.start_if_needed(name)
+        self._proxy.distribute_ca_cert(name)
 
         # Check if workspace is empty (no .git directory)
         check_result = self._runner.exec_in_container(

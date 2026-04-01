@@ -11,11 +11,15 @@ from typing import Any
 from paude.backends.openshift.oc import OcClient
 from paude.backends.shared import proxy_resource_name
 
+CA_CERT_CONTAINER_PATH = "/etc/pki/ca-trust/source/anchors/paude-proxy-ca.crt"
+CA_CERT_POLL_INTERVAL = 2
+CA_CERT_POLL_TIMEOUT = 60
+
 
 class ProxyManager:
     """Manages proxy deployments and network policies for sessions.
 
-    This class handles creating and managing squid proxy pods, services,
+    This class handles creating and managing proxy pods, services,
     and associated network policies for domain-based traffic filtering.
     """
 
@@ -395,6 +399,104 @@ class ProxyManager:
             f"Warning: Deployment/{deployment_name} not ready after {timeout}s",
             file=sys.stderr,
         )
+
+    def distribute_ca_cert(self, session_name: str, agent_pod: str) -> None:
+        """Copy the proxy's CA certificate into the agent pod.
+
+        Reads the CA cert from the proxy pod via oc exec, writes it into
+        the agent pod, and runs update-ca-trust.
+
+        Args:
+            session_name: Session name.
+            agent_pod: Agent pod name to receive the CA cert.
+        """
+        proxy_pod = self._get_proxy_pod(session_name)
+        if not proxy_pod:
+            print(
+                "WARNING: Could not find proxy pod for CA cert distribution.",
+                file=sys.stderr,
+            )
+            return
+
+        # Poll for CA cert generation in proxy pod
+        elapsed = 0
+        while elapsed < CA_CERT_POLL_TIMEOUT:
+            result = self._oc.run(
+                "exec",
+                proxy_pod,
+                "-n",
+                self._namespace,
+                "--",
+                "test",
+                "-f",
+                "/data/ca/ca.crt",
+                check=False,
+            )
+            if result.returncode == 0:
+                break
+            time.sleep(CA_CERT_POLL_INTERVAL)
+            elapsed += CA_CERT_POLL_INTERVAL
+        else:
+            print(
+                "WARNING: Timed out waiting for proxy CA certificate.",
+                file=sys.stderr,
+            )
+            return
+
+        # Read CA cert from proxy pod
+        result = self._oc.run(
+            "exec",
+            proxy_pod,
+            "-n",
+            self._namespace,
+            "--",
+            "cat",
+            "/data/ca/ca.crt",
+            check=False,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            print(
+                "WARNING: Failed to read CA certificate from proxy pod.",
+                file=sys.stderr,
+            )
+            return
+
+        # Write CA cert into agent pod and update trust store
+        ca_cert_content = result.stdout
+        self._oc.run(
+            "exec",
+            "-i",
+            agent_pod,
+            "-n",
+            self._namespace,
+            "--",
+            "sh",
+            "-c",
+            f"cat > {CA_CERT_CONTAINER_PATH} && update-ca-trust",
+            input_data=ca_cert_content,
+            check=False,
+        )
+
+    def _get_proxy_pod(self, session_name: str) -> str | None:
+        """Get the proxy pod name for a session.
+
+        Returns:
+            Pod name or None if not found.
+        """
+        result = self._oc.run(
+            "get",
+            "pods",
+            "-n",
+            self._namespace,
+            "-l",
+            f"app=paude-proxy,paude.io/session-name={session_name}",
+            "-o",
+            "jsonpath={.items[0].metadata.name}",
+            check=False,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        return result.stdout.strip()
 
     def get_deployment_domains(self, session_name: str) -> list[str]:
         """Get the current ALLOWED_DOMAINS from the proxy Deployment.

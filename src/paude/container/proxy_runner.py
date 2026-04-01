@@ -73,6 +73,13 @@ class ProxyRunner:
             )
         return args
 
+    def _build_volume_args(self, ca_volume: str | None = None) -> list[str]:
+        """Build volume mount arguments for proxy containers."""
+        args: list[str] = []
+        if ca_volume:
+            args.extend(["-v", f"{ca_volume}:/data/ca"])
+        return args
+
     def run_proxy(
         self,
         image: str,
@@ -80,6 +87,7 @@ class ProxyRunner:
         dns: str | None = None,
         allowed_domains: list[str] | None = None,
         otel_ports: list[int] | None = None,
+        ca_volume: str | None = None,
     ) -> str:
         """Start a proxy container (auto-remove on stop).
 
@@ -95,6 +103,7 @@ class ProxyRunner:
 
         net_args = self._build_multi_network(network)
         env_args = self._build_env_args(dns, allowed_domains, otel_ports)
+        vol_args = self._build_volume_args(ca_volume)
 
         result = self._engine.run(
             "run",
@@ -104,6 +113,7 @@ class ProxyRunner:
             container_name,
             *net_args,
             *env_args,
+            *vol_args,
             image,
             check=False,
         )
@@ -124,6 +134,7 @@ class ProxyRunner:
         allowed_domains: list[str] | None = None,
         ip: str | None = None,
         otel_ports: list[int] | None = None,
+        ca_volume: str | None = None,
     ) -> str:
         """Create a proxy container for a session (does not start it).
 
@@ -132,6 +143,7 @@ class ProxyRunner:
         """
         net_args = self._build_multi_network(network, ip=ip)
         env_args = self._build_env_args(dns, allowed_domains, otel_ports)
+        vol_args = self._build_volume_args(ca_volume)
 
         ip_args: list[str] = []
         if ip and not self._engine.supports_multi_network_create:
@@ -146,6 +158,7 @@ class ProxyRunner:
             *net_args,
             *ip_args,
             *env_args,
+            *vol_args,
             image,
             check=False,
         )
@@ -175,6 +188,7 @@ class ProxyRunner:
         allowed_domains: list[str] | None = None,
         ip: str | None = None,
         otel_ports: list[int] | None = None,
+        ca_volume: str | None = None,
     ) -> str:
         """Recreate a session proxy with new configuration.
 
@@ -192,6 +206,7 @@ class ProxyRunner:
             allowed_domains=allowed_domains,
             ip=ip,
             otel_ports=otel_ports,
+            ca_volume=ca_volume,
         )
         self.start_session_proxy(name)
 

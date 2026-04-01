@@ -49,6 +49,14 @@ wait_for_git() {
     wait_for_path "/pvc/workspace/.git" "git repository" 120 "continue"
 }
 
+# Update CA trust if paude-proxy CA cert has been injected
+setup_ca_trust() {
+    local ca_cert="/etc/pki/ca-trust/source/anchors/paude-proxy-ca.crt"
+    if [[ -f "$ca_cert" ]]; then
+        update-ca-trust 2>/dev/null || true
+    fi
+}
+
 # Set up credentials from tmpfs-based storage (/credentials)
 setup_credentials() {
     local config_path="/credentials"
