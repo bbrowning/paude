@@ -356,6 +356,19 @@ class ConfigSyncer(BaseConfigSyncer):
         content = generate_sandbox_config_script(
             agent_name, ws, args, provider=provider, yolo=yolo
         )
+        parent = str(Path(SANDBOX_CONFIG_TARGET).parent)
+        self._oc.run(
+            "exec",
+            self._target,
+            "-n",
+            self._namespace,
+            "--",
+            "mkdir",
+            "-p",
+            parent,
+            check=False,
+            timeout=OC_EXEC_TIMEOUT,
+        )
         self._cp_content_to_pod(content, SANDBOX_CONFIG_TARGET)
 
     def _cp_content_to_pod(self, content: str, dest_path: str) -> None:

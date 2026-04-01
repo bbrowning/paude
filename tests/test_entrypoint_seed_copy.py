@@ -441,6 +441,8 @@ def _build_sandbox_script(
     workspace: str,
     suppress_prompts: bool,
     claude_args: str = "",
+    *,
+    yolo: bool = False,
 ) -> str:
     """Build a script using Python-generated Claude sandbox config."""
     if not suppress_prompts:
@@ -449,7 +451,9 @@ def _build_sandbox_script(
     from paude.agents.claude import ClaudeAgent
 
     agent = ClaudeAgent()
-    config_script = agent.apply_sandbox_config(home_dir, workspace, claude_args)
+    config_script = agent.apply_sandbox_config(
+        home_dir, workspace, claude_args, yolo=yolo
+    )
 
     env_lines = f'export HOME="{home_dir}"\n'
     return f"#!/bin/bash\nset -e\n{env_lines}{config_script}"
@@ -502,7 +506,7 @@ class TestSandboxPromptSuppression:
             str(home),
             workspace,
             suppress_prompts=True,
-            claude_args="--dangerously-skip-permissions",
+            yolo=True,
         )
         result = _run_script(script)
         assert result.returncode == 0, result.stderr
@@ -525,7 +529,7 @@ class TestSandboxPromptSuppression:
             str(home),
             workspace,
             suppress_prompts=True,
-            claude_args="--dangerously-skip-permissions",
+            yolo=True,
         )
         result = _run_script(script)
         assert result.returncode == 0, result.stderr
@@ -547,8 +551,8 @@ class TestSandboxPromptSuppression:
         assert not (home / ".claude.json").exists()
         assert not (home / ".claude").exists()
 
-    def test_no_settings_json_without_skip_permissions(self, tmp_path: Path) -> None:
-        """No settings.json changes when --dangerously-skip-permissions not in args."""
+    def test_no_settings_json_without_yolo(self, tmp_path: Path) -> None:
+        """No settings.json changes when yolo mode is not enabled."""
         home = tmp_path / "home"
         home.mkdir()
         workspace = "/pvc/workspace"
@@ -1247,11 +1251,11 @@ class TestGenerateSandboxConfigScript:
         script = generate_sandbox_config_script("claude", "/pvc/workspace", "")
         assert "/home/paude/.claude.json" in script
 
-    def test_claude_script_with_yolo_args(self) -> None:
+    def test_claude_script_with_yolo_flag(self) -> None:
         from paude.backends.shared import generate_sandbox_config_script
 
         script = generate_sandbox_config_script(
-            "claude", "/pvc/workspace", "--dangerously-skip-permissions"
+            "claude", "/pvc/workspace", "", yolo=True
         )
         assert "skipDangerousModePermissionPrompt" in script
 
