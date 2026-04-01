@@ -148,38 +148,37 @@ class TestExpandDomains:
         for domain in DOMAIN_ALIASES["python"]:
             assert domain not in result
 
-    def test_wildcard_dedup_removes_subdomains(self):
-        """Wildcard .example.com removes foo.example.com from results."""
+    def test_wildcard_and_subdomain_both_preserved(self):
+        """Both wildcard and subdomain are preserved (proxy handles dedup)."""
         result = expand_domains(["foo.example.com", ".example.com"])
         assert result is not None
         assert ".example.com" in result
-        assert "foo.example.com" not in result
+        assert "foo.example.com" in result
 
-    def test_wildcard_dedup_removes_exact_base(self):
-        """Wildcard .example.com removes example.com from results."""
+    def test_wildcard_and_exact_base_both_preserved(self):
+        """Both wildcard and exact base domain are preserved."""
         result = expand_domains(["example.com", ".example.com"])
         assert result is not None
         assert ".example.com" in result
-        assert "example.com" not in result
+        assert "example.com" in result
 
-    def test_wildcard_dedup_with_mixed_aliases(self):
-        """Dedup works across aliases and user-supplied domains."""
+    def test_mixed_aliases_and_user_domains_preserved(self):
+        """All domains preserved across aliases and user-supplied domains."""
         result = expand_domains(["nodejs", "custom.npmjs.org"])
         assert result is not None
         assert ".npmjs.org" in result
-        # custom.npmjs.org is a subdomain of .npmjs.org, should be removed
-        assert "custom.npmjs.org" not in result
+        assert "custom.npmjs.org" in result
 
-    def test_wildcard_dedup_preserves_unrelated(self):
-        """Wildcard dedup does not remove unrelated domains."""
+    def test_all_domains_preserved_with_wildcards(self):
+        """All domains preserved regardless of wildcard overlap."""
         result = expand_domains([".example.com", "other.org", "foo.example.com"])
         assert result is not None
         assert ".example.com" in result
         assert "other.org" in result
-        assert "foo.example.com" not in result
+        assert "foo.example.com" in result
 
-    def test_wildcard_dedup_preserves_regex(self):
-        """Wildcard dedup does not affect regex domains."""
+    def test_regex_domains_preserved_with_wildcards(self):
+        """Regex domains preserved alongside wildcards."""
         result = expand_domains(["~example\\.com$", ".example.com"])
         assert result is not None
         assert "~example\\.com$" in result

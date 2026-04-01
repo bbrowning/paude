@@ -236,12 +236,8 @@ class ProxyManager:
 
         env_list: list[dict[str, str]] = []
         if allowed_domains:
-            from paude.domains import format_domains_as_squid_acls
-
             domains_str = ",".join(allowed_domains)
             env_list.append({"name": "ALLOWED_DOMAINS", "value": domains_str})
-            acls = format_domains_as_squid_acls(allowed_domains)
-            env_list.append({"name": "ALLOWED_DOMAIN_ACLS", "value": acls})
         if otel_ports:
             env_list.append(
                 {
@@ -470,19 +466,12 @@ class ProxyManager:
             image: If provided, also update the container image in the same
                 patch to avoid a double pod restart.
         """
-        from paude.domains import format_domains_as_squid_acls
-
         domains_str = ",".join(domains)
-        acls = format_domains_as_squid_acls(domains)
 
         env_entries: list[dict[str, str]] = [
             {
                 "name": "ALLOWED_DOMAINS",
                 "value": domains_str,
-            },
-            {
-                "name": "ALLOWED_DOMAIN_ACLS",
-                "value": acls,
             },
         ]
         if otel_ports is not None:

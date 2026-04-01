@@ -122,16 +122,13 @@ def _add_domains(backend_obj: Backend, name: str, add: list[str]) -> None:
         )
         raise typer.Exit(1)
 
-    # Merge with dedup, preserving order, then remove wildcard-covered domains
-    from paude.domains import remove_wildcard_covered
-
+    # Merge with dedup, preserving order
     seen = set(current)
     merged = list(current)
     for d in expanded:
         if d not in seen:
             merged.append(d)
             seen.add(d)
-    merged = remove_wildcard_covered(merged)
 
     backend_obj.update_allowed_domains(name, merged)
     added_count = len(merged) - len(current)

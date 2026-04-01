@@ -160,63 +160,7 @@ def expand_domains(
                 expanded.append(domain)
                 seen.add(domain)
 
-    return remove_wildcard_covered(expanded)
-
-
-def remove_wildcard_covered(domains: list[str]) -> list[str]:
-    """Remove domains that are already covered by a wildcard in the list.
-
-    Squid treats .example.com as matching both example.com and *.example.com,
-    so having both .example.com and foo.example.com is a fatal config error.
-
-    Args:
-        domains: List of domains (may include wildcards and regex entries).
-
-    Returns:
-        Filtered list with redundant domains removed, preserving order.
-    """
-    wildcards = [d for d in domains if d.startswith(".")]
-    if not wildcards:
-        return domains
-    return [
-        d
-        for d in domains
-        if d.startswith(".")
-        or d.startswith("~")
-        or not any(d == w[1:] or d.endswith(w) for w in wildcards)
-    ]
-
-
-def format_domains_as_squid_acls(domains: list[str]) -> str:
-    """Format deduplicated domains as squid ACL lines.
-
-    Separates regex domains (~prefix) from normal domains to avoid
-    mixing dstdomain and dstdom_regex under the same ACL name
-    (squid 5.x crashes when they share a name).
-
-    Args:
-        domains: Deduplicated domain list (output of expand_domains).
-
-    Returns:
-        Newline-separated ACL block ready for squid.conf injection.
-    """
-    normal_lines: list[str] = []
-    regex_lines: list[str] = []
-
-    for domain in domains:
-        if domain.startswith("~"):
-            regex_lines.append(f"acl allowed_domains_regex dstdom_regex {domain[1:]}")
-        else:
-            normal_lines.append(f"acl allowed_domains dstdomain {domain}")
-
-    # squid errors on undefined ACLs referenced in http_access rules;
-    # both allowed_domains and allowed_domains_regex must always be defined
-    if not normal_lines:
-        normal_lines.append("acl allowed_domains dstdomain .invalid")
-    if not regex_lines:
-        regex_lines.append("acl allowed_domains_regex dstdom_regex ^$")
-
-    return "\\n".join(normal_lines + regex_lines)
+    return expanded
 
 
 def is_unrestricted(domains: list[str] | None) -> bool:
