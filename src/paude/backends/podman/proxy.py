@@ -366,7 +366,7 @@ class PodmanProxyManager:
         same cert should be reused. This method checks that the cert
         is present in the recreated proxy and that the agent container
         still has a matching cert. If the agent cert is missing or
-        differs, it redistributes.
+        differs, it injects the cert directly (without re-polling).
         """
         from paude.backends.podman.helpers import container_name
 
@@ -407,13 +407,27 @@ class PodmanProxyManager:
             cname, ["cat", CA_CERT_CONTAINER_PATH], check=False
         )
 
-        # Redistribute only if the agent cert is missing or differs
+        # Inject directly if the agent cert is missing or differs
+        # (avoids re-polling and re-reading the proxy cert)
         if agent_cert.returncode != 0 or agent_cert.stdout != proxy_cert.stdout:
             print(
                 "Redistributing CA certificate after proxy recreate...",
                 file=sys.stderr,
             )
-            self.distribute_ca_cert(session_name)
+            self._runner.inject_file(
+                cname,
+                proxy_cert.stdout,
+                CA_CERT_CONTAINER_PATH,
+                owner="root:0",
+            )
+            update_result = self._runner.exec_in_container(
+                cname, ["update-ca-trust"], check=False
+            )
+            if update_result.returncode != 0:
+                print(
+                    "WARNING: update-ca-trust failed in agent container.",
+                    file=sys.stderr,
+                )
 
     def update_domains(
         self,

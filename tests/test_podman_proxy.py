@@ -640,9 +640,7 @@ class TestUpdateDomainsCaResilience:
             MagicMock(returncode=0),  # test -f in proxy
             MagicMock(returncode=0, stdout=new_cert),  # cat proxy cert
             MagicMock(returncode=0, stdout=old_cert),  # cat agent cert (differs)
-            # distribute_ca_cert calls
-            MagicMock(returncode=0),  # test -f in proxy
-            MagicMock(returncode=0, stdout=new_cert),  # cat proxy cert
+            # Direct inject (no re-poll) — just update-ca-trust
             MagicMock(returncode=0),  # update-ca-trust
         ]
         mock_network = MagicMock()
@@ -674,9 +672,7 @@ class TestUpdateDomainsCaResilience:
             MagicMock(returncode=0),  # test -f in proxy
             MagicMock(returncode=0, stdout=cert),  # cat proxy cert
             MagicMock(returncode=1, stdout=""),  # cat agent cert (missing)
-            # distribute_ca_cert calls
-            MagicMock(returncode=0),  # test -f in proxy
-            MagicMock(returncode=0, stdout=cert),  # cat proxy cert
+            # Direct inject (no re-poll) — just update-ca-trust
             MagicMock(returncode=0),  # update-ca-trust
         ]
         mock_network = MagicMock()

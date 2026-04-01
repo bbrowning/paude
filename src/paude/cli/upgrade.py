@@ -605,13 +605,10 @@ def _upgrade_openshift(
                     old_hostname, _ = parse_otel_endpoint(old_otel_endpoint)
                     current_domains = [d for d in current_domains if d != old_hostname]
 
-            from paude.agents.base import build_secret_environment_from_config as _bsec
+            from paude.backends.shared import gather_proxy_credentials
 
             _upgrade_agent = get_agent(agent_name, provider=provider_name)
-            _proxy_creds = _bsec(_upgrade_agent.config)
-            _gh = os.environ.get("PAUDE_GITHUB_TOKEN")
-            if _gh:
-                _proxy_creds["GH_TOKEN"] = _gh
+            _proxy_creds = gather_proxy_credentials(_upgrade_agent.config)
             backend._proxy.update_deployment_domains(
                 name,
                 current_domains,
