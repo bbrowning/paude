@@ -97,7 +97,7 @@ def _list_domains(backend_obj: Backend, name: str) -> None:
     from paude.domains import format_domains_for_display
 
     domains = backend_obj.get_allowed_domains(name)
-    summary = format_domains_for_display(domains)
+    summary = format_domains_for_display(domains or [])
     typer.echo(f"Network: {summary}")
     if domains is not None:
         typer.echo("")
@@ -117,7 +117,8 @@ def _add_domains(backend_obj: Backend, name: str, add: list[str]) -> None:
     current = backend_obj.get_allowed_domains(name)
     if current is None:
         typer.echo(
-            "Error: Session has unrestricted network (no proxy). Cannot add domains.",
+            "Error: Session was created without a proxy. "
+            "Recreate the session to enable domain filtering.",
             err=True,
         )
         raise typer.Exit(1)
@@ -147,8 +148,8 @@ def _remove_domains(backend_obj: Backend, name: str, remove: list[str]) -> None:
     current = backend_obj.get_allowed_domains(name)
     if current is None:
         typer.echo(
-            "Error: Session has unrestricted network (no proxy). "
-            "Cannot remove domains.",
+            "Error: Session was created without a proxy. "
+            "Recreate the session to enable domain filtering.",
             err=True,
         )
         raise typer.Exit(1)
@@ -296,8 +297,8 @@ def blocked_domains_cmd(
 
     if log_content is None:
         typer.echo(
-            f"Session '{name}' has unrestricted network (no proxy). "
-            "No domains are blocked."
+            f"Session '{name}' was created without a proxy. "
+            "Recreate the session to enable domain filtering."
         )
         return
 

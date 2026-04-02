@@ -235,7 +235,7 @@ def _expand_allowed_domains(
     allowed_domains: list[str] | None,
     extra_aliases: list[str] | None = None,
     provider_aliases: list[str] | None = None,
-) -> list[str] | None:
+) -> list[str]:
     """Expand domain aliases, defaulting to ["default"].
 
     Args:
@@ -265,7 +265,7 @@ def _prepare_session_create(
     agent_name: str = "claude",
     provider_name: str | None = None,
     otel_endpoint: str | None = None,
-) -> tuple[list[str] | None, list[str], dict[str, str], bool]:
+) -> tuple[list[str], list[str], dict[str, str], bool]:
     """Shared pre-create logic for both backends.
 
     Returns:
@@ -293,7 +293,7 @@ def _prepare_session_create(
 
         env.update(build_otel_env(agent_name, otel_endpoint))
         hostname, _ = parse_otel_endpoint(otel_endpoint)
-        if expanded_domains is not None and hostname not in expanded_domains:
+        if hostname not in expanded_domains:
             expanded_domains.append(hostname)
 
     unrestricted = is_unrestricted(expanded_domains)
@@ -315,7 +315,7 @@ def _prepare_session_create(
 
 def _finalize_session_create(
     session: Session,
-    expanded_domains: list[str] | None,
+    expanded_domains: list[str],
     yolo: bool,
     git: bool,
     openshift_context: str | None = None,

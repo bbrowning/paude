@@ -1998,15 +1998,15 @@ class TestBlockedDomainsCLI:
     """Tests for the blocked-domains CLI subcommand."""
 
     @patch("paude.cli.domains._resolve_backend_for_domains")
-    def test_unrestricted_network_message(self, mock_resolve: MagicMock) -> None:
-        """Shows unrestricted message when no proxy."""
+    def test_no_proxy_message(self, mock_resolve: MagicMock) -> None:
+        """Shows message when session was created without a proxy."""
         mock_backend = MagicMock()
         mock_backend.get_proxy_blocked_log.return_value = None
         mock_resolve.return_value = mock_backend
 
         result = runner.invoke(app, ["blocked-domains", "my-session"])
         assert result.exit_code == 0
-        assert "unrestricted network" in result.stdout
+        assert "created without a proxy" in result.stdout
 
     @patch("paude.cli.domains._resolve_backend_for_domains")
     def test_no_blocked_domains_message(self, mock_resolve: MagicMock) -> None:

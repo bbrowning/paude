@@ -18,6 +18,8 @@ from paude.backends.openshift import (
     OpenShiftConfig,
 )
 
+_FAKE_CA = ("FAKE_CERT_PEM", "FAKE_KEY_PEM")
+
 
 class TestOpenShiftConfig:
     """Tests for OpenShiftConfig dataclass."""
@@ -245,8 +247,14 @@ class TestOpenShiftSessionHelpers:
 class TestOpenShiftCreateSession:
     """Tests for OpenShiftBackend.create_session."""
 
+    @patch(
+        "paude.backends.openshift.certs.generate_ca_cert",
+        return_value=_FAKE_CA,
+    )
     @patch("subprocess.run")
-    def test_create_session_creates_statefulset(self, mock_run: MagicMock) -> None:
+    def test_create_session_creates_statefulset(
+        self, mock_run: MagicMock, mock_ca: MagicMock
+    ) -> None:
         """Create session creates a StatefulSet."""
 
         def run_side_effect(*args, **kwargs):
@@ -254,6 +262,9 @@ class TestOpenShiftCreateSession:
             # Return "Running" for pod status check
             if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
                 return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return "1" for deployment readiness check (proxy)
+            if "get" in cmd and "deployment" in cmd and "readyReplicas" in str(cmd):
+                return MagicMock(returncode=0, stdout="1", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         mock_run.side_effect = run_side_effect
@@ -316,9 +327,13 @@ class TestOpenShiftCreateSession:
         with pytest.raises(SessionExistsError):
             backend.create_session(config)
 
+    @patch(
+        "paude.backends.openshift.certs.generate_ca_cert",
+        return_value=_FAKE_CA,
+    )
     @patch("subprocess.run")
     def test_create_session_waits_for_pod_and_syncs_config(
-        self, mock_run: MagicMock
+        self, mock_run: MagicMock, mock_ca: MagicMock
     ) -> None:
         """Create session waits for pod ready and syncs config."""
         calls_log = []
@@ -329,6 +344,9 @@ class TestOpenShiftCreateSession:
             # Return "Running" for pod status check
             if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
                 return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return "1" for deployment readiness check (proxy)
+            if "get" in cmd and "deployment" in cmd and "readyReplicas" in str(cmd):
+                return MagicMock(returncode=0, stdout="1", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         mock_run.side_effect = run_side_effect
@@ -1535,40 +1553,6 @@ class TestCreateProxyService:
         assert spec["spec"]["ports"][0]["port"] == 3128
 
 
-class TestEnsureNetworkPolicyPermissive:
-    """Tests for _proxy.ensure_network_policy_permissive method."""
-
-    @patch("subprocess.run")
-    def test_creates_permissive_egress_policy_for_paude_pod(
-        self, mock_run: MagicMock
-    ) -> None:
-        """_proxy.ensure_network_policy_permissive creates policy allowing all egress."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        backend._proxy.ensure_network_policy_permissive("my-session")
-
-        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
-        assert len(apply_calls) >= 1
-
-        call_kwargs = apply_calls[0][1]
-        spec = json.loads(call_kwargs["input"])
-
-        assert spec["kind"] == "NetworkPolicy"
-        assert spec["metadata"]["name"] == "paude-egress-my-session"
-        assert spec["metadata"]["namespace"] == "test-ns"
-
-        # Verify pod selector targets paude (not proxy)
-        selector = spec["spec"]["podSelector"]["matchLabels"]
-        assert selector["app"] == "paude"
-        assert selector["paude.io/session-name"] == "my-session"
-
-        # Verify egress allows all (empty rule)
-        egress = spec["spec"]["egress"]
-        assert len(egress) == 1
-        assert egress[0] == {}  # Empty rule = allow all
-
-
 class TestNetworkPolicyWithProxySelector:
     """Tests for NetworkPolicy using pod selector instead of CIDRs."""
 
@@ -1660,9 +1644,6 @@ class TestNetworkPolicyWithProxySelector:
         )
         assert to_entry["namespaceSelector"] == {}, "namespaceSelector should be empty"
         assert to_entry["podSelector"] == {}, "podSelector should be empty"
-
-
-_FAKE_CA = ("FAKE_CERT_PEM", "FAKE_KEY_PEM")
 
 
 @patch(
@@ -1808,52 +1789,6 @@ class TestCreateSessionWithProxy:
         assert env_dict.get("https_proxy") == expected_proxy
         assert env_dict.get("NO_PROXY") == "localhost,127.0.0.1"
         assert env_dict.get("no_proxy") == "localhost,127.0.0.1"
-
-    @patch("subprocess.run")
-    def test_no_proxy_when_allowed_domains_none(
-        self, mock_run: MagicMock, mock_ca: MagicMock
-    ) -> None:
-        """create_session does not create proxy when allowed_domains=None."""
-
-        def run_side_effect(*args, **kwargs):
-            cmd = args[0] if args else kwargs.get("args", [])
-            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
-                return MagicMock(returncode=0, stdout="Running", stderr="")
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = run_side_effect
-
-        from paude.backends.base import SessionConfig
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        config = SessionConfig(
-            name="test-session",
-            workspace=Path("/home/user/project"),
-            image="quay.io/test/paude:v1",
-            allowed_domains=None,
-        )
-
-        backend.create_session(config)
-
-        # Verify no proxy deployment was created
-        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
-        deployment_calls = [
-            c
-            for c in apply_calls
-            if '"kind": "Deployment"' in str(c[1].get("input", ""))
-        ]
-        assert len(deployment_calls) == 0
-
-        # Verify no proxy env vars in StatefulSet
-        sts_calls = [
-            c for c in apply_calls if "StatefulSet" in str(c[1].get("input", ""))
-        ]
-        if sts_calls:
-            sts_spec = json.loads(sts_calls[0][1]["input"])
-            container = sts_spec["spec"]["template"]["spec"]["containers"][0]
-            env_dict = {e["name"]: e["value"] for e in container["env"]}
-            assert "HTTP_PROXY" not in env_dict
-            assert "HTTPS_PROXY" not in env_dict
 
 
 class TestDeleteSessionWithProxy:
@@ -2450,26 +2385,6 @@ class TestSyncCursorAuthJson:
         assert "cursor-auth.json" not in all_calls_str
 
     @patch("subprocess.run")
-    def test_sync_credentials_syncs_auth_json_for_cursor(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """sync_credentials syncs auth.json on reconnect for cursor agent."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        config_cursor = tmp_path / ".config" / "cursor"
-        config_cursor.mkdir(parents=True)
-        (config_cursor / "auth.json").write_text('{"accessToken": "test"}')
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            backend._syncer.sync_credentials("test-pod-0", agent_name="cursor")
-
-        cp_calls = [c for c in mock_run.call_args_list if "cp" in str(c)]
-        auth_cp_calls = [c for c in cp_calls if "cursor-auth.json" in str(c)]
-        assert len(auth_cp_calls) >= 1
-
-    @patch("subprocess.run")
     def test_sync_credentials_does_not_sync_auth_json_for_claude(
         self, mock_run: MagicMock, tmp_path: Path
     ) -> None:
@@ -2565,32 +2480,6 @@ class TestSyncConfigToPod:
         assert "rm -rf /credentials" not in exec_cmd
         assert "mkdir -p /credentials/gcloud /credentials/claude" in exec_cmd
         assert "chmod -R g+rwX /credentials" in exec_cmd
-
-    @patch("subprocess.run")
-    def test_syncs_gcloud_credentials(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """_syncer.sync_full_config syncs gcloud credential files."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        # Create mock gcloud files
-        gcloud_dir = tmp_path / ".config" / "gcloud"
-        gcloud_dir.mkdir(parents=True)
-        (gcloud_dir / "application_default_credentials.json").write_text("{}")
-        (gcloud_dir / "credentials.db").write_text("db")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch.object(Path, "home", return_value=tmp_path):
-            backend._syncer.sync_full_config("test-pod-0")
-
-        # Find oc cp calls for gcloud files
-        cp_calls = [c for c in mock_run.call_args_list if "cp" in str(c)]
-        cp_calls_str = str(cp_calls)
-
-        # Verify gcloud files are synced
-        assert "application_default_credentials.json" in cp_calls_str
-        assert "credentials.db" in cp_calls_str
 
     @patch("subprocess.run")
     def test_syncs_claude_config_files(

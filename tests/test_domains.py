@@ -15,15 +15,15 @@ from paude.domains import (
 class TestExpandDomains:
     """Tests for expand_domains function."""
 
-    def test_expand_all_returns_none(self):
-        """'all' returns None (unrestricted network)."""
+    def test_expand_all_returns_empty_list(self):
+        """'all' returns [] (unrestricted network)."""
         result = expand_domains(["all"])
-        assert result is None
+        assert result == []
 
-    def test_expand_all_with_other_domains_returns_none(self):
-        """'all' with other domains still returns None."""
+    def test_expand_all_with_other_domains_returns_empty_list(self):
+        """'all' with other domains still returns []."""
         result = expand_domains(["vertexai", "all", ".example.com"])
-        assert result is None
+        assert result == []
 
     def test_expand_default_includes_vertexai_and_python(self):
         """'default' expands to vertexai + python domains."""
@@ -193,10 +193,10 @@ class TestFormatDomainsForDisplay:
         result = format_domains_for_display(None)
         assert "unrestricted" in result
 
-    def test_empty_list_shows_none(self):
-        """Empty list shows none."""
+    def test_empty_list_shows_unrestricted(self):
+        """Empty list shows unrestricted (all domains allowed)."""
         result = format_domains_for_display([])
-        assert "none" in result
+        assert "unrestricted" in result
 
     def test_vertexai_domains_show_alias(self):
         """Full vertexai domains show alias name."""
@@ -405,13 +405,9 @@ class TestRustAlias:
 class TestIsUnrestricted:
     """Tests for is_unrestricted helper function."""
 
-    def test_none_is_unrestricted(self):
-        """None domains means unrestricted."""
-        assert is_unrestricted(None) is True
-
-    def test_empty_list_is_restricted(self):
-        """Empty list is NOT unrestricted (no network access)."""
-        assert is_unrestricted([]) is False
+    def test_empty_list_is_unrestricted(self):
+        """Empty list means unrestricted (all domains allowed)."""
+        assert is_unrestricted([]) is True
 
     def test_domain_list_is_restricted(self):
         """A list of domains is NOT unrestricted."""

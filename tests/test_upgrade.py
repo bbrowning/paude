@@ -173,7 +173,7 @@ class TestUpgradePodman:
         mock_image_manager.ensure_default_image.return_value = "paude:latest"
         mock_image_manager_class.return_value = mock_image_manager
 
-        mock_prepare.return_value = (None, [], {}, False)
+        mock_prepare.return_value = ([], [], {}, True)
 
         from paude.backends.podman.backend import PodmanBackend
 
@@ -200,9 +200,7 @@ class TestUpgradePodman:
         config = backend.create_session.call_args[0][0]
         assert config.reuse_volume is True
         # start_session_no_attach called
-        backend.start_session_no_attach.assert_called_once_with(
-            "test-session", github_token=None
-        )
+        backend.start_session_no_attach.assert_called_once_with("test-session")
 
     @patch("paude.mounts.build_mounts", return_value=[])
     @patch("paude.cli.helpers._prepare_session_create")
@@ -279,7 +277,7 @@ class TestUpgradePodman:
         mock_image_manager.ensure_default_image.return_value = "paude:latest"
         mock_image_manager_class.return_value = mock_image_manager
 
-        mock_prepare.return_value = (None, [], {}, False)
+        mock_prepare.return_value = ([], [], {}, True)
 
         from paude.backends.podman.backend import PodmanBackend
 
@@ -342,87 +340,6 @@ class TestUpgradePodman:
         # Network removed
         backend._network_manager.remove_network.assert_called_once_with(
             "paude-net-test-session"
-        )
-
-    @patch("paude.mounts.build_mounts", return_value=[])
-    @patch("paude.cli.helpers._prepare_session_create")
-    @patch("paude.container.ImageManager")
-    @patch("paude.config.detector.detect_config", return_value=None)
-    @patch("paude.backends.podman.helpers.find_container_by_session_name")
-    def test_upgrade_podman_no_proxy(
-        self,
-        mock_find_container: MagicMock,
-        mock_detect_config: MagicMock,
-        mock_image_manager_class: MagicMock,
-        mock_prepare: MagicMock,
-        mock_build_mounts: MagicMock,
-    ) -> None:
-        """Session without domains doesn't build proxy image."""
-        labels = self._make_container_labels()  # No domains
-        mock_find_container.return_value = {"Labels": labels}
-
-        mock_image_manager = MagicMock()
-        mock_image_manager.ensure_default_image.return_value = "paude:latest"
-        mock_image_manager_class.return_value = mock_image_manager
-
-        mock_prepare.return_value = (None, [], {}, False)
-
-        from paude.backends.podman.backend import PodmanBackend
-
-        backend = MagicMock(spec=PodmanBackend)
-        backend._runner = MagicMock()
-        backend._runner.container_exists.return_value = False
-        backend._network_manager = MagicMock()
-        backend._volume_manager = MagicMock()
-        backend._engine = MagicMock()
-
-        from paude.cli.upgrade import _upgrade_podman
-
-        _upgrade_podman("test-session", backend, rebuild=False, overrides=_NO_OVERRIDES)
-
-        # Proxy image not built
-        mock_image_manager.ensure_proxy_image.assert_not_called()
-
-    @patch("paude.mounts.build_mounts", return_value=[])
-    @patch("paude.container.ImageManager")
-    @patch("paude.config.detector.detect_config", return_value=None)
-    @patch("paude.backends.podman.helpers.find_container_by_session_name")
-    def test_upgrade_podman_no_proxy_stays_unrestricted(
-        self,
-        mock_find_container: MagicMock,
-        mock_detect_config: MagicMock,
-        mock_image_manager_class: MagicMock,
-        mock_build_mounts: MagicMock,
-    ) -> None:
-        """Session without domains must NOT gain a proxy after upgrade.
-
-        Regression test: _prepare_session_create treats None domains as
-        'use defaults', which would incorrectly add proxy filtering to a
-        session that was originally unrestricted.
-        """
-        labels = self._make_container_labels()  # No PAUDE_LABEL_DOMAINS
-        mock_find_container.return_value = {"Labels": labels}
-
-        mock_image_manager = MagicMock()
-        mock_image_manager.ensure_default_image.return_value = "paude:latest"
-        mock_image_manager_class.return_value = mock_image_manager
-
-        from paude.backends.podman.backend import PodmanBackend
-
-        backend = MagicMock(spec=PodmanBackend)
-        backend._runner = MagicMock()
-        backend._runner.container_exists.return_value = False
-        backend._network_manager = MagicMock()
-        backend._volume_manager = MagicMock()
-        backend._engine = MagicMock()
-
-        from paude.cli.upgrade import _upgrade_podman
-
-        _upgrade_podman("test-session", backend, rebuild=False, overrides=_NO_OVERRIDES)
-
-        config = backend.create_session.call_args[0][0]
-        assert config.allowed_domains is None, (
-            "Unrestricted session must keep allowed_domains=None after upgrade"
         )
 
 

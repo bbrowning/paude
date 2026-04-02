@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
@@ -273,7 +272,9 @@ def _upgrade_podman(
     yolo = labels.get(PAUDE_LABEL_YOLO) == "1"
     otel_endpoint = labels.get(PAUDE_LABEL_OTEL_ENDPOINT)
 
-    # Domain config
+    # Domain config — old sessions may not have the label (no proxy).
+    # On upgrade, all sessions get a proxy; default to None to trigger
+    # expansion via _prepare_session_create (which defaults to ["default"]).
     domains_str = labels.get(PAUDE_LABEL_DOMAINS)
     allowed_domains: list[str] | None = None
     if domains_str is not None:
@@ -320,14 +321,13 @@ def _upgrade_podman(
         typer.echo(f"Error building image: {e}", err=True)
         raise typer.Exit(1) from None
 
-    # Build proxy image if needed
+    # Build proxy image (always required — all sessions use proxy)
     proxy_image: str | None = None
-    if allowed_domains is not None:
-        try:
-            proxy_image = image_manager.ensure_proxy_image(force_rebuild=rebuild)
-        except Exception as e:
-            typer.echo(f"Error building proxy image: {e}", err=True)
-            raise typer.Exit(1) from None
+    try:
+        proxy_image = image_manager.ensure_proxy_image(force_rebuild=rebuild)
+    except Exception as e:
+        typer.echo(f"Error building proxy image: {e}", err=True)
+        raise typer.Exit(1) from None
 
     # Remove old container and proxy resources (but NOT the volume)
     cname = container_name(name)
@@ -353,26 +353,18 @@ def _upgrade_podman(
     if config and config.container_env:
         env.update(config.container_env)
 
-    # Only expand domains if the session has domain filtering.
-    # allowed_domains=None means no proxy (unrestricted);
-    # passing None to _prepare_session_create would incorrectly add defaults.
-    if allowed_domains is not None:
-        expanded_domains, parsed_args, _env, unrestricted = _prepare_session_create(
-            allowed_domains,
-            yolo,
-            None,
-            config,
-            agent_name=agent_name,
-            otel_endpoint=otel_endpoint,
-        )
-        session_domains = expanded_domains if not unrestricted else allowed_domains
-    else:
-        session_domains = None
-        # Even without proxy, inject OTEL env vars
-        if otel_endpoint:
-            from paude.otel import build_otel_env
-
-            env.update(build_otel_env(agent_name, otel_endpoint))
+    # Expand domains — all sessions get a proxy.
+    # allowed_domains=None (old sessions without proxy) is passed as-is to
+    # _prepare_session_create, which defaults to ["default"].
+    expanded_domains, parsed_args, _env, unrestricted = _prepare_session_create(
+        allowed_domains,
+        yolo,
+        None,
+        config,
+        agent_name=agent_name,
+        otel_endpoint=otel_endpoint,
+    )
+    session_domains = expanded_domains
 
     # Compute OTEL proxy ports
     otel_ports: list[int] = []
@@ -403,8 +395,7 @@ def _upgrade_podman(
     )
 
     backend.create_session(session_config)
-    github_token = os.environ.get("PAUDE_GITHUB_TOKEN")
-    backend.start_session_no_attach(name, github_token=github_token)
+    backend.start_session_no_attach(name)
 
 
 def _upgrade_openshift(
@@ -631,25 +622,11 @@ def _upgrade_openshift(
     typer.echo(f"Waiting for pod {pname} to be ready...", err=True)
     backend._pod_waiter.wait_for_ready(pname)
 
-    # Re-sync config
-    from paude.agents.base import build_secret_environment_from_config
-    from paude.backends.shared import PROXY_MANAGED_CREDENTIAL
-
-    agent_instance = get_agent(agent_name, provider=provider_name)
-    _proxy_active = backend._lookup.has_proxy_deployment(name)
-    if _proxy_active:
-        secret_env = dict.fromkeys(
-            agent_instance.config.secret_env_vars, PROXY_MANAGED_CREDENTIAL
-        )
-    else:
-        secret_env = build_secret_environment_from_config(agent_instance.config)
+    # Re-sync config (no credentials — proxy handles all auth)
     backend._syncer.sync_full_config(
         pname,
         agent_name=agent_name,
         provider=provider_name,
-        secret_env=secret_env,
-        proxy_active=_proxy_active,
     )
 
-    github_token = os.environ.get("PAUDE_GITHUB_TOKEN")
-    backend.start_agent_headless(name, github_token=github_token)
+    backend.start_agent_headless(name)

@@ -118,54 +118,6 @@ class ProxyManager:
             input_data=json.dumps(policy_spec),
         )
 
-    def ensure_network_policy_permissive(self, session_id: str) -> None:
-        """Ensure a permissive NetworkPolicy exists for this session.
-
-        Used when --allowed-domains all is specified. Allows all egress traffic.
-
-        Args:
-            session_id: The session ID to scope the policy to.
-        """
-        policy_name = f"paude-egress-{session_id}"
-
-        print(
-            f"Creating NetworkPolicy/{policy_name} in namespace {self._namespace}...",
-            file=sys.stderr,
-        )
-
-        policy_spec: dict[str, Any] = {
-            "apiVersion": "networking.k8s.io/v1",
-            "kind": "NetworkPolicy",
-            "metadata": {
-                "name": policy_name,
-                "namespace": self._namespace,
-                "labels": {
-                    "app": "paude",
-                    "session-id": session_id,
-                    "paude.io/session-name": session_id,
-                },
-            },
-            "spec": {
-                "podSelector": {
-                    "matchLabels": {
-                        "app": "paude",
-                        "paude.io/session-name": session_id,
-                    },
-                },
-                "policyTypes": ["Egress"],
-                "egress": [
-                    {},  # Empty rule allows all egress
-                ],
-            },
-        }
-
-        self._oc.run(
-            "apply",
-            "-f",
-            "-",
-            input_data=json.dumps(policy_spec),
-        )
-
     def ensure_proxy_network_policy(self, session_name: str) -> None:
         """Create a NetworkPolicy that allows all egress for the proxy pod.
 

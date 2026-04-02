@@ -139,6 +139,24 @@ class TestHelperFunctions:
         assert result == Path(invalid)
 
 
+def _make_create_session_backend(
+    mock_runner: MagicMock,
+    mock_volume: MagicMock | None = None,
+) -> PodmanBackend:
+    """Create a PodmanBackend suitable for create_session tests.
+
+    Mocks _gather_proxy_credentials and _proxy.create_proxy so tests
+    don't need proxy_image or real credentials.
+    """
+    backend = _make_backend(mock_runner, MagicMock(), mock_volume)
+    backend._gather_proxy_credentials = MagicMock(return_value={})  # type: ignore[method-assign]
+    backend._proxy.create_proxy = MagicMock(  # type: ignore[method-assign]
+        return_value=("paude-net-test", "10.89.0.2")
+    )
+    backend._proxy.start_proxy = MagicMock()  # type: ignore[method-assign]
+    return backend
+
+
 class TestPodmanBackendCreateSession:
     """Tests for PodmanBackend.create_session."""
 
@@ -151,10 +169,7 @@ class TestPodmanBackendCreateSession:
         mock_runner.container_exists.return_value = False
         mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
-        backend._volume_manager = MagicMock()
+        backend = _make_create_session_backend(mock_runner)
 
         config = SessionConfig(
             name="my-session",
@@ -179,10 +194,7 @@ class TestPodmanBackendCreateSession:
         mock_runner.container_exists.return_value = False
         mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
-        backend._volume_manager = MagicMock()
+        backend = _make_create_session_backend(mock_runner)
 
         config = SessionConfig(
             name=None,
@@ -202,10 +214,7 @@ class TestPodmanBackendCreateSession:
         mock_runner_class.return_value = mock_runner
         mock_volume = MagicMock()
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
-        backend._volume_manager = mock_volume
+        backend = _make_create_session_backend(mock_runner, mock_volume)
 
         config = SessionConfig(
             name="test-session",
@@ -228,10 +237,7 @@ class TestPodmanBackendCreateSession:
         mock_runner.container_exists.return_value = False
         mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
-        backend._volume_manager = MagicMock()
+        backend = _make_create_session_backend(mock_runner)
 
         config = SessionConfig(
             name="test-session",
@@ -280,10 +286,7 @@ class TestPodmanBackendCreateSession:
         mock_runner_class.return_value = mock_runner
         mock_volume = MagicMock()
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
-        backend._volume_manager = mock_volume
+        backend = _make_create_session_backend(mock_runner, mock_volume)
 
         config = SessionConfig(
             name="test-session",
@@ -304,10 +307,7 @@ class TestPodmanBackendCreateSession:
         mock_runner.container_exists.return_value = False
         mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
-        backend._volume_manager = MagicMock()
+        backend = _make_create_session_backend(mock_runner)
 
         config = SessionConfig(
             name="yolo-session",
@@ -331,7 +331,7 @@ class TestPodmanBackendCreateSession:
         mock_runner.container_exists.return_value = False
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner, MagicMock())
+        backend = _make_create_session_backend(mock_runner)
 
         config = SessionConfig(
             name="filtered-session",
@@ -355,16 +355,12 @@ class TestPodmanBackendCreateSession:
         mock_runner.container_exists.return_value = False
         mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
-        backend._volume_manager = MagicMock()
+        backend = _make_create_session_backend(mock_runner)
 
         config = SessionConfig(
             name="open-session",
             workspace=Path("/home/user/project"),
             image="paude:latest",
-            allowed_domains=None,
         )
         backend.create_session(config)
 
@@ -927,158 +923,6 @@ class TestPodmanBackendFindSessionForWorkspace:
         assert session is None
 
 
-class TestPodmanBackendGcpAdcSecret:
-    """Tests for GCP ADC secret handling."""
-
-    @patch("paude.backends.shared.local_gcp_adc_path")
-    @patch("paude.backends.podman.backend.ContainerRunner")
-    def test_create_session_creates_secret_when_adc_exists(
-        self, mock_runner_class: MagicMock, mock_adc_path: MagicMock
-    ) -> None:
-        """create_session creates a Podman secret when ADC file exists."""
-        mock_runner = MagicMock()
-        mock_runner.container_exists.return_value = False
-        mock_runner_class.return_value = mock_runner
-
-        mock_adc_path.return_value = Path(
-            "/home/user/.config/gcloud/application_default_credentials.json"
-        )
-
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
-        backend._volume_manager = MagicMock()
-
-        config = SessionConfig(
-            name="test-session",
-            workspace=Path("/home/user/project"),
-            image="paude:latest",
-        )
-        backend.create_session(config)
-
-        mock_runner.create_secret.assert_called_once()
-        assert mock_runner.create_secret.call_args[0][0] == "paude-gcp-adc"
-
-    @patch("paude.backends.shared.local_gcp_adc_path")
-    @patch("paude.backends.podman.backend.ContainerRunner")
-    def test_create_session_passes_secret_to_create_container(
-        self, mock_runner_class: MagicMock, mock_adc_path: MagicMock
-    ) -> None:
-        """create_session passes the secret spec to create_container."""
-        mock_runner = MagicMock()
-        mock_runner.container_exists.return_value = False
-        mock_runner_class.return_value = mock_runner
-
-        mock_adc_path.return_value = Path(
-            "/home/user/.config/gcloud/application_default_credentials.json"
-        )
-
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
-        backend._volume_manager = MagicMock()
-
-        config = SessionConfig(
-            name="test-session",
-            workspace=Path("/home/user/project"),
-            image="paude:latest",
-        )
-        backend.create_session(config)
-
-        call_kwargs = mock_runner.create_container.call_args[1]
-        expected_target = (
-            "/home/paude/.config/gcloud/application_default_credentials.json"
-        )
-        assert call_kwargs["secrets"] == [f"paude-gcp-adc,target={expected_target}"]
-
-    @patch("paude.backends.shared.local_gcp_adc_path")
-    @patch("paude.backends.podman.backend.ContainerRunner")
-    def test_create_session_skips_secret_when_adc_missing(
-        self, mock_runner_class: MagicMock, mock_adc_path: MagicMock
-    ) -> None:
-        """create_session skips secret when ADC file does not exist."""
-        mock_runner = MagicMock()
-        mock_runner.container_exists.return_value = False
-        mock_runner_class.return_value = mock_runner
-
-        mock_adc_path.return_value = None
-
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
-        backend._volume_manager = MagicMock()
-
-        config = SessionConfig(
-            name="test-session",
-            workspace=Path("/home/user/project"),
-            image="paude:latest",
-        )
-        backend.create_session(config)
-
-        mock_runner.create_secret.assert_not_called()
-        call_kwargs = mock_runner.create_container.call_args[1]
-        assert call_kwargs["secrets"] is None
-
-    @patch("paude.backends.shared.local_gcp_adc_path")
-    @patch("paude.backends.podman.backend.ContainerRunner")
-    def test_create_session_cleans_up_secret_on_failure(
-        self, mock_runner_class: MagicMock, mock_adc_path: MagicMock
-    ) -> None:
-        """create_session cleans up the secret when container creation fails."""
-        mock_runner = MagicMock()
-        mock_runner.container_exists.return_value = False
-        mock_runner.create_container.side_effect = RuntimeError("Container failed")
-        mock_runner_class.return_value = mock_runner
-
-        mock_adc_path.return_value = Path(
-            "/home/user/.config/gcloud/application_default_credentials.json"
-        )
-
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
-        backend._volume_manager = MagicMock()
-
-        config = SessionConfig(
-            name="test-session",
-            workspace=Path("/home/user/project"),
-            image="paude:latest",
-        )
-
-        with pytest.raises(RuntimeError):
-            backend.create_session(config)
-
-        # Secret should be cleaned up on failure
-        mock_runner.remove_secret.assert_called_once_with("paude-gcp-adc")
-
-    @patch("paude.backends.shared.local_gcp_adc_path")
-    @patch("paude.backends.podman.backend.ContainerRunner")
-    def test_start_session_recreates_secret(
-        self, mock_runner_class: MagicMock, mock_adc_path: MagicMock
-    ) -> None:
-        """start_session recreates the secret before starting (no proxy)."""
-        mock_runner = MagicMock()
-        # Main container exists, proxy container does not
-        mock_runner.container_exists.side_effect = lambda name: (
-            not name.startswith("paude-proxy-")
-        )
-        mock_runner.get_container_state.return_value = "exited"
-        mock_runner.attach_container.return_value = 0
-        mock_runner_class.return_value = mock_runner
-
-        mock_adc_path.return_value = Path(
-            "/home/user/.config/gcloud/application_default_credentials.json"
-        )
-
-        backend = _make_backend(mock_runner)
-
-        with patch.object(backend, "_sync_host_config"):
-            backend.start_session("my-session")
-
-        mock_runner.create_secret.assert_called_once()
-        assert mock_runner.create_secret.call_args[0][0] == "paude-gcp-adc"
-
-
 # ---------------------------------------------------------------------------
 # Proxy integration tests
 # ---------------------------------------------------------------------------
@@ -1213,62 +1057,6 @@ class TestPodmanBackendCreateSessionWithProxy:
         call_kwargs = mock_runner.create_container.call_args[1]
         assert call_kwargs["network"] == "paude-net-no-ip-session"
         assert call_kwargs.get("dns") is None
-
-    @patch("paude.backends.podman.backend.ContainerRunner")
-    def test_create_session_no_dns_without_proxy(
-        self, mock_runner_class: MagicMock
-    ) -> None:
-        """create_session does not pass dns when no proxy is used."""
-        mock_runner = MagicMock()
-        mock_runner.container_exists.return_value = False
-        mock_runner_class.return_value = mock_runner
-
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
-        backend._volume_manager = MagicMock()
-
-        config = SessionConfig(
-            name="no-proxy-session",
-            workspace=Path("/home/user/project"),
-            image="paude:latest",
-            allowed_domains=None,
-        )
-        backend.create_session(config)
-
-        call_kwargs = mock_runner.create_container.call_args[1]
-        assert call_kwargs.get("dns") is None
-
-    @patch("paude.backends.podman.backend.ContainerRunner")
-    def test_create_session_without_domains_skips_proxy(
-        self, mock_runner_class: MagicMock
-    ) -> None:
-        """create_session without allowed_domains does not create proxy."""
-        mock_runner = MagicMock()
-        mock_runner.container_exists.return_value = False
-        mock_runner_class.return_value = mock_runner
-        mock_network = MagicMock()
-
-        backend = _make_backend(mock_runner, mock_network)
-
-        config = SessionConfig(
-            name="my-session",
-            workspace=Path("/home/user/project"),
-            image="paude:latest",
-            allowed_domains=None,  # Unrestricted
-        )
-        backend.create_session(config)
-
-        # No network or proxy created
-        mock_network.create_internal_network.assert_not_called()
-        mock_runner.create_session_proxy.assert_not_called()
-
-        # Main container should NOT have proxy env vars
-        call_kwargs = mock_runner.create_container.call_args[1]
-        env = call_kwargs["env"]
-        assert "HTTP_PROXY" not in env
-        assert "HTTPS_PROXY" not in env
-        assert call_kwargs["network"] is None
 
     @patch("paude.backends.podman.proxy.get_podman_machine_dns")
     @patch("paude.backends.podman.backend.ContainerRunner")
@@ -2166,7 +1954,7 @@ class TestPodmanPortUrls:
         mock_agent = MagicMock()
         mock_agent.config.exposed_ports = [(18789, 18789)]
         mock_agent.config.secret_env_vars = []
-        env = backend._build_attach_env(mock_agent, None)
+        env = backend._build_attach_env(mock_agent)
 
         assert env is not None
         assert "PAUDE_PORT_URLS" in env

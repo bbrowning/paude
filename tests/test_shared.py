@@ -33,7 +33,7 @@ class TestBuildSessionEnv:
         )
         agent = ClaudeAgent()
 
-        env, _args = build_session_env(config, agent)
+        env, _args = build_session_env(config, agent, proxy_name="proxy-test")
 
         assert "PAUDE_HOST_WORKSPACE" not in env
 
@@ -46,7 +46,7 @@ class TestBuildSessionEnv:
         )
         agent = ClaudeAgent()
 
-        env, _args = build_session_env(config, agent)
+        env, _args = build_session_env(config, agent, proxy_name="proxy-test")
 
         assert env["PAUDE_SUPPRESS_PROMPTS"] == "1"
 
@@ -83,19 +83,21 @@ class TestBuildSessionEnvProxyCredentials:
 
         assert env["GH_TOKEN"] == PROXY_MANAGED_CREDENTIAL
 
-    def test_no_proxy_does_not_set_dummy_credentials(self) -> None:
-        """Secret env vars are NOT set when no proxy is active."""
+    def test_dummy_credentials_always_set(self) -> None:
+        """Secret env vars are always set since proxy is always active."""
+        from paude.backends.shared import PROXY_MANAGED_CREDENTIAL
+
         config = SessionConfig(
             name="test",
             workspace=Path("/home/user/project"),
             image="test-image",
         )
         agent = ClaudeAgent()
-        env, _args = build_session_env(config, agent, proxy_name=None)
+        env, _args = build_session_env(config, agent, proxy_name="proxy-test")
 
-        assert "GH_TOKEN" not in env
+        assert env["GH_TOKEN"] == PROXY_MANAGED_CREDENTIAL
         for var in agent.config.secret_env_vars:
-            assert var not in env
+            assert env[var] == PROXY_MANAGED_CREDENTIAL
 
 
 class TestGatherProxyCredentials:

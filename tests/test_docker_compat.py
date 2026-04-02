@@ -36,32 +36,6 @@ class TestDockerBackendType:
 class TestDockerSecretsFallback:
     """Tests for Docker credential handling without secrets."""
 
-    def test_docker_ensure_gcp_credentials_returns_none(self) -> None:
-        """Docker should skip secrets (ADC injected via exec after start)."""
-        engine = ContainerEngine("docker")
-        backend = PodmanBackend(engine=engine)
-        result = backend._ensure_gcp_credentials()
-        assert result is None
-
-    @patch("paude.backends.podman.backend.Path")
-    def test_podman_ensure_gcp_credentials_creates_secret(
-        self, mock_path_class: MagicMock
-    ) -> None:
-        """Podman should create a secret for GCP ADC."""
-        mock_adc_path = MagicMock()
-        mock_adc_path.is_file.return_value = True
-        mock_path_class.home.return_value.__truediv__ = MagicMock(
-            return_value=MagicMock(__truediv__=MagicMock(return_value=mock_adc_path))
-        )
-
-        engine = ContainerEngine("podman")
-        backend = PodmanBackend(engine=engine)
-        with patch.object(backend._runner, "create_secret"):
-            result = backend._ensure_gcp_credentials()
-            assert result is not None
-            assert len(result) == 1
-            assert "gcp-adc" in result[0]
-
     def test_runner_skips_secrets_for_docker(self) -> None:
         """ContainerRunner.create_secret should be a no-op for Docker."""
         engine = ContainerEngine("docker")
@@ -276,48 +250,32 @@ class TestDockerVolumePermissions:
 
 
 class TestDockerCredentialInjection:
-    """Tests for Docker ADC credential injection via exec."""
+    """Tests for stub ADC credential injection via exec."""
 
     @patch("subprocess.run")
-    def test_inject_credentials_execs_into_container(self, mock_run: MagicMock) -> None:
-        """Docker should inject ADC via exec, not bind mount."""
-        from pathlib import Path
-
+    def test_inject_stub_credentials_execs_into_container(
+        self, mock_run: MagicMock
+    ) -> None:
+        """_inject_stub_credentials should inject stub ADC via exec."""
+        from paude.backends.shared import STUB_ADC_JSON
         from paude.constants import GCP_ADC_TARGET
 
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-        adc_content = '{"type": "authorized_user"}'
 
         engine = ContainerEngine("docker")
         backend = PodmanBackend(engine=engine)
+        backend._inject_stub_credentials("paude-test")
 
-        with (
-            patch.object(Path, "is_file", return_value=True),
-            patch.object(Path, "read_text", return_value=adc_content),
-        ):
-            backend._inject_credentials("paude-test")
-
-        # Should have called docker exec with cat > target
         exec_calls = [
             c
             for c in mock_run.call_args_list
             if "exec" in c[0][0] and "cat" in " ".join(c[0][0])
         ]
         assert len(exec_calls) == 1
+        assert exec_calls[0][1].get("input") == STUB_ADC_JSON
         cmd = exec_calls[0][0][0]
         assert cmd[0] == "docker"
-        assert "exec" in cmd
-        assert "-i" in cmd
         assert GCP_ADC_TARGET in " ".join(cmd)
-        # Credential content piped via stdin
-        assert exec_calls[0][1].get("input") == adc_content
-
-    def test_inject_credentials_noop_for_podman(self) -> None:
-        """Podman should skip injection (uses secrets instead)."""
-        engine = ContainerEngine("podman")
-        backend = PodmanBackend(engine=engine)
-        # Should not raise or do anything
-        backend._inject_credentials("paude-test")
 
     @patch("subprocess.run")
     def test_inject_file_sets_permissions(self, mock_run: MagicMock) -> None:
@@ -361,21 +319,13 @@ class TestDockerCredentialInjection:
         assert "chown" not in shell_cmd
 
     @patch("subprocess.run")
-    def test_inject_credentials_passes_owner(self, mock_run: MagicMock) -> None:
-        """_inject_credentials should pass owner='paude:0' to inject_file."""
-        from pathlib import Path
-
+    def test_inject_stub_credentials_passes_owner(self, mock_run: MagicMock) -> None:
+        """_inject_stub_credentials should pass owner='paude:0' to inject_file."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-        adc_content = '{"type": "authorized_user"}'
 
         engine = ContainerEngine("docker")
         backend = PodmanBackend(engine=engine)
-
-        with (
-            patch.object(Path, "is_file", return_value=True),
-            patch.object(Path, "read_text", return_value=adc_content),
-        ):
-            backend._inject_credentials("paude-test")
+        backend._inject_stub_credentials("paude-test")
 
         exec_calls = [
             c
@@ -387,48 +337,20 @@ class TestDockerCredentialInjection:
         assert "chown paude:0" in shell_cmd
 
 
-class TestProxyActiveCredentialInjection:
-    """Tests for stub ADC injection when proxy is active."""
+class TestStubCredentialInjection:
+    """Tests for stub ADC injection (proxy always active)."""
 
     @patch("subprocess.run")
-    def test_inject_credentials_stub_adc_when_proxy_active(
-        self, mock_run: MagicMock
-    ) -> None:
-        """_inject_credentials injects stub ADC when proxy_active=True."""
-        from paude.backends.shared import STUB_ADC_JSON
-        from paude.constants import GCP_ADC_TARGET
-
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        engine = ContainerEngine("docker")
-        backend = PodmanBackend(engine=engine)
-        backend._inject_credentials("paude-test", proxy_active=True)
-
-        # Should inject stub ADC content
-        exec_calls = [
-            c
-            for c in mock_run.call_args_list
-            if "exec" in c[0][0] and "cat" in " ".join(c[0][0])
-        ]
-        assert len(exec_calls) == 1
-        assert exec_calls[0][1].get("input") == STUB_ADC_JSON
-        shell_cmd = exec_calls[0][0][0][-1]
-        assert GCP_ADC_TARGET in shell_cmd
-
-    @patch("subprocess.run")
-    def test_inject_credentials_stub_adc_podman_when_proxy_active(
-        self, mock_run: MagicMock
-    ) -> None:
-        """Podman also injects stub ADC when proxy_active (not no-op)."""
+    def test_inject_stub_credentials_podman(self, mock_run: MagicMock) -> None:
+        """Podman injects stub ADC via exec."""
         from paude.backends.shared import STUB_ADC_JSON
 
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         engine = ContainerEngine("podman")
         backend = PodmanBackend(engine=engine)
-        backend._inject_credentials("paude-test", proxy_active=True)
+        backend._inject_stub_credentials("paude-test")
 
-        # Should still inject stub (not skip like normal Podman path)
         exec_calls = [
             c
             for c in mock_run.call_args_list

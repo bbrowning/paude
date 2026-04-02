@@ -147,7 +147,7 @@ def decode_path(encoded: str, *, url_safe: bool = False) -> Path:
 def build_session_env(
     config: SessionConfig,
     agent: Agent,
-    proxy_name: str | None = None,
+    proxy_name: str,
 ) -> tuple[dict[str, str], list[str]]:
     """Build environment variables and args for a session.
 
@@ -155,10 +155,13 @@ def build_session_env(
     backends: agent env, YOLO flags, agent args, backward compat, proxy env,
     and prompt suppression.
 
+    All real credentials are handled by the proxy container. The agent
+    container only sees dummy sentinel values.
+
     Args:
         config: Session configuration.
         agent: Resolved agent instance.
-        proxy_name: Proxy container/service name (None if no proxy).
+        proxy_name: Proxy container/service name.
 
     Returns:
         Tuple of (env_dict, agent_args).
@@ -186,12 +189,11 @@ def build_session_env(
 
     env["PAUDE_SUPPRESS_PROMPTS"] = "1"
 
-    if proxy_name is not None:
-        env.update(build_proxy_environment(proxy_name))
-        # Set dummy credential values — real creds live in the proxy container
-        for var in agent.config.secret_env_vars:
-            env[var] = PROXY_MANAGED_CREDENTIAL
-        env["GH_TOKEN"] = PROXY_MANAGED_CREDENTIAL
+    env.update(build_proxy_environment(proxy_name))
+    # Set dummy credential values — real creds live in the proxy container
+    for var in agent.config.secret_env_vars:
+        env[var] = PROXY_MANAGED_CREDENTIAL
+    env["GH_TOKEN"] = PROXY_MANAGED_CREDENTIAL
 
     return env, agent_args
 

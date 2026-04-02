@@ -109,12 +109,12 @@ DEFAULT_ALIASES = BASE_ALIASES + ["claude"]
 def expand_domains(
     domains: list[str],
     extra_aliases: list[str] | None = None,
-) -> list[str] | None:
+) -> list[str]:
     """Expand domain aliases to a list of actual domains.
 
     Args:
         domains: List of domains or aliases. Special values:
-            - "all": Returns None (unrestricted network)
+            - "all": Returns [] (unrestricted network, proxy allows all)
             - "default": Expands to BASE_ALIASES + extra_aliases
               (falls back to DEFAULT_ALIASES if extra_aliases is None)
             - Alias names (e.g., "claude", "vertexai"): Expand to domain lists
@@ -124,12 +124,12 @@ def expand_domains(
             for backward compatibility.
 
     Returns:
-        List of expanded domains, or None if "all" is specified (unrestricted).
-        Duplicates are removed while preserving order.
+        List of expanded domains. Empty list means unrestricted (proxy
+        allows all domains). Duplicates are removed while preserving order.
     """
-    # Check for "all" - means unrestricted network
+    # Check for "all" - means unrestricted network (proxy allows everything)
     if "all" in domains:
-        return None
+        return []
 
     expanded: list[str] = []
     seen: set[str] = set()
@@ -163,32 +163,29 @@ def expand_domains(
     return expanded
 
 
-def is_unrestricted(domains: list[str] | None) -> bool:
+def is_unrestricted(domains: list[str]) -> bool:
     """Check if the domain configuration allows unrestricted network access.
 
     Args:
         domains: Expanded domains list (output of expand_domains).
 
     Returns:
-        True if network is unrestricted (domains is None).
+        True if network is unrestricted (empty list).
     """
-    return domains is None
+    return len(domains) == 0
 
 
-def format_domains_for_display(domains: list[str] | None) -> str:
+def format_domains_for_display(domains: list[str]) -> str:
     """Format expanded domains for display.
 
     Args:
-        domains: List of expanded domains or None (unrestricted).
+        domains: List of expanded domains. Empty list means unrestricted.
 
     Returns:
         Human-readable string describing the network access.
     """
-    if domains is None:
-        return "unrestricted (all domains allowed)"
-
     if not domains:
-        return "none (no network access)"
+        return "unrestricted (all domains allowed)"
 
     # Group by alias if possible
     aliases_used = []

@@ -119,52 +119,46 @@ class SessionLifecycleManager:
 
     def _setup_proxy(
         self, config: SessionConfig, session_name: str, agent: Agent
-    ) -> str | None:
+    ) -> str:
         """Set up proxy Secrets, Deployment, Service, and NetworkPolicies.
 
         Returns:
-            The CA Secret name if proxy is active, else None.
+            The CA Secret name.
         """
-        if config.allowed_domains is not None:
-            proxy_image = self._resolve_proxy_image(config)
+        proxy_image = self._resolve_proxy_image(config)
 
-            from paude.backends.openshift.certs import (
-                create_ca_secret,
-                create_credentials_secret,
-                generate_ca_cert,
-            )
-            from paude.backends.shared import (
-                gather_proxy_credentials,
-                local_gcp_adc_path,
-            )
+        from paude.backends.openshift.certs import (
+            create_ca_secret,
+            create_credentials_secret,
+            generate_ca_cert,
+        )
+        from paude.backends.shared import (
+            gather_proxy_credentials,
+            local_gcp_adc_path,
+        )
 
-            # Generate CA cert and store as Secret
-            cert_pem, key_pem = generate_ca_cert()
-            ca_secret = create_ca_secret(
-                self._oc, self._namespace, session_name, cert_pem, key_pem
-            )
+        # Generate CA cert and store as Secret
+        cert_pem, key_pem = generate_ca_cert()
+        ca_secret = create_ca_secret(
+            self._oc, self._namespace, session_name, cert_pem, key_pem
+        )
 
-            # Store credentials as Secret
-            proxy_creds = gather_proxy_credentials(
-                agent.config, gcp_adc_path=local_gcp_adc_path()
-            )
-            create_credentials_secret(
-                self._oc, self._namespace, session_name, proxy_creds
-            )
+        # Store credentials as Secret (only proxy sees these)
+        proxy_creds = gather_proxy_credentials(
+            agent.config, gcp_adc_path=local_gcp_adc_path()
+        )
+        create_credentials_secret(self._oc, self._namespace, session_name, proxy_creds)
 
-            self._proxy.create_deployment(
-                session_name,
-                proxy_image,
-                config.allowed_domains,
-                otel_ports=config.otel_ports,
-            )
-            self._proxy.create_service(session_name)
-            self._proxy.ensure_proxy_network_policy(session_name)
-            self._proxy.ensure_network_policy(session_name)
-            return ca_secret
-        else:
-            self._proxy.ensure_network_policy_permissive(session_name)
-            return None
+        self._proxy.create_deployment(
+            session_name,
+            proxy_image,
+            config.allowed_domains,
+            otel_ports=config.otel_ports,
+        )
+        self._proxy.create_service(session_name)
+        self._proxy.ensure_proxy_network_policy(session_name)
+        self._proxy.ensure_network_policy(session_name)
+        return ca_secret
 
     def _resolve_proxy_image(self, config: SessionConfig) -> str:
         """Resolve the proxy image from config."""
@@ -182,19 +176,14 @@ class SessionLifecycleManager:
             Tuple of (session_env, secret_env).
         """
         from paude.agents import get_agent
-        from paude.agents.base import build_secret_environment_from_config
         from paude.backends.shared import PROXY_MANAGED_CREDENTIAL
 
         agent = get_agent(config.agent, provider=config.provider)
-        proxy_active = config.allowed_domains is not None
-        if proxy_active:
-            # Agent gets dummy credential values; proxy handles real auth
-            secret_env = dict.fromkeys(
-                agent.config.secret_env_vars, PROXY_MANAGED_CREDENTIAL
-            )
-        else:
-            secret_env = build_secret_environment_from_config(agent.config)
-        proxy_name = proxy_resource_name(session_name) if proxy_active else None
+        # Agent gets dummy credential values; proxy handles real auth
+        secret_env = dict.fromkeys(
+            agent.config.secret_env_vars, PROXY_MANAGED_CREDENTIAL
+        )
+        proxy_name = proxy_resource_name(session_name)
         session_env, _agent_args = build_session_env(
             config, agent, proxy_name=proxy_name
         )
@@ -234,8 +223,7 @@ class SessionLifecycleManager:
         self._oc.run("apply", "-f", "-", input_data=json.dumps(sts_spec))
 
         if config.wait_for_ready:
-            if config.allowed_domains is not None:
-                self._proxy.wait_for_ready(session_name)
+            self._proxy.wait_for_ready(session_name)
 
             pname = pod_name(session_name)
             print(f"Waiting for pod {pname} to be ready...", file=sys.stderr)
@@ -245,10 +233,8 @@ class SessionLifecycleManager:
                 pname,
                 agent_name=config.agent,
                 provider=config.provider,
-                secret_env=secret_env,
                 args=session_env.get("PAUDE_AGENT_ARGS", ""),
                 yolo=config.yolo,
-                proxy_active=config.allowed_domains is not None,
             )
 
     def start_agent_headless_in_pod(self, pname: str) -> None:

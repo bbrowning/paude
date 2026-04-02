@@ -59,7 +59,7 @@ class SessionConfig:
         mounts: Volume mount arguments (Podman-style).
         args: Arguments to pass to Claude.
         workdir: Working directory inside container.
-        allowed_domains: List of domains to allow, or None for unrestricted.
+        allowed_domains: List of domains to allow. Empty list means unrestricted.
         yolo: Enable YOLO mode.
         pvc_size: PVC size for OpenShift (e.g., "10Gi").
         storage_class: Storage class for OpenShift.
@@ -74,7 +74,7 @@ class SessionConfig:
     mounts: list[str] = field(default_factory=list)
     args: list[str] = field(default_factory=list)
     workdir: str | None = None
-    allowed_domains: list[str] | None = None
+    allowed_domains: list[str] = field(default_factory=list)
     yolo: bool = False
     pvc_size: str = "10Gi"
     storage_class: str | None = None
@@ -232,7 +232,7 @@ class Backend(Protocol):
         """
         ...
 
-    def start_agent_headless(self, name: str, github_token: str | None = None) -> None:
+    def start_agent_headless(self, name: str) -> None:
         """Start the agent in headless mode in a running session.
 
         Launches the agent in a background tmux session without attaching
@@ -241,7 +241,6 @@ class Backend(Protocol):
 
         Args:
             name: Session name.
-            github_token: Optional GitHub PAT to inject as GH_TOKEN.
         """
         ...
 
