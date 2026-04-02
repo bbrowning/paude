@@ -19,6 +19,7 @@ from paude.backends.shared import (
     PAUDE_LABEL_OTEL_PORTS,
     PAUDE_LABEL_PROXY_IMAGE,
     PROXY_BLOCKED_LOG_PATH,
+    SYS_CA_BUNDLE_PATHS,
     derive_agent_ip,
 )
 from paude.container.engine import ContainerEngine
@@ -27,12 +28,14 @@ from paude.container.proxy_runner import ProxyRunner
 from paude.container.runner import ContainerRunner
 from paude.platform import get_podman_machine_dns, is_macos
 
-# System CA bundle path inside agent containers.
-_SYS_CA_BUNDLE = "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
-
-# Shell command to build a custom CA bundle (system CAs + proxy CA cert).
+# Shell command to find the system CA bundle across distros and build a
+# custom bundle (system CAs + proxy CA cert).
 _BUILD_CA_BUNDLE_CMD = (
-    f"cat {_SYS_CA_BUNDLE} {CA_CERT_CONTAINER_PATH} > {CA_BUNDLE_PATH}"
+    "SYS_BUNDLE=''; "
+    f"for p in {' '.join(SYS_CA_BUNDLE_PATHS)}; do "
+    '[ -f "$p" ] && SYS_BUNDLE="$p" && break; done; '
+    f'[ -n "$SYS_BUNDLE" ] && cat "$SYS_BUNDLE" '
+    f"{CA_CERT_CONTAINER_PATH} > {CA_BUNDLE_PATH}"
 )
 
 

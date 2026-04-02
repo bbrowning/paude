@@ -49,16 +49,36 @@ wait_for_git() {
     wait_for_path "/pvc/workspace/.git" "git repository" 120 "continue"
 }
 
+# Detect the system CA bundle path across distros.
+_find_sys_ca_bundle() {
+    local path
+    for path in \
+        /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem \
+        /etc/ssl/certs/ca-certificates.crt \
+        /etc/ssl/ca-bundle.pem \
+        /etc/ssl/cert.pem; do
+        if [[ -f "$path" ]]; then
+            echo "$path"
+            return 0
+        fi
+    done
+    return 1
+}
+
 # Build custom CA bundle with paude-proxy CA cert if injected.
 # Concatenates the system CA bundle with the proxy CA cert into a
 # writable /tmp path — no root or update-ca-trust needed (works with
-# OpenShift arbitrary UIDs).
+# OpenShift arbitrary UIDs and non-CentOS base images like Debian).
 setup_ca_trust() {
     local ca_cert="/etc/pki/ca-trust/source/anchors/paude-proxy-ca.crt"
-    local sys_bundle="/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
     local custom_bundle="/tmp/paude-ca-bundle.pem"
-    if [[ -f "$ca_cert" ]] && [[ -f "$sys_bundle" ]]; then
+    local sys_bundle
+    sys_bundle=$(_find_sys_ca_bundle) || return 0
+
+    if [[ -f "$ca_cert" ]]; then
         cat "$sys_bundle" "$ca_cert" > "$custom_bundle" 2>/dev/null || true
+    else
+        cp "$sys_bundle" "$custom_bundle" 2>/dev/null || true
     fi
 }
 

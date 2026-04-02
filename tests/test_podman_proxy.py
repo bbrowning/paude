@@ -441,6 +441,37 @@ class TestDistributeCaCert:
         mock_runner.inject_file.assert_not_called()
 
 
+class TestBuildCaBundleCmd:
+    """Tests for _BUILD_CA_BUNDLE_CMD multi-distro support."""
+
+    def test_cmd_supports_debian_ca_path(self) -> None:
+        """_BUILD_CA_BUNDLE_CMD must probe Debian CA bundle path."""
+        from paude.backends.podman.proxy import _BUILD_CA_BUNDLE_CMD
+
+        assert "/etc/ssl/certs/ca-certificates.crt" in _BUILD_CA_BUNDLE_CMD
+
+    def test_cmd_supports_centos_ca_path(self) -> None:
+        """_BUILD_CA_BUNDLE_CMD must probe RHEL/CentOS CA bundle path."""
+        from paude.backends.podman.proxy import _BUILD_CA_BUNDLE_CMD
+
+        assert (
+            "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem" in _BUILD_CA_BUNDLE_CMD
+        )
+
+    def test_cmd_supports_alpine_ca_path(self) -> None:
+        """_BUILD_CA_BUNDLE_CMD must probe Alpine CA bundle path."""
+        from paude.backends.podman.proxy import _BUILD_CA_BUNDLE_CMD
+
+        assert "/etc/ssl/cert.pem" in _BUILD_CA_BUNDLE_CMD
+
+    def test_cmd_writes_to_ca_bundle_path(self) -> None:
+        """_BUILD_CA_BUNDLE_CMD must write to CA_BUNDLE_PATH."""
+        from paude.backends.podman.proxy import _BUILD_CA_BUNDLE_CMD
+        from paude.backends.shared import CA_BUNDLE_PATH
+
+        assert CA_BUNDLE_PATH in _BUILD_CA_BUNDLE_CMD
+
+
 class TestCreateProxyCaVolume:
     """Tests for CA volume creation in PodmanProxyManager.create_proxy."""
 

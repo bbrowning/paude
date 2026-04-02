@@ -36,6 +36,16 @@ CA_CERT_CONTAINER_PATH = "/etc/pki/ca-trust/source/anchors/paude-proxy-ca.crt"
 # Written to /tmp so no root is needed (works with OpenShift arbitrary UIDs).
 CA_BUNDLE_PATH = "/tmp/paude-ca-bundle.pem"  # noqa: S108
 
+# System CA bundle paths across distros (RHEL/CentOS, Debian/Ubuntu,
+# openSUSE, Alpine).  Keep in sync with _find_sys_ca_bundle() in
+# containers/paude/entrypoint-lib-credentials.sh.
+SYS_CA_BUNDLE_PATHS = (
+    "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+    "/etc/ssl/certs/ca-certificates.crt",
+    "/etc/ssl/ca-bundle.pem",
+    "/etc/ssl/cert.pem",
+)
+
 
 def derive_agent_ip(proxy_ip: str) -> str:
     """Derive the expected agent container IP from the proxy IP.
