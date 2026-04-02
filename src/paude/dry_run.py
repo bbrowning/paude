@@ -95,7 +95,7 @@ def _show_resolved_flags(
     typer.echo(format_setting("git", resolved.git))
 
     # Domains with provenance
-    allowed_domains = flags.get("allowed_domains") or []
+    allowed_domains = flags.get("allowed_domains", [])
     domains_display = format_domains_for_display(allowed_domains)
     if resolved.allowed_domains_provenance:
         typer.echo(f"  allowed-domains: {domains_display}")
@@ -131,7 +131,7 @@ def _show_legacy_flags(flags: dict[str, Any]) -> None:
     typer.echo(f"  --verbose: {flags.get('verbose', False)}")
     typer.echo(f"  --yolo: {flags.get('yolo', False)}")
 
-    allowed_domains = flags.get("allowed_domains") or []
+    allowed_domains = flags.get("allowed_domains", [])
     domains_display = format_domains_for_display(allowed_domains)
     typer.echo(f"  --allowed-domains: {domains_display}")
 

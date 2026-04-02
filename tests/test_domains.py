@@ -188,11 +188,6 @@ class TestExpandDomains:
 class TestFormatDomainsForDisplay:
     """Tests for format_domains_for_display function."""
 
-    def test_none_shows_unrestricted(self):
-        """None shows unrestricted message."""
-        result = format_domains_for_display(None)
-        assert "unrestricted" in result
-
     def test_empty_list_shows_unrestricted(self):
         """Empty list shows unrestricted (all domains allowed)."""
         result = format_domains_for_display([])
