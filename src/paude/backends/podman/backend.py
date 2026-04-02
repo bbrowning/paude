@@ -282,38 +282,36 @@ class PodmanBackend:
             print(f"Creating volume {vname}...", file=sys.stderr)
             self._volume_manager.create_volume(vname, labels=labels)
 
-        # Set up proxy network and container
+        # Resolve agent once for both proxy credential gathering and env building
+        from paude.agents import get_agent
+
+        agent = get_agent(config.agent, provider=config.provider)
+
         network: str | None = None
         proxy_ip: str | None = None
-        try:
-            from paude.agents import get_agent as _get_agent
+        if config.proxy_image:
+            try:
+                proxy_creds = self._gather_proxy_credentials(agent)
+                network, proxy_ip = self._proxy.create_proxy(
+                    session_name,
+                    config.proxy_image,
+                    config.allowed_domains,
+                    otel_ports=config.otel_ports,
+                    credentials=proxy_creds,
+                )
+            except Exception:
+                if not config.reuse_volume:
+                    self._volume_manager.remove_volume(vname, force=True)
+                raise
 
-            _agent = _get_agent(config.agent, provider=config.provider)
-            proxy_creds = self._gather_proxy_credentials(_agent)
-            network, proxy_ip = self._proxy.create_proxy(
-                session_name,
-                config.proxy_image or "",
-                config.allowed_domains,
-                otel_ports=config.otel_ports,
-                credentials=proxy_creds,
-            )
-        except Exception:
-            if not config.reuse_volume:
-                self._volume_manager.remove_volume(vname, force=True)
-            raise
+            if proxy_ip is None:
+                print(
+                    "WARNING: Could not determine proxy IP; "
+                    "container DNS will not use the proxy for resolution.",
+                    file=sys.stderr,
+                )
 
-        if proxy_ip is None:
-            print(
-                "WARNING: Could not determine proxy IP; "
-                "container DNS will not use the proxy for resolution.",
-                file=sys.stderr,
-            )
-
-        # Start the proxy now so it's ready when the session starts
-        self._proxy.start_proxy(session_name)
-
-        # Note: CA cert distribution happens in start_session/connect_session
-        # after the agent container is also running.
+            self._proxy.start_proxy(session_name)
 
         # Derive fixed agent IP so it matches what the proxy expects
         agent_ip = derive_agent_ip(proxy_ip) if proxy_ip else None
@@ -322,11 +320,11 @@ class PodmanBackend:
         mounts = list(config.mounts)
         mounts.extend(["-v", f"{vname}:/pvc"])
 
-        # Prepare environment
-        from paude.agents import get_agent
-
-        agent = get_agent(config.agent, provider=config.provider)
-        proxy_name_for_env = proxy_ip or proxy_container_name(session_name)
+        proxy_name_for_env = (
+            (proxy_ip or proxy_container_name(session_name))
+            if config.proxy_image
+            else None
+        )
         env, _agent_args = build_session_env(
             config, agent, proxy_name=proxy_name_for_env
         )
@@ -355,9 +353,10 @@ class PodmanBackend:
             )
         except Exception:
             # Cleanup all resources on failure
-            pname = proxy_container_name(session_name)
-            self._runner.remove_container(pname, force=True)
-            self._network_manager.remove_network(network_name(session_name))
+            if config.proxy_image:
+                pname = proxy_container_name(session_name)
+                self._runner.remove_container(pname, force=True)
+                self._network_manager.remove_network(network_name(session_name))
             self._volume_manager.remove_volume(vname, force=True)
             raise
 

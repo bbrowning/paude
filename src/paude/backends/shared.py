@@ -147,7 +147,7 @@ def decode_path(encoded: str, *, url_safe: bool = False) -> Path:
 def build_session_env(
     config: SessionConfig,
     agent: Agent,
-    proxy_name: str,
+    proxy_name: str | None = None,
 ) -> tuple[dict[str, str], list[str]]:
     """Build environment variables and args for a session.
 
@@ -155,19 +155,17 @@ def build_session_env(
     backends: agent env, YOLO flags, agent args, backward compat, proxy env,
     and prompt suppression.
 
-    All real credentials are handled by the proxy container. The agent
-    container only sees dummy sentinel values.
+    When a proxy is configured, all real credentials are handled by the proxy
+    container and the agent only sees dummy sentinel values.
 
     Args:
         config: Session configuration.
         agent: Resolved agent instance.
-        proxy_name: Proxy container/service name.
+        proxy_name: Proxy container/service name (None if no proxy).
 
     Returns:
         Tuple of (env_dict, agent_args).
     """
-    from paude.environment import build_proxy_environment
-
     env = dict(config.env)
     env.update(build_agent_env(agent.config))
     # build_agent_env sets LAUNCH_CMD to process_name, which is wrong for
@@ -189,11 +187,14 @@ def build_session_env(
 
     env["PAUDE_SUPPRESS_PROMPTS"] = "1"
 
-    env.update(build_proxy_environment(proxy_name))
-    # Set dummy credential values — real creds live in the proxy container
-    for var in agent.config.secret_env_vars:
-        env[var] = PROXY_MANAGED_CREDENTIAL
-    env["GH_TOKEN"] = PROXY_MANAGED_CREDENTIAL
+    if proxy_name:
+        from paude.environment import build_proxy_environment
+
+        env.update(build_proxy_environment(proxy_name))
+        # Set dummy credential values — real creds live in the proxy container
+        for var in agent.config.secret_env_vars:
+            env[var] = PROXY_MANAGED_CREDENTIAL
+        env["GH_TOKEN"] = PROXY_MANAGED_CREDENTIAL
 
     return env, agent_args
 

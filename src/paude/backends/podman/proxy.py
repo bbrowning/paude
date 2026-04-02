@@ -294,7 +294,7 @@ class PodmanProxyManager:
             network gateway could not be determined.
         """
         if not proxy_image:
-            raise ValueError("proxy_image is required when allowed_domains is set")
+            raise ValueError("proxy_image is required to create a proxy")
 
         nname = network_name(session_name)
         self._network_manager.create_internal_network(
