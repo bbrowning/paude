@@ -339,6 +339,11 @@ def _upgrade_podman(
     nname = network_name(name)
     backend._network_manager.remove_network(nname)
 
+    # Remove CA volume so create_session can recreate it
+    from paude.backends.podman.proxy import ca_volume_name
+
+    backend._volume_manager.remove_volume(ca_volume_name(name), force=True)
+
     # Build mounts and env
     home = Path.home()
     mounts = build_mounts(home, agent_instance, include_config=engine.is_remote)

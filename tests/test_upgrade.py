@@ -181,6 +181,7 @@ class TestUpgradePodman:
         backend._runner = MagicMock()
         backend._runner.container_exists.return_value = False
         backend._network_manager = MagicMock()
+        backend._volume_manager = MagicMock()
         backend._engine = MagicMock()
 
         from paude.cli.upgrade import _upgrade_podman
@@ -244,6 +245,7 @@ class TestUpgradePodman:
         backend._runner = MagicMock()
         backend._runner.container_exists.return_value = False
         backend._network_manager = MagicMock()
+        backend._volume_manager = MagicMock()
         backend._engine = MagicMock()
 
         from paude.cli.upgrade import _upgrade_podman
@@ -285,6 +287,7 @@ class TestUpgradePodman:
         backend._runner = MagicMock()
         backend._runner.container_exists.return_value = False
         backend._network_manager = MagicMock()
+        backend._volume_manager = MagicMock()
         backend._engine = MagicMock()
 
         from paude.cli.upgrade import _upgrade_podman
@@ -325,6 +328,7 @@ class TestUpgradePodman:
         backend = MagicMock(spec=PodmanBackend)
         backend._runner = MagicMock()
         backend._network_manager = MagicMock()
+        backend._volume_manager = MagicMock()
         backend._engine = MagicMock()
 
         from paude.cli.upgrade import _upgrade_podman
@@ -369,6 +373,7 @@ class TestUpgradePodman:
         backend._runner = MagicMock()
         backend._runner.container_exists.return_value = False
         backend._network_manager = MagicMock()
+        backend._volume_manager = MagicMock()
         backend._engine = MagicMock()
 
         from paude.cli.upgrade import _upgrade_podman
@@ -408,6 +413,7 @@ class TestUpgradePodman:
         backend._runner = MagicMock()
         backend._runner.container_exists.return_value = False
         backend._network_manager = MagicMock()
+        backend._volume_manager = MagicMock()
         backend._engine = MagicMock()
 
         from paude.cli.upgrade import _upgrade_podman
@@ -1137,6 +1143,7 @@ class TestUpgradePodmanWithOverrides:
         backend = MagicMock(spec=PodmanBackend)
         backend._runner = MagicMock()
         backend._network_manager = MagicMock()
+        backend._volume_manager = MagicMock()
         backend._engine = MagicMock()
 
         from paude.cli.upgrade import _upgrade_podman
@@ -1180,6 +1187,7 @@ class TestUpgradePodmanWithOverrides:
         backend = MagicMock(spec=PodmanBackend)
         backend._runner = MagicMock()
         backend._network_manager = MagicMock()
+        backend._volume_manager = MagicMock()
         backend._engine = MagicMock()
 
         from paude.cli.upgrade import _upgrade_podman
@@ -1223,6 +1231,7 @@ class TestUpgradePodmanWithOverrides:
         backend = MagicMock(spec=PodmanBackend)
         backend._runner = MagicMock()
         backend._network_manager = MagicMock()
+        backend._volume_manager = MagicMock()
         backend._engine = MagicMock()
 
         from paude.cli.upgrade import _upgrade_podman
@@ -1258,6 +1267,7 @@ class TestUpgradePodmanWithOverrides:
         backend._runner = MagicMock()
         backend._runner.container_exists.return_value = False
         backend._network_manager = MagicMock()
+        backend._volume_manager = MagicMock()
         backend._engine = MagicMock()
 
         from paude.cli.upgrade import _upgrade_podman
@@ -1296,6 +1306,7 @@ class TestUpgradePodmanWithOverrides:
         backend._runner = MagicMock()
         backend._runner.container_exists.return_value = False
         backend._network_manager = MagicMock()
+        backend._volume_manager = MagicMock()
         backend._engine = MagicMock()
 
         from paude.cli.upgrade import _upgrade_podman

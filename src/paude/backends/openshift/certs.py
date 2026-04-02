@@ -23,9 +23,10 @@ def creds_secret_name(session_name: str) -> str:
 
 
 def generate_ca_cert() -> tuple[str, str]:
-    """Generate a self-signed CA certificate and private key.
+    """Generate a self-signed CA certificate and ECDSA private key.
 
-    Uses ``openssl`` via subprocess.
+    Uses ``openssl`` via subprocess.  The key is EC P-256 so it matches
+    the format the Go proxy expects (``x509.ParseECPrivateKey``).
 
     Returns:
         Tuple of (cert_pem, key_pem) as strings.
@@ -40,17 +41,31 @@ def generate_ca_cert() -> tuple[str, str]:
             subprocess.run(
                 [
                     "openssl",
+                    "ecparam",
+                    "-name",
+                    "prime256v1",
+                    "-genkey",
+                    "-noout",
+                    "-out",
+                    key_path,
+                ],
+                capture_output=True,
+                check=True,
+                text=True,
+                timeout=30,
+            )
+            subprocess.run(
+                [
+                    "openssl",
                     "req",
                     "-x509",
-                    "-newkey",
-                    "rsa:2048",
-                    "-keyout",
+                    "-new",
+                    "-key",
                     key_path,
                     "-out",
                     cert_path,
                     "-days",
                     "3650",
-                    "-nodes",
                     "-subj",
                     "/CN=paude-proxy-ca",
                 ],
