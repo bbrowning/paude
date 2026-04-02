@@ -45,6 +45,7 @@ class ClaudeAgent:
 
     def __init__(self, provider: str | None = None) -> None:
         creds = build_provider_credentials("claude", provider)
+        creds.extra_env_vars["NODE_USE_ENV_PROXY"] = "1"
         self._config = AgentConfig(
             name="claude",
             display_name="Claude Code",
