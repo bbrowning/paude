@@ -149,6 +149,7 @@ class SessionLifecycleManager:
         )
         create_credentials_secret(self._oc, self._namespace, session_name, proxy_creds)
 
+        self._create_agent_headless_service(session_name)
         self._proxy.create_deployment(
             session_name,
             proxy_image,
@@ -167,6 +168,48 @@ class SessionLifecycleManager:
             return config.proxy_image
 
         return resolve_proxy_image(config.image)
+
+    def _create_agent_headless_service(self, session_name: str) -> None:
+        """Create a headless Service for the agent StatefulSet.
+
+        A headless Service (clusterIP: None) is required for StatefulSet pod
+        DNS to work.  The agent pod gets the DNS name
+        ``paude-{session}-0.paude-{session}.{ns}.svc.cluster.local``,
+        which the proxy uses for ``PAUDE_PROXY_ALLOWED_CLIENTS`` filtering.
+        """
+        svc_name = resource_name(session_name)
+
+        print(
+            f"Creating headless Service/{svc_name} in namespace {self._namespace}...",
+            file=sys.stderr,
+        )
+
+        service_spec: dict[str, Any] = {
+            "apiVersion": "v1",
+            "kind": "Service",
+            "metadata": {
+                "name": svc_name,
+                "namespace": self._namespace,
+                "labels": {
+                    "app": "paude",
+                    "paude.io/session-name": session_name,
+                },
+            },
+            "spec": {
+                "clusterIP": "None",
+                "selector": {
+                    "app": "paude",
+                    "paude.io/session-name": session_name,
+                },
+            },
+        }
+
+        self._oc.run(
+            "apply",
+            "-f",
+            "-",
+            input_data=json.dumps(service_spec),
+        )
 
     def _build_session_env(
         self, config: SessionConfig, session_name: str
@@ -327,6 +370,17 @@ class SessionLifecycleManager:
             ns,
             check=False,
             timeout=90,
+        )
+
+        headless_svc = resource_name(name)
+        print(f"Deleting headless Service/{headless_svc}...", file=sys.stderr)
+        self._oc.run(
+            "delete",
+            "service",
+            headless_svc,
+            "-n",
+            ns,
+            check=False,
         )
 
         print("Deleting NetworkPolicy for session...", file=sys.stderr)

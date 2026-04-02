@@ -229,6 +229,18 @@ def pod_name(session_name: str) -> str:
     return f"paude-{session_name}-0"
 
 
+def agent_pod_fqdn(session_name: str, namespace: str) -> str:
+    """Get the fully-qualified DNS name for the agent StatefulSet pod.
+
+    Requires a headless Service whose name matches the StatefulSet's
+    ``serviceName`` (i.e. ``resource_name(session_name)``).
+    """
+    return (
+        f"{pod_name(session_name)}.{resource_name(session_name)}"
+        f".{namespace}.svc.cluster.local"
+    )
+
+
 def pvc_name(session_name: str) -> str:
     """Get the PVC name for a session (OpenShift workspace PVC)."""
     return f"workspace-paude-{session_name}-0"

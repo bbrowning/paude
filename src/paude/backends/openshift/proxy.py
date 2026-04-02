@@ -14,7 +14,7 @@ from paude.backends.openshift.certs import (
     delete_secrets,
 )
 from paude.backends.openshift.oc import OcClient
-from paude.backends.shared import proxy_resource_name
+from paude.backends.shared import agent_pod_fqdn, proxy_resource_name
 
 
 class ProxyManager:
@@ -175,11 +175,12 @@ class ProxyManager:
         a rule in a selecting policy — so this single policy effectively
         blocks every other pod in the namespace (or cluster).
 
-        Note: Unlike the Podman backend we do not set
-        ``PAUDE_PROXY_ALLOWED_CLIENTS`` here.  Pod IPs are dynamically
-        assigned by the OpenShift SDN, making IP-based filtering
-        impractical.  The NetworkPolicy ingress rule provides equivalent
-        (and stronger) network-layer isolation enforced by the CNI plugin.
+        Note: ``PAUDE_PROXY_ALLOWED_CLIENTS`` is also set on the proxy
+        Deployment (see :meth:`create_deployment`) using the agent pod's
+        deterministic DNS name as defense-in-depth.  This provides
+        application-level client filtering even when cluster-wide
+        NetworkPolicies (e.g. ``allow-from-all-namespaces``) weaken the
+        ingress isolation enforced by the CNI plugin.
 
         Args:
             session_name: Session name for labeling.
@@ -267,7 +268,12 @@ class ProxyManager:
             file=sys.stderr,
         )
 
-        env_list: list[dict[str, str]] = []
+        env_list: list[dict[str, str]] = [
+            {
+                "name": "PAUDE_PROXY_ALLOWED_CLIENTS",
+                "value": agent_pod_fqdn(session_name, self._namespace),
+            },
+        ]
         if allowed_domains:
             domains_str = ",".join(allowed_domains)
             env_list.append({"name": "ALLOWED_DOMAINS", "value": domains_str})

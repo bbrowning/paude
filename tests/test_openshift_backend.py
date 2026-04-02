@@ -1477,6 +1477,26 @@ class TestCreateProxyDeployment:
         assert container["image"] == "quay.io/test/proxy:latest"
         assert container["ports"][0]["containerPort"] == 3128
 
+    @patch("subprocess.run")
+    def test_sets_allowed_clients_env_var(self, mock_run: MagicMock) -> None:
+        """create_deployment sets PAUDE_PROXY_ALLOWED_CLIENTS to agent pod FQDN."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._proxy.create_deployment("my-session", "quay.io/test/proxy:latest")
+
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        assert len(apply_calls) >= 1
+
+        call_kwargs = apply_calls[0][1]
+        spec = json.loads(call_kwargs["input"])
+        container = spec["spec"]["template"]["spec"]["containers"][0]
+        env_dict = {e["name"]: e["value"] for e in container.get("env", [])}
+
+        assert "PAUDE_PROXY_ALLOWED_CLIENTS" in env_dict
+        expected_fqdn = "paude-my-session-0.paude-my-session.test-ns.svc.cluster.local"
+        assert env_dict["PAUDE_PROXY_ALLOWED_CLIENTS"] == expected_fqdn
+
 
 class TestProxyImagePullPolicy:
     """Tests for proxy deployment imagePullPolicy from env var."""
@@ -1790,6 +1810,50 @@ class TestCreateSessionWithProxy:
         assert env_dict.get("NO_PROXY") == "localhost,127.0.0.1"
         assert env_dict.get("no_proxy") == "localhost,127.0.0.1"
 
+    @patch("subprocess.run")
+    def test_creates_headless_service_for_agent(
+        self, mock_run: MagicMock, mock_ca: MagicMock
+    ) -> None:
+        """create_session creates a headless Service for StatefulSet pod DNS."""
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
+                return MagicMock(returncode=0, stdout="Running", stderr="")
+            if "get" in cmd and "deployment" in cmd and "readyReplicas" in str(cmd):
+                return MagicMock(returncode=0, stdout="1", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        from paude.backends.base import SessionConfig
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        config = SessionConfig(
+            name="test-session",
+            workspace=Path("/home/user/project"),
+            image="quay.io/test/paude-base-centos10:v1",
+            allowed_domains=[".googleapis.com"],
+        )
+
+        backend.create_session(config)
+
+        # Find the headless Service creation (clusterIP: None)
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        headless_svc_calls = [
+            c
+            for c in apply_calls
+            if '"clusterIP": "None"' in str(c[1].get("input", ""))
+        ]
+        assert len(headless_svc_calls) >= 1
+
+        svc_spec = json.loads(headless_svc_calls[0][1]["input"])
+        assert svc_spec["kind"] == "Service"
+        assert svc_spec["metadata"]["name"] == "paude-test-session"
+        assert svc_spec["spec"]["clusterIP"] == "None"
+        assert svc_spec["spec"]["selector"]["app"] == "paude"
+        assert svc_spec["spec"]["selector"]["paude.io/session-name"] == "test-session"
+
 
 class TestDeleteSessionWithProxy:
     """Tests for delete_session cleaning up proxy resources."""
@@ -1824,6 +1888,38 @@ class TestDeleteSessionWithProxy:
         assert "paude-proxy-test" in calls_str
         assert "deployment" in calls_str.lower()
         assert "service" in calls_str.lower()
+
+    @patch("subprocess.run")
+    def test_deletes_headless_service(self, mock_run: MagicMock) -> None:
+        """delete_session deletes the agent headless Service."""
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "get" in cmd and "statefulset" in cmd:
+                return MagicMock(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "apiVersion": "apps/v1",
+                            "kind": "StatefulSet",
+                            "metadata": {"name": "paude-test"},
+                        }
+                    ),
+                    stderr="",
+                )
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend.delete_session("test", confirm=True)
+
+        # Verify headless service deletion (paude-test, not paude-proxy-test)
+        delete_calls = [c for c in mock_run.call_args_list if "delete" in str(c)]
+        headless_svc_deleted = any(
+            "service" in str(c) and "paude-test" in str(c) for c in delete_calls
+        )
+        assert headless_svc_deleted
 
 
 class TestDeleteProxyResources:
