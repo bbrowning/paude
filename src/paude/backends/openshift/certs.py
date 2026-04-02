@@ -12,12 +12,12 @@ from typing import Any
 from paude.backends.openshift.oc import OcClient
 
 
-def _ca_secret_name(session_name: str) -> str:
+def ca_secret_name(session_name: str) -> str:
     """Return the Kubernetes Secret name for a session's CA cert."""
     return f"paude-proxy-ca-{session_name}"
 
 
-def _creds_secret_name(session_name: str) -> str:
+def creds_secret_name(session_name: str) -> str:
     """Return the Kubernetes Secret name for a session's proxy credentials."""
     return f"paude-proxy-creds-{session_name}"
 
@@ -57,6 +57,7 @@ def generate_ca_cert() -> tuple[str, str]:
                 capture_output=True,
                 check=True,
                 text=True,
+                timeout=30,
             )
         except FileNotFoundError:
             raise RuntimeError(
@@ -67,6 +68,8 @@ def generate_ca_cert() -> tuple[str, str]:
             raise RuntimeError(
                 f"CA certificate generation failed: {exc.stderr}"
             ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("CA certificate generation timed out") from exc
 
         with open(cert_path) as f:
             cert_pem = f.read()
@@ -95,7 +98,7 @@ def create_ca_secret(
     Returns:
         The Secret name.
     """
-    secret_name = _ca_secret_name(session_name)
+    secret_name = ca_secret_name(session_name)
 
     print(
         f"Creating Secret/{secret_name} in namespace {namespace}...",
@@ -141,7 +144,7 @@ def create_credentials_secret(
     Returns:
         The Secret name.
     """
-    secret_name = _creds_secret_name(session_name)
+    secret_name = creds_secret_name(session_name)
 
     print(
         f"Creating Secret/{secret_name} in namespace {namespace}...",
@@ -169,25 +172,6 @@ def create_credentials_secret(
     return secret_name
 
 
-def update_credentials_secret(
-    oc: OcClient,
-    namespace: str,
-    session_name: str,
-    credentials: dict[str, str],
-) -> None:
-    """Update the proxy credentials Secret with fresh values.
-
-    Creates the Secret if it does not exist (idempotent via ``oc apply``).
-
-    Args:
-        oc: OcClient instance.
-        namespace: Kubernetes namespace.
-        session_name: Session name.
-        credentials: Updated credential key-value pairs.
-    """
-    create_credentials_secret(oc, namespace, session_name, credentials)
-
-
 def delete_secrets(
     oc: OcClient,
     namespace: str,
@@ -200,7 +184,7 @@ def delete_secrets(
         namespace: Kubernetes namespace.
         session_name: Session name.
     """
-    for name in (_ca_secret_name(session_name), _creds_secret_name(session_name)):
+    for name in (ca_secret_name(session_name), creds_secret_name(session_name)):
         oc.run(
             "delete",
             "secret",

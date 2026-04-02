@@ -27,6 +27,8 @@ from paude.backends.openshift.resources import (
 from paude.backends.openshift.session_lookup import SessionLookup
 from paude.backends.openshift.sync import ConfigSyncer
 from paude.backends.shared import (
+    PAUDE_LABEL_AGENT,
+    PAUDE_LABEL_PROVIDER,
     build_session_env,
     pod_name,
     proxy_resource_name,
@@ -396,8 +398,11 @@ class SessionLifecycleManager:
         from paude.backends.shared import gather_proxy_credentials
         from paude.constants import GCP_ADC_FILENAME
 
-        agent_name = self._lookup.get_session_agent_name(session_name)
-        provider = self._lookup.get_session_provider(session_name)
+        sts = self._lookup.get_statefulset(session_name)
+        labels = sts.get("metadata", {}).get("labels", {}) if sts else {}
+        agent_name = str(labels.get(PAUDE_LABEL_AGENT, "claude"))
+        provider_val = labels.get(PAUDE_LABEL_PROVIDER)
+        provider = str(provider_val) if provider_val is not None else None
 
         from paude.agents import get_agent
 

@@ -9,8 +9,8 @@ import time
 from typing import Any
 
 from paude.backends.openshift.certs import (
-    _ca_secret_name,
-    _creds_secret_name,
+    ca_secret_name,
+    creds_secret_name,
     delete_secrets,
 )
 from paude.backends.openshift.oc import OcClient
@@ -256,8 +256,8 @@ class ProxyManager:
                 }
             )
 
-        ca_secret = _ca_secret_name(session_name)
-        creds_secret = _creds_secret_name(session_name)
+        ca_secret = ca_secret_name(session_name)
+        creds_secret = creds_secret_name(session_name)
 
         deployment_spec: dict[str, Any] = {
             "apiVersion": "apps/v1",
@@ -466,9 +466,9 @@ class ProxyManager:
             session_name: Session name.
             credentials: Updated credential key-value pairs.
         """
-        from paude.backends.openshift.certs import update_credentials_secret
+        from paude.backends.openshift.certs import create_credentials_secret
 
-        update_credentials_secret(self._oc, self._namespace, session_name, credentials)
+        create_credentials_secret(self._oc, self._namespace, session_name, credentials)
 
     def _patch_deployment_container(
         self,
@@ -505,7 +505,7 @@ class ProxyManager:
         """Update the ALLOWED_DOMAINS env var on the proxy Deployment.
 
         Credentials are managed separately via the credentials Secret
-        (see :func:`~paude.backends.openshift.certs.update_credentials_secret`).
+        (see :func:`~paude.backends.openshift.certs.create_credentials_secret`).
 
         Args:
             session_name: Session name.
