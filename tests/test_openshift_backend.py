@@ -1889,6 +1889,78 @@ class TestEnsureProxyNetworkPolicy:
         assert egress[0] == {}  # Empty rule = allow all
 
 
+class TestEnsureProxyIngressPolicy:
+    """Tests for _proxy.ensure_proxy_ingress_policy method."""
+
+    @patch("subprocess.run")
+    def test_targets_proxy_pods(self, mock_run: MagicMock) -> None:
+        """Ingress policy selects this session's proxy pod."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._proxy.ensure_proxy_ingress_policy("my-session")
+
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        assert len(apply_calls) >= 1
+
+        spec = json.loads(apply_calls[0][1]["input"])
+        assert spec["kind"] == "NetworkPolicy"
+        assert spec["metadata"]["name"] == "paude-proxy-ingress-my-session"
+
+        selector = spec["spec"]["podSelector"]["matchLabels"]
+        assert selector["app"] == "paude-proxy"
+        assert selector["paude.io/session-name"] == "my-session"
+
+    @patch("subprocess.run")
+    def test_only_allows_agent_pod(self, mock_run: MagicMock) -> None:
+        """Ingress rule only allows the paired paude agent pod."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._proxy.ensure_proxy_ingress_policy("my-session")
+
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        spec = json.loads(apply_calls[0][1]["input"])
+
+        assert spec["spec"]["policyTypes"] == ["Ingress"]
+        ingress = spec["spec"]["ingress"]
+        assert len(ingress) == 1
+
+        from_selector = ingress[0]["from"][0]["podSelector"]["matchLabels"]
+        assert from_selector["app"] == "paude"
+        assert from_selector["paude.io/session-name"] == "my-session"
+
+    @patch("subprocess.run")
+    def test_restricts_to_port_3128(self, mock_run: MagicMock) -> None:
+        """Ingress rule only allows TCP port 3128."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._proxy.ensure_proxy_ingress_policy("my-session")
+
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        spec = json.loads(apply_calls[0][1]["input"])
+
+        ports = spec["spec"]["ingress"][0]["ports"]
+        assert len(ports) == 1
+        assert ports[0] == {"protocol": "TCP", "port": 3128}
+
+    @patch("subprocess.run")
+    def test_has_session_label_for_cleanup(self, mock_run: MagicMock) -> None:
+        """Policy has paude.io/session-name label for automatic cleanup."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._proxy.ensure_proxy_ingress_policy("my-session")
+
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        spec = json.loads(apply_calls[0][1]["input"])
+
+        labels = spec["metadata"]["labels"]
+        assert labels["paude.io/session-name"] == "my-session"
+        assert labels["app"] == "paude-proxy"
+
+
 @patch(
     "paude.backends.openshift.certs.generate_ca_cert",
     return_value=_FAKE_CA,

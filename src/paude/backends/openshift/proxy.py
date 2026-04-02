@@ -166,6 +166,77 @@ class ProxyManager:
             input_data=json.dumps(policy_spec),
         )
 
+    def ensure_proxy_ingress_policy(self, session_name: str) -> None:
+        """Create a NetworkPolicy that restricts ingress to the proxy pod.
+
+        Only the paired paude agent pod for this session may connect to
+        the proxy on port 3128.  Once any NetworkPolicy selects a pod for
+        Ingress, Kubernetes denies all ingress traffic that does not match
+        a rule in a selecting policy — so this single policy effectively
+        blocks every other pod in the namespace (or cluster).
+
+        Note: Unlike the Podman backend we do not set
+        ``PAUDE_PROXY_ALLOWED_CLIENTS`` here.  Pod IPs are dynamically
+        assigned by the OpenShift SDN, making IP-based filtering
+        impractical.  The NetworkPolicy ingress rule provides equivalent
+        (and stronger) network-layer isolation enforced by the CNI plugin.
+
+        Args:
+            session_name: Session name for labeling.
+        """
+        policy_name = f"paude-proxy-ingress-{session_name}"
+
+        print(
+            f"Creating NetworkPolicy/{policy_name} in namespace {self._namespace}...",
+            file=sys.stderr,
+        )
+
+        policy_spec: dict[str, Any] = {
+            "apiVersion": "networking.k8s.io/v1",
+            "kind": "NetworkPolicy",
+            "metadata": {
+                "name": policy_name,
+                "namespace": self._namespace,
+                "labels": {
+                    "app": "paude-proxy",
+                    "paude.io/session-name": session_name,
+                },
+            },
+            "spec": {
+                "podSelector": {
+                    "matchLabels": {
+                        "app": "paude-proxy",
+                        "paude.io/session-name": session_name,
+                    },
+                },
+                "policyTypes": ["Ingress"],
+                "ingress": [
+                    {
+                        "from": [
+                            {
+                                "podSelector": {
+                                    "matchLabels": {
+                                        "app": "paude",
+                                        "paude.io/session-name": session_name,
+                                    },
+                                },
+                            },
+                        ],
+                        "ports": [
+                            {"protocol": "TCP", "port": 3128},
+                        ],
+                    },
+                ],
+            },
+        }
+
+        self._oc.run(
+            "apply",
+            "-f",
+            "-",
+            input_data=json.dumps(policy_spec),
+        )
+
     def create_deployment(
         self,
         session_name: str,

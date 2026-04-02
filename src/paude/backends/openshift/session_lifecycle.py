@@ -157,6 +157,7 @@ class SessionLifecycleManager:
         )
         self._proxy.create_service(session_name)
         self._proxy.ensure_proxy_network_policy(session_name)
+        self._proxy.ensure_proxy_ingress_policy(session_name)
         self._proxy.ensure_network_policy(session_name)
         return ca_secret
 
