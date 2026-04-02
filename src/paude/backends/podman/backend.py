@@ -41,6 +41,7 @@ from paude.backends.shared import (
     PAUDE_LABEL_WORKSPACE,
     PAUDE_LABEL_YOLO,
     build_session_env,
+    derive_agent_ip,
     encode_path,
     generate_sandbox_config_script,
 )
@@ -391,6 +392,9 @@ class PodmanBackend:
             # Note: CA cert distribution happens in start_session/connect_session
             # after the agent container is also running.
 
+        # Derive fixed agent IP so it matches what the proxy expects
+        agent_ip = derive_agent_ip(proxy_ip) if proxy_ip else None
+
         # Build mounts with session volume
         mounts = list(config.mounts)
         mounts.extend(["-v", f"{vname}:/pvc"])
@@ -426,6 +430,7 @@ class PodmanBackend:
                 command=["--", "sleep", "infinity"],
                 secrets=secrets,
                 network=network,
+                network_ip=agent_ip,
                 gpu=config.gpu,
                 dns=dns,
                 ports=None,  # Port-forward proxy handles port access

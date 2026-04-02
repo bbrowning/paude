@@ -393,8 +393,8 @@ class TestPodmanBackendDeleteSession:
         """Delete session removes both container and volume."""
         mock_runner = MagicMock()
         # Main container exists, proxy does not
-        mock_runner.container_exists.side_effect = (
-            lambda name: name == "paude-my-session"
+        mock_runner.container_exists.side_effect = lambda name: (
+            name == "paude-my-session"
         )
         mock_runner.container_running.return_value = False
         mock_runner_class.return_value = mock_runner
@@ -418,8 +418,8 @@ class TestPodmanBackendDeleteSession:
         """Delete session stops container if running."""
         mock_runner = MagicMock()
         # Main container exists, proxy does not
-        mock_runner.container_exists.side_effect = (
-            lambda name: name == "paude-running-session"
+        mock_runner.container_exists.side_effect = lambda name: (
+            name == "paude-running-session"
         )
         mock_runner.container_running.return_value = True
         mock_runner_class.return_value = mock_runner
@@ -471,8 +471,8 @@ class TestPodmanBackendDeleteSession:
     ) -> None:
         """Delete session raises RuntimeError when container removal fails."""
         mock_runner = MagicMock()
-        mock_runner.container_exists.side_effect = (
-            lambda name: name == "paude-stuck-session"
+        mock_runner.container_exists.side_effect = lambda name: (
+            name == "paude-stuck-session"
         )
         mock_runner.container_running.return_value = False
         mock_runner.remove_container_verified.side_effect = RuntimeError(
@@ -491,8 +491,8 @@ class TestPodmanBackendDeleteSession:
     ) -> None:
         """Delete session raises RuntimeError when volume removal fails."""
         mock_runner = MagicMock()
-        mock_runner.container_exists.side_effect = (
-            lambda name: name == "paude-vol-stuck"
+        mock_runner.container_exists.side_effect = lambda name: (
+            name == "paude-vol-stuck"
         )
         mock_runner.container_running.return_value = False
         mock_runner_class.return_value = mock_runner
@@ -518,8 +518,8 @@ class TestPodmanBackendStartSession:
         """Start session starts a stopped container."""
         mock_runner = MagicMock()
         # Main container exists, no proxy
-        mock_runner.container_exists.side_effect = (
-            lambda name: name == "paude-my-session"
+        mock_runner.container_exists.side_effect = lambda name: (
+            name == "paude-my-session"
         )
         mock_runner.get_container_state.return_value = "exited"
         mock_runner.attach_container.return_value = 0
@@ -541,8 +541,8 @@ class TestPodmanBackendStartSession:
         """Start session connects if container already running."""
         mock_runner = MagicMock()
         # Main container exists, no proxy
-        mock_runner.container_exists.side_effect = (
-            lambda name: name == "paude-running-session"
+        mock_runner.container_exists.side_effect = lambda name: (
+            name == "paude-running-session"
         )
         mock_runner.container_running.return_value = True
         mock_runner.get_container_state.return_value = "running"
@@ -588,8 +588,8 @@ class TestPodmanBackendStopSession:
         """Stop session stops a running container."""
         mock_runner = MagicMock()
         # Main container exists, no proxy
-        mock_runner.container_exists.side_effect = (
-            lambda name: name == "paude-my-session"
+        mock_runner.container_exists.side_effect = lambda name: (
+            name == "paude-my-session"
         )
         mock_runner.container_running.return_value = True
         mock_runner_class.return_value = mock_runner
@@ -606,8 +606,8 @@ class TestPodmanBackendStopSession:
     ) -> None:
         """Stop session is no-op if container already stopped."""
         mock_runner = MagicMock()
-        mock_runner.container_exists.side_effect = (
-            lambda name: name == "paude-stopped-session"
+        mock_runner.container_exists.side_effect = lambda name: (
+            name == "paude-stopped-session"
         )
         mock_runner.container_running.return_value = False
         mock_runner_class.return_value = mock_runner
@@ -944,12 +944,8 @@ class TestPodmanBackendGcpAdcSecret:
         mock_home = MagicMock()
         mock_adc = MagicMock()
         mock_adc.is_file.return_value = True
-        mock_home.__truediv__ = lambda self, key: (
-            MagicMock(
-                __truediv__=lambda self, k: MagicMock(
-                    __truediv__=lambda self, k2: mock_adc
-                )
-            )
+        mock_home.__truediv__ = lambda self, key: MagicMock(
+            __truediv__=lambda self, k: MagicMock(__truediv__=lambda self, k2: mock_adc)
         )
         mock_path_class.home.return_value = mock_home
 
@@ -981,12 +977,8 @@ class TestPodmanBackendGcpAdcSecret:
         mock_home = MagicMock()
         mock_adc = MagicMock()
         mock_adc.is_file.return_value = True
-        mock_home.__truediv__ = lambda self, key: (
-            MagicMock(
-                __truediv__=lambda self, k: MagicMock(
-                    __truediv__=lambda self, k2: mock_adc
-                )
-            )
+        mock_home.__truediv__ = lambda self, key: MagicMock(
+            __truediv__=lambda self, k: MagicMock(__truediv__=lambda self, k2: mock_adc)
         )
         mock_path_class.home.return_value = mock_home
 
@@ -1021,12 +1013,8 @@ class TestPodmanBackendGcpAdcSecret:
         mock_home = MagicMock()
         mock_adc = MagicMock()
         mock_adc.is_file.return_value = False
-        mock_home.__truediv__ = lambda self, key: (
-            MagicMock(
-                __truediv__=lambda self, k: MagicMock(
-                    __truediv__=lambda self, k2: mock_adc
-                )
-            )
+        mock_home.__truediv__ = lambda self, key: MagicMock(
+            __truediv__=lambda self, k: MagicMock(__truediv__=lambda self, k2: mock_adc)
         )
         mock_path_class.home.return_value = mock_home
 
@@ -1060,12 +1048,8 @@ class TestPodmanBackendGcpAdcSecret:
         mock_home = MagicMock()
         mock_adc = MagicMock()
         mock_adc.is_file.return_value = True
-        mock_home.__truediv__ = lambda self, key: (
-            MagicMock(
-                __truediv__=lambda self, k: MagicMock(
-                    __truediv__=lambda self, k2: mock_adc
-                )
-            )
+        mock_home.__truediv__ = lambda self, key: MagicMock(
+            __truediv__=lambda self, k: MagicMock(__truediv__=lambda self, k2: mock_adc)
         )
         mock_path_class.home.return_value = mock_home
 
@@ -1104,12 +1088,8 @@ class TestPodmanBackendGcpAdcSecret:
         mock_home = MagicMock()
         mock_adc = MagicMock()
         mock_adc.is_file.return_value = True
-        mock_home.__truediv__ = lambda self, key: (
-            MagicMock(
-                __truediv__=lambda self, k: MagicMock(
-                    __truediv__=lambda self, k2: mock_adc
-                )
-            )
+        mock_home.__truediv__ = lambda self, key: MagicMock(
+            __truediv__=lambda self, k: MagicMock(__truediv__=lambda self, k2: mock_adc)
         )
         mock_path_class.home.return_value = mock_home
 
@@ -1382,8 +1362,8 @@ class TestPodmanBackendStartSessionWithProxy:
         """start_session skips proxy start when no proxy container exists."""
         mock_runner = MagicMock()
         # Only main container exists
-        mock_runner.container_exists.side_effect = (
-            lambda name: name == "paude-my-session"
+        mock_runner.container_exists.side_effect = lambda name: (
+            name == "paude-my-session"
         )
         mock_runner.get_container_state.return_value = "exited"
         mock_runner.attach_container.return_value = 0
@@ -1472,8 +1452,8 @@ class TestProxyHealthCheck:
             }
         ]
         # Proxy container does not exist
-        mock_runner.container_exists.side_effect = (
-            lambda name: name != "paude-proxy-my-session"
+        mock_runner.container_exists.side_effect = lambda name: (
+            name != "paude-proxy-my-session"
         )
         mock_runner_class.return_value = mock_runner
 
@@ -1503,8 +1483,8 @@ class TestProxyHealthCheck:
         ]
         # Proxy exists but not running
         mock_runner.container_exists.return_value = True
-        mock_runner.container_running.side_effect = (
-            lambda name: name != "paude-proxy-my-session"
+        mock_runner.container_running.side_effect = lambda name: (
+            name != "paude-proxy-my-session"
         )
         mock_runner_class.return_value = mock_runner
 
@@ -1574,8 +1554,8 @@ class TestProxyHealthCheck:
     ) -> None:
         """get_session returns degraded when proxy is missing."""
         mock_runner = MagicMock()
-        mock_runner.container_exists.side_effect = (
-            lambda name: name != "paude-proxy-my-session"
+        mock_runner.container_exists.side_effect = lambda name: (
+            name != "paude-proxy-my-session"
         )
         mock_runner.list_containers.return_value = [
             {
@@ -1611,8 +1591,8 @@ class TestProxyRecreation:
         mock_runner = MagicMock()
         mock_dns.return_value = None
         # Main container exists but proxy does not
-        mock_runner.container_exists.side_effect = (
-            lambda name: name == "paude-my-session"
+        mock_runner.container_exists.side_effect = lambda name: (
+            name == "paude-my-session"
         )
         mock_runner.get_container_state.return_value = "exited"
         mock_runner.attach_container.return_value = 0
@@ -1647,8 +1627,8 @@ class TestProxyRecreation:
         """start_session does not recreate proxy when no domain labels."""
         mock_runner = MagicMock()
         # Only main container exists, no proxy
-        mock_runner.container_exists.side_effect = (
-            lambda name: name == "paude-my-session"
+        mock_runner.container_exists.side_effect = lambda name: (
+            name == "paude-my-session"
         )
         mock_runner.get_container_state.return_value = "exited"
         mock_runner.attach_container.return_value = 0
@@ -1684,8 +1664,8 @@ class TestProxyRecreation:
             return name == "paude-my-session"
 
         mock_runner.container_exists.side_effect = container_exists
-        mock_runner.container_running.side_effect = (
-            lambda name: name == "paude-my-session"
+        mock_runner.container_running.side_effect = lambda name: (
+            name == "paude-my-session"
         )
         mock_runner.attach_container.return_value = 0
         mock_runner.exec_in_container.return_value = MagicMock(returncode=0)
@@ -2028,8 +2008,8 @@ class TestPodmanBackendSyncHostConfig:
     def test_start_session_calls_sync(self) -> None:
         """start_session calls _sync_host_config before attach."""
         mock_runner = MagicMock()
-        mock_runner.container_exists.side_effect = (
-            lambda name: name == "paude-my-session"
+        mock_runner.container_exists.side_effect = lambda name: (
+            name == "paude-my-session"
         )
         mock_runner.get_container_state.return_value = "exited"
         mock_runner.attach_container.return_value = 0
@@ -2055,8 +2035,8 @@ class TestPodmanBackendSyncHostConfig:
     def test_connect_session_calls_sync(self) -> None:
         """connect_session calls _sync_host_config before attach."""
         mock_runner = MagicMock()
-        mock_runner.container_exists.side_effect = (
-            lambda name: name == "paude-my-session"
+        mock_runner.container_exists.side_effect = lambda name: (
+            name == "paude-my-session"
         )
         mock_runner.container_running.return_value = True
         mock_runner.attach_container.return_value = 0

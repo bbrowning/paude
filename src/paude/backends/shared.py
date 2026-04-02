@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import ipaddress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -30,6 +31,21 @@ PROXY_BLOCKED_LOG_PATH = "/tmp/paude-proxy-blocked.log"  # noqa: S108
 
 # Path where the proxy CA cert is injected into agent containers.
 CA_CERT_CONTAINER_PATH = "/etc/pki/ca-trust/source/anchors/paude-proxy-ca.crt"
+
+# Custom CA bundle combining system CAs + proxy CA cert.
+# Written to /tmp so no root is needed (works with OpenShift arbitrary UIDs).
+CA_BUNDLE_PATH = "/tmp/paude-ca-bundle.pem"  # noqa: S108
+
+
+def derive_agent_ip(proxy_ip: str) -> str:
+    """Derive the expected agent container IP from the proxy IP.
+
+    The agent container is the next host on the internal network
+    after the proxy (e.g. proxy=10.89.0.2 → agent=10.89.0.3).
+    Used for defense-in-depth source IP filtering.
+    """
+    return str(ipaddress.ip_address(proxy_ip) + 1)
+
 
 # CA certificate polling constants (shared by Podman and OpenShift backends).
 CA_CERT_POLL_INTERVAL = 1

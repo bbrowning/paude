@@ -10,6 +10,7 @@ from paude.backends.podman.proxy import (
     _get_host_dns,
     ca_volume_name,
 )
+from paude.backends.shared import derive_agent_ip
 
 
 def _make_mock_runner(engine_binary: str = "podman") -> MagicMock:
@@ -376,14 +377,14 @@ class TestDistributeCaCert:
         mock_runner.container_running.return_value = True
         # First exec: test -f succeeds (cert exists)
         # Second exec: cat returns cert content
-        # Third exec: update-ca-trust succeeds
+        # Third exec: build custom CA bundle succeeds
         mock_runner.exec_in_container.side_effect = [
             MagicMock(returncode=0),  # test -f
             MagicMock(
                 returncode=0,
                 stdout="-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n",
             ),  # cat
-            MagicMock(returncode=0),  # update-ca-trust
+            MagicMock(returncode=0),  # build CA bundle
         ]
         mock_network = MagicMock()
 
@@ -640,8 +641,8 @@ class TestUpdateDomainsCaResilience:
             MagicMock(returncode=0),  # test -f in proxy
             MagicMock(returncode=0, stdout=new_cert),  # cat proxy cert
             MagicMock(returncode=0, stdout=old_cert),  # cat agent cert (differs)
-            # Direct inject (no re-poll) — just update-ca-trust
-            MagicMock(returncode=0),  # update-ca-trust
+            # Direct inject (no re-poll) — just build CA bundle
+            MagicMock(returncode=0),  # build CA bundle
         ]
         mock_network = MagicMock()
         mock_network.get_network_gateway.return_value = "10.89.0.1"
@@ -672,8 +673,8 @@ class TestUpdateDomainsCaResilience:
             MagicMock(returncode=0),  # test -f in proxy
             MagicMock(returncode=0, stdout=cert),  # cat proxy cert
             MagicMock(returncode=1, stdout=""),  # cat agent cert (missing)
-            # Direct inject (no re-poll) — just update-ca-trust
-            MagicMock(returncode=0),  # update-ca-trust
+            # Direct inject (no re-poll) — just build CA bundle
+            MagicMock(returncode=0),  # build CA bundle
         ]
         mock_network = MagicMock()
         mock_network.get_network_gateway.return_value = "10.89.0.1"
@@ -832,6 +833,6 @@ class TestSourceIpFiltering:
         assert "PAUDE_PROXY_ALLOWED_CLIENTS=10.89.0.3" in env_vals
 
     def test_derive_agent_ip(self) -> None:
-        """_derive_agent_ip returns proxy IP + 1."""
-        assert PodmanProxyManager._derive_agent_ip("10.89.0.2") == "10.89.0.3"
-        assert PodmanProxyManager._derive_agent_ip("172.16.0.10") == "172.16.0.11"
+        """derive_agent_ip returns proxy IP + 1."""
+        assert derive_agent_ip("10.89.0.2") == "10.89.0.3"
+        assert derive_agent_ip("172.16.0.10") == "172.16.0.11"

@@ -49,11 +49,16 @@ wait_for_git() {
     wait_for_path "/pvc/workspace/.git" "git repository" 120 "continue"
 }
 
-# Update CA trust if paude-proxy CA cert has been injected
+# Build custom CA bundle with paude-proxy CA cert if injected.
+# Concatenates the system CA bundle with the proxy CA cert into a
+# writable /tmp path — no root or update-ca-trust needed (works with
+# OpenShift arbitrary UIDs).
 setup_ca_trust() {
     local ca_cert="/etc/pki/ca-trust/source/anchors/paude-proxy-ca.crt"
-    if [[ -f "$ca_cert" ]]; then
-        update-ca-trust 2>/dev/null || true
+    local sys_bundle="/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+    local custom_bundle="/tmp/paude-ca-bundle.pem"
+    if [[ -f "$ca_cert" ]] && [[ -f "$sys_bundle" ]]; then
+        cat "$sys_bundle" "$ca_cert" > "$custom_bundle" 2>/dev/null || true
     fi
 }
 

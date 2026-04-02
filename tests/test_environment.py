@@ -94,13 +94,7 @@ class TestBuildProxyEnvironment:
         assert env["NODE_EXTRA_CA_CERTS"] == (
             "/etc/pki/ca-trust/source/anchors/paude-proxy-ca.crt"
         )
-        assert env["REQUESTS_CA_BUNDLE"] == (
-            "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
-        )
-        assert env["SSL_CERT_FILE"] == (
-            "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
-        )
+        assert env["REQUESTS_CA_BUNDLE"] == "/tmp/paude-ca-bundle.pem"
+        assert env["SSL_CERT_FILE"] == "/tmp/paude-ca-bundle.pem"
         assert env["SSL_CERT_DIR"] == "/etc/pki/tls/certs"
-        assert env["CURL_CA_BUNDLE"] == (
-            "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
-        )
+        assert env["CURL_CA_BUNDLE"] == "/tmp/paude-ca-bundle.pem"

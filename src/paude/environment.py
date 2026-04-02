@@ -20,7 +20,6 @@ def build_environment(agent_name: str = "claude") -> dict[str, str]:
     return agent.build_environment()
 
 
-_CA_BUNDLE_PATH = "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
 _CA_CERT_DIR = "/etc/pki/tls/certs"
 
 
@@ -37,7 +36,7 @@ def build_proxy_environment(proxy_name: str) -> dict[str, str]:
     Returns:
         Dictionary of proxy environment variables.
     """
-    from paude.backends.shared import CA_CERT_CONTAINER_PATH
+    from paude.backends.shared import CA_BUNDLE_PATH, CA_CERT_CONTAINER_PATH
 
     proxy_url = f"http://{proxy_name}:3128"
     return {
@@ -48,8 +47,8 @@ def build_proxy_environment(proxy_name: str) -> dict[str, str]:
         "NO_PROXY": "localhost,127.0.0.1",
         "no_proxy": "localhost,127.0.0.1",
         "NODE_EXTRA_CA_CERTS": CA_CERT_CONTAINER_PATH,
-        "REQUESTS_CA_BUNDLE": _CA_BUNDLE_PATH,
-        "SSL_CERT_FILE": _CA_BUNDLE_PATH,
+        "REQUESTS_CA_BUNDLE": CA_BUNDLE_PATH,
+        "SSL_CERT_FILE": CA_BUNDLE_PATH,
         "SSL_CERT_DIR": _CA_CERT_DIR,
-        "CURL_CA_BUNDLE": _CA_BUNDLE_PATH,
+        "CURL_CA_BUNDLE": CA_BUNDLE_PATH,
     }

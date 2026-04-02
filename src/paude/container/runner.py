@@ -64,6 +64,7 @@ class ContainerRunner:
         env: dict[str, str],
         workdir: str,
         network: str | None = None,
+        network_ip: str | None = None,
         labels: dict[str, str] | None = None,
         entrypoint: str | None = None,
         command: list[str] | None = None,
@@ -96,7 +97,8 @@ class ContainerRunner:
             args.extend(self._engine.gpu_args(gpu))
 
         if network:
-            args.extend(["--network", network])
+            net_spec = f"{network}:ip={network_ip}" if network_ip else network
+            args.extend(["--network", net_spec])
 
         if dns:
             for server in dns:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ipaddress
 import sys
 import time
 
@@ -12,6 +11,7 @@ from paude.backends.podman.helpers import (
     proxy_container_name,
 )
 from paude.backends.shared import (
+    CA_BUNDLE_PATH,
     CA_CERT_CONTAINER_PATH,
     CA_CERT_POLL_INTERVAL,
     CA_CERT_POLL_TIMEOUT,
@@ -19,12 +19,21 @@ from paude.backends.shared import (
     PAUDE_LABEL_OTEL_PORTS,
     PAUDE_LABEL_PROXY_IMAGE,
     PROXY_BLOCKED_LOG_PATH,
+    derive_agent_ip,
 )
 from paude.container.engine import ContainerEngine
 from paude.container.network import NetworkManager
 from paude.container.proxy_runner import ProxyRunner
 from paude.container.runner import ContainerRunner
 from paude.platform import get_podman_machine_dns, is_macos
+
+# System CA bundle path inside agent containers.
+_SYS_CA_BUNDLE = "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+
+# Shell command to build a custom CA bundle (system CAs + proxy CA cert).
+_BUILD_CA_BUNDLE_CMD = (
+    f"cat {_SYS_CA_BUNDLE} {CA_CERT_CONTAINER_PATH} > {CA_BUNDLE_PATH}"
+)
 
 
 def _get_host_dns(engine: ContainerEngine) -> str | None:
@@ -219,19 +228,19 @@ class PodmanProxyManager:
             )
             return
 
-        # Inject into agent container and update trust store
+        # Inject into agent container and build custom CA bundle
         self._runner.inject_file(
             cname,
             result.stdout,
             CA_CERT_CONTAINER_PATH,
             owner="root:0",
         )
-        update_result = self._runner.exec_in_container(
-            cname, ["update-ca-trust"], check=False
+        bundle_result = self._runner.exec_in_container(
+            cname, ["sh", "-c", _BUILD_CA_BUNDLE_CMD], check=False
         )
-        if update_result.returncode != 0:
+        if bundle_result.returncode != 0:
             print(
-                "WARNING: update-ca-trust failed in agent container.",
+                "WARNING: Failed to build custom CA bundle in agent container.",
                 file=sys.stderr,
             )
 
@@ -266,13 +275,8 @@ class PodmanProxyManager:
 
     @staticmethod
     def _derive_agent_ip(proxy_ip: str) -> str:
-        """Derive the expected agent container IP from the proxy IP.
-
-        The agent container is the next host on the internal network
-        after the proxy (e.g. proxy=10.89.0.2 → agent=10.89.0.3).
-        Used for defense-in-depth source IP filtering.
-        """
-        return str(ipaddress.ip_address(proxy_ip) + 1)
+        """Derive the expected agent container IP from the proxy IP."""
+        return derive_agent_ip(proxy_ip)
 
     def create_proxy(
         self,
@@ -420,12 +424,12 @@ class PodmanProxyManager:
                 CA_CERT_CONTAINER_PATH,
                 owner="root:0",
             )
-            update_result = self._runner.exec_in_container(
-                cname, ["update-ca-trust"], check=False
+            bundle_result = self._runner.exec_in_container(
+                cname, ["sh", "-c", _BUILD_CA_BUNDLE_CMD], check=False
             )
-            if update_result.returncode != 0:
+            if bundle_result.returncode != 0:
                 print(
-                    "WARNING: update-ca-trust failed in agent container.",
+                    "WARNING: Failed to build custom CA bundle in agent container.",
                     file=sys.stderr,
                 )
 
