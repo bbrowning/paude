@@ -9,7 +9,7 @@ import pytest
 from paude.agents.claude import ClaudeAgent
 from paude.backends.base import SessionConfig
 from paude.backends.shared import (
-    PROXY_GCP_ADC_PATH,
+    PROXY_GCP_ADC_ENV,
     build_session_env,
     gather_proxy_credentials,
     network_name,
@@ -131,21 +131,23 @@ class TestGatherProxyCredentials:
 
         assert "GH_TOKEN" not in creds
 
-    def test_includes_gcp_adc_path_when_exists(self) -> None:
-        """GOOGLE_APPLICATION_CREDENTIALS is set when GCP ADC exists."""
+    def test_includes_gcp_adc_json_when_exists(self, tmp_path: Path) -> None:
+        """GCP_ADC_JSON contains file content when GCP ADC path is provided."""
+        agent = ClaudeAgent()
+        adc_file = tmp_path / "adc.json"
+        adc_file.write_text('{"type": "authorized_user"}')
+
+        creds = gather_proxy_credentials(agent.config, gcp_adc_path=adc_file)
+
+        assert creds[PROXY_GCP_ADC_ENV] == '{"type": "authorized_user"}'
+
+    def test_no_gcp_adc_when_path_is_none(self) -> None:
+        """GCP_ADC_JSON is absent when no ADC path is provided."""
         agent = ClaudeAgent()
 
-        creds = gather_proxy_credentials(agent.config, gcp_adc_exists=True)
+        creds = gather_proxy_credentials(agent.config, gcp_adc_path=None)
 
-        assert creds["GOOGLE_APPLICATION_CREDENTIALS"] == PROXY_GCP_ADC_PATH
-
-    def test_no_gcp_adc_when_not_exists(self) -> None:
-        """GOOGLE_APPLICATION_CREDENTIALS is absent when GCP ADC doesn't exist."""
-        agent = ClaudeAgent()
-
-        creds = gather_proxy_credentials(agent.config, gcp_adc_exists=False)
-
-        assert "GOOGLE_APPLICATION_CREDENTIALS" not in creds
+        assert PROXY_GCP_ADC_ENV not in creds
 
 
 class TestNamingHelpers:

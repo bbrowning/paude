@@ -48,7 +48,6 @@ from paude.backends.shared import (
 from paude.constants import (
     CONTAINER_ENTRYPOINT,
     CONTAINER_WORKSPACE,
-    GCP_ADC_FILENAME,
     GCP_ADC_SECRET_NAME,
     GCP_ADC_TARGET,
     SANDBOX_CONFIG_TARGET,
@@ -225,31 +224,17 @@ class PodmanBackend:
     @staticmethod
     def _local_adc_path() -> Path | None:
         """Return the local GCP ADC file path, or None if it doesn't exist."""
-        path = Path.home() / ".config" / "gcloud" / GCP_ADC_FILENAME
-        return path if path.is_file() else None
+        from paude.backends.shared import local_gcp_adc_path
+
+        return local_gcp_adc_path()
 
     def _gather_proxy_credentials(self, agent: Agent) -> dict[str, str]:
         """Gather real credentials from host environment for the proxy container."""
         from paude.backends.shared import gather_proxy_credentials
 
         return gather_proxy_credentials(
-            agent.config, gcp_adc_exists=self._local_adc_path() is not None
+            agent.config, gcp_adc_path=self._local_adc_path()
         )
-
-    def _inject_proxy_gcp_credentials(self, session_name: str) -> None:
-        """Inject real GCP ADC into the proxy container after it starts."""
-        from paude.backends.shared import PROXY_GCP_ADC_PATH
-
-        adc_path = self._local_adc_path()
-        if adc_path is None:
-            return
-
-        pname = proxy_container_name(session_name)
-        if not self._runner.container_running(pname):
-            return
-
-        content = adc_path.read_text()
-        self._runner.inject_file(pname, content, PROXY_GCP_ADC_PATH)
 
     def _ensure_gcp_credentials(self) -> list[str] | None:
         """Ensure GCP ADC credentials are available via Podman secret.
@@ -387,7 +372,6 @@ class PodmanBackend:
 
             # Start the proxy now so it's ready when the session starts
             self._proxy.start_proxy(session_name)
-            self._inject_proxy_gcp_credentials(session_name)
 
             # Note: CA cert distribution happens in start_session/connect_session
             # after the agent container is also running.
@@ -491,7 +475,6 @@ class PodmanBackend:
         if proxy_active:
             proxy_creds = self._gather_proxy_credentials(agent)
             self._proxy.start_if_needed(name, credentials=proxy_creds)
-            self._inject_proxy_gcp_credentials(name)
         else:
             self._ensure_gcp_credentials()
             self._proxy.start_if_needed(name)
@@ -671,7 +654,6 @@ class PodmanBackend:
         if proxy_active:
             proxy_creds = self._gather_proxy_credentials(agent)
             self._proxy.start_if_needed(name, credentials=proxy_creds)
-            self._inject_proxy_gcp_credentials(name)
         else:
             self._proxy.start_if_needed(name)
         self._proxy.distribute_ca_cert(name)
@@ -765,7 +747,6 @@ class PodmanBackend:
         agent = self._get_session_agent(name)
         proxy_creds = self._gather_proxy_credentials(agent)
         self._proxy.update_domains(name, domains, credentials=proxy_creds)
-        self._inject_proxy_gcp_credentials(name)
 
     def exec_in_session(self, name: str, command: str) -> tuple[int, str, str]:
         """Execute a command inside a running session's container."""

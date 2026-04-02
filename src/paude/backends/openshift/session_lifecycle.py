@@ -133,8 +133,10 @@ class SessionLifecycleManager:
                 create_credentials_secret,
                 generate_ca_cert,
             )
-            from paude.backends.shared import gather_proxy_credentials
-            from paude.constants import GCP_ADC_FILENAME
+            from paude.backends.shared import (
+                gather_proxy_credentials,
+                local_gcp_adc_path,
+            )
 
             # Generate CA cert and store as Secret
             cert_pem, key_pem = generate_ca_cert()
@@ -143,9 +145,8 @@ class SessionLifecycleManager:
             )
 
             # Store credentials as Secret
-            gcp_adc_path = Path.home() / ".config" / "gcloud" / GCP_ADC_FILENAME
             proxy_creds = gather_proxy_credentials(
-                agent.config, gcp_adc_exists=gcp_adc_path.is_file()
+                agent.config, gcp_adc_path=local_gcp_adc_path()
             )
             create_credentials_secret(
                 self._oc, self._namespace, session_name, proxy_creds
@@ -395,8 +396,7 @@ class SessionLifecycleManager:
 
     def _refresh_proxy_credentials(self, session_name: str) -> None:
         """Update the proxy credential Secret with fresh host credentials."""
-        from paude.backends.shared import gather_proxy_credentials
-        from paude.constants import GCP_ADC_FILENAME
+        from paude.backends.shared import gather_proxy_credentials, local_gcp_adc_path
 
         sts = self._lookup.get_statefulset(session_name)
         labels = sts.get("metadata", {}).get("labels", {}) if sts else {}
@@ -407,9 +407,8 @@ class SessionLifecycleManager:
         from paude.agents import get_agent
 
         agent = get_agent(agent_name, provider=provider)
-        gcp_adc_path = Path.home() / ".config" / "gcloud" / GCP_ADC_FILENAME
         proxy_creds = gather_proxy_credentials(
-            agent.config, gcp_adc_exists=gcp_adc_path.is_file()
+            agent.config, gcp_adc_path=local_gcp_adc_path()
         )
         self._proxy.update_credentials(session_name, proxy_creds)
 

@@ -64,8 +64,8 @@ STUB_ADC_JSON = (
     ' "refresh_token": "paude-proxy-managed"}'
 )
 
-# Path where real GCP ADC is stored in the proxy container.
-PROXY_GCP_ADC_PATH = "/data/gcloud/application_default_credentials.json"  # noqa: S105
+# Environment variable name for passing GCP ADC JSON content to the proxy.
+PROXY_GCP_ADC_ENV = "GCP_ADC_JSON"
 
 # Python snippet executed inside containers to extract the OpenClaw auth token.
 # Used by both Podman and OpenShift backends via exec.
@@ -252,20 +252,28 @@ def engine_binary_for_backend(backend_type: str) -> str:
     raise ValueError(f"No engine binary for backend type: {backend_type}")
 
 
+def local_gcp_adc_path() -> Path | None:
+    """Return the local GCP ADC file path, or None if it doesn't exist."""
+    from paude.constants import GCP_ADC_FILENAME
+
+    path = Path.home() / ".config" / "gcloud" / GCP_ADC_FILENAME
+    return path if path.is_file() else None
+
+
 def gather_proxy_credentials(
     agent_config: AgentConfig,
     *,
-    gcp_adc_exists: bool = False,
+    gcp_adc_path: Path | None = None,
 ) -> dict[str, str]:
     """Gather real credentials from the host for the proxy container.
 
     Reads secret env vars (API keys) and GH_TOKEN from the host
-    environment. Also sets GOOGLE_APPLICATION_CREDENTIALS if GCP ADC
-    exists locally (the actual file is injected separately by each backend).
+    environment. If a GCP ADC file exists locally, its content is
+    passed as ``GCP_ADC_JSON`` so the proxy has it at startup.
 
     Args:
         agent_config: Agent configuration with secret_env_vars.
-        gcp_adc_exists: Whether GCP ADC file exists on the host.
+        gcp_adc_path: Path to local GCP ADC file, or None if absent.
 
     Returns:
         Dict of environment variables for the proxy container.
@@ -280,8 +288,8 @@ def gather_proxy_credentials(
     if gh_token:
         creds["GH_TOKEN"] = gh_token
 
-    if gcp_adc_exists:
-        creds["GOOGLE_APPLICATION_CREDENTIALS"] = PROXY_GCP_ADC_PATH
+    if gcp_adc_path is not None:
+        creds[PROXY_GCP_ADC_ENV] = gcp_adc_path.read_text()
 
     return creds
 
