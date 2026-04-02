@@ -8,13 +8,13 @@ import sys
 import time
 from typing import Any
 
-from paude.backends.openshift.oc import OcClient
-from paude.backends.shared import (
-    CA_CERT_CONTAINER_PATH,
-    CA_CERT_POLL_INTERVAL,
-    CA_CERT_POLL_TIMEOUT,
-    proxy_resource_name,
+from paude.backends.openshift.certs import (
+    _ca_secret_name,
+    _creds_secret_name,
+    delete_secrets,
 )
+from paude.backends.openshift.oc import OcClient
+from paude.backends.shared import proxy_resource_name
 
 
 class ProxyManager:
@@ -220,19 +220,22 @@ class ProxyManager:
         proxy_image: str,
         allowed_domains: list[str] | None = None,
         otel_ports: list[int] | None = None,
-        credentials: dict[str, str] | None = None,
     ) -> None:
         """Create a Deployment for the proxy pod.
 
         The proxy pod handles domain-based filtering and credential injection.
         The paude container routes all HTTP/HTTPS traffic through this proxy.
 
+        Credentials are loaded from a Kubernetes Secret via ``envFrom``
+        (see :func:`~paude.backends.openshift.certs.create_credentials_secret`).
+        The CA certificate is mounted from a Secret at ``/data/ca/``
+        (see :func:`~paude.backends.openshift.certs.create_ca_secret`).
+
         Args:
             session_name: Session name for labeling.
             proxy_image: Container image for the proxy.
             allowed_domains: List of domains to allow through the proxy.
             otel_ports: Non-standard ports to allow for OTEL endpoints.
-            credentials: Real credential env vars for the proxy to inject.
         """
         deployment_name = proxy_resource_name(session_name)
 
@@ -252,9 +255,9 @@ class ProxyManager:
                     "value": ",".join(str(p) for p in otel_ports),
                 }
             )
-        if credentials:
-            for key, value in credentials.items():
-                env_list.append({"name": key, "value": value})
+
+        ca_secret = _ca_secret_name(session_name)
+        creds_secret = _creds_secret_name(session_name)
 
         deployment_spec: dict[str, Any] = {
             "apiVersion": "apps/v1",
@@ -285,6 +288,15 @@ class ProxyManager:
                     "spec": {
                         "automountServiceAccountToken": False,
                         "enableServiceLinks": False,
+                        "volumes": [
+                            {
+                                "name": "ca-cert",
+                                "secret": {
+                                    "secretName": ca_secret,
+                                    "defaultMode": 0o644,
+                                },
+                            },
+                        ],
                         "containers": [
                             {
                                 "name": "proxy",
@@ -294,10 +306,20 @@ class ProxyManager:
                                 ),
                                 "ports": [{"containerPort": 3128}],
                                 "env": env_list,
+                                "envFrom": [
+                                    {"secretRef": {"name": creds_secret}},
+                                ],
                                 "resources": {
                                     "requests": {"cpu": "100m", "memory": "128Mi"},
                                     "limits": {"cpu": "500m", "memory": "256Mi"},
                                 },
+                                "volumeMounts": [
+                                    {
+                                        "name": "ca-cert",
+                                        "mountPath": "/data/ca",
+                                        "readOnly": True,
+                                    },
+                                ],
                             },
                         ],
                     },
@@ -406,104 +428,6 @@ class ProxyManager:
             file=sys.stderr,
         )
 
-    def distribute_ca_cert(self, session_name: str, agent_pod: str) -> None:
-        """Copy the proxy's CA certificate into the agent pod.
-
-        Reads the CA cert from the proxy pod via oc exec, writes it into
-        the agent pod, and runs update-ca-trust.
-
-        Args:
-            session_name: Session name.
-            agent_pod: Agent pod name to receive the CA cert.
-        """
-        proxy_pod = self._get_proxy_pod(session_name)
-        if not proxy_pod:
-            print(
-                "WARNING: Could not find proxy pod for CA cert distribution.",
-                file=sys.stderr,
-            )
-            return
-
-        # Poll for CA cert generation in proxy pod
-        elapsed = 0
-        while elapsed < CA_CERT_POLL_TIMEOUT:
-            result = self._oc.run(
-                "exec",
-                proxy_pod,
-                "-n",
-                self._namespace,
-                "--",
-                "test",
-                "-f",
-                "/data/ca/ca.crt",
-                check=False,
-            )
-            if result.returncode == 0:
-                break
-            time.sleep(CA_CERT_POLL_INTERVAL)
-            elapsed += CA_CERT_POLL_INTERVAL
-        else:
-            print(
-                "WARNING: Timed out waiting for proxy CA certificate.",
-                file=sys.stderr,
-            )
-            return
-
-        # Read CA cert from proxy pod
-        result = self._oc.run(
-            "exec",
-            proxy_pod,
-            "-n",
-            self._namespace,
-            "--",
-            "cat",
-            "/data/ca/ca.crt",
-            check=False,
-        )
-        if result.returncode != 0 or not result.stdout.strip():
-            print(
-                "WARNING: Failed to read CA certificate from proxy pod.",
-                file=sys.stderr,
-            )
-            return
-
-        # Write CA cert into agent pod and update trust store
-        ca_cert_content = result.stdout
-        self._oc.run(
-            "exec",
-            "-i",
-            agent_pod,
-            "-n",
-            self._namespace,
-            "--",
-            "sh",
-            "-c",
-            f"cat > {CA_CERT_CONTAINER_PATH} && update-ca-trust",
-            input_data=ca_cert_content,
-            check=False,
-        )
-
-    def _get_proxy_pod(self, session_name: str) -> str | None:
-        """Get the proxy pod name for a session.
-
-        Returns:
-            Pod name or None if not found.
-        """
-        result = self._oc.run(
-            "get",
-            "pods",
-            "-n",
-            self._namespace,
-            "-l",
-            f"app=paude-proxy,paude.io/session-name={session_name}",
-            "-o",
-            "jsonpath={.items[0].metadata.name}",
-            check=False,
-        )
-        if result.returncode != 0 or not result.stdout.strip():
-            return None
-        return result.stdout.strip()
-
     def get_deployment_domains(self, session_name: str) -> list[str]:
         """Get the current ALLOWED_DOMAINS from the proxy Deployment.
 
@@ -530,6 +454,21 @@ class ProxyManager:
             return []
 
         return [d for d in result.stdout.strip().split(",") if d]
+
+    def update_credentials(
+        self,
+        session_name: str,
+        credentials: dict[str, str],
+    ) -> None:
+        """Update the proxy credentials Secret with fresh values.
+
+        Args:
+            session_name: Session name.
+            credentials: Updated credential key-value pairs.
+        """
+        from paude.backends.openshift.certs import update_credentials_secret
+
+        update_credentials_secret(self._oc, self._namespace, session_name, credentials)
 
     def _patch_deployment_container(
         self,
@@ -562,9 +501,11 @@ class ProxyManager:
         domains: list[str],
         otel_ports: list[int] | None = None,
         image: str | None = None,
-        credentials: dict[str, str] | None = None,
     ) -> None:
         """Update the ALLOWED_DOMAINS env var on the proxy Deployment.
+
+        Credentials are managed separately via the credentials Secret
+        (see :func:`~paude.backends.openshift.certs.update_credentials_secret`).
 
         Args:
             session_name: Session name.
@@ -574,7 +515,6 @@ class ProxyManager:
                 list clears it.
             image: If provided, also update the container image in the same
                 patch to avoid a double pod restart.
-            credentials: Real credential env vars to preserve across updates.
         """
         domains_str = ",".join(domains)
 
@@ -591,9 +531,6 @@ class ProxyManager:
                     "value": ",".join(str(p) for p in otel_ports),
                 }
             )
-        if credentials:
-            for key, value in credentials.items():
-                env_entries.append({"name": key, "value": value})
 
         container_fields: dict[str, Any] = {"env": env_entries}
         if image is not None:
@@ -614,7 +551,7 @@ class ProxyManager:
         self._patch_deployment_container(session_name, {"image": image})
 
     def delete_resources(self, session_name: str) -> None:
-        """Delete proxy Deployment and Service for a session.
+        """Delete proxy Deployment, Service, and Secrets for a session.
 
         Args:
             session_name: Session name.
@@ -642,3 +579,6 @@ class ProxyManager:
             self._namespace,
             check=False,
         )
+
+        print("Deleting proxy Secrets...", file=sys.stderr)
+        delete_secrets(self._oc, self._namespace, session_name)

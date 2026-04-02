@@ -264,13 +264,11 @@ class SessionConnector:
 
     def _get_session_agent_name(self, session_name: str) -> str:
         """Look up the agent name from StatefulSet labels."""
-        sts = self._lookup.get_statefulset(session_name)
-        return self._agent_name_from_sts(sts)
+        return self._lookup.get_session_agent_name(session_name)
 
     def _get_session_provider(self, session_name: str) -> str | None:
         """Look up the provider name from StatefulSet labels."""
-        sts = self._lookup.get_statefulset(session_name)
-        return self._provider_from_sts(sts)
+        return self._lookup.get_session_provider(session_name)
 
     def _sync_for_connect(
         self, pname: str, name: str, github_token: str | None

@@ -84,6 +84,7 @@ class StatefulSetBuilder:
         self._workspace: Path | None = None
         self._pvc_size = "10Gi"
         self._storage_class: str | None = None
+        self._ca_secret_name: str | None = None
 
     def with_otel_endpoint(self, endpoint: str | None) -> StatefulSetBuilder:
         """Set the OTEL endpoint (for annotation).
@@ -119,6 +120,21 @@ class StatefulSetBuilder:
             Self for method chaining.
         """
         self._workspace = workspace
+        return self
+
+    def with_ca_secret(self, secret_name: str) -> StatefulSetBuilder:
+        """Mount a CA certificate from a Kubernetes Secret.
+
+        The CA cert is mounted at the system trust anchor path so that
+        ``update-ca-trust`` (called by the entrypoint) picks it up.
+
+        Args:
+            secret_name: Name of the K8s Secret containing ``ca.crt``.
+
+        Returns:
+            Self for method chaining.
+        """
+        self._ca_secret_name = secret_name
         return self
 
     def with_pvc(
@@ -174,7 +190,7 @@ class StatefulSetBuilder:
 
     def _build_volumes(self) -> list[dict[str, Any]]:
         """Build the volumes list for the pod spec."""
-        return [
+        volumes: list[dict[str, Any]] = [
             {
                 "name": "credentials",
                 "emptyDir": {
@@ -183,10 +199,23 @@ class StatefulSetBuilder:
                 },
             },
         ]
+        if self._ca_secret_name:
+            volumes.append(
+                {
+                    "name": "proxy-ca",
+                    "secret": {
+                        "secretName": self._ca_secret_name,
+                        "defaultMode": 0o644,
+                    },
+                }
+            )
+        return volumes
 
     def _build_volume_mounts(self) -> list[dict[str, Any]]:
         """Build the volume mounts list for the container spec."""
-        return [
+        from paude.backends.shared import CA_CERT_CONTAINER_PATH
+
+        mounts: list[dict[str, Any]] = [
             {
                 "name": "workspace",
                 "mountPath": "/pvc",
@@ -196,6 +225,16 @@ class StatefulSetBuilder:
                 "mountPath": "/credentials",
             },
         ]
+        if self._ca_secret_name:
+            mounts.append(
+                {
+                    "name": "proxy-ca",
+                    "mountPath": CA_CERT_CONTAINER_PATH,
+                    "subPath": "ca.crt",
+                    "readOnly": True,
+                }
+            )
+        return mounts
 
     def _parse_gpu_count(self) -> str | None:
         """Parse GPU spec into a resource count for Kubernetes.

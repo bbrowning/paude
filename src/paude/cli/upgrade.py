@@ -609,12 +609,12 @@ def _upgrade_openshift(
 
             _upgrade_agent = get_agent(agent_name, provider=provider_name)
             _proxy_creds = gather_proxy_credentials(_upgrade_agent.config)
+            backend._proxy.update_credentials(name, _proxy_creds)
             backend._proxy.update_deployment_domains(
                 name,
                 current_domains,
                 otel_ports=otel_ports,
                 image=proxy_image,
-                credentials=_proxy_creds,
             )
         elif proxy_image is not None:
             backend._proxy.update_deployment_image(name, proxy_image)

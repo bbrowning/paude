@@ -78,7 +78,9 @@ class SessionLifecycleManager:
     def create_session(self, config: SessionConfig) -> Session:
         """Create a new persistent session.
 
-        Creates StatefulSet + credentials + NetworkPolicy with replicas=0.
+        Creates Secrets, proxy Deployment, NetworkPolicies, and StatefulSet
+        (replicas=1).  CA cert and credentials are stored as K8s Secrets
+        and mounted into the pods declaratively — no ``oc exec`` orchestration.
         """
         self._oc.check_connection()
         self._oc.verify_namespace(self._namespace)
@@ -93,9 +95,11 @@ class SessionLifecycleManager:
         from paude.agents import get_agent as _get_agent
 
         agent = _get_agent(config.agent, provider=config.provider)
-        self._setup_proxy(config, session_name, agent)
+        ca_secret = self._setup_proxy(config, session_name, agent)
         session_env, secret_env = self._build_session_env(config, session_name)
-        self._apply_and_wait(session_name, config, session_env, secret_env)
+        self._apply_and_wait(
+            session_name, config, session_env, secret_env, ca_secret=ca_secret
+        )
 
         session_status = "running" if config.wait_for_ready else "pending"
         print(f"Session '{session_name}' created.", file=sys.stderr)
@@ -113,17 +117,36 @@ class SessionLifecycleManager:
 
     def _setup_proxy(
         self, config: SessionConfig, session_name: str, agent: Agent
-    ) -> None:
-        """Set up proxy deployment and network policies."""
+    ) -> str | None:
+        """Set up proxy Secrets, Deployment, Service, and NetworkPolicies.
+
+        Returns:
+            The CA Secret name if proxy is active, else None.
+        """
         if config.allowed_domains is not None:
             proxy_image = self._resolve_proxy_image(config)
 
+            from paude.backends.openshift.certs import (
+                create_ca_secret,
+                create_credentials_secret,
+                generate_ca_cert,
+            )
             from paude.backends.shared import gather_proxy_credentials
             from paude.constants import GCP_ADC_FILENAME
 
+            # Generate CA cert and store as Secret
+            cert_pem, key_pem = generate_ca_cert()
+            ca_secret = create_ca_secret(
+                self._oc, self._namespace, session_name, cert_pem, key_pem
+            )
+
+            # Store credentials as Secret
             gcp_adc_path = Path.home() / ".config" / "gcloud" / GCP_ADC_FILENAME
             proxy_creds = gather_proxy_credentials(
                 agent.config, gcp_adc_exists=gcp_adc_path.is_file()
+            )
+            create_credentials_secret(
+                self._oc, self._namespace, session_name, proxy_creds
             )
 
             self._proxy.create_deployment(
@@ -131,13 +154,14 @@ class SessionLifecycleManager:
                 proxy_image,
                 config.allowed_domains,
                 otel_ports=config.otel_ports,
-                credentials=proxy_creds,
             )
             self._proxy.create_service(session_name)
             self._proxy.ensure_proxy_network_policy(session_name)
             self._proxy.ensure_network_policy(session_name)
+            return ca_secret
         else:
             self._proxy.ensure_network_policy_permissive(session_name)
+            return None
 
     def _resolve_proxy_image(self, config: SessionConfig) -> str:
         """Resolve the proxy image from config."""
@@ -180,6 +204,8 @@ class SessionLifecycleManager:
         config: SessionConfig,
         session_env: dict[str, str],
         secret_env: dict[str, str],
+        *,
+        ca_secret: str | None = None,
     ) -> None:
         """Generate StatefulSet spec, apply it, wait for readiness, sync config."""
         ns = self._namespace
@@ -195,6 +221,7 @@ class SessionLifecycleManager:
             gpu=config.gpu,
             yolo=config.yolo,
             otel_endpoint=config.otel_endpoint,
+            ca_secret=ca_secret,
         )
 
         print(
@@ -210,9 +237,6 @@ class SessionLifecycleManager:
             pname = pod_name(session_name)
             print(f"Waiting for pod {pname} to be ready...", file=sys.stderr)
             self._pod_waiter.wait_for_ready(pname)
-
-            if config.allowed_domains is not None:
-                self._proxy.distribute_ca_cert(session_name, pname)
 
             self._syncer.sync_full_config(
                 pname,
@@ -353,6 +377,7 @@ class SessionLifecycleManager:
 
         has_proxy = self._lookup.has_proxy_deployment(name)
         if has_proxy:
+            self._refresh_proxy_credentials(name)
             self._scale_deployment(proxy_resource_name(name), 1)
             self._proxy.wait_for_ready(name)
 
@@ -363,11 +388,25 @@ class SessionLifecycleManager:
             print(f"Pod failed to start: {e}", file=sys.stderr)
             return 1
 
-        if has_proxy:
-            self._proxy.distribute_ca_cert(name, pname)
-
         assert self._connect_fn is not None  # noqa: S101
         return self._connect_fn(name, github_token)
+
+    def _refresh_proxy_credentials(self, session_name: str) -> None:
+        """Update the proxy credential Secret with fresh host credentials."""
+        from paude.backends.shared import gather_proxy_credentials
+        from paude.constants import GCP_ADC_FILENAME
+
+        agent_name = self._lookup.get_session_agent_name(session_name)
+        provider = self._lookup.get_session_provider(session_name)
+
+        from paude.agents import get_agent
+
+        agent = get_agent(agent_name, provider=provider)
+        gcp_adc_path = Path.home() / ".config" / "gcloud" / GCP_ADC_FILENAME
+        proxy_creds = gather_proxy_credentials(
+            agent.config, gcp_adc_exists=gcp_adc_path.is_file()
+        )
+        self._proxy.update_credentials(session_name, proxy_creds)
 
     def stop_session(self, name: str) -> None:
         """Stop a session (preserves volume)."""
@@ -428,9 +467,10 @@ class SessionLifecycleManager:
         gpu: str | None = None,
         yolo: bool = False,
         otel_endpoint: str | None = None,
+        ca_secret: str | None = None,
     ) -> dict[str, Any]:
         """Generate a Kubernetes StatefulSet specification."""
-        return (
+        builder = (
             StatefulSetBuilder(
                 session_name=session_name,
                 namespace=self._namespace,
@@ -445,5 +485,7 @@ class SessionLifecycleManager:
             .with_workspace(workspace)
             .with_pvc(size=pvc_size, storage_class=storage_class)
             .with_otel_endpoint(otel_endpoint)
-            .build()
         )
+        if ca_secret:
+            builder = builder.with_ca_secret(ca_secret)
+        return builder.build()

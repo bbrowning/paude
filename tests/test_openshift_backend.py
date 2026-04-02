@@ -1662,11 +1662,20 @@ class TestNetworkPolicyWithProxySelector:
         assert to_entry["podSelector"] == {}, "podSelector should be empty"
 
 
+_FAKE_CA = ("FAKE_CERT_PEM", "FAKE_KEY_PEM")
+
+
+@patch(
+    "paude.backends.openshift.certs.generate_ca_cert",
+    return_value=_FAKE_CA,
+)
 class TestCreateSessionWithProxy:
     """Tests for create_session with proxy deployment."""
 
     @patch("subprocess.run")
-    def test_creates_proxy_when_allowed_domains_set(self, mock_run: MagicMock) -> None:
+    def test_creates_proxy_when_allowed_domains_set(
+        self, mock_run: MagicMock, mock_ca: MagicMock
+    ) -> None:
         """create_session creates proxy when allowed_domains is set."""
 
         def run_side_effect(*args, **kwargs):
@@ -1705,7 +1714,9 @@ class TestCreateSessionWithProxy:
         assert len(deployment_calls) >= 1
 
     @patch("subprocess.run")
-    def test_proxy_gets_allowed_domains_env_var(self, mock_run: MagicMock) -> None:
+    def test_proxy_gets_allowed_domains_env_var(
+        self, mock_run: MagicMock, mock_ca: MagicMock
+    ) -> None:
         """create_session passes ALLOWED_DOMAINS to proxy deployment."""
 
         def run_side_effect(*args, **kwargs):
@@ -1751,7 +1762,7 @@ class TestCreateSessionWithProxy:
 
     @patch("subprocess.run")
     def test_sets_proxy_env_vars_when_allowed_domains_set(
-        self, mock_run: MagicMock
+        self, mock_run: MagicMock, mock_ca: MagicMock
     ) -> None:
         """create_session sets HTTP_PROXY env vars when allowed_domains is set."""
 
@@ -1799,7 +1810,9 @@ class TestCreateSessionWithProxy:
         assert env_dict.get("no_proxy") == "localhost,127.0.0.1"
 
     @patch("subprocess.run")
-    def test_no_proxy_when_allowed_domains_none(self, mock_run: MagicMock) -> None:
+    def test_no_proxy_when_allowed_domains_none(
+        self, mock_run: MagicMock, mock_ca: MagicMock
+    ) -> None:
         """create_session does not create proxy when allowed_domains=None."""
 
         def run_side_effect(*args, **kwargs):
@@ -1941,11 +1954,17 @@ class TestEnsureProxyNetworkPolicy:
         assert egress[0] == {}  # Empty rule = allow all
 
 
+@patch(
+    "paude.backends.openshift.certs.generate_ca_cert",
+    return_value=_FAKE_CA,
+)
 class TestProxyImageDerivation:
     """Tests for proxy image derivation logic."""
 
     @patch("subprocess.run")
-    def test_derives_proxy_image_from_main_image(self, mock_run: MagicMock) -> None:
+    def test_derives_proxy_image_from_main_image(
+        self, mock_run: MagicMock, mock_ca: MagicMock
+    ) -> None:
         """Proxy image is derived by replacing image name pattern."""
 
         def run_side_effect(*args, **kwargs):
@@ -1989,7 +2008,7 @@ class TestProxyImageDerivation:
 
     @patch("subprocess.run")
     def test_falls_back_to_default_when_pattern_not_found(
-        self, mock_run: MagicMock
+        self, mock_run: MagicMock, mock_ca: MagicMock
     ) -> None:
         """Falls back to default proxy image when pattern doesn't match."""
 
@@ -2470,11 +2489,17 @@ class TestSyncCursorAuthJson:
         assert "cursor-auth.json" not in all_calls_str
 
 
+@patch(
+    "paude.backends.openshift.certs.generate_ca_cert",
+    return_value=_FAKE_CA,
+)
 class TestCreateSessionWithProxyNetworkPolicy:
     """Tests for create_session creating proxy NetworkPolicy."""
 
     @patch("subprocess.run")
-    def test_creates_proxy_network_policy(self, mock_run: MagicMock) -> None:
+    def test_creates_proxy_network_policy(
+        self, mock_run: MagicMock, mock_ca: MagicMock
+    ) -> None:
         """create_session creates NetworkPolicy for proxy."""
 
         def run_side_effect(*args, **kwargs):
@@ -3359,9 +3384,13 @@ class TestSessionConfigProxyImage:
         )
         assert config.proxy_image is None
 
+    @patch(
+        "paude.backends.openshift.certs.generate_ca_cert",
+        return_value=_FAKE_CA,
+    )
     @patch("subprocess.run")
     def test_create_session_uses_provided_proxy_image(
-        self, mock_run: MagicMock
+        self, mock_run: MagicMock, mock_ca: MagicMock
     ) -> None:
         """create_session uses config.proxy_image when provided."""
         proxy_image_used = []
@@ -3369,8 +3398,8 @@ class TestSessionConfigProxyImage:
         def run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
             cmd = args[0] if args else kwargs.get("args", [])
             input_data = kwargs.get("input")
-            # Capture proxy image from deployment spec
-            if "apply" in cmd and input_data and "paude-proxy" in input_data:
+            # Capture proxy image from deployment spec (not Secrets)
+            if "apply" in cmd and input_data and '"kind": "Deployment"' in input_data:
                 proxy_image_used.append(input_data)
             # Return "Running" for pod status check
             if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):

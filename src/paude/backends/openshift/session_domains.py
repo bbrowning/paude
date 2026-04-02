@@ -104,4 +104,6 @@ class SessionDomainManager:
                 "Cannot update domains."
             )
 
-        self._proxy.update_deployment_domains(name, domains, credentials=credentials)
+        if credentials:
+            self._proxy.update_credentials(name, credentials)
+        self._proxy.update_deployment_domains(name, domains)
