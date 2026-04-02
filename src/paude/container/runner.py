@@ -239,6 +239,7 @@ class ContainerRunner:
         target: str,
         user: str = "root",
         owner: str | None = None,
+        mode: str = "600",
     ) -> None:
         """Write file content into a running container via exec.
 
@@ -252,7 +253,7 @@ class ContainerRunner:
         parts = [f"mkdir -p {parent}", f"cat > {quoted_target}"]
         if owner:
             parts.append(f"chown {shlex.quote(owner)} {quoted_target}")
-        parts.append(f"chmod 600 {quoted_target}")
+        parts.append(f"chmod {shlex.quote(mode)} {quoted_target}")
         self._engine.run(
             "exec",
             "-i",

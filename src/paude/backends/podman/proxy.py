@@ -234,6 +234,7 @@ class PodmanProxyManager:
             result.stdout,
             CA_CERT_CONTAINER_PATH,
             owner="root:0",
+            mode="644",
         )
         bundle_result = self._runner.exec_in_container(
             cname, ["sh", "-c", _BUILD_CA_BUNDLE_CMD], check=False
@@ -423,6 +424,7 @@ class PodmanProxyManager:
                 proxy_cert.stdout,
                 CA_CERT_CONTAINER_PATH,
                 owner="root:0",
+                mode="644",
             )
             bundle_result = self._runner.exec_in_container(
                 cname, ["sh", "-c", _BUILD_CA_BUNDLE_CMD], check=False
