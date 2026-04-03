@@ -25,6 +25,10 @@ class AgentConfig:
         secret_env_vars: Host env vars to deliver securely (not in container spec).
         passthrough_env_prefixes: Host env var prefixes to forward.
         config_dir_name: Config directory under HOME (e.g., ".claude").
+        config_dir_env_var: Env var that overrides the host-side config directory
+            path (e.g., "CLAUDE_CONFIG_DIR"). When set, the host config is read
+            from this path instead of HOME/config_dir_name. Does not affect
+            container-side paths.
         config_file_name: Config file under HOME (e.g., ".claude.json"), or None.
         config_excludes: Rsync excludes for config sync.
         config_sync_files_only: When non-empty, only these files (relative to
@@ -52,6 +56,7 @@ class AgentConfig:
     secret_env_vars: list[str] = field(default_factory=list)
     passthrough_env_prefixes: list[str] = field(default_factory=list)
     config_dir_name: str = ".claude"
+    config_dir_env_var: str | None = None
     config_file_name: str | None = ".claude.json"
     config_excludes: list[str] = field(default_factory=list)
     config_sync_files_only: list[str] = field(default_factory=list)

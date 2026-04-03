@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from paude.agents.base import (
@@ -59,6 +60,7 @@ class ClaudeAgent:
             secret_env_vars=creds.secret_env_vars,
             passthrough_env_prefixes=creds.passthrough_env_prefixes,
             config_dir_name=".claude",
+            config_dir_env_var="CLAUDE_CONFIG_DIR",
             config_file_name=".claude.json",
             config_excludes=list(_CLAUDE_CONFIG_EXCLUDES),
             activity_files=list(_CLAUDE_ACTIVITY_FILES),
@@ -138,8 +140,10 @@ chmod g+rw "$settings_json" 2>/dev/null || true
     def host_config_mounts(self, home: Path) -> list[str]:
         mounts: list[str] = []
 
-        # Claude seed directory (ro)
-        claude_dir = home / ".claude"
+        # Claude seed directory (ro) — honour CLAUDE_CONFIG_DIR override
+        env_var = self._config.config_dir_env_var
+        custom_config_dir = os.environ.get(env_var) if env_var else None
+        claude_dir = Path(custom_config_dir) if custom_config_dir else home / ".claude"
         resolved_claude = resolve_path(claude_dir)
         if resolved_claude and resolved_claude.is_dir():
             mounts.extend(["-v", f"{resolved_claude}:/tmp/claude.seed:ro"])

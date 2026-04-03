@@ -233,6 +233,32 @@ class TestClaudeAgentHostConfigMounts:
         mounts = ClaudeAgent().host_config_mounts(tmp_path)
         assert any("/tmp/claude.json.seed:ro" in m for m in mounts)
 
+    def test_respects_claude_config_dir(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        custom_dir = tmp_path / "my-claude-config"
+        custom_dir.mkdir()
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(custom_dir))
+        mounts = ClaudeAgent().host_config_mounts(tmp_path)
+        assert any(str(custom_dir) in m and "/tmp/claude.seed:ro" in m for m in mounts)
+
+    def test_claude_config_dir_with_plugins(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        custom_dir = tmp_path / "my-claude-config"
+        custom_dir.mkdir()
+        plugins = custom_dir / "plugins"
+        plugins.mkdir()
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(custom_dir))
+        mounts = ClaudeAgent().host_config_mounts(tmp_path)
+        assert any("plugins" in m and ":ro" in m for m in mounts)
+
+    def test_claude_config_dir_ignores_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Default .claude dir exists but CLAUDE_CONFIG_DIR points elsewhere
+        (tmp_path / ".claude").mkdir()
+        custom_dir = tmp_path / "other"
+        custom_dir.mkdir()
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(custom_dir))
+        mounts = ClaudeAgent().host_config_mounts(tmp_path)
+        assert not any(".claude" in m and "/tmp/claude.seed:ro" in m for m in mounts)
+        assert any(str(custom_dir) in m and "/tmp/claude.seed:ro" in m for m in mounts)
+
 
 class TestClaudeAgentBuildEnvironment:
     """Tests for ClaudeAgent.build_environment."""
