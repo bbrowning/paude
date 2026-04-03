@@ -1679,35 +1679,6 @@ class TestPodmanBackendSyncHostConfig:
         # Should NOT have called any podman commands
         mock_runner.engine.run.assert_not_called()
 
-    def test_sync_cursor_copies_auth_json(self, tmp_path: Path) -> None:
-        """Sync copies cursor auth.json for cursor agent."""
-        mock_runner = MagicMock()
-        mock_runner.engine.binary = "podman"
-        mock_runner.engine.supports_multi_network_create = True
-        mock_runner.engine.default_bridge_network = "podman"
-        mock_runner.engine.is_remote = False
-        mock_runner.engine.run.return_value = MagicMock(
-            returncode=0, stdout="", stderr=""
-        )
-        backend = _make_backend(mock_runner)
-        backend._engine = mock_runner.engine
-
-        with patch("paude.backends.sync_base.Path.home", return_value=tmp_path):
-            cursor_config = tmp_path / ".config" / "cursor"
-            cursor_config.mkdir(parents=True)
-            (cursor_config / "auth.json").write_text("{}")
-
-            backend._sync_host_config("paude-test", "cursor")
-
-        # Should have called podman cp for auth.json
-        cp_calls = [
-            c
-            for c in mock_runner.engine.run.call_args_list
-            if len(c[0]) >= 2 and c[0][0] == "cp" and "auth.json" in str(c[0][1])
-        ]
-        assert len(cp_calls) == 1
-        assert "paude-test:/credentials/cursor-auth.json" in str(cp_calls[0])
-
     def test_sync_logs_warning_when_step_fails(self, tmp_path: Path, capsys) -> None:
         """Sync logs a warning when a podman sync step fails."""
         mock_runner = MagicMock()
@@ -1795,35 +1766,6 @@ class TestPodmanBackendSyncHostConfig:
         with patch.object(backend, "_sync_host_config") as mock_sync:
             backend.connect_session("my-session")
             mock_sync.assert_called_once()
-
-    def test_sync_copies_global_gitignore(self, tmp_path: Path) -> None:
-        """Sync copies global gitignore to /credentials/gitignore-global."""
-        mock_runner = MagicMock()
-        mock_runner.engine.binary = "podman"
-        mock_runner.engine.supports_multi_network_create = True
-        mock_runner.engine.default_bridge_network = "podman"
-        mock_runner.engine.is_remote = False
-        mock_runner.engine.run.return_value = MagicMock(
-            returncode=0, stdout="", stderr=""
-        )
-        backend = _make_backend(mock_runner)
-        backend._engine = mock_runner.engine
-
-        with patch("paude.backends.sync_base.Path.home", return_value=tmp_path):
-            git_config = tmp_path / ".config" / "git"
-            git_config.mkdir(parents=True)
-            (git_config / "ignore").write_text(".DS_Store\n*.swp\n")
-
-            backend._sync_host_config("paude-test", "claude")
-
-        # Should have called podman cp for gitignore-global
-        cp_calls = [
-            c
-            for c in mock_runner.engine.run.call_args_list
-            if len(c[0]) >= 2 and c[0][0] == "cp" and "gitignore-global" in str(c[0][2])
-        ]
-        assert len(cp_calls) == 1
-        assert "paude-test:/credentials/gitignore-global" in str(cp_calls[0])
 
 
 class TestPodmanPortUrls:

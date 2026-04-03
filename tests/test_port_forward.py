@@ -440,20 +440,16 @@ class TestSessionConnectorCleanup:
     @patch.object(SessionConnector, "_stop_port_forward")
     @patch.object(SessionConnector, "_attach_to_pod", return_value=0)
     @patch.object(SessionConnector, "_start_port_forward", return_value=(None, []))
-    @patch.object(SessionConnector, "_sync_for_connect")
     @patch.object(SessionConnector, "_verify_pod_running", return_value=("pod-0", "ns"))
     def test_connect_stops_port_forward_on_success(
         self,
         mock_verify: MagicMock,  # noqa: ARG002
-        mock_sync: MagicMock,  # noqa: ARG002
         mock_start_pf: MagicMock,  # noqa: ARG002
         mock_attach: MagicMock,  # noqa: ARG002
         mock_stop_pf: MagicMock,
         mock_diag: MagicMock,  # noqa: ARG002
     ) -> None:
-        connector = SessionConnector(
-            MagicMock(), "ns", MagicMock(), MagicMock(), MagicMock()
-        )
+        connector = SessionConnector(MagicMock(), "ns", MagicMock(), MagicMock())
         connector.connect_session("test-session")
         mock_stop_pf.assert_called_once_with("test-session")
 
@@ -461,20 +457,16 @@ class TestSessionConnectorCleanup:
     @patch.object(SessionConnector, "_stop_port_forward")
     @patch.object(SessionConnector, "_attach_to_pod", side_effect=RuntimeError("boom"))
     @patch.object(SessionConnector, "_start_port_forward", return_value=(None, []))
-    @patch.object(SessionConnector, "_sync_for_connect")
     @patch.object(SessionConnector, "_verify_pod_running", return_value=("pod-0", "ns"))
     def test_connect_stops_port_forward_on_error(
         self,
         mock_verify: MagicMock,  # noqa: ARG002
-        mock_sync: MagicMock,  # noqa: ARG002
         mock_start_pf: MagicMock,  # noqa: ARG002
         mock_attach: MagicMock,  # noqa: ARG002
         mock_stop_pf: MagicMock,
         mock_diag: MagicMock,  # noqa: ARG002
     ) -> None:
-        connector = SessionConnector(
-            MagicMock(), "ns", MagicMock(), MagicMock(), MagicMock()
-        )
+        connector = SessionConnector(MagicMock(), "ns", MagicMock(), MagicMock())
         with pytest.raises(RuntimeError):
             connector.connect_session("test-session")
         mock_stop_pf.assert_called_once_with("test-session")
@@ -482,12 +474,10 @@ class TestSessionConnectorCleanup:
     @patch("paude.backends.openshift.session_connection._show_port_forward_diagnostics")
     @patch.object(SessionConnector, "_stop_port_forward")
     @patch.object(SessionConnector, "_attach_to_pod", return_value=0)
-    @patch.object(SessionConnector, "_sync_for_connect")
     @patch.object(SessionConnector, "_verify_pod_running", return_value=("pod-0", "ns"))
     def test_connect_passes_restart_info_to_monitor(
         self,
         mock_verify: MagicMock,  # noqa: ARG002
-        mock_sync: MagicMock,  # noqa: ARG002
         mock_attach: MagicMock,  # noqa: ARG002
         mock_stop_pf: MagicMock,  # noqa: ARG002
         mock_diag: MagicMock,  # noqa: ARG002
@@ -501,9 +491,7 @@ class TestSessionConnectorCleanup:
             log_path=Path("/tmp/test.log"),
         )
 
-        connector = SessionConnector(
-            MagicMock(), "ns", MagicMock(), MagicMock(), MagicMock()
-        )
+        connector = SessionConnector(MagicMock(), "ns", MagicMock(), MagicMock())
         with (
             patch.object(
                 SessionConnector,

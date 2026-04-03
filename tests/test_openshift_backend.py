@@ -17,6 +17,7 @@ from paude.backends.openshift import (
     OpenShiftBackend,
     OpenShiftConfig,
 )
+from paude.backends.openshift.resources import StatefulSetBuilder
 
 _FAKE_CA = ("FAKE_CERT_PEM", "FAKE_KEY_PEM")
 
@@ -332,15 +333,16 @@ class TestOpenShiftCreateSession:
         return_value=_FAKE_CA,
     )
     @patch("subprocess.run")
-    def test_create_session_waits_for_pod_and_syncs_config(
+    def test_create_session_waits_for_pod_and_creates_configmap(
         self, mock_run: MagicMock, mock_ca: MagicMock
     ) -> None:
-        """Create session waits for pod ready and syncs config."""
-        calls_log = []
+        """Create session waits for pod ready and creates ConfigMap."""
+        calls_log: list[Any] = []
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
-            calls_log.append(cmd)
+            input_data = kwargs.get("input")
+            calls_log.append((cmd, input_data))
             # Return "Running" for pod status check
             if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
                 return MagicMock(returncode=0, stdout="Running", stderr="")
@@ -364,13 +366,24 @@ class TestOpenShiftCreateSession:
 
         # Verify pod status check was called (waiting for pod ready)
         pod_status_calls = [
-            c for c in calls_log if "get" in c and "pod" in c and "jsonpath" in str(c)
+            c
+            for c, _ in calls_log
+            if "get" in c and "pod" in c and "jsonpath" in str(c)
         ]
         assert len(pod_status_calls) >= 1, "Should check pod status"
 
-        # Verify sync was called (exec mkdir for config directory)
-        sync_calls = [c for c in calls_log if "exec" in c and "mkdir" in str(c)]
-        assert len(sync_calls) >= 1, "Should sync config to pod"
+        # Verify ConfigMap was applied (contains config data)
+        apply_inputs = [inp for c, inp in calls_log if "apply" in c and inp is not None]
+        configmap_applied = any(
+            '"kind": "ConfigMap"' in inp or '"kind":"ConfigMap"' in inp
+            for inp in apply_inputs
+            if isinstance(inp, str)
+        )
+        assert configmap_applied, "Should apply ConfigMap"
+
+        # Verify no oc exec/cp calls (no imperative sync)
+        exec_calls = [c for c, _ in calls_log if "exec" in c]
+        assert len(exec_calls) == 0, "Should not use oc exec for config sync"
 
         # Verify session is returned as running
         assert session.status == "running"
@@ -1060,7 +1073,6 @@ class TestSessionConnectorBuildExecCmd:
             namespace="test-ns",
             config=config,
             lookup=MagicMock(),
-            syncer=MagicMock(),
         )
 
     def test_exec_cmd_without_port_urls(self) -> None:
@@ -2255,18 +2267,12 @@ class TestStartSessionWaitsForProxy:
         assert "check_proxy_ready" not in call_order
 
 
-class TestConnectSessionRefreshesCredentials:
-    """Tests for connect_session syncing credentials/config."""
+class TestConnectSessionNoSync:
+    """Tests for connect_session without sync (config mounted via ConfigMap)."""
 
     @patch("subprocess.run")
-    def test_connect_session_full_sync_on_first_connect(
-        self, mock_run: MagicMock
-    ) -> None:
-        """connect_session calls _syncer.sync_full_config on first connect.
-
-        When .ready doesn't exist (first connect after start), full config
-        sync is performed including gcloud, claude config, and gitconfig.
-        """
+    def test_connect_session_does_not_sync(self, mock_run: MagicMock) -> None:
+        """connect_session does not sync config — ConfigMap handles it."""
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
@@ -2278,97 +2284,43 @@ class TestConnectSessionRefreshesCredentials:
         mock_run.side_effect = run_side_effect
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend.connect_session("test")
 
-        # Mock _syncer.is_config_synced to return False (first connect)
-        with patch.object(backend._syncer, "is_config_synced", return_value=False):
-            with patch.object(backend._syncer, "sync_full_config") as mock_full_sync:
-                with patch.object(backend._syncer, "sync_credentials") as mock_creds:
-                    with patch("subprocess.run", mock_run):
-                        backend.connect_session("test")
-
-                # First connect: full config sync
-                mock_full_sync.assert_called_once()
-                mock_creds.assert_not_called()
-                assert "paude-test-0" in str(mock_full_sync.call_args)
+        # No oc exec/cp calls for sync
+        exec_calls = [
+            c for c in mock_run.call_args_list if "exec" in str(c) and "mkdir" in str(c)
+        ]
+        assert len(exec_calls) == 0
 
     @patch("subprocess.run")
-    def test_connect_session_credentials_only_on_reconnect(
+    def test_connect_session_returns_1_when_pod_not_running(
         self, mock_run: MagicMock
     ) -> None:
-        """connect_session calls _syncer.sync_credentials on reconnect.
-
-        When .ready exists (reconnect), only gcloud credentials are refreshed
-        for faster reconnection.
-        """
-
-        def run_side_effect(*args, **kwargs):
-            cmd = args[0] if args else kwargs.get("args", [])
-
-            if "get" in cmd and "pod" in cmd:
-                return MagicMock(returncode=0, stdout="Running", stderr="")
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = run_side_effect
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        # Mock _syncer.is_config_synced to return True (reconnect)
-        with patch.object(backend._syncer, "is_config_synced", return_value=True):
-            with patch.object(backend._syncer, "sync_full_config") as mock_full_sync:
-                with patch.object(backend._syncer, "sync_credentials") as mock_creds:
-                    with patch("subprocess.run", mock_run):
-                        backend.connect_session("test")
-
-                # Reconnect: credentials only
-                mock_creds.assert_called_once()
-                mock_full_sync.assert_not_called()
-                assert "paude-test-0" in str(mock_creds.call_args)
-
-    @patch("subprocess.run")
-    def test_connect_session_does_not_sync_when_pod_not_running(
-        self, mock_run: MagicMock
-    ) -> None:
-        """connect_session does not sync if pod is not running."""
+        """connect_session returns 1 if pod is not running."""
         mock_run.return_value = MagicMock(returncode=0, stdout="Pending", stderr="")
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch.object(backend._syncer, "sync_full_config") as mock_full_sync:
-            with patch.object(backend._syncer, "sync_credentials") as mock_creds:
-                result = backend.connect_session("test")
-
-                # Should return 1 (error) without syncing
-                assert result == 1
-                mock_full_sync.assert_not_called()
-                mock_creds.assert_not_called()
+        result = backend.connect_session("test")
+        assert result == 1
 
     @patch("subprocess.run")
-    def test_connect_session_does_not_sync_when_pod_not_found(
+    def test_connect_session_returns_1_when_pod_not_found(
         self, mock_run: MagicMock
     ) -> None:
-        """connect_session does not sync if pod doesn't exist."""
-        # Simulate pod not found - returncode != 0
+        """connect_session returns 1 if pod doesn't exist."""
         mock_run.return_value = MagicMock(
             returncode=1, stdout="", stderr="pod not found"
         )
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch.object(backend._syncer, "sync_full_config") as mock_full_sync:
-            with patch.object(backend._syncer, "sync_credentials") as mock_creds:
-                result = backend.connect_session("test")
-
-                # Should return 1 (error) without syncing
-                assert result == 1
-                mock_full_sync.assert_not_called()
-                mock_creds.assert_not_called()
+        result = backend.connect_session("test")
+        assert result == 1
 
     @patch("subprocess.run")
     def test_connect_session_shows_empty_workspace_message(
         self, mock_run: MagicMock, capsys: Any
     ) -> None:
         """connect_session shows message when workspace is empty."""
-        call_order = []
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
@@ -2378,198 +2330,18 @@ class TestConnectSessionRefreshesCredentials:
                 return MagicMock(returncode=0, stdout="Running", stderr="")
             # Empty workspace - no .git directory
             if "test" in cmd and "-d" in cmd and ".git" in cmd_str:
-                call_order.append("check_git_dir")
                 return MagicMock(returncode=1, stdout="", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         mock_run.side_effect = run_side_effect
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch.object(backend._syncer, "is_config_synced", return_value=True):
-            with patch.object(backend._syncer, "sync_credentials"):
-                backend.connect_session("test")
+        backend.connect_session("test")
 
         captured = capsys.readouterr()
         assert "Workspace is empty" in captured.err
         assert "paude remote add test" in captured.err
         assert "git push paude-test main" in captured.err
-
-
-class TestIsConfigSynced:
-    """Tests for _syncer.is_config_synced method."""
-
-    @patch("subprocess.run")
-    def test_returns_true_when_ready_exists(self, mock_run: MagicMock) -> None:
-        """_syncer.is_config_synced returns True when .ready file exists."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        result = backend._syncer.is_config_synced("paude-test-0")
-
-        assert result is True
-        # Verify it runs test -f /credentials/.ready
-        cmd_str = str(mock_run.call_args)
-        assert "test" in cmd_str
-        assert "-f" in cmd_str
-        assert "/credentials/.ready" in cmd_str
-
-    @patch("subprocess.run")
-    def test_returns_false_when_ready_missing(self, mock_run: MagicMock) -> None:
-        """_syncer.is_config_synced returns False when .ready file doesn't exist."""
-        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        result = backend._syncer.is_config_synced("paude-test-0")
-
-        assert result is False
-
-
-class TestSyncCredentialsToPod:
-    """Tests for _syncer.sync_credentials method (fast credential refresh)."""
-
-    @patch("subprocess.run")
-    def test_syncs_gcloud_files(self, mock_run: MagicMock, tmp_path: Path) -> None:
-        """_syncer.sync_credentials syncs gcloud credential files."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        # Create fake gcloud credentials
-        gcloud_dir = tmp_path / ".config" / "gcloud"
-        gcloud_dir.mkdir(parents=True)
-        (gcloud_dir / "application_default_credentials.json").write_text("{}")
-        (gcloud_dir / "credentials.db").write_text("")
-        (gcloud_dir / "access_tokens.db").write_text("")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            backend._syncer.sync_credentials("paude-test-0", verbose=True)
-
-        # Verify oc cp was called for gcloud files
-        cp_calls = [c for c in mock_run.call_args_list if "cp" in str(c)]
-        gcloud_cp_calls = [c for c in cp_calls if "gcloud" in str(c)]
-        assert len(gcloud_cp_calls) >= 1
-
-    @patch("subprocess.run")
-    def test_touches_ready_marker(self, mock_run: MagicMock, tmp_path: Path) -> None:
-        """_syncer.sync_credentials touches .ready marker."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            backend._syncer.sync_credentials("paude-test-0")
-
-        # Verify touch .ready was called
-        touch_calls = [
-            c
-            for c in mock_run.call_args_list
-            if "touch" in str(c) and ".ready" in str(c)
-        ]
-        assert len(touch_calls) >= 1
-
-    @patch("subprocess.run")
-    def test_does_not_sync_claude_or_git_config(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """_syncer.sync_credentials only syncs gcloud, not claude/git config."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        # Create fake configs
-        gcloud_dir = tmp_path / ".config" / "gcloud"
-        gcloud_dir.mkdir(parents=True)
-        (gcloud_dir / "application_default_credentials.json").write_text("{}")
-
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-        (claude_dir / "settings.json").write_text("{}")
-
-        (tmp_path / ".gitconfig").write_text("[user]\nname = Test")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            backend._syncer.sync_credentials("paude-test-0")
-
-        # Verify no claude or git syncing
-        all_calls_str = str(mock_run.call_args_list)
-        assert "rsync" not in all_calls_str  # No rsync for claude dir
-        assert "gitconfig" not in all_calls_str  # No gitconfig sync
-
-
-class TestSyncCursorAuthJson:
-    """Tests for Cursor auth.json sync in ConfigSyncer."""
-
-    @patch("subprocess.run")
-    def test_sync_config_files_syncs_auth_json_for_cursor(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """_sync_config_files syncs auth.json for cursor agent."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        # Create fake cursor config and auth.json
-        cursor_dir = tmp_path / ".cursor"
-        cursor_dir.mkdir()
-        (cursor_dir / "cli-config.json").write_text("{}")
-        config_cursor = tmp_path / ".config" / "cursor"
-        config_cursor.mkdir(parents=True)
-        (config_cursor / "auth.json").write_text('{"accessToken": "test"}')
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        backend._syncer._target = "test-pod-0"
-
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            backend._syncer._sync_config_files("cursor")
-
-        # Verify oc cp was called for cursor-auth.json
-        cp_calls = [c for c in mock_run.call_args_list if "cp" in str(c)]
-        auth_cp_calls = [c for c in cp_calls if "cursor-auth.json" in str(c)]
-        assert len(auth_cp_calls) >= 1
-
-    @patch("subprocess.run")
-    def test_sync_config_files_does_not_sync_auth_json_for_claude(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """_sync_config_files does NOT sync auth.json for non-cursor agents."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        # Create fake claude config
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-
-        # Create fake cursor auth.json (should NOT be synced for claude agent)
-        config_cursor = tmp_path / ".config" / "cursor"
-        config_cursor.mkdir(parents=True)
-        (config_cursor / "auth.json").write_text('{"accessToken": "test"}')
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        backend._syncer._target = "test-pod-0"
-
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            backend._syncer._sync_config_files("claude")
-
-        # Verify cursor-auth.json was NOT synced
-        all_calls_str = str(mock_run.call_args_list)
-        assert "cursor-auth.json" not in all_calls_str
-
-    @patch("subprocess.run")
-    def test_sync_credentials_does_not_sync_auth_json_for_claude(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """sync_credentials does NOT sync auth.json for non-cursor agents."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        config_cursor = tmp_path / ".config" / "cursor"
-        config_cursor.mkdir(parents=True)
-        (config_cursor / "auth.json").write_text('{"accessToken": "test"}')
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            backend._syncer.sync_credentials("test-pod-0", agent_name="claude")
-
-        all_calls_str = str(mock_run.call_args_list)
-        assert "cursor-auth.json" not in all_calls_str
 
 
 @patch(
@@ -2619,277 +2391,121 @@ class TestCreateSessionWithProxyNetworkPolicy:
         assert len(proxy_policy_calls) >= 1
 
 
-class TestSyncConfigToPod:
-    """Tests for _syncer.sync_full_config method (tmpfs-based credential sync)."""
+class TestConfigMapBuilder:
+    """Tests for build_config_map and ConfigMap-based StatefulSet configuration."""
 
-    @patch("subprocess.run")
-    def test_creates_config_directory_structure(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """_syncer.sync_full_config creates /credentials directory structure."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+    def test_build_config_map_contains_required_keys(self) -> None:
+        """ConfigMap contains gcloud-adc, agent-sandbox-config.sh, and .ready."""
+        from paude.backends.openshift.resources import build_config_map
 
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        cm = build_config_map("test-session", "test-ns")
+        data = cm["data"]
 
-        with patch.object(Path, "home", return_value=tmp_path):
-            backend._syncer.sync_full_config("test-pod-0")
+        assert "gcloud-adc" in data
+        assert "agent-sandbox-config.sh" in data
+        assert ".ready" in data
+        assert data[".ready"] == ""
 
-        # Find the exec call that creates the directory structure
-        exec_calls = [
-            c
-            for c in mock_run.call_args_list
-            if "exec" in str(c) and "mkdir -p" in str(c)
-        ]
-        assert len(exec_calls) >= 1
+    def test_build_config_map_includes_gitconfig_when_available(self) -> None:
+        """ConfigMap includes gitconfig when git user config is available."""
+        from paude.backends.openshift.resources import build_config_map
 
-        # Verify the command includes mkdir (idempotent) and chmod, but NOT rm -rf
-        # Using mkdir -p instead of rm -rf preserves working directories
-        exec_cmd = str(exec_calls[0])
-        assert "rm -rf /credentials" not in exec_cmd
-        assert "mkdir -p /credentials/gcloud" in exec_cmd
-        assert "chmod -R g+rwX /credentials" in exec_cmd
+        with patch(
+            "paude.backends.openshift.resources._read_git_user_config",
+            return_value="[user]\n\tname = Test\n\temail = test@example.com\n",
+        ):
+            cm = build_config_map("test-session", "test-ns")
 
-    @patch("subprocess.run")
-    def test_does_not_sync_agent_config_dir(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """_syncer.sync_full_config does not sync agent config directories."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        assert "gitconfig" in cm["data"]
+        assert "Test" in cm["data"]["gitconfig"]
 
-        # Create mock claude files (should NOT be synced)
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir(parents=True)
-        (claude_dir / "settings.json").write_text("{}")
-        (tmp_path / ".claude.json").write_text("{}")
+    def test_build_config_map_omits_gitconfig_when_empty(self) -> None:
+        """ConfigMap omits gitconfig when no git user config exists."""
+        from paude.backends.openshift.resources import build_config_map
 
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        with patch(
+            "paude.backends.openshift.resources._read_git_user_config",
+            return_value="",
+        ):
+            cm = build_config_map("test-session", "test-ns")
 
-        with patch.object(Path, "home", return_value=tmp_path):
-            backend._syncer.sync_full_config("test-pod-0")
+        assert "gitconfig" not in cm["data"]
 
-        # No rsync calls for agent config
-        rsync_calls = [c for c in mock_run.call_args_list if "rsync" in str(c)]
-        assert len(rsync_calls) == 0
+    def test_build_config_map_metadata(self) -> None:
+        """ConfigMap has correct metadata and labels."""
+        from paude.backends.openshift.resources import build_config_map
 
-        # No cp calls for .claude.json
-        cp_calls_str = str(mock_run.call_args_list)
-        assert ".claude.json" not in cp_calls_str
+        cm = build_config_map("my-session", "my-ns")
 
-    @patch("subprocess.run")
-    def test_syncs_gitconfig(self, mock_run: MagicMock, tmp_path: Path) -> None:
-        """_syncer.sync_full_config syncs gitconfig."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        assert cm["kind"] == "ConfigMap"
+        assert cm["metadata"]["name"] == "paude-config-my-session"
+        assert cm["metadata"]["namespace"] == "my-ns"
+        assert cm["metadata"]["labels"]["paude.io/session-name"] == "my-session"
 
-        # Create mock gitconfig
-        (tmp_path / ".gitconfig").write_text("[user]\nname = Test")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch.object(Path, "home", return_value=tmp_path):
-            backend._syncer.sync_full_config("test-pod-0")
-
-        # Find oc cp call for gitconfig
-        cp_calls = [c for c in mock_run.call_args_list if "cp" in str(c)]
-        cp_calls_str = str(cp_calls)
-
-        assert ".gitconfig" in cp_calls_str
-        assert "/credentials/gitconfig" in cp_calls_str
-
-    @patch("subprocess.run")
-    def test_syncs_global_gitignore(self, mock_run: MagicMock, tmp_path: Path) -> None:
-        """_syncer.sync_full_config syncs global gitignore from ~/.config/git/ignore."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        # Create mock global gitignore
-        git_config_dir = tmp_path / ".config" / "git"
-        git_config_dir.mkdir(parents=True)
-        (git_config_dir / "ignore").write_text("**/.claude/settings.local.json\n")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch.object(Path, "home", return_value=tmp_path):
-            backend._syncer.sync_full_config("test-pod-0")
-
-        # Find oc cp call for global gitignore
-        cp_calls = [c for c in mock_run.call_args_list if "cp" in str(c)]
-        cp_calls_str = str(cp_calls)
-
-        assert ".config/git/ignore" in cp_calls_str
-        assert "/credentials/gitignore-global" in cp_calls_str
-
-    @patch("subprocess.run")
-    def test_skips_global_gitignore_when_missing(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """_syncer.sync_full_config skips global gitignore when it doesn't exist."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        # Don't create the global gitignore file
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch.object(Path, "home", return_value=tmp_path):
-            backend._syncer.sync_full_config("test-pod-0")
-
-        # Should not have a cp call for gitignore-global
-        cp_calls_str = str(mock_run.call_args_list)
-        assert "gitignore-global" not in cp_calls_str
-
-    @patch("subprocess.run")
-    def test_sync_full_config_copies_global_gitignore(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """_syncer.sync_full_config copies global gitignore."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        # Create mock global gitignore
-        git_config_dir = tmp_path / ".config" / "git"
-        git_config_dir.mkdir(parents=True)
-        (git_config_dir / "ignore").write_text("*.log\n")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch.object(Path, "home", return_value=tmp_path):
-            backend._syncer.sync_full_config("test-pod-0")
-
-        # Verify oc cp was called for gitignore-global
-        cp_calls = [c for c in mock_run.call_args_list if "gitignore-global" in str(c)]
-        assert len(cp_calls) >= 1
-
-    @patch("subprocess.run")
-    def test_creates_ready_marker(self, mock_run: MagicMock, tmp_path: Path) -> None:
-        """_syncer.sync_full_config creates .ready marker file."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch.object(Path, "home", return_value=tmp_path):
-            backend._syncer.sync_full_config("test-pod-0")
-
-        # Find the exec call that creates the .ready marker
-        exec_calls = [
-            c
-            for c in mock_run.call_args_list
-            if "exec" in str(c) and ".ready" in str(c)
-        ]
-        # Should have at least 2 calls: one to create .ready, one to verify
-        assert len(exec_calls) >= 2
-
-        # Verify touch .ready is in the create command
-        create_cmd = str(exec_calls[0])
-        assert "touch /credentials/.ready" in create_cmd
-
-        # Verify chmod is wrapped with error suppression (non-fatal)
-        assert "2>/dev/null || true" in create_cmd
-
-        # Verify there's a test -f call to verify .ready was created
-        verify_cmd = str(exec_calls[1])
-        assert "test" in verify_cmd
-        assert "/credentials/.ready" in verify_cmd
-
-    @patch("subprocess.run")
-    def test_warns_when_ready_marker_fails(
-        self, mock_run: MagicMock, tmp_path: Path, capsys: Any
-    ) -> None:
-        """_syncer.sync_full_config warns if .ready marker creation fails."""
-
-        def run_side_effect(*args, **kwargs):
-            cmd = args[0] if args else kwargs.get("args", [])
-            cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
-
-            # Fail the test -f verification
-            if "test" in cmd and "-f" in cmd and ".ready" in cmd_str:
-                return MagicMock(returncode=1, stdout="", stderr="")
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = run_side_effect
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch.object(Path, "home", return_value=tmp_path):
-            backend._syncer.sync_full_config("test-pod-0")
-
-        captured = capsys.readouterr()
-        assert "Warning: Failed to create" in captured.err
-        assert ".ready" in captured.err
-
-    @patch("subprocess.run")
-    def test_handles_missing_files_gracefully(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """_syncer.sync_full_config doesn't fail when files are missing."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        # No credential files exist in tmp_path
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        # Should not raise
-        with patch.object(Path, "home", return_value=tmp_path):
-            backend._syncer.sync_full_config("test-pod-0")
-
-        # Should still create the directory structure and .ready marker
-        calls_str = str(mock_run.call_args_list)
-        assert "mkdir -p /credentials/gcloud" in calls_str
-        assert ".ready" in calls_str
-
-    @patch("subprocess.run")
-    def test_raises_on_mkdir_failure(self, mock_run: MagicMock, tmp_path: Path) -> None:
-        """_syncer.sync_full_config raises OpenShiftError when mkdir fails."""
-        from paude.backends.openshift import OpenShiftError
-
-        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
-            cmd = args[0] if args else []
-            # Fail the mkdir command (first exec call)
-            if "exec" in cmd and "mkdir" in str(cmd):
-                return MagicMock(
-                    returncode=1,
-                    stdout="",
-                    stderr="mkdir: cannot create directory: No space left",
-                )
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = mock_run_side_effect
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch.object(Path, "home", return_value=tmp_path):
-            with pytest.raises(OpenShiftError) as exc_info:
-                backend._syncer.sync_full_config("test-pod-0")
-
-        assert "Failed to prepare config directory" in str(exc_info.value)
-
-    @patch("subprocess.run")
-    def test_exec_calls_use_extended_timeout(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """_syncer.sync_full_config exec calls use OC_EXEC_TIMEOUT (not default)."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch.object(Path, "home", return_value=tmp_path):
-            backend._syncer.sync_full_config("test-pod-0")
-
-        # Find all exec calls (mkdir/chmod operations)
-        exec_calls = [
-            c for c in mock_run.call_args_list if len(c[0]) > 0 and "exec" in c[0][0]
-        ]
-
-        # There should be at least 2 exec calls:
-        # 1. mkdir + chmod for config directory prep
-        # 2. chmod + touch for .ready marker
-        assert len(exec_calls) >= 2, (
-            f"Expected at least 2 exec calls, got {len(exec_calls)}"
+    def test_statefulset_with_config_map_uses_entrypoint_command(self) -> None:
+        """StatefulSet with ConfigMap uses entrypoint-session.sh as command."""
+        builder = StatefulSetBuilder(
+            session_name="test",
+            namespace="ns",
+            image="img:latest",
+            resources={"requests": {"cpu": "1"}, "limits": {"cpu": "2"}},
         )
+        spec = builder.with_config_map("paude-config-test").build()
 
-        # All exec calls should use the extended timeout
-        for call in exec_calls:
-            timeout = call[1].get("timeout")
-            assert timeout == OpenShiftBackend.OC_EXEC_TIMEOUT, (
-                f"exec call should use OC_EXEC_TIMEOUT ({OpenShiftBackend.OC_EXEC_TIMEOUT}), "
-                f"got {timeout}. Call: {call}"
-            )
+        container = spec["spec"]["template"]["spec"]["containers"][0]
+        assert container["command"] == [
+            "tini",
+            "--",
+            "/usr/local/bin/entrypoint-session.sh",
+        ]
+
+    def test_statefulset_with_config_map_sets_headless_env(self) -> None:
+        """StatefulSet with ConfigMap sets PAUDE_HEADLESS=1."""
+        builder = StatefulSetBuilder(
+            session_name="test",
+            namespace="ns",
+            image="img:latest",
+            resources={"requests": {"cpu": "1"}, "limits": {"cpu": "2"}},
+        )
+        spec = builder.with_config_map("paude-config-test").build()
+
+        container = spec["spec"]["template"]["spec"]["containers"][0]
+        env_dict = {e["name"]: e["value"] for e in container["env"]}
+        assert env_dict["PAUDE_HEADLESS"] == "1"
+
+    def test_statefulset_with_config_map_uses_configmap_volume(self) -> None:
+        """StatefulSet with ConfigMap uses configMap volume instead of emptyDir."""
+        builder = StatefulSetBuilder(
+            session_name="test",
+            namespace="ns",
+            image="img:latest",
+            resources={"requests": {"cpu": "1"}, "limits": {"cpu": "2"}},
+        )
+        spec = builder.with_config_map("paude-config-test").build()
+
+        volumes = spec["spec"]["template"]["spec"]["volumes"]
+        cred_vol = next(v for v in volumes if v["name"] == "credentials")
+        assert "configMap" in cred_vol
+        assert cred_vol["configMap"]["name"] == "paude-config-test"
+        assert "emptyDir" not in cred_vol
+
+    def test_statefulset_without_config_map_uses_emptydir(self) -> None:
+        """StatefulSet without ConfigMap uses emptyDir (legacy behavior)."""
+        builder = StatefulSetBuilder(
+            session_name="test",
+            namespace="ns",
+            image="img:latest",
+            resources={"requests": {"cpu": "1"}, "limits": {"cpu": "2"}},
+        )
+        spec = builder.build()
+
+        volumes = spec["spec"]["template"]["spec"]["volumes"]
+        cred_vol = next(v for v in volumes if v["name"] == "credentials")
+        assert "emptyDir" in cred_vol
+        assert "configMap" not in cred_vol
+
+        container = spec["spec"]["template"]["spec"]["containers"][0]
+        assert container["command"] == ["tini", "--", "sleep", "infinity"]
 
 
 class TestEnsureProxyImageViaBuild:

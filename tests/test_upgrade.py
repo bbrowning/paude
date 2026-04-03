@@ -508,7 +508,7 @@ class TestUpgradeOpenShift:
         backend._lifecycle._oc = MagicMock()
         backend._proxy = MagicMock()
         backend._pod_waiter = MagicMock()
-        backend._syncer = MagicMock()
+
         backend.ensure_image_via_build.return_value = "registry.example.com/paude:new"
 
         from paude.cli.upgrade import _upgrade_openshift
@@ -549,7 +549,7 @@ class TestUpgradeOpenShift:
         backend._lifecycle._oc = MagicMock()
         backend._proxy = MagicMock()
         backend._pod_waiter = MagicMock()
-        backend._syncer = MagicMock()
+
         backend.ensure_image_via_build.return_value = "paude:new"
 
         from paude.cli.upgrade import _upgrade_openshift
@@ -584,7 +584,7 @@ class TestUpgradeOpenShift:
         backend._lifecycle._oc = MagicMock()
         backend._proxy = MagicMock()
         backend._pod_waiter = MagicMock()
-        backend._syncer = MagicMock()
+
         backend.ensure_image_via_build.return_value = "paude:new"
 
         from paude.cli.upgrade import _upgrade_openshift
@@ -617,7 +617,7 @@ class TestUpgradeOpenShift:
         backend._lifecycle._oc = MagicMock()
         backend._proxy = MagicMock()
         backend._pod_waiter = MagicMock()
-        backend._syncer = MagicMock()
+
         backend.ensure_image_via_build.return_value = "paude:new"
 
         from paude.cli.upgrade import _upgrade_openshift
@@ -634,41 +634,10 @@ class TestUpgradeOpenShift:
         backend._proxy.wait_for_ready.assert_not_called()
 
     @patch("paude.config.detector.detect_config", return_value=None)
-    def test_upgrade_openshift_resyncs_config(
+    def test_upgrade_openshift_statefulset_not_found(
         self,
-        mock_detect_config: MagicMock,
+        mock_detect_config: MagicMock,  # noqa: ARG002
     ) -> None:
-        """Agent config is re-synced into the pod after upgrade."""
-        from paude.backends.openshift import OpenShiftBackend
-
-        backend = MagicMock(spec=OpenShiftBackend)
-        backend.namespace = "test-ns"
-        backend._lookup = MagicMock()
-        backend._lookup.get_statefulset.return_value = self._make_statefulset()
-        backend._lookup.has_proxy_deployment.return_value = False
-        backend._lifecycle = MagicMock()
-        backend._lifecycle._oc = MagicMock()
-        backend._proxy = MagicMock()
-        backend._pod_waiter = MagicMock()
-        backend._syncer = MagicMock()
-        backend.ensure_image_via_build.return_value = "paude:new"
-
-        from paude.cli.upgrade import _upgrade_openshift
-
-        _upgrade_openshift(
-            "test-session",
-            backend,
-            rebuild=False,
-            openshift_context=None,
-            overrides=_NO_OVERRIDES,
-        )
-
-        backend._syncer.sync_full_config.assert_called_once()
-        call_kwargs = backend._syncer.sync_full_config.call_args
-        assert call_kwargs[0][0] == "paude-test-session-0"  # pod_name
-        assert call_kwargs[1]["agent_name"] == "claude"
-
-    def test_upgrade_openshift_statefulset_not_found(self) -> None:
         """Error when StatefulSet not found."""
         from paude.backends.openshift import OpenShiftBackend
 
@@ -709,7 +678,7 @@ class TestUpgradeOpenShift:
         backend._proxy = MagicMock()
         backend._proxy.get_deployment_domains.return_value = [".googleapis.com"]
         backend._pod_waiter = MagicMock()
-        backend._syncer = MagicMock()
+
         backend.ensure_image_via_build.return_value = "paude:new"
         backend.ensure_proxy_image_via_build.return_value = "paude-proxy:new"
 
@@ -759,7 +728,7 @@ class TestUpgradeOpenShift:
             "old-collector.example.com",
         ]
         backend._pod_waiter = MagicMock()
-        backend._syncer = MagicMock()
+
         backend.ensure_image_via_build.return_value = "paude:new"
         backend.ensure_proxy_image_via_build.return_value = "paude-proxy:new"
 
@@ -801,7 +770,7 @@ class TestUpgradeOpenShift:
         backend._lifecycle._oc = MagicMock()
         backend._proxy = MagicMock()
         backend._pod_waiter = MagicMock()
-        backend._syncer = MagicMock()
+
         backend.ensure_image_via_build.return_value = "paude:new"
 
         from paude.cli.upgrade import _upgrade_openshift
@@ -838,7 +807,7 @@ class TestUpgradeOpenShift:
         backend._lifecycle._oc = MagicMock()
         backend._proxy = MagicMock()
         backend._pod_waiter = MagicMock()
-        backend._syncer = MagicMock()
+
         backend.ensure_image_via_build.return_value = "paude:new"
         backend.ensure_proxy_image_via_build.return_value = "paude-proxy:new"
 
@@ -878,7 +847,7 @@ class TestUpgradeOpenShift:
         backend._lifecycle._oc = MagicMock()
         backend._proxy = MagicMock()
         backend._pod_waiter = MagicMock()
-        backend._syncer = MagicMock()
+
         backend.ensure_image_via_build.return_value = "paude:new"
         backend.ensure_proxy_image_via_build.return_value = "paude-proxy:rebuilt"
 
@@ -915,7 +884,7 @@ class TestUpgradeOpenShift:
         backend._lifecycle._oc = MagicMock()
         backend._proxy = MagicMock()
         backend._pod_waiter = MagicMock()
-        backend._syncer = MagicMock()
+
         backend.ensure_image_via_build.return_value = "paude:new"
 
         from paude.cli.upgrade import _upgrade_openshift
@@ -955,7 +924,7 @@ class TestUpgradeOpenShift:
         backend._lifecycle._oc = MagicMock()
         backend._proxy = MagicMock()
         backend._pod_waiter = MagicMock()
-        backend._syncer = MagicMock()
+
         backend.ensure_image_via_build.return_value = (
             "quay.io/bbrowning/paude-base-centos10:0.15.0rc4"
         )

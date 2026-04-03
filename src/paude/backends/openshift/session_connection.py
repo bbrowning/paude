@@ -15,12 +15,10 @@ from paude.backends.openshift.port_forward import (
     launch_port_forward,
 )
 from paude.backends.openshift.session_lookup import SessionLookup
-from paude.backends.openshift.sync import ConfigSyncer
 from paude.backends.port_forward_utils import check_running_pid, log_file
 from paude.backends.shared import (
     PAUDE_LABEL_AGENT,
     PAUDE_LABEL_PROVIDER,
-    PAUDE_LABEL_YOLO,
     resource_name,
 )
 
@@ -135,19 +133,14 @@ class SessionConnector:
         namespace: str,
         config: OpenShiftConfig,
         lookup: SessionLookup,
-        syncer: ConfigSyncer,
     ) -> None:
         self._oc = oc
         self._namespace = namespace
         self._config = config
         self._lookup = lookup
-        self._syncer = syncer
 
     def connect_session(self, name: str, github_token: str | None = None) -> int:
         """Attach to a running session.
-
-        On first connect: syncs full configuration.
-        On reconnect: only refreshes credentials (fast).
 
         Returns:
             Exit code from the attached session.
@@ -156,7 +149,6 @@ class SessionConnector:
         if pname is None:
             return 1
 
-        self._sync_for_connect(pname, name)
         pf_result, port_urls = self._start_port_forward(name, pname)
 
         stop_event = threading.Event()
@@ -253,65 +245,9 @@ class SessionConnector:
         value = labels.get(PAUDE_LABEL_PROVIDER)
         return str(value) if value is not None else None
 
-    @staticmethod
-    def _yolo_from_sts(sts: dict[str, object] | None) -> bool:
-        """Extract the YOLO flag from a StatefulSet's labels."""
-        if not sts:
-            return False
-        metadata: dict[str, object] = sts.get("metadata", {})  # type: ignore[assignment]
-        labels: dict[str, object] = metadata.get("labels", {})  # type: ignore[assignment]
-        return labels.get(PAUDE_LABEL_YOLO) == "1"
-
     def _get_session_agent_name(self, session_name: str) -> str:
         """Look up the agent name from StatefulSet labels."""
         return self._lookup.get_session_agent_name(session_name)
-
-    def _get_session_provider(self, session_name: str) -> str | None:
-        """Look up the provider name from StatefulSet labels."""
-        return self._lookup.get_session_provider(session_name)
-
-    def _sync_for_connect(self, pname: str, name: str) -> None:
-        """Sync config for a connect operation (no credentials synced)."""
-        sts = self._lookup.get_statefulset(name)
-        agent_name = self._agent_name_from_sts(sts)
-        provider = self._provider_from_sts(sts)
-        yolo = self._yolo_from_sts(sts)
-        agent_args = self._extract_env_from_sts(sts, "PAUDE_AGENT_ARGS")
-
-        if self._syncer.is_config_synced(pname):
-            self._syncer.sync_credentials(
-                pname,
-                verbose=False,
-                agent_name=agent_name,
-                provider=provider,
-                args=agent_args,
-                yolo=yolo,
-            )
-        else:
-            self._syncer.sync_full_config(
-                pname,
-                verbose=False,
-                agent_name=agent_name,
-                provider=provider,
-                args=agent_args,
-                yolo=yolo,
-            )
-
-    @staticmethod
-    def _extract_env_from_sts(sts: dict[str, object] | None, var_name: str) -> str:
-        """Extract an env var value from a StatefulSet spec."""
-        if not sts:
-            return ""
-        spec: dict[str, object] = sts.get("spec", {})  # type: ignore[assignment]
-        template: dict[str, object] = spec.get("template", {})  # type: ignore[assignment]
-        pod_spec: dict[str, object] = template.get("spec", {})  # type: ignore[assignment]
-        containers: list[dict[str, object]] = pod_spec.get("containers", [])  # type: ignore[assignment]
-        for container in containers:
-            env_list: list[dict[str, str]] = container.get("env", [])  # type: ignore[assignment]
-            for env in env_list:
-                if env.get("name") == var_name:
-                    return str(env.get("value", ""))
-        return ""
 
     def _read_openclaw_token(self, pname: str, ns: str) -> str | None:
         """Read the OpenClaw auth token from the pod's config file."""

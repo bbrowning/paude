@@ -35,28 +35,14 @@ class BaseConfigSyncer(ABC):
     def _sync_config_files(self, agent_name: str) -> None:
         """Sync config files common to all backends.
 
-        Copies cursor auth, gitconfig, and global gitignore.
+        Copies gitconfig to the container.
         Subclasses call this from their public sync methods, wrapping
         with backend-specific prepare and finalize steps.
         """
         home = Path.home()
-
-        if agent_name == "cursor":
-            self._sync_cursor_auth(home)
         self._sync_gitconfig(home)
-        self._sync_global_gitignore(home)
 
     # -- shared step implementations ---------------------------------------
-
-    def _sync_cursor_auth(self, home: Path) -> None:
-        """Sync Cursor auth.json from ~/.config/cursor/."""
-        auth_json = home / ".config" / "cursor" / "auth.json"
-        if auth_json.is_file():
-            self._copy_file(
-                str(auth_json),
-                f"{CONFIG_PATH}/cursor-auth.json",
-                context="copy cursor auth.json",
-            )
 
     def _sync_gitconfig(self, home: Path) -> None:
         """Sync ~/.gitconfig."""
@@ -66,14 +52,4 @@ class BaseConfigSyncer(ABC):
                 str(gitconfig),
                 f"{CONFIG_PATH}/gitconfig",
                 context="copy gitconfig",
-            )
-
-    def _sync_global_gitignore(self, home: Path) -> None:
-        """Sync ~/.config/git/ignore (global gitignore)."""
-        global_gitignore = home / ".config" / "git" / "ignore"
-        if global_gitignore.is_file():
-            self._copy_file(
-                str(global_gitignore),
-                f"{CONFIG_PATH}/gitignore-global",
-                context="copy global gitignore",
             )

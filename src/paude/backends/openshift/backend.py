@@ -18,7 +18,6 @@ from paude.backends.openshift.session_connection import SessionConnector
 from paude.backends.openshift.session_domains import SessionDomainManager
 from paude.backends.openshift.session_lifecycle import SessionLifecycleManager
 from paude.backends.openshift.session_lookup import SessionLookup
-from paude.backends.openshift.sync import ConfigSyncer
 
 
 class OpenShiftBackend:
@@ -41,7 +40,6 @@ class OpenShiftBackend:
 
         # Lazy-initialized collaborators
         self._lookup_instance: SessionLookup | None = None
-        self._syncer_instance: ConfigSyncer | None = None
         self._builder_instance: BuildOrchestrator | None = None
         self._proxy_instance: ProxyManager | None = None
         self._pod_waiter_instance: PodWaiter | None = None
@@ -69,12 +67,6 @@ class OpenShiftBackend:
         return self._lookup_instance
 
     @property
-    def _syncer(self) -> ConfigSyncer:
-        if self._syncer_instance is None:
-            self._syncer_instance = ConfigSyncer(self._oc, self.namespace)
-        return self._syncer_instance
-
-    @property
     def _builder(self) -> BuildOrchestrator:
         if self._builder_instance is None:
             self._builder_instance = BuildOrchestrator(
@@ -98,7 +90,7 @@ class OpenShiftBackend:
     def _connector(self) -> SessionConnector:
         if self._connector_instance is None:
             self._connector_instance = SessionConnector(
-                self._oc, self.namespace, self._config, self._lookup, self._syncer
+                self._oc, self.namespace, self._config, self._lookup
             )
         return self._connector_instance
 
@@ -110,7 +102,6 @@ class OpenShiftBackend:
                 self.namespace,
                 self._config,
                 self._lookup,
-                self._syncer,
                 self._builder,
                 self._proxy,
                 self._pod_waiter,
@@ -205,9 +196,7 @@ class OpenShiftBackend:
         self._lifecycle.stop_session(name)
 
     def start_agent_headless(self, name: str) -> None:
-        from paude.backends.shared import pod_name
-
-        self._lifecycle.start_agent_headless_in_pod(pod_name(name))
+        """No-op: agent starts automatically via entrypoint."""
 
     # -------------------------------------------------------------------------
     # Connection and exec
