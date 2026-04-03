@@ -58,6 +58,7 @@ class TestOpenShiftUpgrade:
                 yolo=True,
                 agent="gemini",
                 wait_for_ready=False,
+                env={"PAUDE_SKIP_AGENT_INSTALL": "1"},
             )
             openshift_backend.create_session(config)
 
