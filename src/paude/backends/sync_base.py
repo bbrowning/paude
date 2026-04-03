@@ -7,6 +7,7 @@ Subclasses provide transport-specific implementations (podman cp, oc cp/rsync).
 
 from __future__ import annotations
 
+import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -78,15 +79,22 @@ class BaseConfigSyncer(ABC):
         self._sync_gitconfig(home)
         self._sync_global_gitignore(home)
         if config_synced:
-            plugins_dir = home / agent.config.config_dir_name / "plugins"
+            host_config = self._host_config_dir(agent, home)
+            plugins_dir = host_config / "plugins"
             if plugins_dir.is_dir():
                 self._rewrite_plugin_paths(agent_path, agent, home)
 
     # -- shared step implementations ---------------------------------------
 
+    def _host_config_dir(self, agent: Agent, home: Path) -> Path:
+        """Resolve the host-side config directory, respecting env overrides."""
+        env_var = agent.config.config_dir_env_var
+        custom = os.environ.get(env_var) if env_var else None
+        return Path(custom) if custom else home / agent.config.config_dir_name
+
     def _sync_agent_config(self, agent_path: str, agent: Agent, home: Path) -> bool:
         """Sync agent config directory. Returns True on success."""
-        config_dir = home / agent.config.config_dir_name
+        config_dir = self._host_config_dir(agent, home)
         if not config_dir.is_dir():
             return True
 
