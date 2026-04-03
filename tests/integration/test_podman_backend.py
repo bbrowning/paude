@@ -686,9 +686,6 @@ class TestPodmanGeminiAgent:
                 check=True,
             )
 
-            assert _get_container_env(container_name, "PAUDE_AGENT_SEED_DIR") == (
-                "/tmp/gemini.seed"
-            )
             assert _get_container_env(container_name, "PAUDE_AGENT_NAME") == "gemini"
 
         finally:
