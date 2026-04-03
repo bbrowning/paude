@@ -96,6 +96,26 @@ __all__ = [
 ]
 
 
+def proxy_secret_prefix(session_name: str) -> str:
+    """Get the podman secret name prefix for a session's proxy credentials."""
+    return f"paude-proxy-cred-{session_name}-"
+
+
+def proxy_secret_name(session_name: str, env_var: str) -> str:
+    """Get the podman secret name for a proxy credential.
+
+    Args:
+        session_name: Session name.
+        env_var: Environment variable name (e.g. ``ANTHROPIC_API_KEY``).
+
+    Returns:
+        Secret name scoped to the session (e.g.
+        ``paude-proxy-cred-my-session-anthropic-api-key``).
+    """
+    sanitized = env_var.lower().replace("_", "-")
+    return f"{proxy_secret_prefix(session_name)}{sanitized}"
+
+
 def find_container_by_session_name(
     runner: ContainerRunner, name: str
 ) -> dict[str, Any] | None:

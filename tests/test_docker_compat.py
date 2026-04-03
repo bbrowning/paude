@@ -49,6 +49,18 @@ class TestDockerSecretsFallback:
         runner = ContainerRunner(engine)
         runner.remove_secret("test-secret")
 
+    def test_runner_skips_create_secret_from_value_for_docker(self) -> None:
+        """ContainerRunner.create_secret_from_value should be a no-op for Docker."""
+        engine = ContainerEngine("docker")
+        runner = ContainerRunner(engine)
+        runner.create_secret_from_value("test-secret", "secret-value")
+
+    def test_runner_list_secrets_by_prefix_empty_for_docker(self) -> None:
+        """ContainerRunner.list_secrets_by_prefix should return empty for Docker."""
+        engine = ContainerEngine("docker")
+        runner = ContainerRunner(engine)
+        assert runner.list_secrets_by_prefix("paude-") == []
+
 
 class TestDockerMultiNetwork:
     """Tests for Docker multi-network handling in ProxyRunner."""

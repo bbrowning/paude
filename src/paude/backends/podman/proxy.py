@@ -9,6 +9,7 @@ from paude.backends.podman.helpers import (
     find_container_by_session_name,
     network_name,
     proxy_container_name,
+    proxy_secret_name,
 )
 from paude.backends.shared import (
     CA_BUNDLE_PATH,
@@ -101,6 +102,37 @@ class PodmanProxyManager:
         self._network_manager = network_manager
         self._proxy_runner = ProxyRunner(runner)
 
+    def _create_credential_secrets(
+        self, session_name: str, credentials: dict[str, str] | None
+    ) -> list[str]:
+        """Create podman secrets for proxy credentials.
+
+        Each credential is stored as a separate podman secret scoped to
+        the session.  The returned list contains ``--secret`` flag values
+        using ``type=env`` so the secret is injected as an environment
+        variable inside the container without appearing in inspect output.
+
+        Returns an empty list when the engine does not support secrets
+        (Docker), causing the caller to fall back to ``-e`` env vars.
+        """
+        if not self._runner.engine.supports_secrets or not credentials:
+            return []
+
+        secret_refs: list[str] = []
+        for key, value in credentials.items():
+            sname = proxy_secret_name(session_name, key)
+            self._runner.create_secret_from_value(sname, value)
+            secret_refs.append(f"{sname},type=env,target={key}")
+        return secret_refs
+
+    def remove_credential_secrets(self, session_name: str) -> None:
+        """Remove all podman secrets for a session's proxy credentials."""
+        from paude.backends.podman.helpers import proxy_secret_prefix
+
+        names = self._runner.list_secrets_by_prefix(proxy_secret_prefix(session_name))
+        for sname in names:
+            self._runner.remove_secret(sname)
+
     def has_proxy(self, session_name: str) -> bool:
         """Check if a session has a proxy container."""
         return self._runner.container_exists(proxy_container_name(session_name))
@@ -166,6 +198,8 @@ class PodmanProxyManager:
         proxy_ip = self._get_proxy_ip(nname)
         agent_ip = self._derive_agent_ip(proxy_ip) if proxy_ip else None
         dns = _get_host_dns(self._runner.engine)
+        secret_refs = self._create_credential_secrets(session_name, credentials)
+
         print(f"Recreating missing proxy {pname}...", file=sys.stderr)
         self._proxy_runner.create_session_proxy(
             name=pname,
@@ -178,6 +212,7 @@ class PodmanProxyManager:
             ca_volume=ca_vol,
             credentials=credentials,
             allowed_clients=agent_ip,
+            secret_refs=secret_refs,
         )
         self._proxy_runner.start_session_proxy(pname)
 
@@ -318,6 +353,9 @@ class PodmanProxyManager:
 
         pname = proxy_container_name(session_name)
         dns = _get_host_dns(self._runner.engine)
+
+        secret_refs = self._create_credential_secrets(session_name, credentials)
+
         print(f"Creating proxy {pname}...", file=sys.stderr)
         try:
             self._proxy_runner.create_session_proxy(
@@ -331,6 +369,7 @@ class PodmanProxyManager:
                 ca_volume=ca_vol,
                 credentials=credentials,
                 allowed_clients=agent_ip,
+                secret_refs=secret_refs,
             )
         except Exception:
             volume_mgr.remove_volume(ca_vol, force=True)
@@ -466,6 +505,8 @@ class PodmanProxyManager:
         agent_ip = self._derive_agent_ip(proxy_ip) if proxy_ip else None
         dns = _get_host_dns(self._runner.engine)
 
+        secret_refs = self._create_credential_secrets(session_name, credentials)
+
         print(
             f"Updating proxy domains for session '{session_name}'...",
             file=sys.stderr,
@@ -481,6 +522,7 @@ class PodmanProxyManager:
             ca_volume=ca_vol,
             credentials=credentials,
             allowed_clients=agent_ip,
+            secret_refs=secret_refs,
         )
 
         # Verify CA cert survived the recreate (same named volume = same cert).

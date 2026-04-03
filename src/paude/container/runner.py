@@ -46,6 +46,22 @@ class ContainerRunner:
             self.remove_secret(name)
             self._engine.run("secret", "create", name, str(source_file))
 
+    def create_secret_from_value(self, name: str, value: str) -> None:
+        """Create a container secret from a string value (piped via stdin).
+
+        Removes any existing secret with the same name first for idempotency.
+        Skips silently when the engine does not support standalone secrets.
+
+        Args:
+            name: Secret name.
+            value: Secret value to store.
+        """
+        if not self._engine.supports_secrets:
+            return
+
+        self.remove_secret(name)
+        self._engine.run("secret", "create", name, "-", input=value)
+
     def remove_secret(self, name: str) -> None:
         """Remove a container secret, ignoring errors.
 
@@ -55,6 +71,30 @@ class ContainerRunner:
             return
 
         self._engine.run("secret", "rm", name, check=False)
+
+    def list_secrets_by_prefix(self, prefix: str) -> list[str]:
+        """List secret names matching a prefix.
+
+        Returns an empty list when the engine does not support standalone
+        secrets (e.g. Docker without Swarm).
+
+        Args:
+            prefix: Name prefix to filter by.
+
+        Returns:
+            List of matching secret names.
+        """
+        if not self._engine.supports_secrets:
+            return []
+
+        result = self._engine.run("secret", "ls", "--format", "{{.Name}}", check=False)
+        if result.returncode != 0:
+            return []
+        return [
+            name
+            for name in result.stdout.strip().splitlines()
+            if name.startswith(prefix)
+        ]
 
     def create_container(
         self,

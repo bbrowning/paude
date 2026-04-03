@@ -78,6 +78,15 @@ class ProxyRunner:
             args.extend(["-e", f"PAUDE_PROXY_ALLOWED_CLIENTS={allowed_clients}"])
         return args
 
+    @staticmethod
+    def _build_secret_args(secret_refs: list[str] | None = None) -> list[str]:
+        """Build ``--secret`` arguments for podman create."""
+        args: list[str] = []
+        if secret_refs:
+            for ref in secret_refs:
+                args.extend(["--secret", ref])
+        return args
+
     def _build_volume_args(self, ca_volume: str | None = None) -> list[str]:
         """Build volume mount arguments for proxy containers."""
         args: list[str] = []
@@ -97,16 +106,23 @@ class ProxyRunner:
         ca_volume: str | None = None,
         credentials: dict[str, str] | None = None,
         allowed_clients: str | None = None,
+        secret_refs: list[str] | None = None,
     ) -> str:
         """Create a proxy container for a session (does not start it).
+
+        When *secret_refs* is provided, credentials are injected via
+        ``--secret`` flags (podman only) instead of ``-e`` environment
+        variables, so they do not appear in ``podman inspect`` output.
 
         Returns:
             Container name.
         """
         net_args = self._build_multi_network(network, ip=ip)
+        env_credentials = None if secret_refs else credentials
         env_args = self._build_env_args(
-            dns, allowed_domains, otel_ports, credentials, allowed_clients
+            dns, allowed_domains, otel_ports, env_credentials, allowed_clients
         )
+        secret_args = self._build_secret_args(secret_refs)
         vol_args = self._build_volume_args(ca_volume)
 
         ip_args: list[str] = []
@@ -122,6 +138,7 @@ class ProxyRunner:
             *net_args,
             *ip_args,
             *env_args,
+            *secret_args,
             *vol_args,
             image,
             check=False,
@@ -155,6 +172,7 @@ class ProxyRunner:
         ca_volume: str | None = None,
         credentials: dict[str, str] | None = None,
         allowed_clients: str | None = None,
+        secret_refs: list[str] | None = None,
     ) -> str:
         """Recreate a session proxy with new configuration.
 
@@ -175,6 +193,7 @@ class ProxyRunner:
             ca_volume=ca_volume,
             credentials=credentials,
             allowed_clients=allowed_clients,
+            secret_refs=secret_refs,
         )
         self.start_session_proxy(name)
 
