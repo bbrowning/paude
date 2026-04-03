@@ -98,3 +98,4 @@ class TestBuildProxyEnvironment:
         assert env["SSL_CERT_FILE"] == "/tmp/paude-ca-bundle.pem"
         assert env["SSL_CERT_DIR"] == "/etc/pki/tls/certs"
         assert env["CURL_CA_BUNDLE"] == "/tmp/paude-ca-bundle.pem"
+        assert env["GIT_SSL_CAINFO"] == "/tmp/paude-ca-bundle.pem"
