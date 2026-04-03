@@ -2458,7 +2458,9 @@ class TestConfigMapBuilder:
         assert container["command"] == [
             "tini",
             "--",
-            "/usr/local/bin/entrypoint-session.sh",
+            "bash",
+            "-c",
+            "/usr/local/bin/entrypoint-session.sh && exec sleep infinity",
         ]
 
     def test_statefulset_with_config_map_sets_headless_env(self) -> None:

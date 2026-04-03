@@ -219,9 +219,10 @@ class StatefulSetBuilder:
     def with_config_map(self, name: str) -> StatefulSetBuilder:
         """Mount a ConfigMap at /credentials instead of emptyDir.
 
-        When set, the container command also switches from
-        ``sleep infinity`` to ``entrypoint-session.sh`` since all config
-        is available at mount time.
+        When set, the container command runs ``entrypoint-session.sh``
+        (with ``sleep infinity`` to keep the container alive after the
+        entrypoint exits in headless mode) since all config is available
+        at mount time.
 
         Args:
             name: Name of the ConfigMap to mount.
@@ -383,7 +384,13 @@ class StatefulSetBuilder:
             }
 
         if self._config_map_name:
-            command = ["tini", "--", "/usr/local/bin/entrypoint-session.sh"]
+            command = [
+                "tini",
+                "--",
+                "bash",
+                "-c",
+                "/usr/local/bin/entrypoint-session.sh && exec sleep infinity",
+            ]
             env_list.append({"name": "PAUDE_HEADLESS", "value": "1"})
         else:
             command = ["tini", "--", "sleep", "infinity"]
