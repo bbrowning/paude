@@ -493,7 +493,10 @@ class PodmanBackend:
         if self._volume_manager.volume_exists(ca_vol):
             self._volume_manager.remove_volume(ca_vol, force=True)
 
-        # Remove volume and secret
+        # Remove proxy credential secrets
+        self._proxy.remove_credential_secrets(name)
+
+        # Remove volume and legacy secret
         print(f"Removing volume {vname}...", file=sys.stderr)
         self._volume_manager.remove_volume_verified(vname)
         self._runner.remove_secret(GCP_ADC_SECRET_NAME)

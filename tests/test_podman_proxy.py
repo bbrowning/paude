@@ -20,6 +20,7 @@ def _make_mock_runner(engine_binary: str = "podman") -> MagicMock:
     mock_runner.engine.is_remote = False
     mock_runner.engine.is_podman = engine_binary != "docker"
     mock_runner.engine.supports_multi_network_create = engine_binary != "docker"
+    mock_runner.engine.supports_secrets = engine_binary != "docker"
     mock_runner.engine.default_bridge_network = (
         "podman" if engine_binary == "podman" else "bridge"
     )
@@ -508,12 +509,12 @@ class TestProxyCredentials:
     """Tests for credential passing to the proxy container."""
 
     @patch("paude.backends.podman.proxy.get_podman_machine_dns")
-    def test_create_proxy_passes_credentials_as_env_vars(
+    def test_create_proxy_passes_credentials_as_secrets_for_podman(
         self, mock_dns: MagicMock
     ) -> None:
-        """create_proxy passes credential env vars to the proxy container."""
+        """create_proxy uses --secret flags for podman (not -e)."""
         mock_dns.return_value = None
-        mock_runner = _make_mock_runner()
+        mock_runner = _make_mock_runner("podman")
         mock_runner.container_exists.return_value = False
         mock_network = MagicMock()
         mock_network.get_network_gateway.return_value = "10.89.0.1"
@@ -530,7 +531,65 @@ class TestProxyCredentials:
                 },
             )
 
-        # Check that credentials appear as -e flags in the create call
+        # Secrets should have been created
+        assert mock_runner.create_secret_from_value.call_count == 2
+        mock_runner.create_secret_from_value.assert_any_call(
+            "paude-proxy-cred-test-session-anthropic-api-key", "sk-real-key"
+        )
+        mock_runner.create_secret_from_value.assert_any_call(
+            "paude-proxy-cred-test-session-gh-token", "ghp_real"
+        )
+
+        # Check that --secret flags appear in the create call (not -e for creds)
+        engine_calls = mock_runner.engine.run.call_args_list
+        create_call = [c for c in engine_calls if c[0] and c[0][0] == "create"]
+        assert create_call
+        call_args = create_call[0][0]
+
+        secret_indices = [i for i, a in enumerate(call_args) if a == "--secret"]
+        secret_vals = [call_args[i + 1] for i in secret_indices]
+        assert (
+            "paude-proxy-cred-test-session-anthropic-api-key,"
+            "type=env,target=ANTHROPIC_API_KEY" in secret_vals
+        )
+        assert (
+            "paude-proxy-cred-test-session-gh-token,"
+            "type=env,target=GH_TOKEN" in secret_vals
+        )
+
+        # Credentials should NOT appear as -e flags
+        env_indices = [i for i, a in enumerate(call_args) if a == "-e"]
+        env_vals = [call_args[i + 1] for i in env_indices]
+        assert not any("ANTHROPIC_API_KEY" in v for v in env_vals)
+        assert not any("GH_TOKEN" in v for v in env_vals)
+
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    def test_create_proxy_passes_credentials_as_env_vars_for_docker(
+        self, mock_dns: MagicMock
+    ) -> None:
+        """create_proxy falls back to -e flags for Docker (no secret support)."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner("docker")
+        mock_runner.container_exists.return_value = False
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "172.17.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        with patch("paude.container.volume.VolumeManager"):
+            manager.create_proxy(
+                session_name="test-session",
+                proxy_image="proxy:latest",
+                allowed_domains=[".googleapis.com"],
+                credentials={
+                    "ANTHROPIC_API_KEY": "sk-real-key",
+                    "GH_TOKEN": "ghp_real",
+                },
+            )
+
+        # No secrets created for Docker
+        mock_runner.create_secret_from_value.assert_not_called()
+
+        # Credentials should appear as -e flags
         engine_calls = mock_runner.engine.run.call_args_list
         create_call = [c for c in engine_calls if c[0] and c[0][0] == "create"]
         assert create_call
@@ -561,10 +620,12 @@ class TestProxyCredentials:
         assert proxy_ip == "10.89.0.2"
 
     @patch("paude.backends.podman.proxy._get_host_dns")
-    def test_update_domains_passes_credentials(self, mock_dns: MagicMock) -> None:
-        """update_domains passes credentials to recreated proxy."""
+    def test_update_domains_passes_credentials_as_secrets(
+        self, mock_dns: MagicMock
+    ) -> None:
+        """update_domains passes credentials via --secret for podman."""
         mock_dns.return_value = None
-        mock_runner = _make_mock_runner()
+        mock_runner = _make_mock_runner("podman")
         mock_runner.container_exists.return_value = True
         mock_runner.get_container_image.return_value = "proxy:latest"
         # Disable CA verification (not the focus of this test)
@@ -579,14 +640,22 @@ class TestProxyCredentials:
             credentials={"ANTHROPIC_API_KEY": "sk-real-key"},
         )
 
-        # Check credentials in the recreate call
+        # Secrets should have been created
+        mock_runner.create_secret_from_value.assert_called_once_with(
+            "paude-proxy-cred-test-session-anthropic-api-key", "sk-real-key"
+        )
+
+        # Check --secret in the recreate/create call
         engine_calls = mock_runner.engine.run.call_args_list
         create_call = [c for c in engine_calls if c[0] and c[0][0] == "create"]
         assert create_call
         call_args = create_call[0][0]
-        env_indices = [i for i, a in enumerate(call_args) if a == "-e"]
-        env_vals = [call_args[i + 1] for i in env_indices]
-        assert "ANTHROPIC_API_KEY=sk-real-key" in env_vals
+        secret_indices = [i for i, a in enumerate(call_args) if a == "--secret"]
+        secret_vals = [call_args[i + 1] for i in secret_indices]
+        assert (
+            "paude-proxy-cred-test-session-anthropic-api-key,"
+            "type=env,target=ANTHROPIC_API_KEY" in secret_vals
+        )
 
 
 class TestUpdateDomainsCaResilience:
