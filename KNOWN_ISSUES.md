@@ -6,13 +6,6 @@ Tracking known issues that need to be fixed. Each bug includes enough context fo
 
 Technical debt identified during codebase analysis. Address these before adding significant new functionality to affected files.
 
-### REFACTOR-002: cli.py monolith
-
-**Status**: Resolved
-**Priority**: High (every new command adds complexity)
-**Discovered**: 2026-01-29 during code quality analysis
-**Resolved**: 2026-03-09 — Split 2,246-line `cli.py` into `cli/` package with 8 modules (app.py, help.py, helpers.py, create.py, commands.py, remote.py, domains.py, status.py). Backward compatibility preserved via `__init__.py` re-exports. Dead `_encode_path`/`_decode_path` wrappers removed from `podman.py`.
-
 ### REFACTOR-003: Oversized files, methods, and classes
 
 **Status**: Open
@@ -68,6 +61,81 @@ The container has everything needed to refresh tokens (oauth_creds.json with a v
 
 **Workaround**: Kill the existing Gemini process and restart it inside the tmux session. The new process will pick up the refresh token and authenticate successfully.
 
+## Architecture: GitOps Migration
+
+Tracking the migration from imperative orchestration to declarative, GitOps-compatible session creation.
+
+### ARCH-001: Imperative OpenShift session orchestration blocks GitOps workflows
+
+**Status**: Open
+**Priority**: Medium
+**Discovered**: 2026-04-03 during architecture review
+
+`paude create` orchestrates OpenShift sessions imperatively: Python code builds K8s resource dicts, pipes them as JSON to `oc apply -f -`, waits for pods, then runs `oc exec`/`oc cp`/`oc rsync` to inject config into running containers. This prevents GitOps workflows where manifests are checked into git and applied by ArgoCD or similar tools.
+
+**Current imperative flow creates ~10 K8s resources per session:**
+
+Declarative resources (already applied as JSON via `oc apply`):
+- 2 Secrets (CA cert, proxy credentials) — `backends/openshift/certs.py`
+- 1 headless Service (StatefulSet DNS) — `backends/openshift/session_lifecycle.py`
+- 1 Deployment (proxy sidecar) — `backends/openshift/proxy.py`
+- 1 Service (proxy ClusterIP) — `backends/openshift/proxy.py`
+- 3 NetworkPolicies (agent egress, proxy egress, proxy ingress) — `backends/openshift/proxy.py`
+- 1 StatefulSet with PVC template (agent pod, runs `tini -- sleep infinity`) — `backends/openshift/resources.py`
+
+Post-apply imperative steps (the blocking problem):
+- Poll `oc get pod` for readiness
+- `oc exec mkdir -p /credentials`
+- `oc cp` stub GCP ADC, gitconfig, gitignore, sandbox config script
+- `oc rsync` agent config directory (~/.claude/)
+- `oc exec` jq to rewrite plugin install paths
+- `oc exec touch /credentials/.ready` (signals entrypoint to proceed)
+- `oc exec entrypoint-session.sh` (starts agent headless)
+
+Build resources (shared, coupled to create):
+- BuildConfig + ImageStream — `backends/openshift/build.py` (binary build from local dir)
+
+**Six gaps block GitOps adoption:**
+
+**Gap 1 — No manifest export layer.** Each resource builder calls `oc apply -f -` inline. There is no way to collect all resource specs and write them to disk as YAML. Fix: add a `ManifestCollector` that accumulates resource dicts and can either apply them or write to a directory. Resource builders return dicts instead of applying directly.
+
+**Gap 2 — Config injected into running pods via `oc cp`/`oc exec`.** `sync.py:ConfigSyncer.sync_full_config()` pushes files into a `/credentials/` tmpfs mount after the pod starts. The entrypoint polls `/credentials/.ready` for 300 seconds. Fix: prepare the config directory locally before container start, then mount it as a volume (ConfigMap in K8s, bind mount in Podman). The entrypoint runs directly with config already present — same code path for both backends, no conditional branching needed.
+
+**Gap 3 — Secrets created inline during `paude create`.** CA cert is generated via openssl and credentials are gathered from the host environment, both stored as K8s Secrets during `paude create`. Fix: users pre-create secrets out-of-band (`oc create secret`, sealed-secrets, ESO, vault) and pass names via `--ca-secret` / `--creds-secret` flags. CA generation becomes a helper command (`paude setup-proxy-ca`). Paude manifests just reference secret names, never contain secret data.
+
+**Gap 4 — Image builds coupled to session creation.** `build.py` creates BuildConfig/ImageStream and runs `oc start-build --from-dir=...` which uploads local files. Fix: separate `paude build` from `paude create`. Emitted YAML references a pre-built image by tag or digest.
+
+**Gap 5 — Container starts with `sleep infinity`, agent launched via `oc exec`.** The StatefulSet command is `tini -- sleep infinity` because the entrypoint can't run until config is pushed. Fix: once config is mounted as volumes (Gap 2), the StatefulSet command becomes `entrypoint-session.sh` directly. No `sleep infinity` + `oc exec` dance.
+
+**Gap 6 — Interactive operations (`oc exec`, `oc port-forward`, connect).** No fix needed. These are operational commands that work against running resources. They are orthogonal to GitOps — declarative manages the desired state, interactive commands are for human access.
+
+**Phased migration plan:**
+
+Phase 1 — Manifest collection layer (low effort, high value):
+- Add `ManifestCollector` class to accumulate resource dicts
+- Resource builders return dicts instead of calling `oc apply` directly
+- Add `--emit-yaml <dir>` flag to `paude create` that writes YAML files
+- Files: `session_lifecycle.py`, `proxy.py`, `certs.py`, new `manifest.py`
+
+Phase 2 — Decouple image build (low effort, medium value):
+- Expose `paude build` as a standalone command
+- `--emit-yaml` requires `--image` (no builds during YAML generation)
+- Exclude BuildConfig/ImageStream from session manifests
+
+Phase 3 — Externalize secrets (low-medium effort, high value):
+- Add `--ca-secret` / `--creds-secret` flags to reference pre-created secrets
+- Add `paude setup-proxy-ca` helper to create CA cert secret out-of-band
+- Paude manifests reference secret names, never generate secret data inline
+- Existing inline secret creation remains as default for backward compatibility
+
+Phase 4 — Config as mounted volumes (high effort, high value):
+- Prepare config directory locally before container start
+- Package as ConfigMap (K8s) or bind mount (Podman) — same entrypoint for both
+- Move plugin path rewriting from jq/oc-exec to pure Python at prep time
+- Remove `sleep infinity` + `oc exec` pattern; entrypoint runs directly as container command
+- Remove `/credentials/.ready` polling from entrypoint (config always present at start)
+- Files: `sync.py`, `resources.py`, `entrypoint-session.sh`, Podman backend
+
 ## Security Hardening Backlog
 
 Deferred items from the network egress security audit (2026-03-06).
@@ -80,20 +148,6 @@ Deferred items from the network egress security audit (2026-03-06).
 
 GitHub's GraphQL API uses POST for ALL operations, including reads (`gh pr list`, `gh issue list`). Blocking POST/PUT at the proxy level would break read-only `gh` CLI usage. The correct mitigation is using a read-only Personal Access Token (PAT) rather than proxy-level HTTP method filtering.
 
-### SEC-002: K8s service account token auto-mounted
-
-**Status**: Resolved
-**Severity**: Medium
-**Discovered**: 2026-03-06 during network egress security audit
-**Resolved**: 2026-03-31 — Added `automountServiceAccountToken: false` to both StatefulSet (main container) and Deployment (proxy container) pod specs. Neither container needs Kubernetes API access.
-
-### SEC-003: K8s service environment variables leak cluster info
-
-**Status**: Resolved
-**Severity**: Low
-**Discovered**: 2026-03-06 during network egress security audit
-**Resolved**: 2026-03-31 — Added `enableServiceLinks: false` to both StatefulSet (main container) and Deployment (proxy container) pod specs.
-
 ### SEC-004: DNS tunneling via cluster DNS
 
 **Status**: Open (out of scope)
@@ -102,9 +156,3 @@ GitHub's GraphQL API uses POST for ALL operations, including reads (`gh pr list`
 
 Cluster DNS could theoretically be used for DNS tunneling to exfiltrate data. This is a cluster-level concern and out of paude's scope — requires cluster-level DNS policies or external DNS filtering.
 
-### SEC-005: `no_proxy` not set for internal services
-
-**Status**: Resolved
-**Severity**: Low
-**Discovered**: 2026-03-06 during network egress security audit
-**Resolved**: 2026-03-11 — Added `NO_PROXY=localhost,127.0.0.1` and `no_proxy=localhost,127.0.0.1` to both Podman and OpenShift proxy environments. This prevents internal localhost requests (e.g., Cursor agent's `GET http://localhost/getRepositoryInfo`) from being routed through the proxy and blocked.
