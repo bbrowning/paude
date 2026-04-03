@@ -320,6 +320,11 @@ class PodmanBackend:
         mounts = list(config.mounts)
         mounts.extend(["-v", f"{vname}:/pvc"])
 
+        # Bind-mount host workspace directly for local sessions (avoids
+        # the git-remote sync step, which is slow for large repos).
+        if not self._engine.is_remote:
+            mounts.extend(["-v", f"{config.workspace}:{CONTAINER_WORKSPACE}:z"])
+
         proxy_name_for_env = (
             (proxy_ip or proxy_container_name(session_name))
             if config.proxy_image
