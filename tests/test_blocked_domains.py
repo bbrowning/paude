@@ -24,8 +24,8 @@ class TestPodmanGetProxyBlockedLog:
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_returns_none_when_no_proxy(self, mock_runner_class: MagicMock) -> None:
         mock_runner = MagicMock()
-        mock_runner.container_exists.side_effect = (
-            lambda name: name == "paude-my-session"
+        mock_runner.container_exists.side_effect = lambda name: (
+            name == "paude-my-session"
         )
         mock_runner_class.return_value = mock_runner
 
@@ -103,7 +103,7 @@ class TestPodmanGetProxyBlockedLog:
         assert result == log_content
         mock_runner.exec_in_container.assert_called_once_with(
             "paude-proxy-my-session",
-            ["cat", "/tmp/squid-blocked.log"],
+            ["cat", "/tmp/paude-proxy-blocked.log"],
             check=False,
         )
 

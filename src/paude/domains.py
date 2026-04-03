@@ -109,12 +109,12 @@ DEFAULT_ALIASES = BASE_ALIASES + ["claude"]
 def expand_domains(
     domains: list[str],
     extra_aliases: list[str] | None = None,
-) -> list[str] | None:
+) -> list[str]:
     """Expand domain aliases to a list of actual domains.
 
     Args:
         domains: List of domains or aliases. Special values:
-            - "all": Returns None (unrestricted network)
+            - "all": Returns [] (unrestricted network, proxy allows all)
             - "default": Expands to BASE_ALIASES + extra_aliases
               (falls back to DEFAULT_ALIASES if extra_aliases is None)
             - Alias names (e.g., "claude", "vertexai"): Expand to domain lists
@@ -124,12 +124,12 @@ def expand_domains(
             for backward compatibility.
 
     Returns:
-        List of expanded domains, or None if "all" is specified (unrestricted).
-        Duplicates are removed while preserving order.
+        List of expanded domains. Empty list means unrestricted (proxy
+        allows all domains). Duplicates are removed while preserving order.
     """
-    # Check for "all" - means unrestricted network
+    # Check for "all" - means unrestricted network (proxy allows everything)
     if "all" in domains:
-        return None
+        return []
 
     expanded: list[str] = []
     seen: set[str] = set()
@@ -160,91 +160,32 @@ def expand_domains(
                 expanded.append(domain)
                 seen.add(domain)
 
-    return remove_wildcard_covered(expanded)
+    return expanded
 
 
-def remove_wildcard_covered(domains: list[str]) -> list[str]:
-    """Remove domains that are already covered by a wildcard in the list.
-
-    Squid treats .example.com as matching both example.com and *.example.com,
-    so having both .example.com and foo.example.com is a fatal config error.
-
-    Args:
-        domains: List of domains (may include wildcards and regex entries).
-
-    Returns:
-        Filtered list with redundant domains removed, preserving order.
-    """
-    wildcards = [d for d in domains if d.startswith(".")]
-    if not wildcards:
-        return domains
-    return [
-        d
-        for d in domains
-        if d.startswith(".")
-        or d.startswith("~")
-        or not any(d == w[1:] or d.endswith(w) for w in wildcards)
-    ]
-
-
-def format_domains_as_squid_acls(domains: list[str]) -> str:
-    """Format deduplicated domains as squid ACL lines.
-
-    Separates regex domains (~prefix) from normal domains to avoid
-    mixing dstdomain and dstdom_regex under the same ACL name
-    (squid 5.x crashes when they share a name).
-
-    Args:
-        domains: Deduplicated domain list (output of expand_domains).
-
-    Returns:
-        Newline-separated ACL block ready for squid.conf injection.
-    """
-    normal_lines: list[str] = []
-    regex_lines: list[str] = []
-
-    for domain in domains:
-        if domain.startswith("~"):
-            regex_lines.append(f"acl allowed_domains_regex dstdom_regex {domain[1:]}")
-        else:
-            normal_lines.append(f"acl allowed_domains dstdomain {domain}")
-
-    # squid errors on undefined ACLs referenced in http_access rules;
-    # both allowed_domains and allowed_domains_regex must always be defined
-    if not normal_lines:
-        normal_lines.append("acl allowed_domains dstdomain .invalid")
-    if not regex_lines:
-        regex_lines.append("acl allowed_domains_regex dstdom_regex ^$")
-
-    return "\\n".join(normal_lines + regex_lines)
-
-
-def is_unrestricted(domains: list[str] | None) -> bool:
+def is_unrestricted(domains: list[str]) -> bool:
     """Check if the domain configuration allows unrestricted network access.
 
     Args:
         domains: Expanded domains list (output of expand_domains).
 
     Returns:
-        True if network is unrestricted (domains is None).
+        True if network is unrestricted (empty list).
     """
-    return domains is None
+    return len(domains) == 0
 
 
-def format_domains_for_display(domains: list[str] | None) -> str:
+def format_domains_for_display(domains: list[str]) -> str:
     """Format expanded domains for display.
 
     Args:
-        domains: List of expanded domains or None (unrestricted).
+        domains: List of expanded domains. Empty list means unrestricted.
 
     Returns:
         Human-readable string describing the network access.
     """
-    if domains is None:
-        return "unrestricted (all domains allowed)"
-
     if not domains:
-        return "none (no network access)"
+        return "unrestricted (all domains allowed)"
 
     # Group by alias if possible
     aliases_used = []

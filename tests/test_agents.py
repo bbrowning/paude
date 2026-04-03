@@ -113,7 +113,10 @@ class TestClaudeAgentConfig:
 
     def test_env_vars(self) -> None:
         cfg = ClaudeAgent().config
-        assert cfg.env_vars == {"CLAUDE_CODE_USE_VERTEX": "1"}
+        assert cfg.env_vars == {
+            "CLAUDE_CODE_USE_VERTEX": "1",
+            "NODE_USE_ENV_PROXY": "1",
+        }
 
     def test_config_dir_name(self) -> None:
         assert ClaudeAgent().config.config_dir_name == ".claude"
@@ -237,7 +240,10 @@ class TestClaudeAgentBuildEnvironment:
     def test_includes_static_env_vars_when_no_host_vars_set(self) -> None:
         with patch.dict("os.environ", {}, clear=True):
             env = ClaudeAgent().build_environment()
-            assert env == {"CLAUDE_CODE_USE_VERTEX": "1"}
+            assert env == {
+                "CLAUDE_CODE_USE_VERTEX": "1",
+                "NODE_USE_ENV_PROXY": "1",
+            }
 
     def test_passes_through_vertex_vars(self) -> None:
         with patch.dict(
@@ -249,6 +255,7 @@ class TestClaudeAgentBuildEnvironment:
             assert env == {
                 "ANTHROPIC_VERTEX_PROJECT_ID": "proj-1",
                 "CLAUDE_CODE_USE_VERTEX": "1",
+                "NODE_USE_ENV_PROXY": "1",
             }
 
     def test_passes_through_prefix_vars(self) -> None:
@@ -261,6 +268,7 @@ class TestClaudeAgentBuildEnvironment:
             assert env == {
                 "CLOUDSDK_AUTH_TOKEN": "abc",
                 "CLAUDE_CODE_USE_VERTEX": "1",
+                "NODE_USE_ENV_PROXY": "1",
             }
 
 

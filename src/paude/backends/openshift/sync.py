@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 import tempfile
 from pathlib import Path
@@ -224,26 +223,22 @@ class ConfigSyncer(BaseConfigSyncer):
         self,
         pod_name: str,
         verbose: bool = False,
-        github_token: str | None = None,
         agent_name: str = "claude",
         provider: str | None = None,
-        secret_env: dict[str, str] | None = None,
         workspace: str = "",
         args: str = "",
         yolo: bool = False,
     ) -> None:
         """Sync all configuration to pod /credentials/ directory.
 
-        Full sync including gcloud credentials, agent config, gitconfig,
-        global gitignore, optional GitHub token, and secret env vars.
+        Full sync including stub gcloud credentials, agent config, gitconfig,
+        global gitignore, and sandbox config. No real credentials are synced —
+        all authentication is handled by the proxy sidecar.
 
         Args:
             pod_name: Name of the pod to sync to.
             verbose: Whether to show sync progress.
-            github_token: Optional GitHub token to inject into pod tmpfs.
-                Falls back to PAUDE_GITHUB_TOKEN env var if not provided.
             agent_name: Agent name for config directory naming.
-            secret_env: Secret environment variables to sync to tmpfs.
             workspace: Container workspace path for sandbox config.
             args: Agent args string for sandbox config.
             yolo: Whether YOLO mode is enabled.
@@ -253,10 +248,8 @@ class ConfigSyncer(BaseConfigSyncer):
         print("Syncing configuration to pod...", file=sys.stderr)
 
         self._prepare_config_directory(agent_name=agent_name)
-        self._sync_gcloud_credentials()
+        self._sync_stub_gcloud_credentials()
         self._sync_config_files(agent_name)
-        self._sync_github_token(github_token)
-        self._sync_secret_env_vars(secret_env or {})
         self._sync_sandbox_config(
             agent_name, workspace, args, provider=provider, yolo=yolo
         )
@@ -268,59 +261,33 @@ class ConfigSyncer(BaseConfigSyncer):
         self,
         pod_name: str,
         verbose: bool = False,
-        github_token: str | None = None,
-        secret_env: dict[str, str] | None = None,
         agent_name: str = "claude",
         provider: str | None = None,
         workspace: str = "",
         args: str = "",
         yolo: bool = False,
     ) -> None:
-        """Refresh gcloud credentials on the pod (fast, every connect).
+        """Refresh stub credentials and config on the pod (fast, every connect).
 
-        Only syncs gcloud credential files. Used on reconnects when full
-        config is already present. Also syncs GitHub token and secret env
-        vars if available.
+        Syncs stub gcloud credentials and sandbox config. No real credentials
+        are synced — all authentication is handled by the proxy sidecar.
 
         Args:
             pod_name: Name of the pod to sync to.
             verbose: Whether to show sync progress.
-            github_token: Optional GitHub token to inject into pod tmpfs.
-                Falls back to PAUDE_GITHUB_TOKEN env var if not provided.
-            secret_env: Secret environment variables to sync to tmpfs.
             agent_name: Agent name (used for agent-specific credential sync).
             workspace: Container workspace path for sandbox config.
             args: Agent args string for sandbox config.
             yolo: Whether YOLO mode is enabled.
         """
         self._target = pod_name
-        home = Path.home()
 
         print("Refreshing credentials...", file=sys.stderr)
 
-        gcloud_dir = home / ".config" / "gcloud"
-        gcloud_files = [
-            GCP_ADC_FILENAME,
-            "credentials.db",
-            "access_tokens.db",
-        ]
-        for filename in gcloud_files:
-            filepath = gcloud_dir / filename
-            if filepath.exists():
-                self._copy_file(
-                    str(filepath),
-                    f"{CONFIG_PATH}/gcloud/{filename}",
-                    context=f"refresh gcloud {filename}",
-                )
-
-        self._sync_github_token(github_token)
-        self._sync_secret_env_vars(secret_env or {})
+        self._sync_stub_gcloud_credentials()
         self._sync_sandbox_config(
             agent_name, workspace, args, provider=provider, yolo=yolo
         )
-
-        if agent_name == "cursor":
-            self._sync_cursor_auth(home)
 
         self._oc.run(
             "exec",
@@ -335,7 +302,7 @@ class ConfigSyncer(BaseConfigSyncer):
         )
 
         if verbose:
-            print("  Refreshed gcloud credentials", file=sys.stderr)
+            print("  Refreshed stub gcloud credentials", file=sys.stderr)
         print("Credentials refreshed.", file=sys.stderr)
 
     # -- OpenShift-specific internal methods --------------------------------
@@ -391,35 +358,6 @@ class ConfigSyncer(BaseConfigSyncer):
                 file=sys.stderr,
             )
 
-    def _sync_secret_env_vars(self, secret_env: dict[str, str]) -> None:
-        """Sync secret environment variables to /credentials/env/ on the pod."""
-        if not secret_env:
-            return
-
-        self._oc.run(
-            "exec",
-            self._target,
-            "-n",
-            self._namespace,
-            "--",
-            "mkdir",
-            "-p",
-            f"{CONFIG_PATH}/env",
-            check=False,
-            timeout=OC_EXEC_TIMEOUT,
-        )
-
-        for var_name, value in secret_env.items():
-            self._cp_content_to_pod(value, f"{CONFIG_PATH}/env/{var_name}")
-
-    def _sync_github_token(self, github_token: str | None) -> None:
-        """Sync GitHub token to the pod's credentials directory."""
-        token = github_token or os.environ.get("PAUDE_GITHUB_TOKEN")
-        if not token:
-            return
-
-        self._cp_content_to_pod(token, f"{CONFIG_PATH}/github_token")
-
     def _prepare_config_directory(self, agent_name: str = "claude") -> None:
         """Prepare the config directory on the pod."""
         prep_result = self._oc.run(
@@ -440,23 +378,25 @@ class ConfigSyncer(BaseConfigSyncer):
                 f"Failed to prepare config directory: {prep_result.stderr}"
             )
 
-    def _sync_gcloud_credentials(self) -> None:
-        """Sync gcloud credentials to the pod."""
-        home = Path.home()
-        gcloud_dir = home / ".config" / "gcloud"
-        gcloud_files = [
-            GCP_ADC_FILENAME,
-            "credentials.db",
-            "access_tokens.db",
-        ]
-        for filename in gcloud_files:
-            filepath = gcloud_dir / filename
-            if filepath.exists():
-                self._copy_file(
-                    str(filepath),
-                    f"{CONFIG_PATH}/gcloud/{filename}",
-                    context=f"sync gcloud {filename}",
-                )
+    def _sync_stub_gcloud_credentials(self) -> None:
+        """Sync stub GCP ADC to the pod (proxy handles real auth)."""
+        from paude.backends.shared import STUB_ADC_JSON
+
+        self._oc.run(
+            "exec",
+            self._target,
+            "-n",
+            self._namespace,
+            "--",
+            "mkdir",
+            "-p",
+            f"{CONFIG_PATH}/gcloud",
+            check=False,
+            timeout=OC_EXEC_TIMEOUT,
+        )
+        self._cp_content_to_pod(
+            STUB_ADC_JSON, f"{CONFIG_PATH}/gcloud/{GCP_ADC_FILENAME}"
+        )
 
     def _finalize_sync(self) -> None:
         """Finalize sync by setting permissions and creating .ready marker."""

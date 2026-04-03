@@ -8,7 +8,10 @@ import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from paude.agents.base import Agent
 
 from paude.backends.base import Session, SessionConfig
 from paude.backends.openshift.build import BuildOrchestrator
@@ -24,6 +27,8 @@ from paude.backends.openshift.resources import (
 from paude.backends.openshift.session_lookup import SessionLookup
 from paude.backends.openshift.sync import ConfigSyncer
 from paude.backends.shared import (
+    PAUDE_LABEL_AGENT,
+    PAUDE_LABEL_PROVIDER,
     build_session_env,
     pod_name,
     proxy_resource_name,
@@ -75,7 +80,9 @@ class SessionLifecycleManager:
     def create_session(self, config: SessionConfig) -> Session:
         """Create a new persistent session.
 
-        Creates StatefulSet + credentials + NetworkPolicy with replicas=0.
+        Creates Secrets, proxy Deployment, NetworkPolicies, and StatefulSet
+        (replicas=1).  CA cert and credentials are stored as K8s Secrets
+        and mounted into the pods declaratively — no ``oc exec`` orchestration.
         """
         self._oc.check_connection()
         self._oc.verify_namespace(self._namespace)
@@ -87,9 +94,14 @@ class SessionLifecycleManager:
 
         print(f"Creating session '{session_name}'...", file=sys.stderr)
 
-        self._setup_proxy(config, session_name)
+        from paude.agents import get_agent as _get_agent
+
+        agent = _get_agent(config.agent, provider=config.provider)
+        ca_secret = self._setup_proxy(config, session_name, agent)
         session_env, secret_env = self._build_session_env(config, session_name)
-        self._apply_and_wait(session_name, config, session_env, secret_env)
+        self._apply_and_wait(
+            session_name, config, session_env, secret_env, ca_secret=ca_secret
+        )
 
         session_status = "running" if config.wait_for_ready else "pending"
         print(f"Session '{session_name}' created.", file=sys.stderr)
@@ -105,22 +117,50 @@ class SessionLifecycleManager:
             agent=config.agent,
         )
 
-    def _setup_proxy(self, config: SessionConfig, session_name: str) -> None:
-        """Set up proxy deployment and network policies."""
-        if config.allowed_domains is not None:
-            proxy_image = self._resolve_proxy_image(config)
+    def _setup_proxy(
+        self, config: SessionConfig, session_name: str, agent: Agent
+    ) -> str:
+        """Set up proxy Secrets, Deployment, Service, and NetworkPolicies.
 
-            self._proxy.create_deployment(
-                session_name,
-                proxy_image,
-                config.allowed_domains,
-                otel_ports=config.otel_ports,
-            )
-            self._proxy.create_service(session_name)
-            self._proxy.ensure_proxy_network_policy(session_name)
-            self._proxy.ensure_network_policy(session_name)
-        else:
-            self._proxy.ensure_network_policy_permissive(session_name)
+        Returns:
+            The CA Secret name.
+        """
+        proxy_image = self._resolve_proxy_image(config)
+
+        from paude.backends.openshift.certs import (
+            create_ca_secret,
+            create_credentials_secret,
+            generate_ca_cert,
+        )
+        from paude.backends.shared import (
+            gather_proxy_credentials,
+            local_gcp_adc_path,
+        )
+
+        # Generate CA cert and store as Secret
+        cert_pem, key_pem = generate_ca_cert()
+        ca_secret = create_ca_secret(
+            self._oc, self._namespace, session_name, cert_pem, key_pem
+        )
+
+        # Store credentials as Secret (only proxy sees these)
+        proxy_creds = gather_proxy_credentials(
+            agent.config, gcp_adc_path=local_gcp_adc_path()
+        )
+        create_credentials_secret(self._oc, self._namespace, session_name, proxy_creds)
+
+        self._create_agent_headless_service(session_name)
+        self._proxy.create_deployment(
+            session_name,
+            proxy_image,
+            config.allowed_domains,
+            otel_ports=config.otel_ports,
+        )
+        self._proxy.create_service(session_name)
+        self._proxy.ensure_proxy_network_policy(session_name)
+        self._proxy.ensure_proxy_ingress_policy(session_name)
+        self._proxy.ensure_network_policy(session_name)
+        return ca_secret
 
     def _resolve_proxy_image(self, config: SessionConfig) -> str:
         """Resolve the proxy image from config."""
@@ -128,6 +168,48 @@ class SessionLifecycleManager:
             return config.proxy_image
 
         return resolve_proxy_image(config.image)
+
+    def _create_agent_headless_service(self, session_name: str) -> None:
+        """Create a headless Service for the agent StatefulSet.
+
+        A headless Service (clusterIP: None) is required for StatefulSet pod
+        DNS to work.  The agent pod gets the DNS name
+        ``paude-{session}-0.paude-{session}.{ns}.svc.cluster.local``,
+        which the proxy uses for ``PAUDE_PROXY_ALLOWED_CLIENTS`` filtering.
+        """
+        svc_name = resource_name(session_name)
+
+        print(
+            f"Creating headless Service/{svc_name} in namespace {self._namespace}...",
+            file=sys.stderr,
+        )
+
+        service_spec: dict[str, Any] = {
+            "apiVersion": "v1",
+            "kind": "Service",
+            "metadata": {
+                "name": svc_name,
+                "namespace": self._namespace,
+                "labels": {
+                    "app": "paude",
+                    "paude.io/session-name": session_name,
+                },
+            },
+            "spec": {
+                "clusterIP": "None",
+                "selector": {
+                    "app": "paude",
+                    "paude.io/session-name": session_name,
+                },
+            },
+        }
+
+        self._oc.run(
+            "apply",
+            "-f",
+            "-",
+            input_data=json.dumps(service_spec),
+        )
 
     def _build_session_env(
         self, config: SessionConfig, session_name: str
@@ -138,22 +220,16 @@ class SessionLifecycleManager:
             Tuple of (session_env, secret_env).
         """
         from paude.agents import get_agent
-        from paude.agents.base import build_secret_environment_from_config
+        from paude.backends.shared import PROXY_MANAGED_CREDENTIAL
 
         agent = get_agent(config.agent, provider=config.provider)
-        secret_env = build_secret_environment_from_config(agent.config)
-        proxy_name = (
-            proxy_resource_name(session_name)
-            if config.allowed_domains is not None
-            else None
+        # Agent gets dummy credential values; proxy handles real auth
+        secret_env = dict.fromkeys(
+            agent.config.secret_env_vars, PROXY_MANAGED_CREDENTIAL
         )
+        proxy_name = proxy_resource_name(session_name)
         session_env, _agent_args = build_session_env(
             config, agent, proxy_name=proxy_name
-        )
-
-        session_env["PAUDE_CREDENTIAL_TIMEOUT"] = str(config.credential_timeout)
-        session_env["PAUDE_CREDENTIAL_WATCHDOG"] = (
-            "1" if config.credential_timeout > 0 else "0"
         )
 
         return session_env, secret_env
@@ -164,6 +240,8 @@ class SessionLifecycleManager:
         config: SessionConfig,
         session_env: dict[str, str],
         secret_env: dict[str, str],
+        *,
+        ca_secret: str | None = None,
     ) -> None:
         """Generate StatefulSet spec, apply it, wait for readiness, sync config."""
         ns = self._namespace
@@ -179,6 +257,7 @@ class SessionLifecycleManager:
             gpu=config.gpu,
             yolo=config.yolo,
             otel_endpoint=config.otel_endpoint,
+            ca_secret=ca_secret,
         )
 
         print(
@@ -188,8 +267,7 @@ class SessionLifecycleManager:
         self._oc.run("apply", "-f", "-", input_data=json.dumps(sts_spec))
 
         if config.wait_for_ready:
-            if config.allowed_domains is not None:
-                self._proxy.wait_for_ready(session_name)
+            self._proxy.wait_for_ready(session_name)
 
             pname = pod_name(session_name)
             print(f"Waiting for pod {pname} to be ready...", file=sys.stderr)
@@ -199,7 +277,6 @@ class SessionLifecycleManager:
                 pname,
                 agent_name=config.agent,
                 provider=config.provider,
-                secret_env=secret_env,
                 args=session_env.get("PAUDE_AGENT_ARGS", ""),
                 yolo=config.yolo,
             )
@@ -295,6 +372,17 @@ class SessionLifecycleManager:
             timeout=90,
         )
 
+        headless_svc = resource_name(name)
+        print(f"Deleting headless Service/{headless_svc}...", file=sys.stderr)
+        self._oc.run(
+            "delete",
+            "service",
+            headless_svc,
+            "-n",
+            ns,
+            check=False,
+        )
+
         print("Deleting NetworkPolicy for session...", file=sys.stderr)
         self._oc.run(
             "delete",
@@ -331,7 +419,9 @@ class SessionLifecycleManager:
         print(f"Starting session '{name}'...", file=sys.stderr)
         self._scale_statefulset(name, 1)
 
-        if self._lookup.has_proxy_deployment(name):
+        has_proxy = self._lookup.has_proxy_deployment(name)
+        if has_proxy:
+            self._refresh_proxy_credentials(name)
             self._scale_deployment(proxy_resource_name(name), 1)
             self._proxy.wait_for_ready(name)
 
@@ -344,6 +434,24 @@ class SessionLifecycleManager:
 
         assert self._connect_fn is not None  # noqa: S101
         return self._connect_fn(name, github_token)
+
+    def _refresh_proxy_credentials(self, session_name: str) -> None:
+        """Update the proxy credential Secret with fresh host credentials."""
+        from paude.backends.shared import gather_proxy_credentials, local_gcp_adc_path
+
+        sts = self._lookup.get_statefulset(session_name)
+        labels = sts.get("metadata", {}).get("labels", {}) if sts else {}
+        agent_name = str(labels.get(PAUDE_LABEL_AGENT, "claude"))
+        provider_val = labels.get(PAUDE_LABEL_PROVIDER)
+        provider = str(provider_val) if provider_val is not None else None
+
+        from paude.agents import get_agent
+
+        agent = get_agent(agent_name, provider=provider)
+        proxy_creds = gather_proxy_credentials(
+            agent.config, gcp_adc_path=local_gcp_adc_path()
+        )
+        self._proxy.update_credentials(session_name, proxy_creds)
 
     def stop_session(self, name: str) -> None:
         """Stop a session (preserves volume)."""
@@ -404,9 +512,10 @@ class SessionLifecycleManager:
         gpu: str | None = None,
         yolo: bool = False,
         otel_endpoint: str | None = None,
+        ca_secret: str | None = None,
     ) -> dict[str, Any]:
         """Generate a Kubernetes StatefulSet specification."""
-        return (
+        builder = (
             StatefulSetBuilder(
                 session_name=session_name,
                 namespace=self._namespace,
@@ -421,5 +530,7 @@ class SessionLifecycleManager:
             .with_workspace(workspace)
             .with_pvc(size=pvc_size, storage_class=storage_class)
             .with_otel_endpoint(otel_endpoint)
-            .build()
         )
+        if ca_secret:
+            builder = builder.with_ca_secret(ca_secret)
+        return builder.build()

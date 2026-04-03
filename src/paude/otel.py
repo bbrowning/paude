@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
-# Ports already allowed by squid.conf (no need to inject)
-_SQUID_DEFAULT_PORTS = {80, 443}
+# Ports already allowed by the proxy (no need to inject)
+_PROXY_DEFAULT_PORTS = {80, 443}
 
 # Default OTLP HTTP port
 _DEFAULT_OTLP_PORT = 4318
@@ -124,7 +124,7 @@ def parse_otel_endpoint(endpoint: str) -> tuple[str, int]:
 
 
 def otel_proxy_ports(endpoint: str) -> list[int]:
-    """Return ports that must be opened in squid for the OTEL endpoint.
+    """Return non-standard ports that must be opened in the proxy for OTEL.
 
     Filters out ports already allowed by default (80, 443).
 
@@ -132,9 +132,9 @@ def otel_proxy_ports(endpoint: str) -> list[int]:
         endpoint: OTEL endpoint URL.
 
     Returns:
-        List of ports to add to squid Safe_ports/SSL_ports ACLs.
+        List of non-standard ports to allow through the proxy.
     """
     _, port = parse_otel_endpoint(endpoint)
-    if port in _SQUID_DEFAULT_PORTS:
+    if port in _PROXY_DEFAULT_PORTS:
         return []
     return [port]

@@ -81,7 +81,7 @@ RUN useradd -M -d /home/paude -s /bin/bash -g 0 paude && \
 # It gets installed at user-side build time via a runtime layer.
 # See src/paude/config/claude_layer.py for the installation logic.
 
-# Copy entrypoints and watchdog script
+# Copy entrypoints
 USER root
 COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY --chmod=755 entrypoint-session.sh /usr/local/bin/entrypoint-session.sh
@@ -89,7 +89,6 @@ COPY --chmod=755 entrypoint-lib-credentials.sh /usr/local/bin/entrypoint-lib-cre
 COPY --chmod=755 entrypoint-lib-config.sh /usr/local/bin/entrypoint-lib-config.sh
 COPY --chmod=755 entrypoint-lib-install.sh /usr/local/bin/entrypoint-lib-install.sh
 COPY --chmod=755 entrypoint-lib-openclaw.sh /usr/local/bin/entrypoint-lib-openclaw.sh
-COPY --chmod=755 credential-watchdog.sh /usr/local/bin/credential-watchdog.sh
 COPY --chmod=755 patch-proxy-fetch.sh /usr/local/bin/patch-proxy-fetch.sh
 COPY --chmod=755 patch-gemini-otel-proxy.sh /usr/local/bin/patch-gemini-otel-proxy.sh
 COPY --chmod=755 patch-openclaw-otel-proxy.sh /usr/local/bin/patch-openclaw-otel-proxy.sh

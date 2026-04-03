@@ -8,14 +8,19 @@ import sys
 import time
 from typing import Any
 
+from paude.backends.openshift.certs import (
+    ca_secret_name,
+    creds_secret_name,
+    delete_secrets,
+)
 from paude.backends.openshift.oc import OcClient
-from paude.backends.shared import proxy_resource_name
+from paude.backends.shared import agent_pod_fqdn, proxy_resource_name
 
 
 class ProxyManager:
     """Manages proxy deployments and network policies for sessions.
 
-    This class handles creating and managing squid proxy pods, services,
+    This class handles creating and managing proxy pods, services,
     and associated network policies for domain-based traffic filtering.
     """
 
@@ -37,8 +42,8 @@ class ProxyManager:
         - Allows egress to this session's proxy pod on port 3128
         - Denies all other egress traffic
 
-        The paude pod can ONLY reach DNS and the squid proxy. The proxy handles
-        domain-based filtering via squid.conf.
+        The paude pod can ONLY reach DNS and the proxy. The proxy handles
+        domain-based filtering via its allowlist configuration.
 
         Args:
             session_id: The session ID to scope the policy to.
@@ -113,59 +118,11 @@ class ProxyManager:
             input_data=json.dumps(policy_spec),
         )
 
-    def ensure_network_policy_permissive(self, session_id: str) -> None:
-        """Ensure a permissive NetworkPolicy exists for this session.
-
-        Used when --allowed-domains all is specified. Allows all egress traffic.
-
-        Args:
-            session_id: The session ID to scope the policy to.
-        """
-        policy_name = f"paude-egress-{session_id}"
-
-        print(
-            f"Creating NetworkPolicy/{policy_name} in namespace {self._namespace}...",
-            file=sys.stderr,
-        )
-
-        policy_spec: dict[str, Any] = {
-            "apiVersion": "networking.k8s.io/v1",
-            "kind": "NetworkPolicy",
-            "metadata": {
-                "name": policy_name,
-                "namespace": self._namespace,
-                "labels": {
-                    "app": "paude",
-                    "session-id": session_id,
-                    "paude.io/session-name": session_id,
-                },
-            },
-            "spec": {
-                "podSelector": {
-                    "matchLabels": {
-                        "app": "paude",
-                        "paude.io/session-name": session_id,
-                    },
-                },
-                "policyTypes": ["Egress"],
-                "egress": [
-                    {},  # Empty rule allows all egress
-                ],
-            },
-        }
-
-        self._oc.run(
-            "apply",
-            "-f",
-            "-",
-            input_data=json.dumps(policy_spec),
-        )
-
     def ensure_proxy_network_policy(self, session_name: str) -> None:
         """Create a NetworkPolicy that allows all egress for the proxy pod.
 
         The proxy pod needs unrestricted egress to reach the internet.
-        Domain-based filtering is handled by squid.conf, not NetworkPolicy.
+        Domain-based filtering is handled by the proxy, not NetworkPolicy.
 
         Args:
             session_name: Session name for labeling.
@@ -209,6 +166,78 @@ class ProxyManager:
             input_data=json.dumps(policy_spec),
         )
 
+    def ensure_proxy_ingress_policy(self, session_name: str) -> None:
+        """Create a NetworkPolicy that restricts ingress to the proxy pod.
+
+        Only the paired paude agent pod for this session may connect to
+        the proxy on port 3128.  Once any NetworkPolicy selects a pod for
+        Ingress, Kubernetes denies all ingress traffic that does not match
+        a rule in a selecting policy — so this single policy effectively
+        blocks every other pod in the namespace (or cluster).
+
+        Note: ``PAUDE_PROXY_ALLOWED_CLIENTS`` is also set on the proxy
+        Deployment (see :meth:`create_deployment`) using the agent pod's
+        deterministic DNS name as defense-in-depth.  This provides
+        application-level client filtering even when cluster-wide
+        NetworkPolicies (e.g. ``allow-from-all-namespaces``) weaken the
+        ingress isolation enforced by the CNI plugin.
+
+        Args:
+            session_name: Session name for labeling.
+        """
+        policy_name = f"paude-proxy-ingress-{session_name}"
+
+        print(
+            f"Creating NetworkPolicy/{policy_name} in namespace {self._namespace}...",
+            file=sys.stderr,
+        )
+
+        policy_spec: dict[str, Any] = {
+            "apiVersion": "networking.k8s.io/v1",
+            "kind": "NetworkPolicy",
+            "metadata": {
+                "name": policy_name,
+                "namespace": self._namespace,
+                "labels": {
+                    "app": "paude-proxy",
+                    "paude.io/session-name": session_name,
+                },
+            },
+            "spec": {
+                "podSelector": {
+                    "matchLabels": {
+                        "app": "paude-proxy",
+                        "paude.io/session-name": session_name,
+                    },
+                },
+                "policyTypes": ["Ingress"],
+                "ingress": [
+                    {
+                        "from": [
+                            {
+                                "podSelector": {
+                                    "matchLabels": {
+                                        "app": "paude",
+                                        "paude.io/session-name": session_name,
+                                    },
+                                },
+                            },
+                        ],
+                        "ports": [
+                            {"protocol": "TCP", "port": 3128},
+                        ],
+                    },
+                ],
+            },
+        }
+
+        self._oc.run(
+            "apply",
+            "-f",
+            "-",
+            input_data=json.dumps(policy_spec),
+        )
+
     def create_deployment(
         self,
         session_name: str,
@@ -216,10 +245,15 @@ class ProxyManager:
         allowed_domains: list[str] | None = None,
         otel_ports: list[int] | None = None,
     ) -> None:
-        """Create a Deployment for the squid proxy pod.
+        """Create a Deployment for the proxy pod.
 
-        The proxy pod handles domain-based filtering using squid.conf.
+        The proxy pod handles domain-based filtering and credential injection.
         The paude container routes all HTTP/HTTPS traffic through this proxy.
+
+        Credentials are loaded from a Kubernetes Secret via ``envFrom``
+        (see :func:`~paude.backends.openshift.certs.create_credentials_secret`).
+        The CA certificate is mounted from a Secret at ``/data/ca/``
+        (see :func:`~paude.backends.openshift.certs.create_ca_secret`).
 
         Args:
             session_name: Session name for labeling.
@@ -234,14 +268,15 @@ class ProxyManager:
             file=sys.stderr,
         )
 
-        env_list: list[dict[str, str]] = []
+        env_list: list[dict[str, str]] = [
+            {
+                "name": "PAUDE_PROXY_ALLOWED_CLIENTS",
+                "value": agent_pod_fqdn(session_name, self._namespace),
+            },
+        ]
         if allowed_domains:
-            from paude.domains import format_domains_as_squid_acls
-
             domains_str = ",".join(allowed_domains)
             env_list.append({"name": "ALLOWED_DOMAINS", "value": domains_str})
-            acls = format_domains_as_squid_acls(allowed_domains)
-            env_list.append({"name": "ALLOWED_DOMAIN_ACLS", "value": acls})
         if otel_ports:
             env_list.append(
                 {
@@ -249,6 +284,9 @@ class ProxyManager:
                     "value": ",".join(str(p) for p in otel_ports),
                 }
             )
+
+        ca_secret = ca_secret_name(session_name)
+        creds_secret = creds_secret_name(session_name)
 
         deployment_spec: dict[str, Any] = {
             "apiVersion": "apps/v1",
@@ -279,6 +317,15 @@ class ProxyManager:
                     "spec": {
                         "automountServiceAccountToken": False,
                         "enableServiceLinks": False,
+                        "volumes": [
+                            {
+                                "name": "ca-cert",
+                                "secret": {
+                                    "secretName": ca_secret,
+                                    "defaultMode": 0o644,
+                                },
+                            },
+                        ],
                         "containers": [
                             {
                                 "name": "proxy",
@@ -288,10 +335,20 @@ class ProxyManager:
                                 ),
                                 "ports": [{"containerPort": 3128}],
                                 "env": env_list,
+                                "envFrom": [
+                                    {"secretRef": {"name": creds_secret}},
+                                ],
                                 "resources": {
                                     "requests": {"cpu": "100m", "memory": "128Mi"},
                                     "limits": {"cpu": "500m", "memory": "256Mi"},
                                 },
+                                "volumeMounts": [
+                                    {
+                                        "name": "ca-cert",
+                                        "mountPath": "/data/ca",
+                                        "readOnly": True,
+                                    },
+                                ],
                             },
                         ],
                     },
@@ -307,7 +364,7 @@ class ProxyManager:
         )
 
     def create_service(self, session_name: str) -> str:
-        """Create a Service for the squid proxy pod.
+        """Create a Service for the proxy pod.
 
         Args:
             session_name: Session name for labeling.
@@ -427,6 +484,21 @@ class ProxyManager:
 
         return [d for d in result.stdout.strip().split(",") if d]
 
+    def update_credentials(
+        self,
+        session_name: str,
+        credentials: dict[str, str],
+    ) -> None:
+        """Update the proxy credentials Secret with fresh values.
+
+        Args:
+            session_name: Session name.
+            credentials: Updated credential key-value pairs.
+        """
+        from paude.backends.openshift.certs import create_credentials_secret
+
+        create_credentials_secret(self._oc, self._namespace, session_name, credentials)
+
     def _patch_deployment_container(
         self,
         session_name: str,
@@ -461,6 +533,9 @@ class ProxyManager:
     ) -> None:
         """Update the ALLOWED_DOMAINS env var on the proxy Deployment.
 
+        Credentials are managed separately via the credentials Secret
+        (see :func:`~paude.backends.openshift.certs.create_credentials_secret`).
+
         Args:
             session_name: Session name.
             domains: New list of allowed domains.
@@ -470,19 +545,12 @@ class ProxyManager:
             image: If provided, also update the container image in the same
                 patch to avoid a double pod restart.
         """
-        from paude.domains import format_domains_as_squid_acls
-
         domains_str = ",".join(domains)
-        acls = format_domains_as_squid_acls(domains)
 
         env_entries: list[dict[str, str]] = [
             {
                 "name": "ALLOWED_DOMAINS",
                 "value": domains_str,
-            },
-            {
-                "name": "ALLOWED_DOMAIN_ACLS",
-                "value": acls,
             },
         ]
         if otel_ports is not None:
@@ -512,7 +580,7 @@ class ProxyManager:
         self._patch_deployment_container(session_name, {"image": image})
 
     def delete_resources(self, session_name: str) -> None:
-        """Delete proxy Deployment and Service for a session.
+        """Delete proxy Deployment, Service, and Secrets for a session.
 
         Args:
             session_name: Session name.
@@ -540,3 +608,6 @@ class ProxyManager:
             self._namespace,
             check=False,
         )
+
+        print("Deleting proxy Secrets...", file=sys.stderr)
+        delete_secrets(self._oc, self._namespace, session_name)

@@ -47,9 +47,6 @@ class ResolvedCreateOptions:
     pvc_size: SettingValue[str] = field(
         default_factory=lambda: SettingValue("10Gi", "built-in")
     )
-    credential_timeout: SettingValue[int] = field(
-        default_factory=lambda: SettingValue(60, "built-in")
-    )
     platform: SettingValue[str | None] = field(
         default_factory=lambda: SettingValue(None, "built-in")
     )
@@ -88,7 +85,6 @@ def resolve_create_options(
     cli_yolo: bool | None,
     cli_git: bool | None,
     cli_pvc_size: str | None,
-    cli_credential_timeout: int | None,
     cli_platform: str | None,
     cli_openshift_context: str | None,
     cli_openshift_namespace: str | None,
@@ -159,13 +155,6 @@ def resolve_create_options(
         project=None,
         user=user_defaults.pvc_size,
         builtin="10Gi",
-    )
-
-    result.credential_timeout = _resolve_scalar(
-        cli=cli_credential_timeout,
-        project=None,
-        user=user_defaults.credential_timeout,
-        builtin=60,
     )
 
     result.platform = _resolve_scalar(

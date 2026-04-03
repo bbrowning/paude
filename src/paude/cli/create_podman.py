@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -28,7 +27,7 @@ def create_podman_session(
     workspace: Path,
     config: PaudeConfig | None,
     env: dict[str, str],
-    expanded_domains: list[str] | None,
+    expanded_domains: list[str],
     unrestricted: bool,
     parsed_args: list[str],
     yolo: bool,
@@ -88,14 +87,13 @@ def create_podman_session(
             remote_config_paths = sync_configs_to_remote(engine.transport, mounts)
             mounts = remap_mounts(mounts, remote_config_paths.path_map)
 
-    # Ensure proxy image when domain filtering is active
+    # Ensure proxy image (always required — all sessions use proxy)
     podman_proxy_image: str | None = None
-    if not unrestricted:
-        try:
-            podman_proxy_image = image_manager.ensure_proxy_image(force_rebuild=rebuild)
-        except Exception as e:
-            typer.echo(f"Error ensuring proxy image: {e}", err=True)
-            raise typer.Exit(1) from None
+    try:
+        podman_proxy_image = image_manager.ensure_proxy_image(force_rebuild=rebuild)
+    except Exception as e:
+        typer.echo(f"Error ensuring proxy image: {e}", err=True)
+        raise typer.Exit(1) from None
 
     # Create session config
     session_config = SessionConfig(
@@ -122,10 +120,7 @@ def create_podman_session(
         session = backend_instance.create_session(session_config)
 
         # Auto-start the container (entrypoint is tini -- sleep infinity)
-        github_token = os.environ.get("PAUDE_GITHUB_TOKEN")
-        backend_instance.start_session_no_attach(
-            session.name, github_token=github_token
-        )
+        backend_instance.start_session_no_attach(session.name)
     except SessionExistsError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None

@@ -176,13 +176,10 @@ paude/
 │   │   ├── Dockerfile             # Agent container image
 │   │   ├── entrypoint.sh          # Container entrypoint
 │   │   ├── entrypoint-session.sh  # Session entrypoint
-│   │   ├── credential-watchdog.sh # Credential refresh watchdog
 │   │   └── tmux.conf              # Tmux configuration
 │   └── proxy/
-│       ├── Dockerfile             # Squid proxy container image
-│       ├── entrypoint.sh          # Proxy container entrypoint
-│       ├── squid.conf             # Proxy allowlist configuration
-│       └── ERR_CUSTOM_ACCESS_DENIED  # Custom error page
+│       ├── Dockerfile             # Proxy container image (paude-proxy)
+│       └── entrypoint.sh          # Proxy container entrypoint
 ├── tests/                 # Python tests (pytest)
 ├── examples/              # Example configurations
 ├── docs/                  # Documentation

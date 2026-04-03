@@ -378,7 +378,7 @@ def _start_proxy_session(
     )
     backend.create_session(config)
     backend.start_session_no_attach(session_name)
-    time.sleep(1)  # Extra time for squid to fully initialize
+    time.sleep(1)  # Extra time for proxy to fully initialize
 
     # Get proxy IP on the internal network
     proxy_name = f"paude-proxy-{session_name}"
@@ -407,8 +407,10 @@ def _start_proxy_session(
 def stopped_session(
     podman_available: bool,
     test_image_available: bool,
+    proxy_image_available: bool,
     temp_workspace_class: Path,
     podman_test_image: str,
+    podman_proxy_image: str,
 ) -> Generator[tuple[PodmanBackend, str, Session, Path], None, None]:
     """Create a stopped session once for the entire test class."""
     if not podman_available:
@@ -421,6 +423,7 @@ def stopped_session(
         name=name,
         workspace=temp_workspace_class,
         image=podman_test_image,
+        proxy_image=podman_proxy_image if proxy_image_available else None,
     )
     session = backend.create_session(config)
     yield (backend, name, session, temp_workspace_class)
@@ -431,8 +434,10 @@ def stopped_session(
 def running_session(
     podman_available: bool,
     test_image_available: bool,
+    proxy_image_available: bool,
     temp_workspace_class: Path,
     podman_test_image: str,
+    podman_proxy_image: str,
 ) -> Generator[tuple[PodmanBackend, str, Path], None, None]:
     """Create and start a session once for the entire test class."""
     if not podman_available:
@@ -445,6 +450,7 @@ def running_session(
         name=name,
         workspace=temp_workspace_class,
         image=podman_test_image,
+        proxy_image=podman_proxy_image if proxy_image_available else None,
     )
     backend.create_session(config)
     backend.start_session_no_attach(name)

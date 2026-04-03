@@ -41,13 +41,13 @@ from paude.backends.shared import (
     PAUDE_LABEL_WORKSPACE,
     PAUDE_LABEL_YOLO,
     build_session_env,
+    derive_agent_ip,
     encode_path,
     generate_sandbox_config_script,
 )
 from paude.constants import (
     CONTAINER_ENTRYPOINT,
     CONTAINER_WORKSPACE,
-    GCP_ADC_FILENAME,
     GCP_ADC_SECRET_NAME,
     GCP_ADC_TARGET,
     SANDBOX_CONFIG_TARGET,
@@ -161,18 +161,14 @@ class PodmanBackend:
         cname = container_name(session_name)
         self._port_forward.start(session_name, cname, ports)
 
-    def _build_attach_env(
-        self, agent: Agent, github_token: str | None
-    ) -> dict[str, str] | None:
-        """Build extra environment for container attachment."""
-        from paude.agents.base import build_secret_environment_from_config
+    def _build_attach_env(self, agent: Agent) -> dict[str, str] | None:
+        """Build extra environment for container attachment.
 
-        secret_env = build_secret_environment_from_config(agent.config)
-
+        No credentials are passed here — all authentication is handled
+        by the proxy sidecar. Dummy values are already baked into the
+        container env via build_session_env().
+        """
         extra_env: dict[str, str] = {}
-        if github_token:
-            extra_env["GH_TOKEN"] = github_token
-        extra_env.update(secret_env)
 
         port_urls = self._get_port_urls(agent)
         if port_urls:
@@ -214,49 +210,27 @@ class PodmanBackend:
     @staticmethod
     def _local_adc_path() -> Path | None:
         """Return the local GCP ADC file path, or None if it doesn't exist."""
-        path = Path.home() / ".config" / "gcloud" / GCP_ADC_FILENAME
-        return path if path.is_file() else None
+        from paude.backends.shared import local_gcp_adc_path
 
-    def _ensure_gcp_credentials(self) -> list[str] | None:
-        """Ensure GCP ADC credentials are available via Podman secret.
+        return local_gcp_adc_path()
 
-        For Podman: creates a podman secret and returns a secret spec.
-        For Docker: credentials are injected via ``_inject_credentials``
-        after the container is started.
+    def _gather_proxy_credentials(self, agent: Agent) -> dict[str, str]:
+        """Gather real credentials from host environment for the proxy container."""
+        from paude.backends.shared import gather_proxy_credentials
 
-        Returns:
-            List of secret specs for --secret, or None.
+        return gather_proxy_credentials(
+            agent.config, gcp_adc_path=self._local_adc_path()
+        )
+
+    def _inject_stub_credentials(self, cname: str) -> None:
+        """Inject stub GCP ADC into a running container.
+
+        All real authentication is handled by the proxy sidecar. The agent
+        container only gets a stub ADC JSON to satisfy client library checks.
         """
-        if not self._engine.supports_secrets:
-            return None
+        from paude.backends.shared import STUB_ADC_JSON
 
-        adc_path = self._local_adc_path()
-        if adc_path is None:
-            return None
-
-        self._runner.create_secret(GCP_ADC_SECRET_NAME, adc_path)
-        secret_spec = f"{GCP_ADC_SECRET_NAME},target={GCP_ADC_TARGET}"
-        return [secret_spec]
-
-    def _inject_credentials(self, cname: str) -> None:
-        """Inject GCP ADC credentials into a running container.
-
-        For Docker (no standalone secrets): reads the local ADC file and
-        pipes it into the container via ``exec``.  Nothing is written to
-        the host filesystem, which is critical for SSH remotes where
-        other users share the host.
-
-        For Podman: no-op (secrets are handled at create time).
-        """
-        if self._engine.supports_secrets:
-            return
-
-        adc_path = self._local_adc_path()
-        if adc_path is None:
-            return
-
-        content = adc_path.read_text()
-        self._runner.inject_file(cname, content, GCP_ADC_TARGET, owner="paude:0")
+        self._runner.inject_file(cname, STUB_ADC_JSON, GCP_ADC_TARGET, owner="paude:0")
 
     def create_session(self, config: SessionConfig) -> Session:
         """Create a new session (does not start it).
@@ -268,7 +242,6 @@ class PodmanBackend:
 
         cname = container_name(session_name)
         vname = volume_name(session_name)
-        use_proxy = config.allowed_domains is not None
 
         if self._runner.container_exists(cname):
             raise SessionExistsError(f"Session '{session_name}' already exists")
@@ -292,16 +265,13 @@ class PodmanBackend:
             labels[PAUDE_LABEL_GPU] = config.gpu
         if config.yolo:
             labels[PAUDE_LABEL_YOLO] = "1"
-        if use_proxy:
-            labels[PAUDE_LABEL_DOMAINS] = ",".join(config.allowed_domains or [])
-            if config.proxy_image:
-                labels[PAUDE_LABEL_PROXY_IMAGE] = config.proxy_image
-            if config.otel_ports:
-                labels[PAUDE_LABEL_OTEL_PORTS] = ",".join(
-                    str(p) for p in config.otel_ports
-                )
-            if config.otel_endpoint:
-                labels[PAUDE_LABEL_OTEL_ENDPOINT] = config.otel_endpoint
+        labels[PAUDE_LABEL_DOMAINS] = ",".join(config.allowed_domains)
+        if config.proxy_image:
+            labels[PAUDE_LABEL_PROXY_IMAGE] = config.proxy_image
+        if config.otel_ports:
+            labels[PAUDE_LABEL_OTEL_PORTS] = ",".join(str(p) for p in config.otel_ports)
+        if config.otel_endpoint:
+            labels[PAUDE_LABEL_OTEL_ENDPOINT] = config.otel_endpoint
 
         print(f"Creating session '{session_name}'...", file=sys.stderr)
 
@@ -312,16 +282,22 @@ class PodmanBackend:
             print(f"Creating volume {vname}...", file=sys.stderr)
             self._volume_manager.create_volume(vname, labels=labels)
 
-        # Set up proxy network and container if domain filtering is active
+        # Resolve agent once for both proxy credential gathering and env building
+        from paude.agents import get_agent
+
+        agent = get_agent(config.agent, provider=config.provider)
+
         network: str | None = None
         proxy_ip: str | None = None
-        if use_proxy:
+        if config.proxy_image:
             try:
+                proxy_creds = self._gather_proxy_credentials(agent)
                 network, proxy_ip = self._proxy.create_proxy(
                     session_name,
-                    config.proxy_image or "",
+                    config.proxy_image,
                     config.allowed_domains,
                     otel_ports=config.otel_ports,
+                    credentials=proxy_creds,
                 )
             except Exception:
                 if not config.reuse_volume:
@@ -335,29 +311,27 @@ class PodmanBackend:
                     file=sys.stderr,
                 )
 
-            # Start the proxy now so it's ready when the session starts
             self._proxy.start_proxy(session_name)
+
+        # Derive fixed agent IP so it matches what the proxy expects
+        agent_ip = derive_agent_ip(proxy_ip) if proxy_ip else None
 
         # Build mounts with session volume
         mounts = list(config.mounts)
         mounts.extend(["-v", f"{vname}:/pvc"])
 
-        # Prepare environment
-        from paude.agents import get_agent
-
-        agent = get_agent(config.agent, provider=config.provider)
         proxy_name_for_env = (
-            (proxy_ip or proxy_container_name(session_name)) if use_proxy else None
+            (proxy_ip or proxy_container_name(session_name))
+            if config.proxy_image
+            else None
         )
         env, _agent_args = build_session_env(
             config, agent, proxy_name=proxy_name_for_env
         )
         env["PAUDE_WORKSPACE"] = CONTAINER_WORKSPACE
 
-        # Ensure GCP credentials (Podman secrets; Docker injects after start)
-        secrets = self._ensure_gcp_credentials()
-
-        # Create container (stopped)
+        # Create container (stopped) — no real credentials are passed.
+        # Agent gets stub ADC injected at start time.
         print(f"Creating container {cname}...", file=sys.stderr)
         try:
             dns = [proxy_ip] if proxy_ip else None
@@ -370,20 +344,20 @@ class PodmanBackend:
                 labels=labels,
                 entrypoint="tini",
                 command=["--", "sleep", "infinity"],
-                secrets=secrets,
+                secrets=None,
                 network=network,
+                network_ip=agent_ip,
                 gpu=config.gpu,
                 dns=dns,
                 ports=None,  # Port-forward proxy handles port access
             )
         except Exception:
             # Cleanup all resources on failure
-            if use_proxy:
+            if config.proxy_image:
                 pname = proxy_container_name(session_name)
                 self._runner.remove_container(pname, force=True)
                 self._network_manager.remove_network(network_name(session_name))
             self._volume_manager.remove_volume(vname, force=True)
-            self._runner.remove_secret(GCP_ADC_SECRET_NAME)
             raise
 
         print(f"Session '{session_name}' created (stopped).", file=sys.stderr)
@@ -419,34 +393,47 @@ class PodmanBackend:
             check=False,
         )
 
-    def start_session_no_attach(
-        self, name: str, github_token: str | None = None
-    ) -> None:
+    def _start_session_containers(self, name: str, cname: str) -> Agent:
+        """Start proxy and agent containers, inject stub credentials and config.
+
+        Shared startup sequence used by both interactive and headless paths.
+        No real credentials are injected into the agent container.
+
+        Returns:
+            The resolved agent.
+        """
+        agent = self._get_session_agent(name)
+        proxy_creds = self._gather_proxy_credentials(agent)
+        self._proxy.start_if_needed(name, credentials=proxy_creds)
+        self._runner.start_container(cname)
+        self._fix_volume_permissions(cname)
+        self._proxy.distribute_ca_cert(name)
+        self._inject_stub_credentials(cname)
+        self._sync_host_config(cname, agent.config.name)
+        self._sync_sandbox_config(cname, name)
+        return agent
+
+    def start_session_no_attach(self, name: str) -> None:
         """Start containers without attaching (for git setup, etc.)."""
         cname = self._require_session(name)
         if self._runner.container_running(cname):
             return
-        self._ensure_gcp_credentials()
-        self._proxy.start_if_needed(name)
-        self._runner.start_container(cname)
-        self._fix_volume_permissions(cname)
-        self._inject_credentials(cname)
-        agent = self._get_session_agent(name)
-        self._sync_host_config(cname, agent.config.name)
-        self._sync_sandbox_config(cname, name)
-        self._start_agent_headless_in_container(cname, agent, github_token)
+        agent = self._start_session_containers(name, cname)
+        self._start_agent_headless_in_container(cname, agent)
 
-    def start_agent_headless(self, name: str, github_token: str | None = None) -> None:
+    def start_agent_headless(self, name: str) -> None:
         """Start the agent in headless mode inside the container."""
         cname = self._require_running_session(name)
         agent = self._get_session_agent(name)
-        self._start_agent_headless_in_container(cname, agent, github_token)
+        self._start_agent_headless_in_container(cname, agent)
 
     def _start_agent_headless_in_container(
-        self, cname: str, agent: Agent, github_token: str | None = None
+        self,
+        cname: str,
+        agent: Agent,
     ) -> None:
         """Start the agent in headless mode (internal, skips session lookup)."""
-        env_vars = self._build_attach_env(agent, github_token=github_token)
+        env_vars = self._build_attach_env(agent)
         cmd: list[str] = ["env", "PAUDE_HEADLESS=1"]
         if env_vars:
             for key, value in env_vars.items():
@@ -499,6 +486,13 @@ class PodmanBackend:
         # Remove network
         self._network_manager.remove_network(network_name(name))
 
+        # Remove CA volume if it exists
+        from paude.backends.podman.proxy import ca_volume_name
+
+        ca_vol = ca_volume_name(name)
+        if self._volume_manager.volume_exists(ca_vol):
+            self._volume_manager.remove_volume(ca_vol, force=True)
+
         # Remove volume and secret
         print(f"Removing volume {vname}...", file=sys.stderr)
         self._volume_manager.remove_volume_verified(vname)
@@ -515,25 +509,18 @@ class PodmanBackend:
                 f"Session '{name}' is already running, connecting...",
                 file=sys.stderr,
             )
-            return self.connect_session(name, github_token=github_token)
+            return self.connect_session(name)
 
         print(f"Starting session '{name}'...", file=sys.stderr)
 
-        self._ensure_gcp_credentials()
-        self._proxy.start_if_needed(name)
-        self._runner.start_container(cname)
-        self._fix_volume_permissions(cname)
-        self._inject_credentials(cname)
-        agent = self._get_session_agent(name)
-        self._sync_host_config(cname, agent.config.name)
-        self._sync_sandbox_config(cname, name)
+        agent = self._start_session_containers(name, cname)
 
         self._start_port_forward(name, agent)
         self._print_port_urls(name, agent)
         exit_code = self._runner.attach_container(
             cname,
             entrypoint=CONTAINER_ENTRYPOINT,
-            extra_env=self._build_attach_env(agent, github_token),
+            extra_env=self._build_attach_env(agent),
         )
         self._print_port_urls(name, agent)
         return exit_code
@@ -575,7 +562,10 @@ class PodmanBackend:
             return 1
 
         # Ensure proxy is running (recreates if missing)
-        self._proxy.start_if_needed(name)
+        agent = self._get_session_agent(name)
+        proxy_creds = self._gather_proxy_credentials(agent)
+        self._proxy.start_if_needed(name, credentials=proxy_creds)
+        self._proxy.distribute_ca_cert(name)
 
         # Check if workspace is empty (no .git directory)
         check_result = self._runner.exec_in_container(
@@ -591,7 +581,6 @@ class PodmanBackend:
             print("", file=sys.stderr)
 
         # Re-sync config on every connect (refreshes if user updated config)
-        agent = self._get_session_agent(name)
         self._sync_host_config(cname, agent.config.name)
         self._sync_sandbox_config(cname, name)
 
@@ -602,7 +591,7 @@ class PodmanBackend:
             exit_code = self._runner.attach_container(
                 cname,
                 entrypoint=CONTAINER_ENTRYPOINT,
-                extra_env=self._build_attach_env(agent, github_token),
+                extra_env=self._build_attach_env(agent),
             )
         finally:
             self._port_forward.stop(name)
@@ -655,14 +644,16 @@ class PodmanBackend:
         return self._proxy.get_allowed_domains(name)
 
     def get_proxy_blocked_log(self, name: str) -> str | None:
-        """Get raw squid blocked log from the proxy container."""
+        """Get raw blocked-domain log from the proxy container."""
         self._require_session(name)
         return self._proxy.get_blocked_log(name)
 
     def update_allowed_domains(self, name: str, domains: list[str]) -> None:
         """Update allowed domains for a session."""
         self._require_session(name)
-        self._proxy.update_domains(name, domains)
+        agent = self._get_session_agent(name)
+        proxy_creds = self._gather_proxy_credentials(agent)
+        self._proxy.update_domains(name, domains, credentials=proxy_creds)
 
     def exec_in_session(self, name: str, command: str) -> tuple[int, str, str]:
         """Execute a command inside a running session's container."""

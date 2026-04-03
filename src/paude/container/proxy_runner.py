@@ -21,8 +21,6 @@ class ProxyRunner:
     operations. Handles engine differences (e.g. Docker multi-network).
     """
 
-    _proxy_counter = 0
-
     def __init__(self, runner: ContainerRunner) -> None:
         self._runner = runner
 
@@ -60,64 +58,32 @@ class ProxyRunner:
         dns: str | None,
         allowed_domains: list[str] | None,
         otel_ports: list[int] | None = None,
+        credentials: dict[str, str] | None = None,
+        allowed_clients: str | None = None,
     ) -> list[str]:
         """Build environment variable arguments for proxy containers."""
         args: list[str] = []
         if dns:
-            args.extend(["-e", f"SQUID_DNS={dns}"])
+            args.extend(["-e", f"PROXY_DNS={dns}"])
         if allowed_domains:
-            from paude.domains import format_domains_as_squid_acls
-
             args.extend(["-e", f"ALLOWED_DOMAINS={','.join(allowed_domains)}"])
-            acls = format_domains_as_squid_acls(allowed_domains)
-            args.extend(["-e", f"ALLOWED_DOMAIN_ACLS={acls}"])
         if otel_ports:
             args.extend(
                 ["-e", f"ALLOWED_OTEL_PORTS={','.join(str(p) for p in otel_ports)}"]
             )
+        if credentials:
+            for key, value in credentials.items():
+                args.extend(["-e", f"{key}={value}"])
+        if allowed_clients:
+            args.extend(["-e", f"PAUDE_PROXY_ALLOWED_CLIENTS={allowed_clients}"])
         return args
 
-    def run_proxy(
-        self,
-        image: str,
-        network: str,
-        dns: str | None = None,
-        allowed_domains: list[str] | None = None,
-        otel_ports: list[int] | None = None,
-    ) -> str:
-        """Start a proxy container (auto-remove on stop).
-
-        Returns:
-            Container name.
-
-        Raises:
-            ProxyStartError: If the proxy container fails to start.
-        """
-        ProxyRunner._proxy_counter += 1
-        session_id = f"{int(time.time())}-{ProxyRunner._proxy_counter}"
-        container_name = f"paude-proxy-{session_id}"
-
-        net_args = self._build_multi_network(network)
-        env_args = self._build_env_args(dns, allowed_domains, otel_ports)
-
-        result = self._engine.run(
-            "run",
-            "-d",
-            "--rm",
-            "--name",
-            container_name,
-            *net_args,
-            *env_args,
-            image,
-            check=False,
-        )
-        if result.returncode != 0:
-            raise ProxyStartError(f"Failed to start proxy: {result.stderr}")
-
-        self._connect_bridge_if_needed(container_name)
-        time.sleep(1)
-
-        return container_name
+    def _build_volume_args(self, ca_volume: str | None = None) -> list[str]:
+        """Build volume mount arguments for proxy containers."""
+        args: list[str] = []
+        if ca_volume:
+            args.extend(["-v", f"{ca_volume}:/data/ca"])
+        return args
 
     def create_session_proxy(
         self,
@@ -128,6 +94,9 @@ class ProxyRunner:
         allowed_domains: list[str] | None = None,
         ip: str | None = None,
         otel_ports: list[int] | None = None,
+        ca_volume: str | None = None,
+        credentials: dict[str, str] | None = None,
+        allowed_clients: str | None = None,
     ) -> str:
         """Create a proxy container for a session (does not start it).
 
@@ -135,7 +104,10 @@ class ProxyRunner:
             Container name.
         """
         net_args = self._build_multi_network(network, ip=ip)
-        env_args = self._build_env_args(dns, allowed_domains, otel_ports)
+        env_args = self._build_env_args(
+            dns, allowed_domains, otel_ports, credentials, allowed_clients
+        )
+        vol_args = self._build_volume_args(ca_volume)
 
         ip_args: list[str] = []
         if ip and not self._engine.supports_multi_network_create:
@@ -150,6 +122,7 @@ class ProxyRunner:
             *net_args,
             *ip_args,
             *env_args,
+            *vol_args,
             image,
             check=False,
         )
@@ -179,6 +152,9 @@ class ProxyRunner:
         allowed_domains: list[str] | None = None,
         ip: str | None = None,
         otel_ports: list[int] | None = None,
+        ca_volume: str | None = None,
+        credentials: dict[str, str] | None = None,
+        allowed_clients: str | None = None,
     ) -> str:
         """Recreate a session proxy with new configuration.
 
@@ -196,6 +172,9 @@ class ProxyRunner:
             allowed_domains=allowed_domains,
             ip=ip,
             otel_ports=otel_ports,
+            ca_volume=ca_volume,
+            credentials=credentials,
+            allowed_clients=allowed_clients,
         )
         self.start_session_proxy(name)
 

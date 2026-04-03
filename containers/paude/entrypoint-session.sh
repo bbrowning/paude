@@ -56,6 +56,10 @@ fi
 # git config --global creates .gitconfig if it doesn't exist
 git config --global --add safe.directory '*' 2>/dev/null || true
 
+# Update CA trust early (before any HTTPS calls like agent install)
+# The CA cert is injected by the host after the container starts.
+setup_ca_trust
+
 # Wait for and set up tmpfs-based credentials
 # Order matters: setup_credentials copies host config into ~/.claude (real dir),
 # then persist_agent_config merges it into /pvc/.claude (preserving existing
@@ -64,16 +68,6 @@ wait_for_credentials
 setup_credentials
 persist_agent_config
 wait_for_git
-
-# Start credential watchdog in background (OpenShift only)
-# The watchdog removes credentials after inactivity when no tmux clients are attached
-# Only start if not already running (avoid duplicates on reconnect)
-if [[ -d /credentials ]] && [[ "${PAUDE_CREDENTIAL_WATCHDOG:-1}" == "1" ]]; then
-    if ! pgrep -f "credential-watchdog.sh" >/dev/null 2>&1; then
-        nohup /usr/local/bin/credential-watchdog.sh >> /tmp/credential-watchdog.log 2>&1 &
-        echo "Credential watchdog started (timeout: ${PAUDE_CREDENTIAL_TIMEOUT:-60}m)"
-    fi
-fi
 
 # Add PVC local bin to PATH (for agent and other tools installed to PVC)
 # Also keep home .local/bin for tools installed during image build

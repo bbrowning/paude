@@ -113,6 +113,23 @@ class SessionLookup:
             )
         return pname
 
+    def get_session_agent_name(self, session_name: str) -> str:
+        """Get the agent name for a session from its StatefulSet labels."""
+        sts = self.get_statefulset(session_name)
+        if not sts:
+            return "claude"
+        labels = sts.get("metadata", {}).get("labels", {})
+        return str(labels.get(PAUDE_LABEL_AGENT, "claude"))
+
+    def get_session_provider(self, session_name: str) -> str | None:
+        """Get the provider name for a session from its StatefulSet labels."""
+        sts = self.get_statefulset(session_name)
+        if not sts:
+            return None
+        labels = sts.get("metadata", {}).get("labels", {})
+        value = labels.get(PAUDE_LABEL_PROVIDER)
+        return str(value) if value is not None else None
+
     def has_proxy_deployment(self, session_name: str) -> bool:
         """Check if a proxy deployment exists for a session."""
         result = self._oc.run(

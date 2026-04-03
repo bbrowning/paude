@@ -322,8 +322,7 @@ class TestProxyDeployment:
     ) -> None:
         """Proxy container starts successfully with allowed_domains configured.
 
-        This catches container-level bugs like squid.conf syntax errors
-        (e.g. referencing ACLs before they are defined).
+        This catches container-level bugs like proxy configuration errors.
         """
         config = SessionConfig(
             name=unique_session_name,
@@ -419,9 +418,9 @@ class TestProxyDeployment:
                     diag_lines.append(
                         f"\n=== Stderr for {pod_name} ===\n{pod_logs.stderr.strip()}"
                     )
-                # Read squid log files from the container
-                for log_file in ["/tmp/squid-cache.log", "/tmp/squid-blocked.log"]:
-                    squid_log = run_oc(
+                # Read proxy log files from the container
+                for log_file in ["/tmp/paude-proxy-blocked.log"]:
+                    proxy_log = run_oc(
                         "exec",
                         pod_name,
                         "-n",
@@ -431,9 +430,9 @@ class TestProxyDeployment:
                         log_file,
                         check=False,
                     )
-                    if squid_log.stdout.strip():
+                    if proxy_log.stdout.strip():
                         diag_lines.append(
-                            f"\n=== {log_file} from {pod_name} ===\n{squid_log.stdout.strip()}"
+                            f"\n=== {log_file} from {pod_name} ===\n{proxy_log.stdout.strip()}"
                         )
                 pod_describe = run_oc(
                     "describe",
@@ -460,7 +459,7 @@ class TestProxyDeployment:
             "-n",
             test_namespace,
             "-o",
-            "jsonpath={.spec.template.spec.containers[0].env[0].value}",
+            'jsonpath={.spec.template.spec.containers[0].env[?(@.name=="ALLOWED_DOMAINS")].value}',
         )
         assert result.stdout.strip() == "example.com,.googleapis.com"
 
@@ -481,21 +480,17 @@ class TestProxyDeployment:
         pod_name = result.stdout.strip()
         assert pod_name, "Could not find proxy pod"
 
-        # Read squid.conf from the running proxy container
+        # Verify the proxy's ALLOWED_DOMAINS env var contains both test domains
         result = run_oc(
             "exec",
             pod_name,
             "-n",
             test_namespace,
             "--",
-            "cat",
-            "/tmp/squid.conf",
+            "printenv",
+            "ALLOWED_DOMAINS",
+            check=False,
         )
-        squid_conf = result.stdout
-
-        # Verify ACL entries for both test domains
-        assert "example.com" in squid_conf
-        assert ".googleapis.com" in squid_conf
-
-        # Verify the access_log directive that triggered the original bug
-        assert "!allowed_domains" in squid_conf
+        allowed = result.stdout.strip()
+        assert "example.com" in allowed
+        assert ".googleapis.com" in allowed

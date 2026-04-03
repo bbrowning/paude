@@ -30,7 +30,7 @@ def create_openshift_session(
     workspace: Path,
     config: PaudeConfig | None,
     env: dict[str, str],
-    expanded_domains: list[str] | None,
+    expanded_domains: list[str],
     unrestricted: bool,
     parsed_args: list[str],
     yolo: bool,
@@ -41,7 +41,6 @@ def create_openshift_session(
     storage_class: str | None,
     openshift_context: str | None,
     openshift_namespace: str | None,
-    credential_timeout: int,
     agent_name: str = "claude",
     provider_name: str | None = None,
     gpu: str | None = None,
@@ -83,7 +82,7 @@ def create_openshift_session(
         # os_script_dir is None for pip installs, which fall back to the
         # registry image via _resolve_proxy_image().
         proxy_image: str | None = None
-        if not unrestricted and os_script_dir:
+        if os_script_dir:
             typer.echo("Building proxy image in OpenShift cluster...")
             proxy_image = os_backend.ensure_proxy_image_via_build(
                 script_dir=os_script_dir,
@@ -116,7 +115,6 @@ def create_openshift_session(
             pvc_size=pvc_size,
             storage_class=storage_class,
             proxy_image=proxy_image,
-            credential_timeout=credential_timeout,
             agent=agent_name,
             provider=provider_name,
             gpu=gpu,

@@ -318,8 +318,8 @@ class TestPodmanGetAllowedDomains:
         """get_allowed_domains returns None when no proxy exists (unrestricted)."""
         mock_runner = MagicMock()
         # Main container exists, proxy does not
-        mock_runner.container_exists.side_effect = (
-            lambda name: name == "paude-my-session"
+        mock_runner.container_exists.side_effect = lambda name: (
+            name == "paude-my-session"
         )
         mock_runner_class.return_value = mock_runner
 
@@ -410,6 +410,8 @@ class TestPodmanUpdateAllowedDomains:
         # Both main and proxy containers exist
         mock_runner.container_exists.return_value = True
         mock_runner.get_container_image.return_value = "proxy:latest"
+        # Disable CA verification polling (not the focus of this test)
+        mock_runner.container_running.return_value = False
         mock_runner_class.return_value = mock_runner
         mock_dns.return_value = None
 
@@ -450,8 +452,8 @@ class TestPodmanUpdateAllowedDomains:
         """update_allowed_domains raises ValueError when session has no proxy."""
         mock_runner = MagicMock()
         # Main container exists, proxy does not
-        mock_runner.container_exists.side_effect = (
-            lambda name: name == "paude-my-session"
+        mock_runner.container_exists.side_effect = lambda name: (
+            name == "paude-my-session"
         )
         mock_runner_class.return_value = mock_runner
 

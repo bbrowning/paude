@@ -474,130 +474,6 @@ class TestPrepareBuiltContext:
 class TestContainerRunner:
     """Tests for ContainerRunner."""
 
-    def test_run_proxy_creates_container_with_network(self):
-        """run_proxy creates container with correct network including podman."""
-        from paude.container.proxy_runner import ProxyRunner
-
-        mock_runner = MagicMock()
-        mock_runner.engine.binary = "podman"
-        mock_runner.engine.supports_multi_network_create = True
-        mock_runner.engine.default_bridge_network = "podman"
-        mock_runner.engine.run.return_value = MagicMock(returncode=0)
-
-        proxy = ProxyRunner(mock_runner)
-        proxy.run_proxy("test:proxy", "test-network")
-
-        call_args = mock_runner.engine.run.call_args[0]
-        assert "--network" in call_args
-        network_idx = call_args.index("--network")
-        assert call_args[network_idx + 1] == "test-network,podman"
-
-    def test_run_proxy_passes_dns_as_squid_env_var(self):
-        """run_proxy passes DNS as SQUID_DNS env var, not --dns flag."""
-        from paude.container.proxy_runner import ProxyRunner
-
-        mock_runner = MagicMock()
-        mock_runner.engine.binary = "podman"
-        mock_runner.engine.supports_multi_network_create = True
-        mock_runner.engine.default_bridge_network = "podman"
-        mock_runner.engine.run.return_value = MagicMock(returncode=0)
-
-        proxy = ProxyRunner(mock_runner)
-        proxy.run_proxy("test:proxy", "test-network", dns="192.168.127.1")
-
-        call_args = mock_runner.engine.run.call_args[0]
-        assert "--dns" not in call_args
-        assert "-e" in call_args
-        env_idx = call_args.index("-e")
-        assert call_args[env_idx + 1] == "SQUID_DNS=192.168.127.1"
-
-    def test_run_proxy_passes_allowed_domains_as_env_var(self):
-        """run_proxy passes allowed_domains as ALLOWED_DOMAINS env var."""
-        from paude.container.proxy_runner import ProxyRunner
-
-        mock_runner = MagicMock()
-        mock_runner.engine.binary = "podman"
-        mock_runner.engine.supports_multi_network_create = True
-        mock_runner.engine.default_bridge_network = "podman"
-        mock_runner.engine.run.return_value = MagicMock(returncode=0)
-
-        proxy = ProxyRunner(mock_runner)
-        allowed_domains = [".googleapis.com", ".pypi.org", "api.example.com"]
-        proxy.run_proxy("test:proxy", "test-network", allowed_domains=allowed_domains)
-
-        call_args = mock_runner.engine.run.call_args[0]
-        assert "-e" in call_args
-        env_indices = [i for i, x in enumerate(call_args) if x == "-e"]
-        found_domains = False
-        found_acls = False
-        for idx in env_indices:
-            val = call_args[idx + 1]
-            if val.startswith("ALLOWED_DOMAINS="):
-                found_domains = True
-                expected = "ALLOWED_DOMAINS=.googleapis.com,.pypi.org,api.example.com"
-                assert val == expected
-            if val.startswith("ALLOWED_DOMAIN_ACLS="):
-                found_acls = True
-                acl_content = val.split("=", 1)[1]
-                assert "dstdomain .googleapis.com" in acl_content
-                assert "dstdomain .pypi.org" in acl_content
-                assert "dstdomain api.example.com" in acl_content
-        assert found_domains, "ALLOWED_DOMAINS env var not found in command"
-        assert found_acls, "ALLOWED_DOMAIN_ACLS env var not found in command"
-
-    def test_run_proxy_omits_allowed_domains_when_none(self):
-        """run_proxy omits ALLOWED_DOMAINS env var when not provided."""
-        from paude.container.proxy_runner import ProxyRunner
-
-        mock_runner = MagicMock()
-        mock_runner.engine.binary = "podman"
-        mock_runner.engine.supports_multi_network_create = True
-        mock_runner.engine.default_bridge_network = "podman"
-        mock_runner.engine.run.return_value = MagicMock(returncode=0)
-
-        proxy = ProxyRunner(mock_runner)
-        proxy.run_proxy("test:proxy", "test-network")
-
-        call_args = mock_runner.engine.run.call_args[0]
-        env_indices = [i for i, x in enumerate(call_args) if x == "-e"]
-        for idx in env_indices:
-            assert not call_args[idx + 1].startswith("ALLOWED_DOMAINS="), (
-                "ALLOWED_DOMAINS should not be set when not provided"
-            )
-
-    def test_run_proxy_uses_unique_container_name(self):
-        """run_proxy uses unique container name to avoid conflicts."""
-        from paude.container.proxy_runner import ProxyRunner
-
-        mock_runner = MagicMock()
-        mock_runner.engine.binary = "podman"
-        mock_runner.engine.supports_multi_network_create = True
-        mock_runner.engine.default_bridge_network = "podman"
-        mock_runner.engine.run.return_value = MagicMock(returncode=0)
-
-        proxy = ProxyRunner(mock_runner)
-        name1 = proxy.run_proxy("test:proxy", "net1")
-        name2 = proxy.run_proxy("test:proxy", "net2")
-
-        assert name1 != name2
-
-    def test_run_proxy_failure_includes_error_message(self):
-        """run_proxy raises error with stderr on failure."""
-        from paude.container.proxy_runner import ProxyRunner, ProxyStartError
-
-        mock_runner = MagicMock()
-        mock_runner.engine.binary = "podman"
-        mock_runner.engine.supports_multi_network_create = True
-        mock_runner.engine.default_bridge_network = "podman"
-        mock_runner.engine.run.return_value = MagicMock(
-            returncode=125,
-            stderr="Error: container name already in use",
-        )
-
-        proxy = ProxyRunner(mock_runner)
-        with pytest.raises(ProxyStartError, match="container name already in use"):
-            proxy.run_proxy("test:proxy", "test-network")
-
     @patch("paude.transport.local.subprocess.run")
     def test_stop_container_uses_stop_with_short_timeout(self, mock_run):
         """stop_container uses podman stop with short timeout for graceful exit."""
@@ -608,7 +484,7 @@ class TestContainerRunner:
         runner.stop_container("test-container")
 
         call_args = mock_run.call_args[0][0]
-        # Should use 'stop' with 1-second timeout (squid has shutdown_lifetime=0)
+        # Should use 'stop' with 1-second timeout
         assert call_args[0] == "podman"
         assert call_args[1] == "stop"
         assert "-t" in call_args
@@ -809,14 +685,15 @@ class TestProxyDockerfileCopyFiles:
         assert dockerfile.exists(), f"Proxy Dockerfile not found: {dockerfile}"
 
         content = dockerfile.read_text()
-        # Match COPY lines, skipping --chmod=... or --from=... flags
-        copy_pattern = re.compile(r"^COPY\s+(?:--\S+\s+)*(\S+)\s+\S+", re.MULTILINE)
+        # Match COPY lines, capturing all flags and the source path
+        copy_pattern = re.compile(r"^COPY\s+((?:--\S+\s+)*)(\S+)\s+\S+", re.MULTILINE)
 
         sources = []
         for match in copy_pattern.finditer(content):
-            src = match.group(1)
-            # Skip multi-stage references like --from=builder
-            if src.startswith("--"):
+            flags = match.group(1)
+            src = match.group(2)
+            # Skip multi-stage COPY (--from=builder etc.)
+            if "--from=" in flags:
                 continue
             sources.append(src)
 
@@ -1650,3 +1527,84 @@ class TestProxyRunnerFixedIp:
 
         call_args = mock_runner.engine.run.call_args[0]
         assert "--ip" not in call_args
+
+
+class TestProxyRunnerAllowedClients:
+    """Tests for allowed_clients parameter in ProxyRunner."""
+
+    def test_create_session_proxy_passes_allowed_clients_env(self):
+        """create_session_proxy sets PAUDE_PROXY_ALLOWED_CLIENTS env var."""
+        from paude.container.proxy_runner import ProxyRunner
+
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.run.return_value = MagicMock(returncode=0)
+
+        proxy = ProxyRunner(mock_runner)
+        proxy.create_session_proxy(
+            name="paude-proxy-test",
+            image="proxy:latest",
+            network="paude-net-test",
+            ip="10.89.0.2",
+            allowed_clients="10.89.0.3",
+        )
+
+        call_args = mock_runner.engine.run.call_args_list[0][0]
+        env_indices = [i for i, a in enumerate(call_args) if a == "-e"]
+        env_vals = [call_args[i + 1] for i in env_indices]
+        assert "PAUDE_PROXY_ALLOWED_CLIENTS=10.89.0.3" in env_vals
+
+    def test_create_session_proxy_omits_allowed_clients_when_none(self):
+        """create_session_proxy omits PAUDE_PROXY_ALLOWED_CLIENTS when not set."""
+        from paude.container.proxy_runner import ProxyRunner
+
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.run.return_value = MagicMock(returncode=0)
+
+        proxy = ProxyRunner(mock_runner)
+        proxy.create_session_proxy(
+            name="paude-proxy-test",
+            image="proxy:latest",
+            network="paude-net-test",
+        )
+
+        call_args = mock_runner.engine.run.call_args_list[0][0]
+        env_indices = [i for i, a in enumerate(call_args) if a == "-e"]
+        env_vals = [call_args[i + 1] for i in env_indices]
+        assert not any("PAUDE_PROXY_ALLOWED_CLIENTS" in v for v in env_vals)
+
+    def test_recreate_session_proxy_passes_allowed_clients(self):
+        """recreate_session_proxy forwards allowed_clients to create."""
+        from paude.container.proxy_runner import ProxyRunner
+
+        mock_runner = MagicMock()
+        mock_runner.engine.binary = "podman"
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.run.return_value = MagicMock(returncode=0)
+
+        proxy = ProxyRunner(mock_runner)
+        proxy.recreate_session_proxy(
+            name="paude-proxy-test",
+            image="proxy:latest",
+            network="paude-net-test",
+            ip="10.89.0.2",
+            allowed_clients="10.89.0.3",
+        )
+
+        # Find the "create" call (after stop and rm)
+        create_calls = [
+            c
+            for c in mock_runner.engine.run.call_args_list
+            if c[0] and c[0][0] == "create"
+        ]
+        assert create_calls
+        call_args = create_calls[0][0]
+        env_indices = [i for i, a in enumerate(call_args) if a == "-e"]
+        env_vals = [call_args[i + 1] for i in env_indices]
+        assert "PAUDE_PROXY_ALLOWED_CLIENTS=10.89.0.3" in env_vals

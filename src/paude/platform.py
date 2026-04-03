@@ -19,7 +19,7 @@ def is_macos() -> bool:
 def get_podman_machine_dns() -> str | None:
     """Get the DNS IP address from the podman machine VM.
 
-    On macOS, containers run in a VM. The squid proxy needs the VM's
+    On macOS, containers run in a VM. The proxy needs the VM's
     DNS server IP to resolve external domains.
 
     Returns:

@@ -156,7 +156,7 @@ class SessionConnector:
         if pname is None:
             return 1
 
-        self._sync_for_connect(pname, name, github_token)
+        self._sync_for_connect(pname, name)
         pf_result, port_urls = self._start_port_forward(name, pname)
 
         stop_event = threading.Event()
@@ -264,36 +264,24 @@ class SessionConnector:
 
     def _get_session_agent_name(self, session_name: str) -> str:
         """Look up the agent name from StatefulSet labels."""
-        sts = self._lookup.get_statefulset(session_name)
-        return self._agent_name_from_sts(sts)
+        return self._lookup.get_session_agent_name(session_name)
 
     def _get_session_provider(self, session_name: str) -> str | None:
         """Look up the provider name from StatefulSet labels."""
-        sts = self._lookup.get_statefulset(session_name)
-        return self._provider_from_sts(sts)
+        return self._lookup.get_session_provider(session_name)
 
-    def _sync_for_connect(
-        self, pname: str, name: str, github_token: str | None
-    ) -> None:
-        """Sync credentials/config for a connect operation."""
-        from paude.agents import get_agent
-        from paude.agents.base import build_secret_environment_from_config
-
+    def _sync_for_connect(self, pname: str, name: str) -> None:
+        """Sync config for a connect operation (no credentials synced)."""
         sts = self._lookup.get_statefulset(name)
         agent_name = self._agent_name_from_sts(sts)
         provider = self._provider_from_sts(sts)
         yolo = self._yolo_from_sts(sts)
         agent_args = self._extract_env_from_sts(sts, "PAUDE_AGENT_ARGS")
 
-        agent = get_agent(agent_name, provider=provider)
-        secret_env = build_secret_environment_from_config(agent.config)
-
         if self._syncer.is_config_synced(pname):
             self._syncer.sync_credentials(
                 pname,
                 verbose=False,
-                github_token=github_token,
-                secret_env=secret_env,
                 agent_name=agent_name,
                 provider=provider,
                 args=agent_args,
@@ -303,10 +291,8 @@ class SessionConnector:
             self._syncer.sync_full_config(
                 pname,
                 verbose=False,
-                github_token=github_token,
                 agent_name=agent_name,
                 provider=provider,
-                secret_env=secret_env,
                 args=agent_args,
                 yolo=yolo,
             )

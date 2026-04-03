@@ -789,7 +789,7 @@ class TestPodmanProxyBehavior:
             text=True,
             timeout=15,
         )
-        # Squid only writes to the blocked log for denied requests.
+        # The proxy only writes to the blocked log for denied requests.
         # If the domain appears there, the proxy blocked it.
         blocked_log = backend.get_proxy_blocked_log(name)
         assert blocked_log is not None

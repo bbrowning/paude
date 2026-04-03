@@ -64,6 +64,7 @@ class ContainerRunner:
         env: dict[str, str],
         workdir: str,
         network: str | None = None,
+        network_ip: str | None = None,
         labels: dict[str, str] | None = None,
         entrypoint: str | None = None,
         command: list[str] | None = None,
@@ -96,7 +97,8 @@ class ContainerRunner:
             args.extend(self._engine.gpu_args(gpu))
 
         if network:
-            args.extend(["--network", network])
+            net_spec = f"{network}:ip={network_ip}" if network_ip else network
+            args.extend(["--network", net_spec])
 
         if dns:
             for server in dns:
@@ -237,6 +239,7 @@ class ContainerRunner:
         target: str,
         user: str = "root",
         owner: str | None = None,
+        mode: str = "600",
     ) -> None:
         """Write file content into a running container via exec.
 
@@ -250,7 +253,7 @@ class ContainerRunner:
         parts = [f"mkdir -p {parent}", f"cat > {quoted_target}"]
         if owner:
             parts.append(f"chown {shlex.quote(owner)} {quoted_target}")
-        parts.append(f"chmod 600 {quoted_target}")
+        parts.append(f"chmod {shlex.quote(mode)} {quoted_target}")
         self._engine.run(
             "exec",
             "-i",

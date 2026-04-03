@@ -204,7 +204,7 @@ class OpenShiftBackend:
     def stop_session(self, name: str) -> None:
         self._lifecycle.stop_session(name)
 
-    def start_agent_headless(self, name: str, github_token: str | None = None) -> None:
+    def start_agent_headless(self, name: str) -> None:
         from paude.backends.shared import pod_name
 
         self._lifecycle.start_agent_headless_in_pod(pod_name(name))

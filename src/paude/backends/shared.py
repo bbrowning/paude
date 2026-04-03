@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import ipaddress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -26,7 +27,55 @@ PAUDE_LABEL_PROVIDER = "paude.io/provider"
 PAUDE_LABEL_OTEL_PORTS = "paude.io/otel-ports"
 PAUDE_LABEL_OTEL_ENDPOINT = "paude.io/otel-endpoint"
 
-SQUID_BLOCKED_LOG_PATH = "/tmp/squid-blocked.log"  # noqa: S108
+PROXY_BLOCKED_LOG_PATH = "/tmp/paude-proxy-blocked.log"  # noqa: S108
+
+# Path where the proxy CA cert is injected into agent containers.
+CA_CERT_CONTAINER_PATH = "/etc/pki/ca-trust/source/anchors/paude-proxy-ca.crt"
+
+# Custom CA bundle combining system CAs + proxy CA cert.
+# Written to /tmp so no root is needed (works with OpenShift arbitrary UIDs).
+CA_BUNDLE_PATH = "/tmp/paude-ca-bundle.pem"  # noqa: S108
+
+# System CA bundle paths across distros (RHEL/CentOS, Debian/Ubuntu,
+# openSUSE, Alpine).  Keep in sync with _find_sys_ca_bundle() in
+# containers/paude/entrypoint-lib-credentials.sh.
+SYS_CA_BUNDLE_PATHS = (
+    "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+    "/etc/ssl/certs/ca-certificates.crt",
+    "/etc/ssl/ca-bundle.pem",
+    "/etc/ssl/cert.pem",
+)
+
+
+def derive_agent_ip(proxy_ip: str) -> str:
+    """Derive the expected agent container IP from the proxy IP.
+
+    The agent container is the next host on the internal network
+    after the proxy (e.g. proxy=10.89.0.2 → agent=10.89.0.3).
+    Used for defense-in-depth source IP filtering.
+    """
+    return str(ipaddress.ip_address(proxy_ip) + 1)
+
+
+# CA certificate polling constants (shared by Podman and OpenShift backends).
+CA_CERT_POLL_INTERVAL = 1
+CA_CERT_POLL_TIMEOUT = 30
+
+# Sentinel value for credentials managed by paude-proxy.
+# Agent containers see this instead of real API keys.
+PROXY_MANAGED_CREDENTIAL = "paude-proxy-managed"  # noqa: S105
+
+# Stub GCP ADC JSON that satisfies Google client library structure checks.
+# The proxy handles real authentication.
+STUB_ADC_JSON = (
+    '{"type": "authorized_user",'
+    ' "client_id": "paude-proxy-managed",'
+    ' "client_secret": "paude-proxy-managed",'
+    ' "refresh_token": "paude-proxy-managed"}'
+)
+
+# Environment variable name for passing GCP ADC JSON content to the proxy.
+PROXY_GCP_ADC_ENV = "GCP_ADC_JSON"
 
 # Python snippet executed inside containers to extract the OpenClaw auth token.
 # Used by both Podman and OpenShift backends via exec.
@@ -116,6 +165,9 @@ def build_session_env(
     backends: agent env, YOLO flags, agent args, backward compat, proxy env,
     and prompt suppression.
 
+    When a proxy is configured, all real credentials are handled by the proxy
+    container and the agent only sees dummy sentinel values.
+
     Args:
         config: Session configuration.
         agent: Resolved agent instance.
@@ -124,8 +176,6 @@ def build_session_env(
     Returns:
         Tuple of (env_dict, agent_args).
     """
-    from paude.environment import build_proxy_environment
-
     env = dict(config.env)
     env.update(build_agent_env(agent.config))
     # build_agent_env sets LAUNCH_CMD to process_name, which is wrong for
@@ -147,8 +197,14 @@ def build_session_env(
 
     env["PAUDE_SUPPRESS_PROMPTS"] = "1"
 
-    if proxy_name is not None:
+    if proxy_name:
+        from paude.environment import build_proxy_environment
+
         env.update(build_proxy_environment(proxy_name))
+        # Set dummy credential values — real creds live in the proxy container
+        for var in agent.config.secret_env_vars:
+            env[var] = PROXY_MANAGED_CREDENTIAL
+        env["GH_TOKEN"] = PROXY_MANAGED_CREDENTIAL
 
     return env, agent_args
 
@@ -171,6 +227,18 @@ def proxy_resource_name(session_name: str) -> str:
 def pod_name(session_name: str) -> str:
     """Get the pod name for a session (OpenShift StatefulSet pod)."""
     return f"paude-{session_name}-0"
+
+
+def agent_pod_fqdn(session_name: str, namespace: str) -> str:
+    """Get the fully-qualified DNS name for the agent StatefulSet pod.
+
+    Requires a headless Service whose name matches the StatefulSet's
+    ``serviceName`` (i.e. ``resource_name(session_name)``).
+    """
+    return (
+        f"{pod_name(session_name)}.{resource_name(session_name)}"
+        f".{namespace}.svc.cluster.local"
+    )
 
 
 def pvc_name(session_name: str) -> str:
@@ -207,6 +275,48 @@ def engine_binary_for_backend(backend_type: str) -> str:
     if backend_type in LOCAL_BACKEND_TYPES:
         return backend_type
     raise ValueError(f"No engine binary for backend type: {backend_type}")
+
+
+def local_gcp_adc_path() -> Path | None:
+    """Return the local GCP ADC file path, or None if it doesn't exist."""
+    from paude.constants import GCP_ADC_FILENAME
+
+    path = Path.home() / ".config" / "gcloud" / GCP_ADC_FILENAME
+    return path if path.is_file() else None
+
+
+def gather_proxy_credentials(
+    agent_config: AgentConfig,
+    *,
+    gcp_adc_path: Path | None = None,
+) -> dict[str, str]:
+    """Gather real credentials from the host for the proxy container.
+
+    Reads secret env vars (API keys) and GH_TOKEN from the host
+    environment. If a GCP ADC file exists locally, its content is
+    passed as ``GCP_ADC_JSON`` so the proxy has it at startup.
+
+    Args:
+        agent_config: Agent configuration with secret_env_vars.
+        gcp_adc_path: Path to local GCP ADC file, or None if absent.
+
+    Returns:
+        Dict of environment variables for the proxy container.
+    """
+    import os
+
+    from paude.agents.base import build_secret_environment_from_config
+
+    creds = build_secret_environment_from_config(agent_config)
+
+    gh_token = os.environ.get("PAUDE_GITHUB_TOKEN")
+    if gh_token:
+        creds["GH_TOKEN"] = gh_token
+
+    if gcp_adc_path is not None:
+        creds[PROXY_GCP_ADC_ENV] = gcp_adc_path.read_text()
+
+    return creds
 
 
 def generate_sandbox_config_script(

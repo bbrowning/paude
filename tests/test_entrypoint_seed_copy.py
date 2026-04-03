@@ -1221,6 +1221,197 @@ class TestCursorSandboxConfig:
         )
 
 
+class TestSetupCaTrustContract:
+    """Contract tests: setup_ca_trust supports multiple distros."""
+
+    def test_find_sys_ca_bundle_checks_multiple_paths(self) -> None:
+        """_find_sys_ca_bundle must probe Debian, Alpine, and SUSE paths."""
+        content = ENTRYPOINT_LIB_CREDENTIALS_PATH.read_text()
+        assert "/etc/ssl/certs/ca-certificates.crt" in content, (
+            "setup_ca_trust must support Debian/Ubuntu CA bundle path"
+        )
+        assert "/etc/ssl/cert.pem" in content, (
+            "setup_ca_trust must support Alpine CA bundle path"
+        )
+        assert "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem" in content, (
+            "setup_ca_trust must support RHEL/CentOS CA bundle path"
+        )
+
+    def test_setup_ca_trust_has_fallback_without_proxy_ca(self) -> None:
+        """setup_ca_trust must fall back to system-only bundle without proxy CA."""
+        content = ENTRYPOINT_LIB_CREDENTIALS_PATH.read_text()
+        # The function must have an else branch that copies just the system
+        # bundle when the proxy CA cert is absent, so SSL_CERT_FILE always
+        # points to a valid file.
+        func_start = content.find("setup_ca_trust()")
+        func_body = content[func_start:]
+        assert "else" in func_body, (
+            "setup_ca_trust must have an else branch for the no-proxy-CA case"
+        )
+        assert "cp " in func_body, (
+            "setup_ca_trust must cp the system bundle when proxy CA is absent"
+        )
+
+    def test_path_list_matches_shared_constant(self) -> None:
+        """Entrypoint CA paths must match SYS_CA_BUNDLE_PATHS in shared.py."""
+        import re
+
+        from paude.backends.shared import SYS_CA_BUNDLE_PATHS
+
+        content = ENTRYPOINT_LIB_CREDENTIALS_PATH.read_text()
+        # Extract paths from the _find_sys_ca_bundle function
+        func_start = content.find("_find_sys_ca_bundle()")
+        func_end = content.find("}", func_start)
+        func_body = content[func_start:func_end]
+        paths = [p.rstrip(";") for p in re.findall(r"(/etc/\S+)", func_body)]
+        assert tuple(paths) == SYS_CA_BUNDLE_PATHS, (
+            f"CA bundle paths in entrypoint ({paths}) must match "
+            f"SYS_CA_BUNDLE_PATHS in shared.py ({SYS_CA_BUNDLE_PATHS})"
+        )
+
+
+class TestSetupCaTrustFunctional:
+    """Functional tests: run setup_ca_trust in a temp directory."""
+
+    def _build_ca_trust_script(
+        self,
+        tmp_path: Path,
+        *,
+        sys_bundle_path: str,
+        has_proxy_ca: bool = True,
+    ) -> str:
+        """Build a script that exercises setup_ca_trust with custom paths."""
+        import textwrap
+
+        # Create fake system CA bundle
+        bundle_dir = Path(sys_bundle_path).parent
+        (tmp_path / bundle_dir.relative_to("/")).mkdir(parents=True, exist_ok=True)
+        sys_bundle_file = tmp_path / Path(sys_bundle_path).relative_to("/")
+        sys_bundle_file.write_text("SYSTEM-CA-BUNDLE\n")
+
+        # Create fake proxy CA cert
+        proxy_ca_dir = tmp_path / "etc/pki/ca-trust/source/anchors"
+        proxy_ca_dir.mkdir(parents=True, exist_ok=True)
+        if has_proxy_ca:
+            (proxy_ca_dir / "paude-proxy-ca.crt").write_text("PROXY-CA-CERT\n")
+
+        custom_bundle = tmp_path / "tmp" / "paude-ca-bundle.pem"
+        (tmp_path / "tmp").mkdir(exist_ok=True)
+
+        return textwrap.dedent(f"""\
+            #!/bin/bash
+            set -e
+
+            _find_sys_ca_bundle() {{
+                local path
+                for path in \\
+                    {tmp_path}/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem \\
+                    {tmp_path}/etc/ssl/certs/ca-certificates.crt \\
+                    {tmp_path}/etc/ssl/ca-bundle.pem \\
+                    {tmp_path}/etc/ssl/cert.pem; do
+                    if [[ -f "$path" ]]; then
+                        echo "$path"
+                        return 0
+                    fi
+                done
+                return 1
+            }}
+
+            setup_ca_trust() {{
+                local ca_cert="{proxy_ca_dir}/paude-proxy-ca.crt"
+                local custom_bundle="{custom_bundle}"
+                local sys_bundle
+                sys_bundle=$(_find_sys_ca_bundle) || return 0
+
+                if [[ -f "$ca_cert" ]]; then
+                    cat "$sys_bundle" "$ca_cert" > "$custom_bundle" 2>/dev/null || true
+                else
+                    cp "$sys_bundle" "$custom_bundle" 2>/dev/null || true
+                fi
+            }}
+
+            setup_ca_trust
+        """)
+
+    def test_creates_bundle_with_centos_path(self, tmp_path: Path) -> None:
+        """Bundle created when system CA is at RHEL/CentOS path."""
+        script = self._build_ca_trust_script(
+            tmp_path,
+            sys_bundle_path="/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+        )
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        bundle = (tmp_path / "tmp" / "paude-ca-bundle.pem").read_text()
+        assert "SYSTEM-CA-BUNDLE" in bundle
+        assert "PROXY-CA-CERT" in bundle
+
+    def test_creates_bundle_with_debian_path(self, tmp_path: Path) -> None:
+        """Bundle created when system CA is at Debian/Ubuntu path."""
+        script = self._build_ca_trust_script(
+            tmp_path,
+            sys_bundle_path="/etc/ssl/certs/ca-certificates.crt",
+        )
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        bundle = (tmp_path / "tmp" / "paude-ca-bundle.pem").read_text()
+        assert "SYSTEM-CA-BUNDLE" in bundle
+        assert "PROXY-CA-CERT" in bundle
+
+    def test_creates_bundle_with_alpine_path(self, tmp_path: Path) -> None:
+        """Bundle created when system CA is at Alpine path."""
+        script = self._build_ca_trust_script(
+            tmp_path,
+            sys_bundle_path="/etc/ssl/cert.pem",
+        )
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        bundle = (tmp_path / "tmp" / "paude-ca-bundle.pem").read_text()
+        assert "SYSTEM-CA-BUNDLE" in bundle
+        assert "PROXY-CA-CERT" in bundle
+
+    def test_creates_bundle_without_proxy_ca(self, tmp_path: Path) -> None:
+        """Bundle created from system CAs only when proxy CA is absent."""
+        script = self._build_ca_trust_script(
+            tmp_path,
+            sys_bundle_path="/etc/ssl/certs/ca-certificates.crt",
+            has_proxy_ca=False,
+        )
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        bundle = (tmp_path / "tmp" / "paude-ca-bundle.pem").read_text()
+        assert "SYSTEM-CA-BUNDLE" in bundle
+        assert "PROXY-CA-CERT" not in bundle
+
+    def test_no_bundle_when_no_system_ca(self, tmp_path: Path) -> None:
+        """No bundle created when no system CA bundle exists."""
+        import textwrap
+
+        custom_bundle = tmp_path / "tmp" / "paude-ca-bundle.pem"
+        (tmp_path / "tmp").mkdir(exist_ok=True)
+
+        script = textwrap.dedent(f"""\
+            #!/bin/bash
+            _find_sys_ca_bundle() {{
+                return 1
+            }}
+            setup_ca_trust() {{
+                local ca_cert="/nonexistent"
+                local custom_bundle="{custom_bundle}"
+                local sys_bundle
+                sys_bundle=$(_find_sys_ca_bundle) || return 0
+                cat "$sys_bundle" > "$custom_bundle" 2>/dev/null || true
+            }}
+            setup_ca_trust
+        """)
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+        assert not custom_bundle.exists()
+
+
 class TestGenerateSandboxConfigScript:
     """Tests for generate_sandbox_config_script() in shared.py."""
 

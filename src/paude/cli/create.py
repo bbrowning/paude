@@ -114,13 +114,6 @@ def session_create(
             help="Target platform for image builds (e.g., linux/amd64, linux/arm64).",
         ),
     ] = None,
-    credential_timeout: Annotated[
-        int | None,
-        typer.Option(
-            "--credential-timeout",
-            help="Inactivity minutes before removing credentials (OpenShift).",
-        ),
-    ] = None,
     agent: Annotated[
         str | None,
         typer.Option(
@@ -222,7 +215,6 @@ def session_create(
         cli_yolo=yolo,
         cli_git=git,
         cli_pvc_size=pvc_size,
-        cli_credential_timeout=credential_timeout,
         cli_platform=platform,
         cli_openshift_context=openshift_context,
         cli_openshift_namespace=openshift_namespace,
@@ -240,7 +232,6 @@ def session_create(
     r_yolo = resolved.yolo.value
     r_git = resolved.git.value
     r_pvc_size = resolved.pvc_size.value
-    r_credential_timeout = resolved.credential_timeout.value
     r_platform = resolved.platform.value
     r_openshift_context = resolved.openshift_context.value
     r_openshift_namespace = resolved.openshift_namespace.value
@@ -332,7 +323,7 @@ def session_create(
         otel_endpoint=r_otel_endpoint,
     )
 
-    # Compute OTEL proxy ports (non-standard ports to open in squid)
+    # Compute OTEL proxy ports (non-standard ports to allow through proxy)
     otel_ports: list[int] = []
     if r_otel_endpoint:
         from paude.otel import otel_proxy_ports
@@ -384,7 +375,6 @@ def session_create(
             storage_class=storage_class,
             openshift_context=r_openshift_context,
             openshift_namespace=r_openshift_namespace,
-            credential_timeout=r_credential_timeout,
             agent_name=r_agent,
             provider_name=r_provider,
             gpu=r_gpu,

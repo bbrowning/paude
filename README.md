@@ -134,7 +134,7 @@ Export agent telemetry (metrics, logs, traces) to any OTLP-compatible collector:
 paude create --otel-endpoint http://collector:4318 my-project
 ```
 
-The endpoint hostname is automatically added to the proxy allowlist and non-standard ports (like 4318) are opened in the squid proxy. Supported agents: Claude Code, Gemini CLI, OpenClaw. Set `otel-endpoint` in `~/.config/paude/defaults.json` to apply globally.
+The endpoint hostname is automatically added to the proxy allowlist and non-standard ports (like 4318) are opened in the proxy. Supported agents: Claude Code, Gemini CLI, OpenClaw. Set `otel-endpoint` in `~/.config/paude/defaults.json` to apply globally.
 
 ### Passing a Task
 

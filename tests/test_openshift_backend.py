@@ -18,6 +18,8 @@ from paude.backends.openshift import (
     OpenShiftConfig,
 )
 
+_FAKE_CA = ("FAKE_CERT_PEM", "FAKE_KEY_PEM")
+
 
 class TestOpenShiftConfig:
     """Tests for OpenShiftConfig dataclass."""
@@ -245,8 +247,14 @@ class TestOpenShiftSessionHelpers:
 class TestOpenShiftCreateSession:
     """Tests for OpenShiftBackend.create_session."""
 
+    @patch(
+        "paude.backends.openshift.certs.generate_ca_cert",
+        return_value=_FAKE_CA,
+    )
     @patch("subprocess.run")
-    def test_create_session_creates_statefulset(self, mock_run: MagicMock) -> None:
+    def test_create_session_creates_statefulset(
+        self, mock_run: MagicMock, mock_ca: MagicMock
+    ) -> None:
         """Create session creates a StatefulSet."""
 
         def run_side_effect(*args, **kwargs):
@@ -254,6 +262,9 @@ class TestOpenShiftCreateSession:
             # Return "Running" for pod status check
             if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
                 return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return "1" for deployment readiness check (proxy)
+            if "get" in cmd and "deployment" in cmd and "readyReplicas" in str(cmd):
+                return MagicMock(returncode=0, stdout="1", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         mock_run.side_effect = run_side_effect
@@ -316,9 +327,13 @@ class TestOpenShiftCreateSession:
         with pytest.raises(SessionExistsError):
             backend.create_session(config)
 
+    @patch(
+        "paude.backends.openshift.certs.generate_ca_cert",
+        return_value=_FAKE_CA,
+    )
     @patch("subprocess.run")
     def test_create_session_waits_for_pod_and_syncs_config(
-        self, mock_run: MagicMock
+        self, mock_run: MagicMock, mock_ca: MagicMock
     ) -> None:
         """Create session waits for pod ready and syncs config."""
         calls_log = []
@@ -329,6 +344,9 @@ class TestOpenShiftCreateSession:
             # Return "Running" for pod status check
             if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
                 return MagicMock(returncode=0, stdout="Running", stderr="")
+            # Return "1" for deployment readiness check (proxy)
+            if "get" in cmd and "deployment" in cmd and "readyReplicas" in str(cmd):
+                return MagicMock(returncode=0, stdout="1", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         mock_run.side_effect = run_side_effect
@@ -1459,6 +1477,26 @@ class TestCreateProxyDeployment:
         assert container["image"] == "quay.io/test/proxy:latest"
         assert container["ports"][0]["containerPort"] == 3128
 
+    @patch("subprocess.run")
+    def test_sets_allowed_clients_env_var(self, mock_run: MagicMock) -> None:
+        """create_deployment sets PAUDE_PROXY_ALLOWED_CLIENTS to agent pod FQDN."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._proxy.create_deployment("my-session", "quay.io/test/proxy:latest")
+
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        assert len(apply_calls) >= 1
+
+        call_kwargs = apply_calls[0][1]
+        spec = json.loads(call_kwargs["input"])
+        container = spec["spec"]["template"]["spec"]["containers"][0]
+        env_dict = {e["name"]: e["value"] for e in container.get("env", [])}
+
+        assert "PAUDE_PROXY_ALLOWED_CLIENTS" in env_dict
+        expected_fqdn = "paude-my-session-0.paude-my-session.test-ns.svc.cluster.local"
+        assert env_dict["PAUDE_PROXY_ALLOWED_CLIENTS"] == expected_fqdn
+
 
 class TestProxyImagePullPolicy:
     """Tests for proxy deployment imagePullPolicy from env var."""
@@ -1533,40 +1571,6 @@ class TestCreateProxyService:
         assert spec["spec"]["selector"]["app"] == "paude-proxy"
         assert spec["spec"]["selector"]["paude.io/session-name"] == "my-session"
         assert spec["spec"]["ports"][0]["port"] == 3128
-
-
-class TestEnsureNetworkPolicyPermissive:
-    """Tests for _proxy.ensure_network_policy_permissive method."""
-
-    @patch("subprocess.run")
-    def test_creates_permissive_egress_policy_for_paude_pod(
-        self, mock_run: MagicMock
-    ) -> None:
-        """_proxy.ensure_network_policy_permissive creates policy allowing all egress."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        backend._proxy.ensure_network_policy_permissive("my-session")
-
-        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
-        assert len(apply_calls) >= 1
-
-        call_kwargs = apply_calls[0][1]
-        spec = json.loads(call_kwargs["input"])
-
-        assert spec["kind"] == "NetworkPolicy"
-        assert spec["metadata"]["name"] == "paude-egress-my-session"
-        assert spec["metadata"]["namespace"] == "test-ns"
-
-        # Verify pod selector targets paude (not proxy)
-        selector = spec["spec"]["podSelector"]["matchLabels"]
-        assert selector["app"] == "paude"
-        assert selector["paude.io/session-name"] == "my-session"
-
-        # Verify egress allows all (empty rule)
-        egress = spec["spec"]["egress"]
-        assert len(egress) == 1
-        assert egress[0] == {}  # Empty rule = allow all
 
 
 class TestNetworkPolicyWithProxySelector:
@@ -1662,11 +1666,17 @@ class TestNetworkPolicyWithProxySelector:
         assert to_entry["podSelector"] == {}, "podSelector should be empty"
 
 
+@patch(
+    "paude.backends.openshift.certs.generate_ca_cert",
+    return_value=_FAKE_CA,
+)
 class TestCreateSessionWithProxy:
     """Tests for create_session with proxy deployment."""
 
     @patch("subprocess.run")
-    def test_creates_proxy_when_allowed_domains_set(self, mock_run: MagicMock) -> None:
+    def test_creates_proxy_when_allowed_domains_set(
+        self, mock_run: MagicMock, mock_ca: MagicMock
+    ) -> None:
         """create_session creates proxy when allowed_domains is set."""
 
         def run_side_effect(*args, **kwargs):
@@ -1705,7 +1715,9 @@ class TestCreateSessionWithProxy:
         assert len(deployment_calls) >= 1
 
     @patch("subprocess.run")
-    def test_proxy_gets_allowed_domains_env_var(self, mock_run: MagicMock) -> None:
+    def test_proxy_gets_allowed_domains_env_var(
+        self, mock_run: MagicMock, mock_ca: MagicMock
+    ) -> None:
         """create_session passes ALLOWED_DOMAINS to proxy deployment."""
 
         def run_side_effect(*args, **kwargs):
@@ -1751,7 +1763,7 @@ class TestCreateSessionWithProxy:
 
     @patch("subprocess.run")
     def test_sets_proxy_env_vars_when_allowed_domains_set(
-        self, mock_run: MagicMock
+        self, mock_run: MagicMock, mock_ca: MagicMock
     ) -> None:
         """create_session sets HTTP_PROXY env vars when allowed_domains is set."""
 
@@ -1799,13 +1811,17 @@ class TestCreateSessionWithProxy:
         assert env_dict.get("no_proxy") == "localhost,127.0.0.1"
 
     @patch("subprocess.run")
-    def test_no_proxy_when_allowed_domains_none(self, mock_run: MagicMock) -> None:
-        """create_session does not create proxy when allowed_domains=None."""
+    def test_creates_headless_service_for_agent(
+        self, mock_run: MagicMock, mock_ca: MagicMock
+    ) -> None:
+        """create_session creates a headless Service for StatefulSet pod DNS."""
 
         def run_side_effect(*args, **kwargs):
             cmd = args[0] if args else kwargs.get("args", [])
             if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):
                 return MagicMock(returncode=0, stdout="Running", stderr="")
+            if "get" in cmd and "deployment" in cmd and "readyReplicas" in str(cmd):
+                return MagicMock(returncode=0, stdout="1", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         mock_run.side_effect = run_side_effect
@@ -1816,31 +1832,27 @@ class TestCreateSessionWithProxy:
         config = SessionConfig(
             name="test-session",
             workspace=Path("/home/user/project"),
-            image="quay.io/test/paude:v1",
-            allowed_domains=None,
+            image="quay.io/test/paude-base-centos10:v1",
+            allowed_domains=[".googleapis.com"],
         )
 
         backend.create_session(config)
 
-        # Verify no proxy deployment was created
+        # Find the headless Service creation (clusterIP: None)
         apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
-        deployment_calls = [
+        headless_svc_calls = [
             c
             for c in apply_calls
-            if '"kind": "Deployment"' in str(c[1].get("input", ""))
+            if '"clusterIP": "None"' in str(c[1].get("input", ""))
         ]
-        assert len(deployment_calls) == 0
+        assert len(headless_svc_calls) >= 1
 
-        # Verify no proxy env vars in StatefulSet
-        sts_calls = [
-            c for c in apply_calls if "StatefulSet" in str(c[1].get("input", ""))
-        ]
-        if sts_calls:
-            sts_spec = json.loads(sts_calls[0][1]["input"])
-            container = sts_spec["spec"]["template"]["spec"]["containers"][0]
-            env_dict = {e["name"]: e["value"] for e in container["env"]}
-            assert "HTTP_PROXY" not in env_dict
-            assert "HTTPS_PROXY" not in env_dict
+        svc_spec = json.loads(headless_svc_calls[0][1]["input"])
+        assert svc_spec["kind"] == "Service"
+        assert svc_spec["metadata"]["name"] == "paude-test-session"
+        assert svc_spec["spec"]["clusterIP"] == "None"
+        assert svc_spec["spec"]["selector"]["app"] == "paude"
+        assert svc_spec["spec"]["selector"]["paude.io/session-name"] == "test-session"
 
 
 class TestDeleteSessionWithProxy:
@@ -1876,6 +1888,38 @@ class TestDeleteSessionWithProxy:
         assert "paude-proxy-test" in calls_str
         assert "deployment" in calls_str.lower()
         assert "service" in calls_str.lower()
+
+    @patch("subprocess.run")
+    def test_deletes_headless_service(self, mock_run: MagicMock) -> None:
+        """delete_session deletes the agent headless Service."""
+
+        def run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "get" in cmd and "statefulset" in cmd:
+                return MagicMock(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "apiVersion": "apps/v1",
+                            "kind": "StatefulSet",
+                            "metadata": {"name": "paude-test"},
+                        }
+                    ),
+                    stderr="",
+                )
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend.delete_session("test", confirm=True)
+
+        # Verify headless service deletion (paude-test, not paude-proxy-test)
+        delete_calls = [c for c in mock_run.call_args_list if "delete" in str(c)]
+        headless_svc_deleted = any(
+            "service" in str(c) and "paude-test" in str(c) for c in delete_calls
+        )
+        assert headless_svc_deleted
 
 
 class TestDeleteProxyResources:
@@ -1941,11 +1985,89 @@ class TestEnsureProxyNetworkPolicy:
         assert egress[0] == {}  # Empty rule = allow all
 
 
+class TestEnsureProxyIngressPolicy:
+    """Tests for _proxy.ensure_proxy_ingress_policy method."""
+
+    @patch("subprocess.run")
+    def test_targets_proxy_pods(self, mock_run: MagicMock) -> None:
+        """Ingress policy selects this session's proxy pod."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._proxy.ensure_proxy_ingress_policy("my-session")
+
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        assert len(apply_calls) >= 1
+
+        spec = json.loads(apply_calls[0][1]["input"])
+        assert spec["kind"] == "NetworkPolicy"
+        assert spec["metadata"]["name"] == "paude-proxy-ingress-my-session"
+
+        selector = spec["spec"]["podSelector"]["matchLabels"]
+        assert selector["app"] == "paude-proxy"
+        assert selector["paude.io/session-name"] == "my-session"
+
+    @patch("subprocess.run")
+    def test_only_allows_agent_pod(self, mock_run: MagicMock) -> None:
+        """Ingress rule only allows the paired paude agent pod."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._proxy.ensure_proxy_ingress_policy("my-session")
+
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        spec = json.loads(apply_calls[0][1]["input"])
+
+        assert spec["spec"]["policyTypes"] == ["Ingress"]
+        ingress = spec["spec"]["ingress"]
+        assert len(ingress) == 1
+
+        from_selector = ingress[0]["from"][0]["podSelector"]["matchLabels"]
+        assert from_selector["app"] == "paude"
+        assert from_selector["paude.io/session-name"] == "my-session"
+
+    @patch("subprocess.run")
+    def test_restricts_to_port_3128(self, mock_run: MagicMock) -> None:
+        """Ingress rule only allows TCP port 3128."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._proxy.ensure_proxy_ingress_policy("my-session")
+
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        spec = json.loads(apply_calls[0][1]["input"])
+
+        ports = spec["spec"]["ingress"][0]["ports"]
+        assert len(ports) == 1
+        assert ports[0] == {"protocol": "TCP", "port": 3128}
+
+    @patch("subprocess.run")
+    def test_has_session_label_for_cleanup(self, mock_run: MagicMock) -> None:
+        """Policy has paude.io/session-name label for automatic cleanup."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
+        backend._proxy.ensure_proxy_ingress_policy("my-session")
+
+        apply_calls = [c for c in mock_run.call_args_list if "apply" in str(c)]
+        spec = json.loads(apply_calls[0][1]["input"])
+
+        labels = spec["metadata"]["labels"]
+        assert labels["paude.io/session-name"] == "my-session"
+        assert labels["app"] == "paude-proxy"
+
+
+@patch(
+    "paude.backends.openshift.certs.generate_ca_cert",
+    return_value=_FAKE_CA,
+)
 class TestProxyImageDerivation:
     """Tests for proxy image derivation logic."""
 
     @patch("subprocess.run")
-    def test_derives_proxy_image_from_main_image(self, mock_run: MagicMock) -> None:
+    def test_derives_proxy_image_from_main_image(
+        self, mock_run: MagicMock, mock_ca: MagicMock
+    ) -> None:
         """Proxy image is derived by replacing image name pattern."""
 
         def run_side_effect(*args, **kwargs):
@@ -1989,7 +2111,7 @@ class TestProxyImageDerivation:
 
     @patch("subprocess.run")
     def test_falls_back_to_default_when_pattern_not_found(
-        self, mock_run: MagicMock
+        self, mock_run: MagicMock, mock_ca: MagicMock
     ) -> None:
         """Falls back to default proxy image when pattern doesn't match."""
 
@@ -2431,26 +2553,6 @@ class TestSyncCursorAuthJson:
         assert "cursor-auth.json" not in all_calls_str
 
     @patch("subprocess.run")
-    def test_sync_credentials_syncs_auth_json_for_cursor(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """sync_credentials syncs auth.json on reconnect for cursor agent."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        config_cursor = tmp_path / ".config" / "cursor"
-        config_cursor.mkdir(parents=True)
-        (config_cursor / "auth.json").write_text('{"accessToken": "test"}')
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            backend._syncer.sync_credentials("test-pod-0", agent_name="cursor")
-
-        cp_calls = [c for c in mock_run.call_args_list if "cp" in str(c)]
-        auth_cp_calls = [c for c in cp_calls if "cursor-auth.json" in str(c)]
-        assert len(auth_cp_calls) >= 1
-
-    @patch("subprocess.run")
     def test_sync_credentials_does_not_sync_auth_json_for_claude(
         self, mock_run: MagicMock, tmp_path: Path
     ) -> None:
@@ -2470,11 +2572,17 @@ class TestSyncCursorAuthJson:
         assert "cursor-auth.json" not in all_calls_str
 
 
+@patch(
+    "paude.backends.openshift.certs.generate_ca_cert",
+    return_value=_FAKE_CA,
+)
 class TestCreateSessionWithProxyNetworkPolicy:
     """Tests for create_session creating proxy NetworkPolicy."""
 
     @patch("subprocess.run")
-    def test_creates_proxy_network_policy(self, mock_run: MagicMock) -> None:
+    def test_creates_proxy_network_policy(
+        self, mock_run: MagicMock, mock_ca: MagicMock
+    ) -> None:
         """create_session creates NetworkPolicy for proxy."""
 
         def run_side_effect(*args, **kwargs):
@@ -2540,32 +2648,6 @@ class TestSyncConfigToPod:
         assert "rm -rf /credentials" not in exec_cmd
         assert "mkdir -p /credentials/gcloud /credentials/claude" in exec_cmd
         assert "chmod -R g+rwX /credentials" in exec_cmd
-
-    @patch("subprocess.run")
-    def test_syncs_gcloud_credentials(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """_syncer.sync_full_config syncs gcloud credential files."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        # Create mock gcloud files
-        gcloud_dir = tmp_path / ".config" / "gcloud"
-        gcloud_dir.mkdir(parents=True)
-        (gcloud_dir / "application_default_credentials.json").write_text("{}")
-        (gcloud_dir / "credentials.db").write_text("db")
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch.object(Path, "home", return_value=tmp_path):
-            backend._syncer.sync_full_config("test-pod-0")
-
-        # Find oc cp calls for gcloud files
-        cp_calls = [c for c in mock_run.call_args_list if "cp" in str(c)]
-        cp_calls_str = str(cp_calls)
-
-        # Verify gcloud files are synced
-        assert "application_default_credentials.json" in cp_calls_str
-        assert "credentials.db" in cp_calls_str
 
     @patch("subprocess.run")
     def test_syncs_claude_config_files(
@@ -3168,7 +3250,6 @@ class TestEnsureProxyImageViaBuild:
         proxy_dir = tmp_path / "containers" / "proxy"
         proxy_dir.mkdir(parents=True)
         (proxy_dir / "Dockerfile").write_text("FROM centos:9")
-        (proxy_dir / "squid.conf").write_text("http_port 3128")
         (proxy_dir / "entrypoint.sh").write_text("#!/bin/bash")
 
         def run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
@@ -3226,7 +3307,6 @@ class TestEnsureProxyImageViaBuild:
         proxy_dir = tmp_path / "containers" / "proxy"
         proxy_dir.mkdir(parents=True)
         (proxy_dir / "Dockerfile").write_text("FROM centos:9")
-        (proxy_dir / "squid.conf").write_text("http_port 3128")
         (proxy_dir / "entrypoint.sh").write_text("#!/bin/bash")
 
         def run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
@@ -3267,7 +3347,6 @@ class TestEnsureProxyImageViaBuild:
         proxy_dir = tmp_path / "containers" / "proxy"
         proxy_dir.mkdir(parents=True)
         (proxy_dir / "Dockerfile").write_text("FROM centos:9")
-        (proxy_dir / "squid.conf").write_text("http_port 3128")
         (proxy_dir / "entrypoint.sh").write_text("#!/bin/bash")
 
         def run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
@@ -3328,7 +3407,6 @@ class TestEnsureProxyImageViaBuild:
         # Create proxy directory but without Dockerfile
         proxy_dir = tmp_path / "containers" / "proxy"
         proxy_dir.mkdir(parents=True)
-        (proxy_dir / "squid.conf").write_text("http_port 3128")
         (proxy_dir / "entrypoint.sh").write_text("#!/bin/bash")
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
@@ -3363,9 +3441,13 @@ class TestSessionConfigProxyImage:
         )
         assert config.proxy_image is None
 
+    @patch(
+        "paude.backends.openshift.certs.generate_ca_cert",
+        return_value=_FAKE_CA,
+    )
     @patch("subprocess.run")
     def test_create_session_uses_provided_proxy_image(
-        self, mock_run: MagicMock
+        self, mock_run: MagicMock, mock_ca: MagicMock
     ) -> None:
         """create_session uses config.proxy_image when provided."""
         proxy_image_used = []
@@ -3373,8 +3455,8 @@ class TestSessionConfigProxyImage:
         def run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
             cmd = args[0] if args else kwargs.get("args", [])
             input_data = kwargs.get("input")
-            # Capture proxy image from deployment spec
-            if "apply" in cmd and input_data and "paude-proxy" in input_data:
+            # Capture proxy image from deployment spec (not Secrets)
+            if "apply" in cmd and input_data and '"kind": "Deployment"' in input_data:
                 proxy_image_used.append(input_data)
             # Return "Running" for pod status check
             if "get" in cmd and "pod" in cmd and "jsonpath" in str(cmd):

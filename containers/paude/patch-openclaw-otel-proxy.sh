@@ -4,7 +4,7 @@
 # The @opentelemetry/otlp-exporter-base package creates http/https Agents
 # that do NOT respect HTTP_PROXY / HTTPS_PROXY env vars.  This script
 # patches the compiled transport layer to return proxy-aware agents so
-# OTEL exports go through the squid proxy.
+# OTEL exports go through the proxy.
 #
 # OpenClaw bundles its diagnostics-otel plugin into
 # /app/dist/extensions/diagnostics-otel/index.js, so the primary patch
