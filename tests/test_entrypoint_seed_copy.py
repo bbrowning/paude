@@ -1,10 +1,8 @@
-"""Tests for entrypoint-session.sh seed copy logic (Podman backend).
+"""Tests for entrypoint-session.sh config logic (Podman backend).
 
-These tests exercise the bash seed copy block by extracting it into a
-minimal script, running it in a temporary directory, and verifying results.
-
-A contract test also validates that entrypoint-session.sh itself contains the
-expected cp -a pattern and not the old file-by-file loop.
+These tests exercise the bash config blocks (seed copy, persist, sandbox)
+by extracting them into minimal scripts, running them in a temporary
+directory, and verifying results.
 """
 
 from __future__ import annotations
@@ -42,53 +40,6 @@ def _read_all_entrypoint_files() -> str:
     )
 
 
-def _build_script(home_dir: str, seed_dir: str, credentials_dir: str | None) -> str:
-    """Build a minimal bash script that replicates the seed copy logic.
-
-    Args:
-        home_dir: Path to use as HOME.
-        seed_dir: Path to use as /tmp/claude.seed.
-        credentials_dir: Path to use as /credentials, or None to skip.
-            When None, CRED_DIR is set to a non-existent path under home_dir.
-    """
-    # Guard: if credentials_dir is set, create it so the -d test passes
-    credentials_check = ""
-    if credentials_dir is not None:
-        credentials_check = f'mkdir -p "{credentials_dir}"'
-
-    # When no credentials_dir, use a guaranteed-nonexistent path under tmp_path
-    cred_dir_value = credentials_dir or f"{home_dir}/.no-credentials"
-
-    return textwrap.dedent(f"""\
-        #!/bin/bash
-        set -e
-        export HOME="{home_dir}"
-        SEED_DIR="{seed_dir}"
-        CRED_DIR="{cred_dir_value}"
-        {credentials_check}
-
-        # Replicate the seed copy block from entrypoint-session.sh
-        if [[ -d "$SEED_DIR" ]] && [[ ! -d "$CRED_DIR" ]]; then
-            mkdir -p "$HOME/.claude"
-            chmod g+rwX "$HOME/.claude" 2>/dev/null || true
-
-            cp -Rp "$SEED_DIR/." "$HOME/.claude/" 2>/dev/null || true
-
-            if [[ -f "$HOME/.claude/claude.json" ]]; then
-                cp -f "$HOME/.claude/claude.json" "$HOME/.claude.json" 2>/dev/null || true
-                rm -f "$HOME/.claude/claude.json" 2>/dev/null || true
-                chmod g+rw "$HOME/.claude.json" 2>/dev/null || true
-            fi
-
-            if [[ -d "$HOME/.claude/plugins" ]]; then
-                chmod -R g+rwX "$HOME/.claude/plugins" 2>/dev/null || true
-            fi
-
-            chmod -R g+rwX "$HOME/.claude" 2>/dev/null || true
-        fi
-    """)
-
-
 def _run_script(script: str) -> subprocess.CompletedProcess[str]:
     """Run a bash script and return the result."""
     return subprocess.run(
@@ -106,16 +57,6 @@ class TestEntrypointContract:
     If the entrypoint is reverted, these tests catch it.
     """
 
-    def test_entrypoint_uses_recursive_copy(self) -> None:
-        """The entrypoint must use recursive cp for seed copy, not a file loop."""
-        content = _read_all_entrypoint_files()
-        assert "cp -dR" in content, (
-            "entrypoint files must use 'cp -dR' for recursive seed copy"
-        )
-        assert "$AGENT_SEED_DIR" in content or "/tmp/claude.seed" in content, (
-            "entrypoint files must reference seed directory variable"
-        )
-
     def test_entrypoint_sources_sandbox_config_script(self) -> None:
         """The entrypoint must source the Python-generated sandbox config script."""
         content = ENTRYPOINT_PATH.read_text()
@@ -124,17 +65,6 @@ class TestEntrypointContract:
         )
         assert "PAUDE_SUPPRESS_PROMPTS" in content, (
             "entrypoint-session.sh must check PAUDE_SUPPRESS_PROMPTS before sourcing"
-        )
-
-    def test_entrypoint_checks_tmux_before_seed_copy(self) -> None:
-        """tmux has-session check must appear before the seed copy block."""
-        content = ENTRYPOINT_PATH.read_text()
-        tmux_check_pos = content.find("tmux -u has-session")
-        seed_copy_pos = content.find('copy_agent_config "$AGENT_SEED_DIR"')
-        assert tmux_check_pos != -1, "entrypoint must check for existing tmux session"
-        assert seed_copy_pos != -1, "entrypoint must have seed copy block"
-        assert tmux_check_pos < seed_copy_pos, (
-            "tmux session check must come before seed config copy"
         )
 
     def test_entrypoint_checks_tmux_before_sandbox_config(self) -> None:
@@ -170,254 +100,6 @@ class TestEntrypointContract:
         assert "--reference=/pvc" in content, (
             "chcon must use --reference=/pvc to inherit PVC SELinux context"
         )
-
-    def test_entrypoint_no_old_file_loop(self) -> None:
-        """The old file-by-file loop pattern must not be present."""
-        content = _read_all_entrypoint_files()
-        assert "for f in /tmp/claude.seed/*" not in content, (
-            "entrypoint files still contain the old file-by-file loop"
-        )
-
-    def test_entrypoint_handles_claude_json_after_copy(self) -> None:
-        """Config file must be moved (not copied separately) after recursive copy."""
-        content = ENTRYPOINT_LIB_CONFIG_PATH.read_text()
-        # Find the recursive copy in copy_agent_config function
-        cp_pos = content.find("cp -dR --preserve=mode,timestamps")
-        if cp_pos == -1:
-            cp_pos = content.find('cp -a "$AGENT_SEED_DIR/."')
-        if cp_pos == -1:
-            cp_pos = content.find("cp -a /tmp/claude.seed/.")
-        assert cp_pos != -1, "Missing recursive copy command for seed dir"
-        # Find the mv that comes after this specific cp -a
-        mv_pos = max(
-            content.find("AGENT_CONFIG_FILE_BASENAME", cp_pos + 1),
-            content.find("claude.json", cp_pos + 1),
-        )
-        assert mv_pos != -1, "Missing mv command for config file after cp -a"
-        assert mv_pos > cp_pos, "mv must come after cp -a"
-
-
-class TestSeedCopyRegularFiles:
-    """Test that regular files are copied from seed."""
-
-    def test_copies_regular_files(self, tmp_path: Path) -> None:
-        """Regular files like settings.json are copied to ~/.claude/."""
-        home = tmp_path / "home"
-        home.mkdir()
-        seed = tmp_path / "seed"
-        seed.mkdir()
-
-        (seed / "settings.json").write_text('{"key": "value"}')
-        (seed / "projects.json").write_text("[]")
-
-        script = _build_script(str(home), str(seed), None)
-        result = _run_script(script)
-        assert result.returncode == 0, result.stderr
-
-        assert (home / ".claude" / "settings.json").read_text() == '{"key": "value"}'
-        assert (home / ".claude" / "projects.json").read_text() == "[]"
-
-
-class TestSeedCopyDirectories:
-    """Test that directories (like commands/) are recursively copied."""
-
-    def test_copies_directories_recursively(self, tmp_path: Path) -> None:
-        """Directories like commands/ with nested subdirs are fully copied."""
-        home = tmp_path / "home"
-        home.mkdir()
-        seed = tmp_path / "seed"
-        seed.mkdir()
-
-        # Create commands/ with nested structure
-        commands = seed / "commands"
-        commands.mkdir()
-        (commands / "skill1.md").write_text("# Skill 1")
-
-        subdir = commands / "subdir"
-        subdir.mkdir()
-        (subdir / "skill2.md").write_text("# Skill 2")
-
-        script = _build_script(str(home), str(seed), None)
-        result = _run_script(script)
-        assert result.returncode == 0, result.stderr
-
-        assert (home / ".claude" / "commands" / "skill1.md").read_text() == "# Skill 1"
-        assert (
-            home / ".claude" / "commands" / "subdir" / "skill2.md"
-        ).read_text() == "# Skill 2"
-
-
-class TestSeedCopyHiddenFiles:
-    """Test that hidden files (dotfiles) are copied.
-
-    The old glob-based loop (for f in seed/*) skipped hidden files.
-    cp -a copies everything including dotfiles, which is the desired behavior.
-    """
-
-    def test_copies_dotfiles(self, tmp_path: Path) -> None:
-        """Hidden files like .gitignore inside seed are copied."""
-        home = tmp_path / "home"
-        home.mkdir()
-        seed = tmp_path / "seed"
-        seed.mkdir()
-
-        (seed / ".some-hidden-config").write_text("hidden")
-        (seed / "settings.json").write_text("{}")
-
-        script = _build_script(str(home), str(seed), None)
-        result = _run_script(script)
-        assert result.returncode == 0, result.stderr
-
-        assert (home / ".claude" / ".some-hidden-config").read_text() == "hidden"
-        assert (home / ".claude" / "settings.json").read_text() == "{}"
-
-
-class TestSeedCopySymlinks:
-    """Test symlink handling with cp -a.
-
-    cp -a preserves symlinks (unlike the old cp -L which dereferenced them).
-    This matches the OpenShift backend behavior. Symlinks to files within the
-    seed tree should work; symlinks pointing outside will be preserved as-is.
-    """
-
-    def test_copies_symlinks_to_local_targets(self, tmp_path: Path) -> None:
-        """Symlinks pointing within the seed tree are preserved and functional."""
-        home = tmp_path / "home"
-        home.mkdir()
-        seed = tmp_path / "seed"
-        seed.mkdir()
-
-        (seed / "real-file.json").write_text('{"real": true}')
-        (seed / "link-to-file.json").symlink_to("real-file.json")
-
-        script = _build_script(str(home), str(seed), None)
-        result = _run_script(script)
-        assert result.returncode == 0, result.stderr
-
-        link_dest = home / ".claude" / "link-to-file.json"
-        assert link_dest.is_symlink()
-        assert link_dest.read_text() == '{"real": true}'
-
-
-class TestSeedCopyClaudeJson:
-    """Test claude.json special handling."""
-
-    def test_claude_json_moved_to_home_root(self, tmp_path: Path) -> None:
-        """claude.json ends up at ~/.claude.json, not ~/.claude/claude.json."""
-        home = tmp_path / "home"
-        home.mkdir()
-        seed = tmp_path / "seed"
-        seed.mkdir()
-
-        (seed / "claude.json").write_text('{"config": true}')
-
-        script = _build_script(str(home), str(seed), None)
-        result = _run_script(script)
-        assert result.returncode == 0, result.stderr
-
-        assert (home / ".claude.json").read_text() == '{"config": true}'
-        assert not (home / ".claude" / "claude.json").exists()
-
-    def test_other_files_unaffected_by_claude_json_move(self, tmp_path: Path) -> None:
-        """Other files aren't disturbed when claude.json is moved."""
-        home = tmp_path / "home"
-        home.mkdir()
-        seed = tmp_path / "seed"
-        seed.mkdir()
-
-        (seed / "claude.json").write_text('{"config": true}')
-        (seed / "settings.json").write_text('{"settings": true}')
-
-        script = _build_script(str(home), str(seed), None)
-        result = _run_script(script)
-        assert result.returncode == 0, result.stderr
-
-        assert (home / ".claude" / "settings.json").read_text() == '{"settings": true}'
-        assert (home / ".claude.json").read_text() == '{"config": true}'
-
-
-class TestSeedCopySkipsWithCredentials:
-    """Test that seed copy is skipped when /credentials exists."""
-
-    def test_skips_when_credentials_dir_exists(self, tmp_path: Path) -> None:
-        """No copy happens when credentials directory exists (OpenShift path)."""
-        home = tmp_path / "home"
-        home.mkdir()
-        seed = tmp_path / "seed"
-        seed.mkdir()
-        cred = tmp_path / "credentials"
-        # cred dir will be created by the script
-
-        (seed / "settings.json").write_text('{"key": "value"}')
-
-        script = _build_script(str(home), str(seed), str(cred))
-        result = _run_script(script)
-        assert result.returncode == 0, result.stderr
-
-        assert not (home / ".claude").exists()
-
-
-class TestSeedCopyEmptySeed:
-    """Test behavior with an empty seed directory."""
-
-    def test_empty_seed_creates_claude_dir_without_error(self, tmp_path: Path) -> None:
-        """Empty seed directory should succeed and create ~/.claude/."""
-        home = tmp_path / "home"
-        home.mkdir()
-        seed = tmp_path / "seed"
-        seed.mkdir()
-        # seed is intentionally empty
-
-        script = _build_script(str(home), str(seed), None)
-        result = _run_script(script)
-        assert result.returncode == 0, result.stderr
-
-        assert (home / ".claude").is_dir()
-        # No claude.json should appear
-        assert not (home / ".claude.json").exists()
-
-
-class TestSeedCopyMixedContent:
-    """Test copying a mix of files and directories."""
-
-    def test_copies_files_and_directories_together(self, tmp_path: Path) -> None:
-        """Mix of files, directories, and nested content all get copied."""
-        home = tmp_path / "home"
-        home.mkdir()
-        seed = tmp_path / "seed"
-        seed.mkdir()
-
-        # Regular files
-        (seed / "settings.json").write_text('{"settings": true}')
-        (seed / "claude.json").write_text('{"claude": true}')
-
-        # Directory with files
-        commands = seed / "commands"
-        commands.mkdir()
-        (commands / "my-skill.md").write_text("# My Skill")
-
-        # Plugins directory
-        plugins = seed / "plugins"
-        plugins.mkdir()
-        (plugins / "plugin.json").write_text('{"plugin": true}')
-
-        script = _build_script(str(home), str(seed), None)
-        result = _run_script(script)
-        assert result.returncode == 0, result.stderr
-
-        # Regular file copied
-        assert (home / ".claude" / "settings.json").read_text() == '{"settings": true}'
-        # claude.json moved to home root
-        assert (home / ".claude.json").read_text() == '{"claude": true}'
-        assert not (home / ".claude" / "claude.json").exists()
-        # Directory copied
-        assert (
-            home / ".claude" / "commands" / "my-skill.md"
-        ).read_text() == "# My Skill"
-        # Plugins directory copied
-        assert (
-            home / ".claude" / "plugins" / "plugin.json"
-        ).read_text() == '{"plugin": true}'
 
 
 def _build_gemini_sandbox_script(
@@ -830,50 +512,6 @@ def _build_persist_script(
     """)
 
 
-def _build_persist_and_copy_script(
-    home_dir: str,
-    pvc_dir: str,
-    seed_dir: str,
-    agent_config_dir: str = ".claude",
-    agent_config_file: str = ".claude.json",
-) -> str:
-    """Build a script that runs persist_agent_config then copy_agent_config."""
-    persist_fn = _persist_bash_function(pvc_dir)
-    return textwrap.dedent(f"""\
-        #!/bin/bash
-        set -e
-        export HOME="{home_dir}"
-        AGENT_CONFIG_DIR="{agent_config_dir}"
-        AGENT_CONFIG_FILE="{agent_config_file}"
-        AGENT_CONFIG_FILE_BASENAME="${{AGENT_CONFIG_FILE#.}}"
-
-        {persist_fn}
-        copy_agent_config() {{
-            local source_path="$1"
-
-            mkdir -p "$HOME/$AGENT_CONFIG_DIR"
-            chmod g+rwX "$HOME/$AGENT_CONFIG_DIR" 2>/dev/null || true
-
-            cp -Rp "$source_path/." "$HOME/$AGENT_CONFIG_DIR/" 2>/dev/null || true
-
-            if [[ -n "$AGENT_CONFIG_FILE" ]] && [[ -n "$AGENT_CONFIG_FILE_BASENAME" ]] && [[ -f "$HOME/$AGENT_CONFIG_DIR/$AGENT_CONFIG_FILE_BASENAME" ]]; then
-                cp -f "$HOME/$AGENT_CONFIG_DIR/$AGENT_CONFIG_FILE_BASENAME" "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
-                rm -f "$HOME/$AGENT_CONFIG_DIR/$AGENT_CONFIG_FILE_BASENAME" 2>/dev/null || true
-                chmod g+rw "$HOME/$AGENT_CONFIG_FILE" 2>/dev/null || true
-            fi
-
-            if [[ -d "$HOME/$AGENT_CONFIG_DIR/plugins" ]]; then
-                chmod -R g+rwX "$HOME/$AGENT_CONFIG_DIR/plugins" 2>/dev/null || true
-            fi
-
-            chmod -R g+rwX "$HOME/$AGENT_CONFIG_DIR" 2>/dev/null || true
-        }}
-
-        persist_agent_config
-        copy_agent_config "{seed_dir}"
-    """)
-
-
 class TestPersistAgentConfig:
     """Tests for persist_agent_config() — symlinks config to PVC."""
 
@@ -1052,36 +690,6 @@ class TestPersistAgentConfigContract:
             "so host config is merged into PVC without clobbering runtime state"
         )
 
-    def test_copy_agent_config_skips_runtime_dirs(self) -> None:
-        """copy_agent_config skip list must match Python _CLAUDE_CONFIG_EXCLUDES."""
-        from paude.agents.claude import _CLAUDE_CONFIG_EXCLUDES
-
-        content = ENTRYPOINT_LIB_CONFIG_PATH.read_text()
-        func_start = content.find("copy_agent_config()")
-        func_end = content.find("\n}", func_start)
-        func_body = content[func_start:func_end]
-
-        for pattern in _CLAUDE_CONFIG_EXCLUDES:
-            name = pattern.lstrip("/")
-            assert name in func_body, (
-                f"copy_agent_config must skip '{name}' — present in "
-                f"_CLAUDE_CONFIG_EXCLUDES but missing from entrypoint case statement"
-            )
-
-    def test_entrypoint_uses_cp_not_mv_for_config_file(self) -> None:
-        """copy_agent_config must use cp -f (not mv) for config file relocation."""
-        content = ENTRYPOINT_LIB_CONFIG_PATH.read_text()
-        # Find copy_agent_config function body
-        func_start = content.find("copy_agent_config()")
-        func_end = content.find("\n}", func_start)
-        func_body = content[func_start:func_end]
-        assert "cp -f" in func_body, (
-            "copy_agent_config must use 'cp -f' to write through symlinks"
-        )
-        assert 'mv "$HOME/$AGENT_CONFIG_DIR' not in func_body, (
-            "copy_agent_config must not use 'mv' which breaks symlinks"
-        )
-
     def test_sandbox_config_python_uses_cp_for_claude_json(self) -> None:
         """Claude agent's apply_sandbox_config must use cp+rm, not mv."""
         from paude.agents.claude import ClaudeAgent
@@ -1094,86 +702,6 @@ class TestPersistAgentConfigContract:
         assert 'rm -f "${claude_json}.tmp"' in script, (
             "Claude sandbox config must remove temp file after cp"
         )
-
-
-class TestCopyThroughSymlinks:
-    """Tests that copy_agent_config works correctly through symlinks."""
-
-    def test_seed_copy_writes_through_symlink(self, tmp_path: Path) -> None:
-        """Seed config copy writes into PVC through the symlink."""
-        home = tmp_path / "home"
-        home.mkdir()
-        pvc = tmp_path / "pvc"
-        pvc.mkdir()
-        seed = tmp_path / "seed"
-        seed.mkdir()
-
-        (seed / "settings.json").write_text('{"from": "seed"}')
-        (seed / "claude.json").write_text('{"config": true}')
-
-        script = _build_persist_and_copy_script(str(home), str(pvc), str(seed))
-        result = _run_script(script)
-        assert result.returncode == 0, result.stderr
-
-        # Data lives on PVC
-        assert (pvc / ".claude" / "settings.json").read_text() == '{"from": "seed"}'
-        # Config file written through symlink
-        assert json.loads((pvc / ".claude.json").read_text())["config"] is True
-        # Accessible through HOME symlinks
-        assert (home / ".claude" / "settings.json").read_text() == '{"from": "seed"}'
-        assert json.loads((home / ".claude.json").read_text())["config"] is True
-
-    def test_seed_copy_preserves_existing_pvc_files(self, tmp_path: Path) -> None:
-        """Seed copy is additive: existing PVC files not in seed survive."""
-        home = tmp_path / "home"
-        home.mkdir()
-        pvc = tmp_path / "pvc"
-        pvc.mkdir()
-        seed = tmp_path / "seed"
-        seed.mkdir()
-
-        # Pre-existing PVC state (from previous container)
-        pvc_claude = pvc / ".claude"
-        pvc_claude.mkdir()
-        (pvc_claude / "history.jsonl").write_text("old-history\n")
-        projects = pvc_claude / "projects"
-        projects.mkdir()
-        (projects / "session.json").write_text('{"old": "session"}')
-
-        # Seed has some config files
-        (seed / "settings.json").write_text('{"new": "settings"}')
-
-        script = _build_persist_and_copy_script(str(home), str(pvc), str(seed))
-        result = _run_script(script)
-        assert result.returncode == 0, result.stderr
-
-        # New seed content is applied
-        assert (pvc / ".claude" / "settings.json").read_text() == '{"new": "settings"}'
-        # Old PVC state survives (additive copy)
-        assert (pvc / ".claude" / "history.jsonl").read_text() == "old-history\n"
-        assert (
-            pvc / ".claude" / "projects" / "session.json"
-        ).read_text() == '{"old": "session"}'
-
-    def test_config_file_symlink_preserved_after_copy(self, tmp_path: Path) -> None:
-        """Config file symlink is not broken by copy_agent_config's cp -f."""
-        home = tmp_path / "home"
-        home.mkdir()
-        pvc = tmp_path / "pvc"
-        pvc.mkdir()
-        seed = tmp_path / "seed"
-        seed.mkdir()
-
-        (seed / "claude.json").write_text('{"seeded": true}')
-
-        script = _build_persist_and_copy_script(str(home), str(pvc), str(seed))
-        result = _run_script(script)
-        assert result.returncode == 0, result.stderr
-
-        # Symlink is preserved (not replaced by a regular file)
-        assert (home / ".claude.json").is_symlink()
-        # Data went through to PVC
-        assert json.loads((pvc / ".claude.json").read_text())["seeded"] is True
 
 
 class TestCursorSandboxConfig:

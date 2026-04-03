@@ -23,9 +23,10 @@ from paude.backends.openshift.proxy import ProxyManager
 from paude.backends.openshift.resources import (
     StatefulSetBuilder,
     _generate_session_name,
+    build_config_map,
+    config_map_name,
 )
 from paude.backends.openshift.session_lookup import SessionLookup
-from paude.backends.openshift.sync import ConfigSyncer
 from paude.backends.shared import (
     PAUDE_LABEL_AGENT,
     PAUDE_LABEL_PROVIDER,
@@ -58,7 +59,6 @@ class SessionLifecycleManager:
         namespace: str,
         config: OpenShiftConfig,
         lookup: SessionLookup,
-        syncer: ConfigSyncer,
         builder: BuildOrchestrator,
         proxy: ProxyManager,
         pod_waiter: PodWaiter,
@@ -67,7 +67,6 @@ class SessionLifecycleManager:
         self._namespace = namespace
         self._config = config
         self._lookup = lookup
-        self._syncer = syncer
         self._builder = builder
         self._proxy = proxy
         self._pod_waiter = pod_waiter
@@ -243,8 +242,27 @@ class SessionLifecycleManager:
         *,
         ca_secret: str | None = None,
     ) -> None:
-        """Generate StatefulSet spec, apply it, wait for readiness, sync config."""
+        """Create ConfigMap and StatefulSet, then wait for readiness."""
         ns = self._namespace
+
+        # Create ConfigMap with all config files so the entrypoint can
+        # run directly without post-apply oc cp/exec.
+        cm_spec = build_config_map(
+            session_name,
+            ns,
+            agent_name=config.agent,
+            provider=config.provider,
+            workspace=str(config.workspace),
+            args=session_env.get("PAUDE_AGENT_ARGS", ""),
+            yolo=config.yolo,
+        )
+        cm_name = config_map_name(session_name)
+        print(
+            f"Creating ConfigMap/{cm_name} in namespace {ns}...",
+            file=sys.stderr,
+        )
+        self._oc.run("apply", "-f", "-", input_data=json.dumps(cm_spec))
+
         sts_spec = self._generate_statefulset_spec(
             session_name=session_name,
             image=config.image,
@@ -258,6 +276,7 @@ class SessionLifecycleManager:
             yolo=config.yolo,
             otel_endpoint=config.otel_endpoint,
             ca_secret=ca_secret,
+            config_map=cm_name,
         )
 
         print(
@@ -272,52 +291,6 @@ class SessionLifecycleManager:
             pname = pod_name(session_name)
             print(f"Waiting for pod {pname} to be ready...", file=sys.stderr)
             self._pod_waiter.wait_for_ready(pname)
-
-            self._syncer.sync_full_config(
-                pname,
-                agent_name=config.agent,
-                provider=config.provider,
-                args=session_env.get("PAUDE_AGENT_ARGS", ""),
-                yolo=config.yolo,
-            )
-
-    def start_agent_headless_in_pod(self, pname: str) -> None:
-        """Start the agent in headless mode inside the pod."""
-        from paude.backends.openshift.exceptions import OcTimeoutError
-        from paude.backends.openshift.oc import OC_EXEC_TIMEOUT
-        from paude.constants import CONTAINER_ENTRYPOINT
-
-        try:
-            result = self._oc.run(
-                "exec",
-                pname,
-                "-n",
-                self._namespace,
-                "--",
-                "env",
-                "PAUDE_HEADLESS=1",
-                CONTAINER_ENTRYPOINT,
-                check=False,
-                timeout=OC_EXEC_TIMEOUT,
-            )
-            if result.returncode != 0:
-                print(
-                    f"Warning: headless agent start failed (exit {result.returncode}). "
-                    f"Agent will start on next 'paude connect'.",
-                    file=sys.stderr,
-                )
-        except OcTimeoutError:
-            print(
-                "Warning: headless agent start timed out. "
-                "Agent will start on next 'paude connect'.",
-                file=sys.stderr,
-            )
-        except Exception as exc:
-            print(
-                f"Warning: headless agent start failed ({exc}). "
-                f"Agent will start on next 'paude connect'.",
-                file=sys.stderr,
-            )
 
     def delete_session(self, name: str, confirm: bool = False) -> None:
         """Delete a session and all its resources.
@@ -391,6 +364,17 @@ class SessionLifecycleManager:
             ns,
             "-l",
             f"paude.io/session-name={name}",
+            check=False,
+        )
+
+        cm = config_map_name(name)
+        print(f"Deleting ConfigMap/{cm}...", file=sys.stderr)
+        self._oc.run(
+            "delete",
+            "configmap",
+            cm,
+            "-n",
+            ns,
             check=False,
         )
 
@@ -513,6 +497,7 @@ class SessionLifecycleManager:
         yolo: bool = False,
         otel_endpoint: str | None = None,
         ca_secret: str | None = None,
+        config_map: str | None = None,
     ) -> dict[str, Any]:
         """Generate a Kubernetes StatefulSet specification."""
         builder = (
@@ -533,4 +518,6 @@ class SessionLifecycleManager:
         )
         if ca_secret:
             builder = builder.with_ca_secret(ca_secret)
+        if config_map:
+            builder = builder.with_config_map(config_map)
         return builder.build()

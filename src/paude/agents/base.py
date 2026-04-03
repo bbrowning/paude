@@ -26,9 +26,6 @@ class AgentConfig:
         passthrough_env_prefixes: Host env var prefixes to forward.
         config_dir_name: Config directory under HOME (e.g., ".claude").
         config_file_name: Config file under HOME (e.g., ".claude.json"), or None.
-        config_excludes: Rsync excludes for config sync.
-        config_sync_files_only: When non-empty, only these files (relative to
-            config dir) are copied instead of rsyncing the entire directory.
         activity_files: Paths (relative to config dir) for activity detection.
         yolo_flag: CLI flag to skip permissions
             (e.g., "--dangerously-skip-permissions").
@@ -53,8 +50,6 @@ class AgentConfig:
     passthrough_env_prefixes: list[str] = field(default_factory=list)
     config_dir_name: str = ".claude"
     config_file_name: str | None = ".claude.json"
-    config_excludes: list[str] = field(default_factory=list)
-    config_sync_files_only: list[str] = field(default_factory=list)
     activity_files: list[str] = field(default_factory=list)
     yolo_flag: str | None = "--dangerously-skip-permissions"
     clear_command: str | None = "/clear"

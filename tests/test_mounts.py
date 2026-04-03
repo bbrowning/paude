@@ -35,8 +35,8 @@ class TestBuildMounts:
 
         assert ".config/gcloud" not in mount_str
 
-    def test_claude_seed_mount_read_only(self, tmp_path: Path):
-        """Claude seed mount is read-only when present."""
+    def test_claude_no_seed_mount(self, tmp_path: Path):
+        """Claude agent no longer bind-mounts ~/.claude as a seed."""
         home = tmp_path / "home"
         home.mkdir()
         claude = home / ".claude"
@@ -45,23 +45,7 @@ class TestBuildMounts:
         mounts = build_mounts(home)
         mount_str = " ".join(mounts)
 
-        assert "/tmp/claude.seed:ro" in mount_str
-
-    def test_plugins_mounted_at_original_path(self, tmp_path: Path):
-        """Plugins mounted at original host path."""
-        home = tmp_path / "home"
-        home.mkdir()
-        claude = home / ".claude"
-        claude.mkdir()
-        plugins = claude / "plugins"
-        plugins.mkdir()
-
-        mounts = build_mounts(home)
-        mount_str = " ".join(mounts)
-
-        # Plugins should be mounted at their original path, not /tmp/
-        assert str(plugins) in mount_str
-        assert f"{plugins}:{plugins}:ro" in mount_str
+        assert "claude.seed" not in mount_str
 
     def test_gitconfig_mount_read_only(self, tmp_path: Path):
         """gitconfig mount is read-only when present."""
@@ -74,18 +58,6 @@ class TestBuildMounts:
         mount_str = " ".join(mounts)
 
         assert "/home/paude/.gitconfig:ro" in mount_str
-
-    def test_claude_json_mount_read_only(self, tmp_path: Path):
-        """claude.json mount is read-only when present."""
-        home = tmp_path / "home"
-        home.mkdir()
-        claude_json = home / ".claude.json"
-        claude_json.write_text('{"settings": {}}')
-
-        mounts = build_mounts(home)
-        mount_str = " ".join(mounts)
-
-        assert "/tmp/claude.json.seed:ro" in mount_str
 
     def test_include_config_false_skips_all_config_mounts(self, tmp_path: Path):
         """include_config=False returns no config or gitconfig mounts."""
@@ -103,7 +75,7 @@ class TestBuildMounts:
         """Default behavior includes config mounts."""
         home = tmp_path / "home"
         home.mkdir()
-        (home / ".claude").mkdir()
+        (home / ".gitconfig").write_text("[user]\n  name = Test\n")
 
         mounts_default = build_mounts(home)
         mounts_explicit = build_mounts(home, include_config=True)

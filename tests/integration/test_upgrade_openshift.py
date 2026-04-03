@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -58,6 +58,7 @@ class TestOpenShiftUpgrade:
                 yolo=True,
                 agent="gemini",
                 wait_for_ready=False,
+                env={"PAUDE_SKIP_AGENT_INSTALL": "1"},
             )
             openshift_backend.create_session(config)
 
@@ -105,7 +106,7 @@ class TestOpenShiftUpgrade:
         pre_labels = sts_json.get("metadata", {}).get("labels", {})
         assert pre_labels.get(PAUDE_LABEL_VERSION) == OLD_VERSION
 
-        # 4. Run upgrade with mocked image building and config sync
+        # 4. Run upgrade with mocked image building
         with (
             patch.object(
                 openshift_backend,
@@ -117,7 +118,6 @@ class TestOpenShiftUpgrade:
                 "ensure_proxy_image_via_build",
                 return_value=kubernetes_test_image,
             ),
-            patch.object(openshift_backend, "_syncer_instance", MagicMock()),
             patch.object(openshift_backend, "start_agent_headless"),
         ):
             from paude.cli.upgrade import _upgrade_openshift

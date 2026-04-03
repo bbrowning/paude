@@ -9,7 +9,6 @@ from paude.agents.base import (
     build_environment_from_config,
     build_provider_credentials,
 )
-from paude.mounts import resolve_path
 
 
 class OpenClawAgent:
@@ -38,8 +37,6 @@ class OpenClawAgent:
             passthrough_env_prefixes=creds.passthrough_env_prefixes,
             config_dir_name=".openclaw",
             config_file_name=None,
-            config_excludes=[],
-            config_sync_files_only=[],
             activity_files=[],
             yolo_flag=None,
             clear_command=None,
@@ -204,14 +201,7 @@ fi
         return cmd
 
     def host_config_mounts(self, home: Path) -> list[str]:
-        mounts: list[str] = []
-
-        config_dir = home / ".openclaw"
-        resolved = resolve_path(config_dir)
-        if resolved and resolved.is_dir():
-            mounts.extend(["-v", f"{resolved}:/tmp/openclaw.seed:ro"])
-
-        return mounts
+        return []
 
     def build_environment(self) -> dict[str, str]:
         return build_environment_from_config(self._config)

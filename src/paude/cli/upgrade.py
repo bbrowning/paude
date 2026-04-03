@@ -621,12 +621,3 @@ def _upgrade_openshift(
     pname = pod_name(name)
     typer.echo(f"Waiting for pod {pname} to be ready...", err=True)
     backend._pod_waiter.wait_for_ready(pname)
-
-    # Re-sync config (no credentials — proxy handles all auth)
-    backend._syncer.sync_full_config(
-        pname,
-        agent_name=agent_name,
-        provider=provider_name,
-    )
-
-    backend.start_agent_headless(name)

@@ -98,11 +98,6 @@ setup_credentials() {
         ln -sf "$config_path/gcloud" "$HOME/.config/gcloud"
     fi
 
-    # Copy agent config (need to be writable, so copy instead of symlink)
-    if [[ -d "$config_path/$AGENT_NAME" ]]; then
-        copy_agent_config "$config_path/$AGENT_NAME"
-    fi
-
     # Set up gitconfig via symlink
     if [[ -f "$config_path/gitconfig" ]]; then
         rm -f "$HOME/.gitconfig" 2>/dev/null || true

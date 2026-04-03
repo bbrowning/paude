@@ -10,29 +10,6 @@ from paude.agents.base import (
     build_provider_credentials,
     pipefail_install_lines,
 )
-from paude.mounts import resolve_path
-
-# Keep in sync with the case statement in copy_agent_config() in
-# containers/paude/entrypoint-session.sh (defense-in-depth).
-_CLAUDE_CONFIG_EXCLUDES = [
-    "/backups",
-    "/cache",
-    "/debug",
-    "/downloads",
-    "/file-history",
-    "/history.jsonl",
-    "/paste-cache",
-    "/plans",
-    "/session-env",
-    "/sessions",
-    "/shell-snapshots",
-    "/stats-cache.json",
-    "/statsig",
-    "/tasks",
-    "/todos",
-    "/projects",
-    "/.git",
-]
 
 _CLAUDE_ACTIVITY_FILES = [
     "history.jsonl",
@@ -60,7 +37,6 @@ class ClaudeAgent:
             passthrough_env_prefixes=creds.passthrough_env_prefixes,
             config_dir_name=".claude",
             config_file_name=".claude.json",
-            config_excludes=list(_CLAUDE_CONFIG_EXCLUDES),
             activity_files=list(_CLAUDE_ACTIVITY_FILES),
             yolo_flag="--dangerously-skip-permissions",
             clear_command="/clear",
@@ -136,26 +112,7 @@ chmod g+rw "$settings_json" 2>/dev/null || true
         return "claude"
 
     def host_config_mounts(self, home: Path) -> list[str]:
-        mounts: list[str] = []
-
-        # Claude seed directory (ro)
-        claude_dir = home / ".claude"
-        resolved_claude = resolve_path(claude_dir)
-        if resolved_claude and resolved_claude.is_dir():
-            mounts.extend(["-v", f"{resolved_claude}:/tmp/claude.seed:ro"])
-
-            # Plugins at original host path (ro)
-            plugins_dir = resolved_claude / "plugins"
-            if plugins_dir.is_dir():
-                mounts.extend(["-v", f"{plugins_dir}:{plugins_dir}:ro"])
-
-        # claude.json seed (ro)
-        claude_json = home / ".claude.json"
-        resolved_claude_json = resolve_path(claude_json)
-        if resolved_claude_json and resolved_claude_json.is_file():
-            mounts.extend(["-v", f"{resolved_claude_json}:/tmp/claude.json.seed:ro"])
-
-        return mounts
+        return []
 
     def build_environment(self) -> dict[str, str]:
         return build_environment_from_config(self._config)

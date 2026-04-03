@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,83 @@ def _generate_session_name(workspace: Path) -> str:
     # Add hash for uniqueness
     path_hash = hashlib.sha256(str(workspace).encode()).hexdigest()[:8]
     return f"{sanitized}-{path_hash}"
+
+
+def config_map_name(session_name: str) -> str:
+    """Return the ConfigMap name for a session."""
+    return f"paude-config-{session_name}"
+
+
+def _read_git_user_config() -> str:
+    """Read user.name and user.email from host git config.
+
+    Returns a minimal gitconfig string with only these two fields.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "config", "--global", "--list"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return ""
+    if result.returncode != 0:
+        return ""
+
+    lines = ["[user]"]
+    for line in result.stdout.splitlines():
+        if line.startswith("user.name="):
+            lines.append(f"\tname = {line.split('=', 1)[1]}")
+        elif line.startswith("user.email="):
+            lines.append(f"\temail = {line.split('=', 1)[1]}")
+    if len(lines) == 1:
+        return ""
+    return "\n".join(lines) + "\n"
+
+
+def build_config_map(
+    session_name: str,
+    namespace: str,
+    agent_name: str = "claude",
+    provider: str | None = None,
+    workspace: str = "",
+    args: str = "",
+    yolo: bool = False,
+) -> dict[str, Any]:
+    """Build a ConfigMap spec containing session config files.
+
+    The ConfigMap replaces the old ``oc cp``/``oc exec`` config sync
+    by pre-mounting all config files before the container starts.
+    """
+    from paude.backends.shared import STUB_ADC_JSON, generate_sandbox_config_script
+    from paude.constants import CONTAINER_WORKSPACE
+
+    ws = workspace or CONTAINER_WORKSPACE
+
+    data: dict[str, str] = {
+        "gcloud-adc": STUB_ADC_JSON,
+        "agent-sandbox-config.sh": generate_sandbox_config_script(
+            agent_name, ws, args, provider=provider, yolo=yolo
+        ),
+        ".ready": "",
+    }
+
+    data["gitconfig"] = _read_git_user_config()
+
+    return {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {
+            "name": config_map_name(session_name),
+            "namespace": namespace,
+            "labels": {
+                "app": "paude",
+                "paude.io/session-name": session_name,
+            },
+        },
+        "data": data,
+    }
 
 
 class StatefulSetBuilder:
@@ -85,6 +163,7 @@ class StatefulSetBuilder:
         self._pvc_size = "10Gi"
         self._storage_class: str | None = None
         self._ca_secret_name: str | None = None
+        self._config_map_name: str | None = None
 
     def with_otel_endpoint(self, endpoint: str | None) -> StatefulSetBuilder:
         """Set the OTEL endpoint (for annotation).
@@ -135,6 +214,23 @@ class StatefulSetBuilder:
             Self for method chaining.
         """
         self._ca_secret_name = secret_name
+        return self
+
+    def with_config_map(self, name: str) -> StatefulSetBuilder:
+        """Mount a ConfigMap at /credentials instead of emptyDir.
+
+        When set, the container command runs ``entrypoint-session.sh``
+        (with ``sleep infinity`` to keep the container alive after the
+        entrypoint exits in headless mode) since all config is available
+        at mount time.
+
+        Args:
+            name: Name of the ConfigMap to mount.
+
+        Returns:
+            Self for method chaining.
+        """
+        self._config_map_name = name
         return self
 
     def with_pvc(
@@ -190,15 +286,35 @@ class StatefulSetBuilder:
 
     def _build_volumes(self) -> list[dict[str, Any]]:
         """Build the volumes list for the pod spec."""
-        volumes: list[dict[str, Any]] = [
-            {
+        if self._config_map_name:
+            cred_volume: dict[str, Any] = {
+                "name": "credentials",
+                "configMap": {
+                    "name": self._config_map_name,
+                    "defaultMode": 0o644,
+                    "items": [
+                        {
+                            "key": "gcloud-adc",
+                            "path": "gcloud/application_default_credentials.json",
+                        },
+                        {"key": "gitconfig", "path": "gitconfig"},
+                        {
+                            "key": "agent-sandbox-config.sh",
+                            "path": "agent-sandbox-config.sh",
+                        },
+                        {"key": ".ready", "path": ".ready"},
+                    ],
+                },
+            }
+        else:
+            cred_volume = {
                 "name": "credentials",
                 "emptyDir": {
                     "medium": "Memory",
                     "sizeLimit": "100Mi",
                 },
-            },
-        ]
+            }
+        volumes: list[dict[str, Any]] = [cred_volume]
         if self._ca_secret_name:
             volumes.append(
                 {
@@ -267,11 +383,23 @@ class StatefulSetBuilder:
                 k: {**v, "nvidia.com/gpu": gpu_count} for k, v in resources.items()
             }
 
+        if self._config_map_name:
+            command = [
+                "tini",
+                "--",
+                "bash",
+                "-c",
+                "/usr/local/bin/entrypoint-session.sh && exec sleep infinity",
+            ]
+            env_list.append({"name": "PAUDE_HEADLESS", "value": "1"})
+        else:
+            command = ["tini", "--", "sleep", "infinity"]
+
         return {
             "name": "paude",
             "image": self._image,
             "imagePullPolicy": image_pull_policy,
-            "command": ["tini", "--", "sleep", "infinity"],
+            "command": command,
             "stdin": True,
             "tty": True,
             "env": env_list,

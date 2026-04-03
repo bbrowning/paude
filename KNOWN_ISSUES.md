@@ -13,7 +13,7 @@ Technical debt identified during codebase analysis. Address these before adding 
 **Discovered**: 2026-03-24 during v0.13.0 pre-release audit
 
 **Files exceeding 400-line limit:**
-- `backends/openshift/sync.py` — 595 lines
+- `backends/openshift/sync.py` — dead code for OpenShift (kept for Podman base class)
 - `cli/commands.py` — 580 lines
 - `backends/podman/backend.py` — 504 lines
 - `backends/openshift/proxy.py` — 484 lines
@@ -23,7 +23,7 @@ Technical debt identified during codebase analysis. Address these before adding 
 **Methods exceeding 50-line limit:**
 - `workflow.py` — `harvest_session()` (~102 lines), `status_sessions()` (~84), `reset_session()` (~72)
 - `cli/commands.py` — `session_cp()` (~75 lines)
-- `backends/openshift/sync.py` — `_sync_agent_config()` (~90 lines)
+- `backends/openshift/sync.py` — dead code (see above)
 - `backends/podman/backend.py` — `create_session()` (~95 lines)
 
 **Classes exceeding 20-method limit:**
@@ -83,14 +83,8 @@ Declarative resources (already applied as JSON via `oc apply`):
 - 3 NetworkPolicies (agent egress, proxy egress, proxy ingress) — `backends/openshift/proxy.py`
 - 1 StatefulSet with PVC template (agent pod, runs `tini -- sleep infinity`) — `backends/openshift/resources.py`
 
-Post-apply imperative steps (the blocking problem):
-- Poll `oc get pod` for readiness
-- `oc exec mkdir -p /credentials`
-- `oc cp` stub GCP ADC, gitconfig, gitignore, sandbox config script
-- `oc rsync` agent config directory (~/.claude/)
-- `oc exec` jq to rewrite plugin install paths
-- `oc exec touch /credentials/.ready` (signals entrypoint to proceed)
-- `oc exec entrypoint-session.sh` (starts agent headless)
+Post-apply imperative steps (resolved — config now mounted via ConfigMap):
+- Poll `oc get pod` for readiness (still present, but standard K8s usage)
 
 Build resources (shared, coupled to create):
 - BuildConfig + ImageStream — `backends/openshift/build.py` (binary build from local dir)
@@ -99,13 +93,13 @@ Build resources (shared, coupled to create):
 
 **Gap 1 — No manifest export layer.** Each resource builder calls `oc apply -f -` inline. There is no way to collect all resource specs and write them to disk as YAML. Fix: add a `ManifestCollector` that accumulates resource dicts and can either apply them or write to a directory. Resource builders return dicts instead of applying directly.
 
-**Gap 2 — Config injected into running pods via `oc cp`/`oc exec`.** `sync.py:ConfigSyncer.sync_full_config()` pushes files into a `/credentials/` tmpfs mount after the pod starts. The entrypoint polls `/credentials/.ready` for 300 seconds. Fix: prepare the config directory locally before container start, then mount it as a volume (ConfigMap in K8s, bind mount in Podman). The entrypoint runs directly with config already present — same code path for both backends, no conditional branching needed.
+**Gap 2 — Config injected into running pods via `oc cp`/`oc exec`.** (Resolved) All config files (stub GCP ADC, gitconfig user.name/email, sandbox config script) are now packaged into a ConfigMap and mounted at `/credentials` before the container starts. No `oc cp`/`oc exec` is needed. Cursor auth and global gitignore syncing were removed entirely.
 
 **Gap 3 — Secrets created inline during `paude create`.** CA cert is generated via openssl and credentials are gathered from the host environment, both stored as K8s Secrets during `paude create`. Fix: users pre-create secrets out-of-band (`oc create secret`, sealed-secrets, ESO, vault) and pass names via `--ca-secret` / `--creds-secret` flags. CA generation becomes a helper command (`paude setup-proxy-ca`). Paude manifests just reference secret names, never contain secret data.
 
 **Gap 4 — Image builds coupled to session creation.** `build.py` creates BuildConfig/ImageStream and runs `oc start-build --from-dir=...` which uploads local files. Fix: separate `paude build` from `paude create`. Emitted YAML references a pre-built image by tag or digest.
 
-**Gap 5 — Container starts with `sleep infinity`, agent launched via `oc exec`.** The StatefulSet command is `tini -- sleep infinity` because the entrypoint can't run until config is pushed. Fix: once config is mounted as volumes (Gap 2), the StatefulSet command becomes `entrypoint-session.sh` directly. No `sleep infinity` + `oc exec` dance.
+**Gap 5 — Container starts with `sleep infinity`, agent launched via `oc exec`.** (Resolved) The StatefulSet command is now `tini -- entrypoint-session.sh` with `PAUDE_HEADLESS=1`. Config is pre-mounted via ConfigMap (Gap 2), so the entrypoint runs directly. No `sleep infinity` + `oc exec` pattern.
 
 **Gap 6 — Interactive operations (`oc exec`, `oc port-forward`, connect).** No fix needed. These are operational commands that work against running resources. They are orthogonal to GitOps — declarative manages the desired state, interactive commands are for human access.
 
@@ -128,13 +122,13 @@ Phase 3 — Externalize secrets (low-medium effort, high value):
 - Paude manifests reference secret names, never generate secret data inline
 - Existing inline secret creation remains as default for backward compatibility
 
-Phase 4 — Config as mounted volumes (high effort, high value):
-- Prepare config directory locally before container start
-- Package as ConfigMap (K8s) or bind mount (Podman) — same entrypoint for both
-- Move plugin path rewriting from jq/oc-exec to pure Python at prep time
-- Remove `sleep infinity` + `oc exec` pattern; entrypoint runs directly as container command
-- Remove `/credentials/.ready` polling from entrypoint (config always present at start)
-- Files: `sync.py`, `resources.py`, `entrypoint-session.sh`, Podman backend
+Phase 4 — Config as mounted volumes (done for OpenShift):
+- Agent config sync and plugin path rewriting already removed (done)
+- Remaining config (stub ADC, gitconfig user.name/email, sandbox script) packaged as ConfigMap (done)
+- `sleep infinity` + `oc exec` pattern removed; entrypoint runs directly (done)
+- ConfigMap includes `.ready` marker so entrypoint skips wait (done)
+- Cursor auth and global gitignore syncing removed (done)
+- Podman backend still uses old `podman cp`/`podman exec` pattern (future work)
 
 ## Security Hardening Backlog
 
