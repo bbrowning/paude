@@ -2419,8 +2419,10 @@ class TestConfigMapBuilder:
         assert "gitconfig" in cm["data"]
         assert "Test" in cm["data"]["gitconfig"]
 
-    def test_build_config_map_omits_gitconfig_when_empty(self) -> None:
-        """ConfigMap omits gitconfig when no git user config exists."""
+    def test_build_config_map_includes_empty_gitconfig_when_no_host_config(
+        self,
+    ) -> None:
+        """ConfigMap includes empty gitconfig when no git user config exists."""
         from paude.backends.openshift.resources import build_config_map
 
         with patch(
@@ -2429,7 +2431,7 @@ class TestConfigMapBuilder:
         ):
             cm = build_config_map("test-session", "test-ns")
 
-        assert "gitconfig" not in cm["data"]
+        assert cm["data"]["gitconfig"] == ""
 
     def test_build_config_map_metadata(self) -> None:
         """ConfigMap has correct metadata and labels."""

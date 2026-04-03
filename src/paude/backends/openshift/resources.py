@@ -102,9 +102,7 @@ def build_config_map(
         ".ready": "",
     }
 
-    gitconfig = _read_git_user_config()
-    if gitconfig:
-        data["gitconfig"] = gitconfig
+    data["gitconfig"] = _read_git_user_config()
 
     return {
         "apiVersion": "v1",
