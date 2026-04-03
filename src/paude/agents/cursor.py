@@ -33,8 +33,6 @@ class CursorAgent:
             passthrough_env_prefixes=creds.passthrough_env_prefixes,
             config_dir_name=".cursor",
             config_file_name=None,
-            config_excludes=[],
-            config_sync_files_only=["cli-config.json"],
             activity_files=[],
             yolo_flag="--yolo",
             clear_command="/clear",
@@ -74,14 +72,7 @@ class CursorAgent:
 cli_config="{home}/.cursor/cli-config.json"
 mkdir -p "{home}/.cursor" 2>/dev/null || true
 
-# Seed from host cli-config.json if available (carries auth tokens)
-if [ -f /tmp/cursor-cli-config.seed ]; then
-    cp /tmp/cursor-cli-config.seed "$cli_config"
-    chmod g+rw "$cli_config" 2>/dev/null || true
-fi
-
-# Ensure version field exists so CLI doesn't prompt for setup,
-# and force HTTP/1.1 for agent inference (HTTP/2 bypasses proxy).
+# Create minimal cli-config with version and HTTP/1.1 proxy settings.
 if [ -f "$cli_config" ]; then
     jq '. * {{"version": (.version // 1), "network": {{"useHttp1ForAgent": true}}}}' \
         "$cli_config" > "${{cli_config}}.tmp" \
@@ -124,15 +115,6 @@ TRUST
 
     def host_config_mounts(self, home: Path) -> list[str]:
         mounts: list[str] = []
-
-        # IMPORTANT: Only mount cli-config.json, NEVER the entire .cursor directory.
-        # ~/.cursor contains Cursor IDE data (extensions/, worktrees/, etc.) that
-        # can exceed 1 GB and 26k+ files. Only cli-config.json is needed for CLI
-        # auth tokens from `agent login`.
-        cli_config = home / ".cursor" / "cli-config.json"
-        resolved = resolve_path(cli_config)
-        if resolved and resolved.is_file():
-            mounts.extend(["-v", f"{resolved}:/tmp/cursor-cli-config.seed:ro"])
 
         # Mount auth.json (accessToken/refreshToken) from ~/.config/cursor/
         auth_json = home / ".config" / "cursor" / "auth.json"

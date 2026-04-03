@@ -2646,21 +2646,20 @@ class TestSyncConfigToPod:
         # Using mkdir -p instead of rm -rf preserves working directories
         exec_cmd = str(exec_calls[0])
         assert "rm -rf /credentials" not in exec_cmd
-        assert "mkdir -p /credentials/gcloud /credentials/claude" in exec_cmd
+        assert "mkdir -p /credentials/gcloud" in exec_cmd
         assert "chmod -R g+rwX /credentials" in exec_cmd
 
     @patch("subprocess.run")
-    def test_syncs_claude_config_files(
+    def test_does_not_sync_agent_config_dir(
         self, mock_run: MagicMock, tmp_path: Path
     ) -> None:
-        """_syncer.sync_full_config syncs claude config directory via rsync."""
+        """_syncer.sync_full_config does not sync agent config directories."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
-        # Create mock claude files
+        # Create mock claude files (should NOT be synced)
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir(parents=True)
         (claude_dir / "settings.json").write_text("{}")
-        (claude_dir / "credentials.json").write_text("{}")
         (tmp_path / ".claude.json").write_text("{}")
 
         backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
@@ -2668,18 +2667,13 @@ class TestSyncConfigToPod:
         with patch.object(Path, "home", return_value=tmp_path):
             backend._syncer.sync_full_config("test-pod-0")
 
-        # Find rsync calls (now using rsync for ~/.claude/)
+        # No rsync calls for agent config
         rsync_calls = [c for c in mock_run.call_args_list if "rsync" in str(c)]
-        assert len(rsync_calls) >= 1, "Should use rsync for ~/.claude/ directory"
+        assert len(rsync_calls) == 0
 
-        # Verify rsync targets claude directory
-        rsync_calls_str = str(rsync_calls)
-        assert ".claude" in rsync_calls_str
-
-        # .claude.json is still synced separately via cp
-        cp_calls = [c for c in mock_run.call_args_list if "cp" in str(c)]
-        cp_calls_str = str(cp_calls)
-        assert ".claude.json" in cp_calls_str
+        # No cp calls for .claude.json
+        cp_calls_str = str(mock_run.call_args_list)
+        assert ".claude.json" not in cp_calls_str
 
     @patch("subprocess.run")
     def test_syncs_gitconfig(self, mock_run: MagicMock, tmp_path: Path) -> None:
@@ -2836,7 +2830,7 @@ class TestSyncConfigToPod:
 
         # Should still create the directory structure and .ready marker
         calls_str = str(mock_run.call_args_list)
-        assert "mkdir -p /credentials/gcloud /credentials/claude" in calls_str
+        assert "mkdir -p /credentials/gcloud" in calls_str
         assert ".ready" in calls_str
 
     @patch("subprocess.run")
@@ -2896,346 +2890,6 @@ class TestSyncConfigToPod:
                 f"exec call should use OC_EXEC_TIMEOUT ({OpenShiftBackend.OC_EXEC_TIMEOUT}), "
                 f"got {timeout}. Call: {call}"
             )
-
-
-class TestSyncConfigWithPlugins:
-    """Tests for _sync_config_to_pod with full ~/.claude/ sync including plugins."""
-
-    @patch("subprocess.run")
-    def test_sync_config_uses_rsync_with_excludes(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """_syncer.sync_full_config uses rsync with config excludes for ~/.claude/."""
-        # Create mock claude directory
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-        (claude_dir / "settings.json").write_text("{}")
-
-        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = mock_run_side_effect
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            backend._syncer.sync_full_config("test-pod-0")
-
-        # Find rsync calls
-        rsync_calls = [
-            c
-            for c in mock_run.call_args_list
-            if c[0] and len(c[0]) > 0 and "rsync" in c[0][0]
-        ]
-
-        # Should have at least one rsync call for claude directory
-        assert len(rsync_calls) >= 1
-
-        # Verify excludes are passed
-        rsync_cmd = rsync_calls[0][0][0]
-        assert "--exclude" in rsync_cmd
-
-    @patch("subprocess.run")
-    def test_sync_config_calls_rewrite_plugin_paths(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """_syncer.sync_full_config calls _rewrite_plugin_paths after rsync."""
-        # Create mock claude directory with plugins subdirectory
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-        (claude_dir / "settings.json").write_text("{}")
-        (claude_dir / "plugins").mkdir()
-
-        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = mock_run_side_effect
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            with patch.object(backend._syncer, "_rewrite_plugin_paths") as mock_rewrite:
-                backend._syncer.sync_full_config("test-pod-0")
-                mock_rewrite.assert_called_once()
-
-    @patch("subprocess.run")
-    def test_sync_config_skips_rewrite_when_no_plugins_dir(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """_syncer.sync_full_config skips _rewrite_plugin_paths when no plugins dir."""
-        # Create mock claude directory WITHOUT plugins subdirectory
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-        (claude_dir / "settings.json").write_text("{}")
-
-        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = mock_run_side_effect
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            with patch.object(backend._syncer, "_rewrite_plugin_paths") as mock_rewrite:
-                backend._syncer.sync_full_config("test-pod-0")
-                mock_rewrite.assert_not_called()
-
-    @patch("subprocess.run")
-    def test_sync_config_handles_missing_claude_dir(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """_syncer.sync_full_config handles missing ~/.claude/ gracefully."""
-        # Don't create claude directory
-
-        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = mock_run_side_effect
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            # Should not raise
-            backend._syncer.sync_full_config("test-pod-0")
-
-        # Should not have rsync calls for claude directory
-        rsync_calls = [
-            c
-            for c in mock_run.call_args_list
-            if c[0] and len(c[0]) > 0 and "rsync" in c[0][0] and ".claude" in str(c)
-        ]
-        assert len(rsync_calls) == 0
-
-    @patch("subprocess.run")
-    def test_sync_config_skips_rewrite_on_rsync_failure(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
-        """_syncer.sync_full_config does NOT call _rewrite_plugin_paths when rsync fails."""
-        # Create mock claude directory
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-        (claude_dir / "settings.json").write_text("{}")
-
-        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
-            cmd = args[0] if args else []
-            # Fail rsync calls
-            if "rsync" in cmd:
-                return MagicMock(
-                    returncode=1,
-                    stdout="",
-                    stderr="error: rsync failed",
-                )
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = mock_run_side_effect
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            with patch.object(backend._syncer, "_rewrite_plugin_paths") as mock_rewrite:
-                backend._syncer.sync_full_config("test-pod-0")
-                # Should NOT be called because rsync failed
-                mock_rewrite.assert_not_called()
-
-    @patch("subprocess.run")
-    def test_sync_config_prints_warning_on_rsync_failure(
-        self, mock_run: MagicMock, tmp_path: Path, capsys: Any
-    ) -> None:
-        """_syncer.sync_full_config prints warning when rsync fails."""
-        # Create mock claude directory
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-        (claude_dir / "settings.json").write_text("{}")
-
-        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
-            cmd = args[0] if args else []
-            if "rsync" in cmd:
-                return MagicMock(
-                    returncode=1,
-                    stdout="",
-                    stderr="error: rsync failed",
-                )
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = mock_run_side_effect
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            backend._syncer.sync_full_config("test-pod-0")
-
-        captured = capsys.readouterr()
-        assert "Failed to copy agent config directory" in captured.err
-        assert "plugins may not work" in captured.err
-
-
-class TestRewritePluginPaths:
-    """Tests for _rewrite_plugin_paths method."""
-
-    @staticmethod
-    def _make_claude_agent() -> Any:
-        """Create a claude agent for testing _rewrite_plugin_paths."""
-        from paude.agents import get_agent
-
-        return get_agent("claude")
-
-    @patch("subprocess.run")
-    def test_rewrite_plugin_paths_uses_jq(self, mock_run: MagicMock) -> None:
-        """_rewrite_plugin_paths uses jq to rewrite installed_plugins.json."""
-
-        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = mock_run_side_effect
-        agent = self._make_claude_agent()
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        backend._syncer._target = "test-pod-0"
-        backend._syncer._rewrite_plugin_paths("/credentials/claude", agent, Path.home())
-
-        # Find exec calls with jq
-        jq_calls = [
-            c
-            for c in mock_run.call_args_list
-            if c[0] and len(c[0]) > 0 and "exec" in c[0][0] and "jq" in str(c)
-        ]
-
-        # Should have two jq calls (installed_plugins.json and known_marketplaces.json)
-        assert len(jq_calls) >= 2
-
-    @patch("subprocess.run")
-    def test_rewrite_plugin_paths_targets_correct_files(
-        self, mock_run: MagicMock
-    ) -> None:
-        """_rewrite_plugin_paths rewrites both plugin metadata files."""
-
-        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = mock_run_side_effect
-        agent = self._make_claude_agent()
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        backend._syncer._target = "test-pod-0"
-        backend._syncer._rewrite_plugin_paths("/credentials/claude", agent, Path.home())
-
-        # Check for installed_plugins.json rewrite
-        installed_plugins_calls = [
-            c for c in mock_run.call_args_list if "installed_plugins.json" in str(c)
-        ]
-        assert len(installed_plugins_calls) >= 1
-
-        # Check for known_marketplaces.json rewrite
-        known_marketplaces_calls = [
-            c for c in mock_run.call_args_list if "known_marketplaces.json" in str(c)
-        ]
-        assert len(known_marketplaces_calls) >= 1
-
-    @patch("subprocess.run")
-    def test_rewrite_plugin_paths_uses_correct_container_path(
-        self, mock_run: MagicMock
-    ) -> None:
-        """_rewrite_plugin_paths rewrites to /home/paude/.claude/plugins/."""
-
-        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = mock_run_side_effect
-        agent = self._make_claude_agent()
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        backend._syncer._target = "test-pod-0"
-        backend._syncer._rewrite_plugin_paths("/credentials/claude", agent, Path.home())
-
-        # Check that the container path is used
-        all_calls_str = str(mock_run.call_args_list)
-        assert "/home/paude/.claude/plugins" in all_calls_str
-
-    @patch("subprocess.run")
-    def test_rewrite_plugin_paths_handles_null_installpath(
-        self, mock_run: MagicMock
-    ) -> None:
-        """_rewrite_plugin_paths jq expression handles null/missing installPath."""
-
-        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = mock_run_side_effect
-        agent = self._make_claude_agent()
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        backend._syncer._target = "test-pod-0"
-        backend._syncer._rewrite_plugin_paths("/credentials/claude", agent, Path.home())
-
-        # The jq expression should include null-safety check
-        all_calls_str = str(mock_run.call_args_list)
-        # Check for the conditional that guards against null installPath
-        assert "if .installPath then" in all_calls_str
-
-    @patch("subprocess.run")
-    def test_rewrite_plugin_paths_handles_null_installlocation(
-        self, mock_run: MagicMock
-    ) -> None:
-        """_rewrite_plugin_paths jq handles null/missing installLocation."""
-
-        def mock_run_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
-            return MagicMock(returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = mock_run_side_effect
-        agent = self._make_claude_agent()
-
-        backend = OpenShiftBackend(config=OpenShiftConfig(namespace="test-ns"))
-        backend._syncer._target = "test-pod-0"
-        backend._syncer._rewrite_plugin_paths("/credentials/claude", agent, Path.home())
-
-        # The jq expression for known_marketplaces should include null-safety
-        all_calls_str = str(mock_run.call_args_list)
-        assert "if .value.installLocation then" in all_calls_str
-
-
-class TestClaudeConfigExcludes:
-    """Tests for ClaudeAgent config_excludes (canonical source of truth)."""
-
-    def test_config_excludes_contains_expected_patterns(self) -> None:
-        """config_excludes contains session-specific and cache patterns."""
-        from paude.agents.claude import ClaudeAgent
-
-        excludes = ClaudeAgent().config.config_excludes
-
-        # Session-specific patterns (anchored with leading /)
-        assert "/history.jsonl" in excludes
-        assert "/tasks" in excludes
-        assert "/todos" in excludes
-        assert "/session-env" in excludes
-
-        # Cache patterns (anchored to only match top-level cache)
-        assert "/cache" in excludes
-        assert "/stats-cache.json" in excludes
-
-        # Git metadata
-        assert "/.git" in excludes
-
-    def test_config_excludes_uses_anchored_patterns(self) -> None:
-        """config_excludes uses anchored patterns to not exclude plugins/cache."""
-        from paude.agents.claude import ClaudeAgent
-
-        excludes = ClaudeAgent().config.config_excludes
-
-        # All patterns should be anchored (start with /) to prevent
-        # accidentally excluding nested directories like plugins/cache
-        for pattern in excludes:
-            assert pattern.startswith("/"), (
-                f"Pattern '{pattern}' should be anchored with leading / "
-                "to prevent excluding nested directories"
-            )
-
-    def test_config_excludes_does_not_contain_plugins(self) -> None:
-        """config_excludes does not exclude plugins directory."""
-        from paude.agents.claude import ClaudeAgent
-
-        excludes = ClaudeAgent().config.config_excludes
-
-        assert "plugins" not in excludes
 
 
 class TestEnsureProxyImageViaBuild:

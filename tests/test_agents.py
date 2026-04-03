@@ -84,7 +84,6 @@ class TestAgentConfig:
         assert cfg.env_vars == {}
         assert cfg.passthrough_env_vars == []
         assert cfg.passthrough_env_prefixes == []
-        assert cfg.config_excludes == []
         assert cfg.activity_files == []
         assert cfg.extra_domain_aliases == ["claude"]
         assert cfg.exposed_ports == []
@@ -129,14 +128,6 @@ class TestClaudeAgentConfig:
 
     def test_clear_command(self) -> None:
         assert ClaudeAgent().config.clear_command == "/clear"
-
-    def test_config_excludes_not_empty(self) -> None:
-        cfg = ClaudeAgent().config
-        assert len(cfg.config_excludes) > 0
-        assert "/projects" in cfg.config_excludes
-
-    def test_config_sync_files_only_empty(self) -> None:
-        assert ClaudeAgent().config.config_sync_files_only == []
 
     def test_passthrough_vars(self) -> None:
         cfg = ClaudeAgent().config
@@ -216,22 +207,7 @@ class TestClaudeAgentHostConfigMounts:
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
         mounts = ClaudeAgent().host_config_mounts(tmp_path)
-        assert "-v" in mounts
-        assert any("/tmp/claude.seed:ro" in m for m in mounts)
-
-    def test_mounts_plugins(self, tmp_path: Path) -> None:
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-        plugins = claude_dir / "plugins"
-        plugins.mkdir()
-        mounts = ClaudeAgent().host_config_mounts(tmp_path)
-        assert any("plugins" in m and ":ro" in m for m in mounts)
-
-    def test_mounts_claude_json(self, tmp_path: Path) -> None:
-        claude_json = tmp_path / ".claude.json"
-        claude_json.write_text("{}")
-        mounts = ClaudeAgent().host_config_mounts(tmp_path)
-        assert any("/tmp/claude.json.seed:ro" in m for m in mounts)
+        assert mounts == []
 
 
 class TestClaudeAgentBuildEnvironment:
@@ -348,12 +324,6 @@ class TestGeminiAgentConfig:
     def test_env_vars_empty(self) -> None:
         assert GeminiAgent().config.env_vars == {}
 
-    def test_config_excludes_empty(self) -> None:
-        assert GeminiAgent().config.config_excludes == []
-
-    def test_config_sync_files_only_empty(self) -> None:
-        assert GeminiAgent().config.config_sync_files_only == []
-
     def test_activity_files_empty(self) -> None:
         assert GeminiAgent().config.activity_files == []
 
@@ -408,8 +378,7 @@ class TestGeminiAgentHostConfigMounts:
         gemini_dir = tmp_path / ".gemini"
         gemini_dir.mkdir()
         mounts = GeminiAgent().host_config_mounts(tmp_path)
-        assert "-v" in mounts
-        assert any("/tmp/gemini.seed:ro" in m for m in mounts)
+        assert mounts == []
 
     def test_no_config_file_mount(self, tmp_path: Path) -> None:
         gemini_json = tmp_path / ".gemini.json"
@@ -523,12 +492,6 @@ class TestCursorAgentConfig:
             "NODE_USE_ENV_PROXY": "1",
         }
 
-    def test_config_excludes_empty(self) -> None:
-        assert CursorAgent().config.config_excludes == []
-
-    def test_config_sync_files_only(self) -> None:
-        assert CursorAgent().config.config_sync_files_only == ["cli-config.json"]
-
     def test_activity_files_empty(self) -> None:
         assert CursorAgent().config.activity_files == []
 
@@ -610,23 +573,6 @@ class TestCursorAgentHostConfigMounts:
         mounts = CursorAgent().host_config_mounts(tmp_path)
         assert mounts == []
 
-    def test_mounts_cli_config_json(self, tmp_path: Path) -> None:
-        cursor_dir = tmp_path / ".cursor"
-        cursor_dir.mkdir()
-        cli_config = cursor_dir / "cli-config.json"
-        cli_config.write_text("{}")
-        mounts = CursorAgent().host_config_mounts(tmp_path)
-        assert "-v" in mounts
-        assert any("/tmp/cursor-cli-config.seed:ro" in m for m in mounts)
-
-    def test_does_not_mount_entire_cursor_dir(self, tmp_path: Path) -> None:
-        cursor_dir = tmp_path / ".cursor"
-        cursor_dir.mkdir()
-        (cursor_dir / "cli-config.json").write_text("{}")
-        (cursor_dir / "extensions").mkdir()
-        mounts = CursorAgent().host_config_mounts(tmp_path)
-        assert not any("cursor.seed" in m for m in mounts)
-
     def test_mounts_auth_json_when_exists(self, tmp_path: Path) -> None:
         config_cursor = tmp_path / ".config" / "cursor"
         config_cursor.mkdir(parents=True)
@@ -639,7 +585,7 @@ class TestCursorAgentHostConfigMounts:
         mounts = CursorAgent().host_config_mounts(tmp_path)
         assert not any("cursor-auth.seed" in m for m in mounts)
 
-    def test_mounts_both_cli_config_and_auth_json(self, tmp_path: Path) -> None:
+    def test_mounts_only_auth_json_when_both_exist(self, tmp_path: Path) -> None:
         cursor_dir = tmp_path / ".cursor"
         cursor_dir.mkdir()
         (cursor_dir / "cli-config.json").write_text("{}")
@@ -647,7 +593,7 @@ class TestCursorAgentHostConfigMounts:
         config_cursor.mkdir(parents=True)
         (config_cursor / "auth.json").write_text("{}")
         mounts = CursorAgent().host_config_mounts(tmp_path)
-        assert any("/tmp/cursor-cli-config.seed:ro" in m for m in mounts)
+        assert not any("cursor-cli-config.seed" in m for m in mounts)
         assert any("/tmp/cursor-auth.seed:ro" in m for m in mounts)
 
 
@@ -692,10 +638,6 @@ class TestCursorAgentSandboxConfig:
     def test_uses_jq(self) -> None:
         script = CursorAgent().apply_sandbox_config("/home/paude", "/workspace", "")
         assert "jq" in script
-
-    def test_seeds_from_host_cli_config(self) -> None:
-        script = CursorAgent().apply_sandbox_config("/home/paude", "/workspace", "")
-        assert "/tmp/cursor-cli-config.seed" in script
 
     def test_home_path_parameterized(self) -> None:
         script = CursorAgent().apply_sandbox_config("/custom/home", "/workspace", "")
@@ -1016,8 +958,7 @@ class TestOpenClawAgentHostConfigMounts:
         openclaw_dir = tmp_path / ".openclaw"
         openclaw_dir.mkdir()
         mounts = OpenClawAgent().host_config_mounts(tmp_path)
-        assert "-v" in mounts
-        assert any("/tmp/openclaw.seed:ro" in m for m in mounts)
+        assert mounts == []
 
 
 class TestOpenClawAgentBuildEnvironment:

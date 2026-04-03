@@ -9,7 +9,6 @@ from paude.agents.base import (
     build_environment_from_config,
     build_provider_credentials,
 )
-from paude.mounts import resolve_path
 
 
 class GeminiAgent:
@@ -33,7 +32,6 @@ class GeminiAgent:
             passthrough_env_prefixes=creds.passthrough_env_prefixes,
             config_dir_name=".gemini",
             config_file_name=None,
-            config_excludes=[],
             activity_files=[],
             yolo_flag="--yolo",
             clear_command="/clear",
@@ -86,15 +84,7 @@ fi
         return "gemini"
 
     def host_config_mounts(self, home: Path) -> list[str]:
-        mounts: list[str] = []
-
-        # Gemini seed directory (ro)
-        gemini_dir = home / ".gemini"
-        resolved_gemini = resolve_path(gemini_dir)
-        if resolved_gemini and resolved_gemini.is_dir():
-            mounts.extend(["-v", f"{resolved_gemini}:/tmp/gemini.seed:ro"])
-
-        return mounts
+        return []
 
     def build_environment(self) -> dict[str, str]:
         return build_environment_from_config(self._config)

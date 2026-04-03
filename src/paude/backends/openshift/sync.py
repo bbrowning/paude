@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from paude.backends.openshift.exceptions import OcTimeoutError, OpenShiftError
 from paude.backends.openshift.oc import (
@@ -15,10 +14,7 @@ from paude.backends.openshift.oc import (
     OcClient,
 )
 from paude.backends.sync_base import CONFIG_PATH, BaseConfigSyncer
-from paude.constants import CONTAINER_HOME, GCP_ADC_FILENAME, SANDBOX_CONFIG_TARGET
-
-if TYPE_CHECKING:
-    from paude.agents.base import Agent
+from paude.constants import GCP_ADC_FILENAME, SANDBOX_CONFIG_TARGET
 
 
 class ConfigSyncer(BaseConfigSyncer):
@@ -54,81 +50,6 @@ class ConfigSyncer(BaseConfigSyncer):
             return True
         except Exception:  # noqa: S110
             return False
-
-    def _copy_dir(
-        self,
-        local_dir: str,
-        container_path: str,
-        *,
-        excludes: list[str] | None = None,
-        context: str,
-    ) -> bool:
-        exclude_args: list[str] = []
-        if excludes:
-            for pattern in excludes:
-                exclude_args.extend(["--exclude", pattern])
-
-        success = self.rsync_with_retry(
-            f"{local_dir}/",
-            f"{self._target}:{container_path}",
-            exclude_args,
-        )
-        if not success:
-            print(
-                f"  Warning: Failed to {context} ({local_dir}/) - plugins may not work",
-                file=sys.stderr,
-            )
-        return success
-
-    def _rewrite_plugin_paths(self, agent_path: str, agent: Agent, home: Path) -> None:
-        config_dir_name = agent.config.config_dir_name
-        container_plugins_path = f"{CONTAINER_HOME}/{config_dir_name}/plugins"
-
-        installed_plugins = f"{agent_path}/plugins/installed_plugins.json"
-        jq_expr = (
-            ".plugins |= with_entries(.value |= map("
-            "if .installPath then "
-            '.installPath = ($prefix + "/" + '
-            '(.installPath | split("/") | .[-3:] | join("/"))) '
-            "else . end))"
-        )
-        self._oc.run(
-            "exec",
-            self._target,
-            "-n",
-            self._namespace,
-            "--",
-            "bash",
-            "-c",
-            f'if [ -f "{installed_plugins}" ]; then '
-            f"jq --arg prefix \"{container_plugins_path}/cache\" '{jq_expr}' "
-            f'"{installed_plugins}" > "{installed_plugins}.tmp" && '
-            f'mv "{installed_plugins}.tmp" "{installed_plugins}"; fi',
-            check=False,
-            timeout=OC_EXEC_TIMEOUT,
-        )
-
-        known_marketplaces = f"{agent_path}/plugins/known_marketplaces.json"
-        jq_expr2 = (
-            "with_entries(if .value.installLocation then "
-            '.value.installLocation = ($prefix + "/marketplaces/" + .key) '
-            "else . end)"
-        )
-        self._oc.run(
-            "exec",
-            self._target,
-            "-n",
-            self._namespace,
-            "--",
-            "bash",
-            "-c",
-            f'if [ -f "{known_marketplaces}" ]; then '
-            f"jq --arg prefix \"{container_plugins_path}\" '{jq_expr2}' "
-            f'"{known_marketplaces}" > "{known_marketplaces}.tmp" && '
-            f'mv "{known_marketplaces}.tmp" "{known_marketplaces}"; fi',
-            check=False,
-            timeout=OC_EXEC_TIMEOUT,
-        )
 
     # -- OpenShift-specific public API -------------------------------------
 
@@ -231,7 +152,7 @@ class ConfigSyncer(BaseConfigSyncer):
     ) -> None:
         """Sync all configuration to pod /credentials/ directory.
 
-        Full sync including stub gcloud credentials, agent config, gitconfig,
+        Full sync including stub gcloud credentials, gitconfig,
         global gitignore, and sandbox config. No real credentials are synced —
         all authentication is handled by the proxy sidecar.
 
@@ -247,7 +168,7 @@ class ConfigSyncer(BaseConfigSyncer):
 
         print("Syncing configuration to pod...", file=sys.stderr)
 
-        self._prepare_config_directory(agent_name=agent_name)
+        self._prepare_config_directory()
         self._sync_stub_gcloud_credentials()
         self._sync_config_files(agent_name)
         self._sync_sandbox_config(
@@ -358,7 +279,7 @@ class ConfigSyncer(BaseConfigSyncer):
                 file=sys.stderr,
             )
 
-    def _prepare_config_directory(self, agent_name: str = "claude") -> None:
+    def _prepare_config_directory(self) -> None:
         """Prepare the config directory on the pod."""
         prep_result = self._oc.run(
             "exec",
@@ -368,7 +289,7 @@ class ConfigSyncer(BaseConfigSyncer):
             "--",
             "bash",
             "-c",
-            f"mkdir -p {CONFIG_PATH}/gcloud {CONFIG_PATH}/{agent_name} && "
+            f"mkdir -p {CONFIG_PATH}/gcloud && "
             f"(chmod -R g+rwX {CONFIG_PATH} 2>/dev/null || true)",
             check=False,
             timeout=OC_EXEC_TIMEOUT,

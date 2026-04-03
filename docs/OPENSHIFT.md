@@ -118,31 +118,19 @@ Credentials are stored in RAM-only storage for enhanced security:
 
 **Configuration Sync:**
 
-Configuration is synced via `oc cp` to tmpfs on session start and reconnect:
+Minimal configuration is synced via `oc cp` to tmpfs on session start:
 
-**Synced from host:**
-- `~/.config/gcloud` → gcloud credentials for Vertex AI authentication
+- Stub GCP ADC (sentinel values — real auth handled by proxy sidecar)
 - `~/.gitconfig` → Git identity configuration
-- `~/.claude/` → Agent config directory (for Claude Code), including:
-  - `settings.json`, `settings.local.json` - Core settings
-  - `plugins/` - Installed plugins and marketplace metadata
-  - `CLAUDE.md` - Global instructions
-- `~/.claude.json` → Agent preferences
+- `~/.config/git/ignore` → Global gitignore
+- Agent sandbox config script (onboarding/trust prompt suppression)
+- Cursor auth.json (for Cursor agent only)
 
-**Excluded (session-specific):**
-- `history.jsonl`, `tasks/`, `todos/`, `plans/` - Session state
-- `sessions/`, `session-env/`, `projects/` - Session metadata
-- `cache/`, `stats-cache.json`, `statsig/` - Caches
-- `debug/`, `file-history/`, `shell-snapshots/` - Debug logs
-- `backups/`, `downloads/`, `paste-cache/`, `.git/` - Misc
-
-Plugin paths are automatically rewritten from host paths to container paths.
+Agent config directories (`~/.claude/`, `~/.gemini/`, etc.) are **not** synced from the host. The agent starts with vanilla config — the sandbox config script generates the minimum viable settings. This improves security (no host credentials leak into containers) and simplifies the path to GitOps-compatible session creation.
 
 **Credential Refresh:**
-- **First connect** (after pod start): Full sync of gcloud, claude config, and gitconfig
-- **Reconnect** (subsequent connects): Only gcloud credentials refreshed (fast)
-- This ensures fresh OAuth tokens propagate if you re-authenticate locally
-- Long-running pods stay current with local credential changes
+- **First connect** (after pod start): Full sync of stub credentials, gitconfig, and sandbox config
+- **Reconnect** (subsequent connects): Stub credentials and sandbox config refreshed (fast)
 
 ### Network Filtering
 
@@ -261,9 +249,9 @@ For merge conflicts, use normal git workflows (rebase, merge, etc.).
 │  │  │  │  + tmux    │  │    ┌───────────────────────┐ │ │
 │  │  │  └────────────┘  │    │  tmpfs: /credentials  │ │ │
 │  │  │                  │    │  (RAM-only, ephemeral) │ │ │
-│  │  │  Mounts:         │    │  - gcloud creds       │ │ │
-│  │  │  - /pvc (PVC)    │    │  - ~/.claude/ dir     │ │ │
-│  │  │  - /credentials  │    │  - gitconfig          │ │ │
+│  │  │  Mounts:         │    │  - stub gcloud creds  │ │ │
+│  │  │  - /pvc (PVC)    │    │  - gitconfig          │ │ │
+│  │  │  - /credentials  │    │  - sandbox config     │ │ │
 │  │  │    (tmpfs)       │    └───────────────────────┘ │ │
 │  │  └──────────────────┘                              │ │
 │  │         ↑                                          │ │
@@ -275,7 +263,6 @@ For merge conflicts, use normal git workflows (rebase, merge, etc.).
     ┌────────┴────────┐
     │  Local Machine  │
     │  - workspace    │
-    │  - ~/.claude/   │
     │  - credentials  │
     │  - paude CLI    │
     └─────────────────┘
@@ -288,7 +275,7 @@ For merge conflicts, use normal git workflows (rebase, merge, etc.).
 | Session Persistence | Yes (named volumes) | Yes (tmux + PVC) |
 | Network Disconnect | Session lost | Session preserved |
 | Code Sync | git push/pull | git push/pull |
-| Config Sync | Mounted at start | oc cp at connect |
+| Config Sync | oc cp at connect | oc cp at connect |
 | Multi-machine | No | Yes |
 | Resource Isolation | Container | Pod + namespace |
 | Setup Complexity | Low | Medium |

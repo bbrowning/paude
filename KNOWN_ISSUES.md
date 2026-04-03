@@ -86,9 +86,7 @@ Declarative resources (already applied as JSON via `oc apply`):
 Post-apply imperative steps (the blocking problem):
 - Poll `oc get pod` for readiness
 - `oc exec mkdir -p /credentials`
-- `oc cp` stub GCP ADC, gitconfig, gitignore, sandbox config script
-- `oc rsync` agent config directory (~/.claude/)
-- `oc exec` jq to rewrite plugin install paths
+- `oc cp` stub GCP ADC, gitconfig, gitignore, sandbox config script, cursor auth
 - `oc exec touch /credentials/.ready` (signals entrypoint to proceed)
 - `oc exec entrypoint-session.sh` (starts agent headless)
 
@@ -99,7 +97,7 @@ Build resources (shared, coupled to create):
 
 **Gap 1 — No manifest export layer.** Each resource builder calls `oc apply -f -` inline. There is no way to collect all resource specs and write them to disk as YAML. Fix: add a `ManifestCollector` that accumulates resource dicts and can either apply them or write to a directory. Resource builders return dicts instead of applying directly.
 
-**Gap 2 — Config injected into running pods via `oc cp`/`oc exec`.** `sync.py:ConfigSyncer.sync_full_config()` pushes files into a `/credentials/` tmpfs mount after the pod starts. The entrypoint polls `/credentials/.ready` for 300 seconds. Fix: prepare the config directory locally before container start, then mount it as a volume (ConfigMap in K8s, bind mount in Podman). The entrypoint runs directly with config already present — same code path for both backends, no conditional branching needed.
+**Gap 2 — Config injected into running pods via `oc cp`/`oc exec`.** (Partially resolved) Agent config directory sync (`oc rsync` of `~/.claude/`, plugin path rewriting via `oc exec jq`) has been removed. Remaining `oc cp`/`oc exec` items: stub GCP ADC, gitconfig, global gitignore, sandbox config script, cursor auth, and `.ready` marker. These are small static files that could be pre-computed and mounted as a ConfigMap. Fix for remaining items: prepare the config directory locally before container start, then mount it as a volume (ConfigMap in K8s, bind mount in Podman).
 
 **Gap 3 — Secrets created inline during `paude create`.** CA cert is generated via openssl and credentials are gathered from the host environment, both stored as K8s Secrets during `paude create`. Fix: users pre-create secrets out-of-band (`oc create secret`, sealed-secrets, ESO, vault) and pass names via `--ca-secret` / `--creds-secret` flags. CA generation becomes a helper command (`paude setup-proxy-ca`). Paude manifests just reference secret names, never contain secret data.
 
@@ -128,10 +126,10 @@ Phase 3 — Externalize secrets (low-medium effort, high value):
 - Paude manifests reference secret names, never generate secret data inline
 - Existing inline secret creation remains as default for backward compatibility
 
-Phase 4 — Config as mounted volumes (high effort, high value):
-- Prepare config directory locally before container start
+Phase 4 — Config as mounted volumes (medium effort, high value):
+- Agent config sync and plugin path rewriting already removed (done)
+- Prepare remaining config (stub ADC, gitconfig, gitignore, sandbox script) locally before container start
 - Package as ConfigMap (K8s) or bind mount (Podman) — same entrypoint for both
-- Move plugin path rewriting from jq/oc-exec to pure Python at prep time
 - Remove `sleep infinity` + `oc exec` pattern; entrypoint runs directly as container command
 - Remove `/credentials/.ready` polling from entrypoint (config always present at start)
 - Files: `sync.py`, `resources.py`, `entrypoint-session.sh`, Podman backend
