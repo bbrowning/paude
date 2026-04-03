@@ -51,4 +51,5 @@ def build_proxy_environment(proxy_name: str) -> dict[str, str]:
         "SSL_CERT_FILE": CA_BUNDLE_PATH,
         "SSL_CERT_DIR": _CA_CERT_DIR,
         "CURL_CA_BUNDLE": CA_BUNDLE_PATH,
+        "GIT_SSL_CAINFO": CA_BUNDLE_PATH,
     }
