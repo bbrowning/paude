@@ -459,7 +459,7 @@ class TestProxyDeployment:
             "-n",
             test_namespace,
             "-o",
-            "jsonpath={.spec.template.spec.containers[0].env[0].value}",
+            'jsonpath={.spec.template.spec.containers[0].env[?(@.name=="ALLOWED_DOMAINS")].value}',
         )
         assert result.stdout.strip() == "example.com,.googleapis.com"
 
