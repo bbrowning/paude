@@ -339,8 +339,10 @@ class SessionConnector:
         else:
             cmd = ["oc", "exec", "-it", "-n", ns, pname, "--"]
 
+        env_args = ["env", "PAUDE_HEADLESS=0"]
         if port_urls:
-            cmd.extend(["env", f"PAUDE_PORT_URLS={';'.join(port_urls)}"])
+            env_args.append(f"PAUDE_PORT_URLS={';'.join(port_urls)}")
+        cmd.extend(env_args)
 
         cmd.append("/usr/local/bin/entrypoint-session.sh")
         return cmd
