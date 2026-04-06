@@ -1076,7 +1076,7 @@ class TestSessionConnectorBuildExecCmd:
         )
 
     def test_exec_cmd_without_port_urls(self) -> None:
-        """Exec command has no env prefix when no port URLs."""
+        """Exec command overrides PAUDE_HEADLESS even without port URLs."""
         connector = self._make_connector()
         cmd = connector._build_exec_cmd("pod-0", "test-ns")
         assert cmd == [
@@ -1087,6 +1087,8 @@ class TestSessionConnectorBuildExecCmd:
             "test-ns",
             "pod-0",
             "--",
+            "env",
+            "PAUDE_HEADLESS=0",
             "/usr/local/bin/entrypoint-session.sh",
         ]
 
@@ -1099,6 +1101,7 @@ class TestSessionConnectorBuildExecCmd:
             port_urls=["http://localhost:18789"],
         )
         assert "env" in cmd
+        assert "PAUDE_HEADLESS=0" in cmd
         assert "PAUDE_PORT_URLS=http://localhost:18789" in cmd
         # env and PAUDE_PORT_URLS must come before entrypoint
         env_idx = cmd.index("env")
@@ -1113,6 +1116,7 @@ class TestSessionConnectorBuildExecCmd:
             "test-ns",
             port_urls=["http://localhost:8080", "http://localhost:8443"],
         )
+        assert "PAUDE_HEADLESS=0" in cmd
         env_val = [c for c in cmd if c.startswith("PAUDE_PORT_URLS=")][0]
         assert env_val == (
             "PAUDE_PORT_URLS=http://localhost:8080;http://localhost:8443"
@@ -1128,6 +1132,7 @@ class TestSessionConnectorBuildExecCmd:
         )
         assert cmd[:4] == ["oc", "--context", "my-ctx", "exec"]
         assert "env" in cmd
+        assert "PAUDE_HEADLESS=0" in cmd
         assert "PAUDE_PORT_URLS=http://localhost:18789" in cmd
 
 
