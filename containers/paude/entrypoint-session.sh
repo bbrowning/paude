@@ -98,6 +98,7 @@ setup_ca_trust
 wait_for_credentials
 setup_credentials
 persist_agent_config
+persist_config_dir .dolt
 wait_for_git
 
 # Fix git "dubious ownership" error when running as arbitrary UID (OpenShift restricted SCC)

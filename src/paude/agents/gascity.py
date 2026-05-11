@@ -34,6 +34,8 @@ class GascityAgent:
     def __init__(self, provider: str | None = None) -> None:
         creds = build_provider_credentials("gascity", provider)
         creds.extra_env_vars["NODE_USE_ENV_PROXY"] = "1"
+        creds.extra_env_vars["BD_DOLT_AUTO_COMMIT"] = "off"
+        creds.extra_env_vars["BD_EXPORT_AUTO"] = "false"
         self._config = AgentConfig(
             name="gascity",
             display_name="Gas City",
@@ -109,7 +111,9 @@ class GascityAgent:
             'curl -fsSL "https://github.com/gastownhall'
             f"/gascity/releases/download/v{GC_VERSION}"
             f"/gascity_{GC_VERSION}_linux_${{BIN_ARCH}}"
-            '.tar.gz" | tar xz -C $D gc',
+            '.tar.gz" | tar xz -C $D gc && '
+            "$D/dolt config --global --set metrics.disabled true && "
+            f"chmod -R g+rwX {container_home}/.dolt",
             "",
             f'ENV PATH="{install_dir}:$PATH"',
         ]

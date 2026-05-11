@@ -40,6 +40,8 @@ class TestGascityAgentConfig:
         assert cfg.env_vars == {
             "CLAUDE_CODE_USE_VERTEX": "1",
             "NODE_USE_ENV_PROXY": "1",
+            "BD_DOLT_AUTO_COMMIT": "off",
+            "BD_EXPORT_AUTO": "false",
         }
 
     def test_passthrough_vars(self) -> None:
@@ -128,6 +130,15 @@ class TestGascityAgentDockerfile:
         text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
         assert "lsof" in text
 
+    def test_disables_dolt_metrics(self) -> None:
+        text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
+        assert "metrics.disabled" in text
+        assert "dolt config --global --set" in text
+
+    def test_dolt_config_dir_group_writable(self) -> None:
+        text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
+        assert "chmod -R g+rwX /home/paude/.dolt" in text
+
     def test_arch_detection(self) -> None:
         text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
         assert "uname -m" in text
@@ -174,6 +185,8 @@ class TestGascityAgentBuildEnvironment:
             assert env == {
                 "CLAUDE_CODE_USE_VERTEX": "1",
                 "NODE_USE_ENV_PROXY": "1",
+                "BD_DOLT_AUTO_COMMIT": "off",
+                "BD_EXPORT_AUTO": "false",
             }
 
     def test_passes_through_vertex_vars(self) -> None:
