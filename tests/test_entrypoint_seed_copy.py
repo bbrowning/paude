@@ -492,7 +492,7 @@ def _persist_config_dir_bash_function(pvc_dir: str) -> str:
 
             if [[ ! -L "$home_dir" ]]; then
                 if [[ -d "$home_dir" ]]; then
-                    cp -dR --preserve=mode,timestamps "$home_dir/." "$pvc_dir/" 2>/dev/null || true
+                    cp -RPp "$home_dir/." "$pvc_dir/" 2>/dev/null || true
                     rm -rf "$home_dir" 2>/dev/null || true
                 fi
                 if [[ ! -e "$home_dir" ]]; then
@@ -523,7 +523,7 @@ def _persist_bash_function(pvc_dir: str) -> str:
 
                 if [[ -f "$home_config_file" ]] && [[ ! -L "$home_config_file" ]]; then
                     if [[ ! -f "$pvc_config_file" ]]; then
-                        cp -dR --preserve=mode,timestamps "$home_config_file" "$pvc_config_file" 2>/dev/null || true
+                        cp -RPp "$home_config_file" "$pvc_config_file" 2>/dev/null || true
                     fi
                     rm -f "$home_config_file" 2>/dev/null || true
                 fi
