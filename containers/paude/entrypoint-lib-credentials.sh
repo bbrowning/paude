@@ -98,10 +98,17 @@ setup_credentials() {
         ln -sf "$config_path/gcloud" "$HOME/.config/gcloud"
     fi
 
-    # Set up gitconfig via symlink
-    if [[ -f "$config_path/gitconfig" ]]; then
-        rm -f "$HOME/.gitconfig" 2>/dev/null || true
-        ln -sf "$config_path/gitconfig" "$HOME/.gitconfig"
+    # Unlike gcloud/gitignore (symlinked read-only), gitconfig must be
+    # writable — tools like GasCity add entries via `git config --global`.
+    # Seed once to PVC so additions survive pod restarts. To force a
+    # re-seed from host config, delete /pvc/.gitconfig before restarting.
+    if [[ -f "$config_path/gitconfig" ]] && [[ ! -f /pvc/.gitconfig ]]; then
+        cp -f "$config_path/gitconfig" /pvc/.gitconfig 2>/dev/null || true
+        chmod 664 /pvc/.gitconfig 2>/dev/null || true
+        chcon --reference=/pvc /pvc/.gitconfig 2>/dev/null || true
+    fi
+    if [[ -f /pvc/.gitconfig ]]; then
+        export GIT_CONFIG_GLOBAL=/pvc/.gitconfig
     fi
 
     # Set up global gitignore via symlink

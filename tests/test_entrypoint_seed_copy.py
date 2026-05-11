@@ -28,6 +28,7 @@ ENTRYPOINT_LIB_CREDENTIALS_PATH = (
 ENTRYPOINT_LIB_INSTALL_PATH = (
     Path(__file__).parent.parent / "containers" / "paude" / "entrypoint-lib-install.sh"
 )
+DOCKERFILE_PATH = Path(__file__).parent.parent / "containers" / "paude" / "Dockerfile"
 
 
 def _read_all_entrypoint_files() -> str:
@@ -99,6 +100,36 @@ class TestEntrypointContract:
         )
         assert "--reference=/pvc" in content, (
             "chcon must use --reference=/pvc to inherit PVC SELinux context"
+        )
+
+
+class TestNssWrapperContract:
+    """Contract tests verifying nss_wrapper setup for OpenShift arbitrary UIDs."""
+
+    def test_dockerfile_installs_nss_wrapper(self) -> None:
+        content = DOCKERFILE_PATH.read_text()
+        assert "nss_wrapper" in content, (
+            "Dockerfile must install nss_wrapper for OpenShift arbitrary UID support"
+        )
+
+    def test_entrypoint_activates_nss_wrapper(self) -> None:
+        content = ENTRYPOINT_PATH.read_text()
+        assert "NSS_WRAPPER_PASSWD" in content, (
+            "entrypoint-session.sh must set NSS_WRAPPER_PASSWD for nss_wrapper"
+        )
+        assert "libnss_wrapper" in content, (
+            "entrypoint-session.sh must LD_PRELOAD libnss_wrapper.so"
+        )
+
+    def test_nss_wrapper_before_home_setup(self) -> None:
+        content = ENTRYPOINT_PATH.read_text()
+        nss_pos = content.find("NSS_WRAPPER_PASSWD")
+        home_pos = content.find('if [[ -z "$HOME" || "$HOME" == "/" ]]')
+        assert nss_pos != -1, "NSS_WRAPPER_PASSWD must exist in entrypoint"
+        assert home_pos != -1, "HOME setup block must exist in entrypoint"
+        assert nss_pos < home_pos, (
+            "nss_wrapper setup must appear before HOME setup so that "
+            "user.Current() and os.UserHomeDir() see the correct passwd entry"
         )
 
 
