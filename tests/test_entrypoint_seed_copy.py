@@ -28,6 +28,7 @@ ENTRYPOINT_LIB_CREDENTIALS_PATH = (
 ENTRYPOINT_LIB_INSTALL_PATH = (
     Path(__file__).parent.parent / "containers" / "paude" / "entrypoint-lib-install.sh"
 )
+DOCKERFILE_PATH = Path(__file__).parent.parent / "containers" / "paude" / "Dockerfile"
 
 
 def _read_all_entrypoint_files() -> str:
@@ -99,6 +100,36 @@ class TestEntrypointContract:
         )
         assert "--reference=/pvc" in content, (
             "chcon must use --reference=/pvc to inherit PVC SELinux context"
+        )
+
+
+class TestNssWrapperContract:
+    """Contract tests verifying nss_wrapper setup for OpenShift arbitrary UIDs."""
+
+    def test_dockerfile_installs_nss_wrapper(self) -> None:
+        content = DOCKERFILE_PATH.read_text()
+        assert "nss_wrapper" in content, (
+            "Dockerfile must install nss_wrapper for OpenShift arbitrary UID support"
+        )
+
+    def test_entrypoint_activates_nss_wrapper(self) -> None:
+        content = ENTRYPOINT_PATH.read_text()
+        assert "NSS_WRAPPER_PASSWD" in content, (
+            "entrypoint-session.sh must set NSS_WRAPPER_PASSWD for nss_wrapper"
+        )
+        assert "libnss_wrapper" in content, (
+            "entrypoint-session.sh must LD_PRELOAD libnss_wrapper.so"
+        )
+
+    def test_nss_wrapper_before_home_setup(self) -> None:
+        content = ENTRYPOINT_PATH.read_text()
+        nss_pos = content.find("NSS_WRAPPER_PASSWD")
+        home_pos = content.find('if [[ -z "$HOME" || "$HOME" == "/" ]]')
+        assert nss_pos != -1, "NSS_WRAPPER_PASSWD must exist in entrypoint"
+        assert home_pos != -1, "HOME setup block must exist in entrypoint"
+        assert nss_pos < home_pos, (
+            "nss_wrapper setup must appear before HOME setup so that "
+            "user.Current() and os.UserHomeDir() see the correct passwd entry"
         )
 
 
@@ -437,34 +468,54 @@ class TestTerminalEnvBeforeTmux:
 
 
 # ---------------------------------------------------------------------------
-# Helper for persist_agent_config tests
+# Helpers for persist_config_dir / persist_agent_config tests
 # ---------------------------------------------------------------------------
 
 
-def _persist_bash_function(pvc_dir: str) -> str:
-    """Return the persist_agent_config() bash function body for test scripts."""
+def _persist_config_dir_bash_function(pvc_dir: str) -> str:
+    """Return the persist_config_dir() bash function body for test scripts."""
     return textwrap.dedent(f"""\
+        persist_config_dir() {{
+            local dir_name="$1"
+            if [[ ! -d "{pvc_dir}" ]]; then return 0; fi
+
+            local pvc_dir="{pvc_dir}/$dir_name"
+            local home_dir="$HOME/$dir_name"
+
+            if [[ ! -d "$home_dir" ]] && [[ ! -L "$home_dir" ]] && [[ ! -d "$pvc_dir" ]]; then
+                return 0
+            fi
+
+            mkdir -p "$pvc_dir" 2>/dev/null || true
+            chmod g+rwX "$pvc_dir" 2>/dev/null || true
+            chcon -R --reference="{pvc_dir}" "$pvc_dir" 2>/dev/null || true
+
+            if [[ ! -L "$home_dir" ]]; then
+                if [[ -d "$home_dir" ]]; then
+                    cp -dR --preserve=mode,timestamps "$home_dir/." "$pvc_dir/" 2>/dev/null || true
+                    rm -rf "$home_dir" 2>/dev/null || true
+                fi
+                if [[ ! -e "$home_dir" ]]; then
+                    ln -sf "$pvc_dir" "$home_dir"
+                else
+                    echo "persist_config_dir: cannot replace $home_dir with symlink; using PVC copy at $pvc_dir" >&2
+                fi
+            fi
+        }}
+    """)
+
+
+def _persist_bash_function(pvc_dir: str) -> str:
+    """Return persist_config_dir + persist_agent_config for test scripts."""
+    config_dir_fn = _persist_config_dir_bash_function(pvc_dir)
+    return config_dir_fn + textwrap.dedent(f"""\
         persist_agent_config() {{
             if [[ ! -d "{pvc_dir}" ]]; then
                 return 0
             fi
 
-            local pvc_config_dir="{pvc_dir}/$AGENT_CONFIG_DIR"
-            local home_config_dir="$HOME/$AGENT_CONFIG_DIR"
-
-            mkdir -p "$pvc_config_dir" 2>/dev/null || true
-            chmod g+rwX "$pvc_config_dir" 2>/dev/null || true
-            chcon -R --reference="{pvc_dir}" "$pvc_config_dir" 2>/dev/null || true
-
-            if [[ -d "$home_config_dir" ]] && [[ ! -L "$home_config_dir" ]]; then
-                cp -Rp "$home_config_dir/." "$pvc_config_dir/" 2>/dev/null || true
-                rm -rf "$home_config_dir"
-            fi
-
-            if [[ ! -L "$home_config_dir" ]]; then
-                rm -rf "$home_config_dir" 2>/dev/null || true
-                ln -sf "$pvc_config_dir" "$home_config_dir"
-            fi
+            mkdir -p "{pvc_dir}/$AGENT_CONFIG_DIR" 2>/dev/null || true
+            persist_config_dir "$AGENT_CONFIG_DIR"
 
             if [[ -n "$AGENT_CONFIG_FILE" ]]; then
                 local pvc_config_file="{pvc_dir}/$AGENT_CONFIG_FILE"
@@ -472,9 +523,9 @@ def _persist_bash_function(pvc_dir: str) -> str:
 
                 if [[ -f "$home_config_file" ]] && [[ ! -L "$home_config_file" ]]; then
                     if [[ ! -f "$pvc_config_file" ]]; then
-                        cp -Rp "$home_config_file" "$pvc_config_file" 2>/dev/null || true
+                        cp -dR --preserve=mode,timestamps "$home_config_file" "$pvc_config_file" 2>/dev/null || true
                     fi
-                    rm -f "$home_config_file"
+                    rm -f "$home_config_file" 2>/dev/null || true
                 fi
 
                 if [[ ! -f "$pvc_config_file" ]]; then
@@ -483,8 +534,7 @@ def _persist_bash_function(pvc_dir: str) -> str:
                 chmod g+rw "$pvc_config_file" 2>/dev/null || true
                 chcon --reference="{pvc_dir}" "$pvc_config_file" 2>/dev/null || true
 
-                if [[ ! -L "$home_config_file" ]]; then
-                    rm -f "$home_config_file" 2>/dev/null || true
+                if [[ ! -e "$home_config_file" ]]; then
                     ln -sf "$pvc_config_file" "$home_config_file"
                 fi
             fi
@@ -701,6 +751,178 @@ class TestPersistAgentConfigContract:
         )
         assert 'rm -f "${claude_json}.tmp"' in script, (
             "Claude sandbox config must remove temp file after cp"
+        )
+
+
+def _build_persist_config_dir_script(
+    home_dir: str,
+    pvc_dir: str,
+    dir_name: str,
+) -> str:
+    """Build a script that exercises persist_config_dir()."""
+    config_dir_fn = _persist_config_dir_bash_function(pvc_dir)
+    return textwrap.dedent(f"""\
+        #!/bin/bash
+        set -e
+        export HOME="{home_dir}"
+
+        {config_dir_fn}
+        persist_config_dir {dir_name}
+    """)
+
+
+class TestPersistConfigDir:
+    """Tests for persist_config_dir() — generic dotdir PVC persistence."""
+
+    def test_persists_image_baked_dolt_config(self, tmp_path: Path) -> None:
+        """First start: copies image-baked ~/.dolt to PVC and symlinks."""
+        home = tmp_path / "home"
+        home.mkdir()
+        pvc = tmp_path / "pvc"
+        pvc.mkdir()
+
+        dolt_dir = home / ".dolt"
+        dolt_dir.mkdir()
+        (dolt_dir / "config_global.json").write_text('{"metrics.disabled":true}')
+
+        script = _build_persist_config_dir_script(str(home), str(pvc), ".dolt")
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        assert (home / ".dolt").is_symlink()
+        assert (home / ".dolt").resolve() == (pvc / ".dolt").resolve()
+        assert (pvc / ".dolt" / "config_global.json").read_text() == (
+            '{"metrics.disabled":true}'
+        )
+
+    def test_preserves_pvc_state_on_reconnect(self, tmp_path: Path) -> None:
+        """Reconnect: PVC has existing dolt data, symlink preserved."""
+        home = tmp_path / "home"
+        home.mkdir()
+        pvc = tmp_path / "pvc"
+        pvc.mkdir()
+
+        # Simulate existing PVC state
+        pvc_dolt = pvc / ".dolt"
+        pvc_dolt.mkdir()
+        (pvc_dolt / "config_global.json").write_text('{"user.name":"agent"}')
+
+        script = _build_persist_config_dir_script(str(home), str(pvc), ".dolt")
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        assert (home / ".dolt").is_symlink()
+        assert (pvc / ".dolt" / "config_global.json").read_text() == (
+            '{"user.name":"agent"}'
+        )
+
+    def test_idempotent(self, tmp_path: Path) -> None:
+        """Running twice produces the same result."""
+        home = tmp_path / "home"
+        home.mkdir()
+        pvc = tmp_path / "pvc"
+        pvc.mkdir()
+        (home / ".dolt").mkdir()
+        (home / ".dolt" / "config_global.json").write_text("{}")
+
+        script = _build_persist_config_dir_script(str(home), str(pvc), ".dolt")
+        _run_script(script)
+        (home / ".dolt" / "config_global.json").write_text('{"modified":true}')
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        assert (home / ".dolt").is_symlink()
+        assert (pvc / ".dolt" / "config_global.json").read_text() == '{"modified":true}'
+
+    def test_noop_when_dir_does_not_exist(self, tmp_path: Path) -> None:
+        """No-op when neither HOME nor PVC has the directory."""
+        home = tmp_path / "home"
+        home.mkdir()
+        pvc = tmp_path / "pvc"
+        pvc.mkdir()
+
+        script = _build_persist_config_dir_script(str(home), str(pvc), ".dolt")
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        assert not (home / ".dolt").exists()
+        assert not (pvc / ".dolt").exists()
+
+    def test_no_crash_when_home_dir_not_removable(self, tmp_path: Path) -> None:
+        """If rm -rf fails (e.g. OpenShift overlay), copies to PVC without crashing."""
+        home = tmp_path / "home"
+        home.mkdir()
+        pvc = tmp_path / "pvc"
+        pvc.mkdir()
+
+        dolt_dir = home / ".dolt"
+        dolt_dir.mkdir()
+        (dolt_dir / "config_global.json").write_text('{"metrics.disabled":true}')
+
+        config_dir_fn = _persist_config_dir_bash_function(str(pvc))
+        script = textwrap.dedent(f"""\
+            #!/bin/bash
+            set -e
+            export HOME="{home}"
+
+            {config_dir_fn}
+
+            # Stub rm to simulate OpenShift overlay permission denied
+            rm() {{ return 1; }}
+            export -f rm
+
+            persist_config_dir .dolt
+        """)
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        # Config was copied to PVC even though rm failed
+        assert (pvc / ".dolt" / "config_global.json").read_text() == (
+            '{"metrics.disabled":true}'
+        )
+        # Home dir is still a real directory (not a symlink)
+        assert (home / ".dolt").is_dir()
+        assert not (home / ".dolt").is_symlink()
+
+    def test_noop_without_pvc(self, tmp_path: Path) -> None:
+        """No-op when /pvc doesn't exist (non-persistent setup)."""
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / ".dolt").mkdir()
+
+        script = _build_persist_config_dir_script(
+            str(home), str(tmp_path / "nonexistent"), ".dolt"
+        )
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        assert (home / ".dolt").is_dir()
+        assert not (home / ".dolt").is_symlink()
+
+
+class TestPersistConfigDirContract:
+    """Contract tests for persist_config_dir in the real entrypoint."""
+
+    def test_entrypoint_has_persist_config_dir_function(self) -> None:
+        content = ENTRYPOINT_LIB_CONFIG_PATH.read_text()
+        assert "persist_config_dir()" in content, (
+            "entrypoint-lib-config.sh must define persist_config_dir()"
+        )
+
+    def test_entrypoint_calls_persist_config_dir_for_dolt(self) -> None:
+        content = ENTRYPOINT_PATH.read_text()
+        assert "persist_config_dir .dolt" in content, (
+            "entrypoint-session.sh must call persist_config_dir .dolt"
+        )
+
+    def test_persist_config_dir_called_after_persist_agent_config(self) -> None:
+        content = ENTRYPOINT_PATH.read_text()
+        agent_pos = content.find("\npersist_agent_config\n")
+        dolt_pos = content.find("\npersist_config_dir .dolt\n")
+        assert agent_pos != -1
+        assert dolt_pos != -1
+        assert agent_pos < dolt_pos, (
+            "persist_config_dir .dolt must be called after persist_agent_config"
         )
 
 

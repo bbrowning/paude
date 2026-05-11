@@ -46,6 +46,11 @@ AGENT_PROVIDERS: dict[str, dict[str, AgentProviderConfig]] = {
     "cursor": {
         "cursor": AgentProviderConfig(),
     },
+    "gascity": {
+        "vertex": AgentProviderConfig(
+            extra_env_vars={"CLAUDE_CODE_USE_VERTEX": "1"},
+        ),
+    },
     "gemini": {
         "google": AgentProviderConfig(),
     },
@@ -54,6 +59,7 @@ AGENT_PROVIDERS: dict[str, dict[str, AgentProviderConfig]] = {
 # Default provider for each agent (used when --provider is not specified).
 DEFAULT_PROVIDER: dict[str, str] = {
     "claude": "vertex",
+    "gascity": "vertex",
     "openclaw": "vertex",
     "cursor": "cursor",
     "gemini": "google",

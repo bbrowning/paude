@@ -158,6 +158,7 @@ _SECTIONS: tuple[HelpSection, ...] = (
         rows=(
             ("--agent claude", "Claude Code (default)"),
             ("--agent cursor", "Cursor CLI"),
+            ("--agent gascity", "Gas City (multi-agent orchestration)"),
             ("--agent gemini", "Gemini CLI"),
             ("--agent openclaw", "OpenClaw (web UI on port 18789)"),
             ("", ""),

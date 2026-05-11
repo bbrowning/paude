@@ -102,6 +102,15 @@ class TestAgentProviderResolution:
         provider, _ = resolve_agent_provider("cursor", "cursor")
         assert provider.name == "cursor"
 
+    def test_resolve_gascity_vertex(self) -> None:
+        provider, agent_cfg = resolve_agent_provider("gascity", "vertex")
+        assert provider.name == "vertex"
+        assert agent_cfg.extra_env_vars.get("CLAUDE_CODE_USE_VERTEX") == "1"
+
+    def test_resolve_gascity_default(self) -> None:
+        provider, _ = resolve_agent_provider("gascity")
+        assert provider.name == "vertex"
+
     def test_resolve_gemini_google(self) -> None:
         provider, _ = resolve_agent_provider("gemini", "google")
         assert provider.name == "google"
@@ -135,6 +144,9 @@ class TestDefaultProviders:
     def test_cursor_default_is_cursor(self) -> None:
         assert DEFAULT_PROVIDER["cursor"] == "cursor"
 
+    def test_gascity_default_is_vertex(self) -> None:
+        assert DEFAULT_PROVIDER["gascity"] == "vertex"
+
     def test_gemini_default_is_google(self) -> None:
         assert DEFAULT_PROVIDER["gemini"] == "google"
 
@@ -161,6 +173,10 @@ class TestSupportedProviders:
         assert "vertex" in providers
         assert "openai" in providers
         assert "anthropic" in providers
+
+    def test_gascity_providers(self) -> None:
+        providers = supported_providers("gascity")
+        assert "vertex" in providers
 
     def test_unknown_agent_returns_empty(self) -> None:
         assert supported_providers("nonexistent") == []

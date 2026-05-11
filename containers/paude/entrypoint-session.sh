@@ -25,6 +25,45 @@ if [[ -f /usr/local/bin/entrypoint-lib-openclaw.sh ]]; then
     source /usr/local/bin/entrypoint-lib-openclaw.sh
 fi
 
+# OpenShift CRI-O injects home=/ for arbitrary UIDs. Fix /etc/passwd directly
+# (made group-writable in Dockerfile) so all programs — including statically
+# linked Go binaries that bypass NSS — see the correct home directory.
+# nss_wrapper is kept as a fallback for environments where /etc/passwd is
+# read-only (e.g. older base images).
+_PAUDE_HOME="/home/paude"
+_CURRENT_UID=$(id -u)
+_PASSWD_HOME=$(getent passwd "$_CURRENT_UID" 2>/dev/null | cut -d: -f6)
+if [[ "$_PASSWD_HOME" != "$_PAUDE_HOME" ]]; then
+    if [[ -n "$_PASSWD_HOME" ]]; then
+        # UID exists with wrong home (CRI-O injected home=/) — fix it
+        _SED_EXPR="s|^\([^:]*:[^:]*:${_CURRENT_UID}:[^:]*:[^:]*:\)[^:]*:\(.*\)$|\1${_PAUDE_HOME}:\2|"
+        if sed -i "$_SED_EXPR" /etc/passwd 2>/dev/null; then
+            : # /etc/passwd updated in place
+        else
+            # Read-only /etc/passwd — fall back to nss_wrapper overlay
+            sed "$_SED_EXPR" /etc/passwd > /tmp/nss_wrapper_passwd
+            export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD} }/usr/lib64/libnss_wrapper.so"
+            export NSS_WRAPPER_PASSWD="/tmp/nss_wrapper_passwd"
+            export NSS_WRAPPER_GROUP=/etc/group
+        fi
+        unset _SED_EXPR
+    else
+        # UID not in /etc/passwd at all — append directly or via nss_wrapper
+        _ENTRY="paude:x:${_CURRENT_UID}:0:paude:${_PAUDE_HOME}:/bin/bash"
+        if echo "$_ENTRY" >> /etc/passwd 2>/dev/null; then
+            : # appended to /etc/passwd
+        else
+            cp /etc/passwd /tmp/nss_wrapper_passwd
+            echo "$_ENTRY" >> /tmp/nss_wrapper_passwd
+            export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD} }/usr/lib64/libnss_wrapper.so"
+            export NSS_WRAPPER_PASSWD="/tmp/nss_wrapper_passwd"
+            export NSS_WRAPPER_GROUP=/etc/group
+        fi
+        unset _ENTRY
+    fi
+fi
+unset _PAUDE_HOME _CURRENT_UID _PASSWD_HOME
+
 # Ensure HOME is set correctly for OpenShift arbitrary UID
 # OpenShift runs containers with random UIDs that don't exist in /etc/passwd
 # HOME may be unset, empty, or set to "/" which is not writable
@@ -48,10 +87,6 @@ if [[ -d /pvc ]]; then
     chmod g+rwX /pvc 2>/dev/null || true
 fi
 
-# Fix git "dubious ownership" error when running as arbitrary UID (OpenShift restricted SCC)
-# git config --global creates .gitconfig if it doesn't exist
-git config --global --add safe.directory '*' 2>/dev/null || true
-
 # Update CA trust early (before any HTTPS calls like agent install)
 # The CA cert is injected by the host after the container starts.
 setup_ca_trust
@@ -63,7 +98,15 @@ setup_ca_trust
 wait_for_credentials
 setup_credentials
 persist_agent_config
+persist_config_dir .dolt
 wait_for_git
+
+# Fix git "dubious ownership" error when running as arbitrary UID (OpenShift restricted SCC)
+# Runs after setup_credentials so it writes to the final (writable) gitconfig.
+# Guard against duplicates: gitconfig is PVC-persistent so --add would accumulate entries.
+if ! git config --global --get safe.directory '^\*$' &>/dev/null; then
+    git config --global --add safe.directory '*' 2>/dev/null || true
+fi
 
 # Add PVC local bin to PATH (for agent and other tools installed to PVC)
 # Also keep home .local/bin for tools installed during image build
@@ -169,7 +212,7 @@ if tmux -u has-session -t "$AGENT_SESSION_NAME" 2>/dev/null; then
 else
     echo "Starting new $AGENT_NAME session..."
     tmux -u new-session -s "$AGENT_SESSION_NAME" -c "$WORKSPACE" -d "bash -l"
-    tmux send-keys -t "$AGENT_SESSION_NAME" "export HOME=$HOME PATH='$PATH'" Enter
+    tmux send-keys -t "$AGENT_SESSION_NAME" "export HOME=$HOME PATH='$PATH'${GIT_CONFIG_GLOBAL:+ GIT_CONFIG_GLOBAL='$GIT_CONFIG_GLOBAL'}" Enter
     tmux send-keys -t "$AGENT_SESSION_NAME" "cd $WORKSPACE" Enter
     tmux send-keys -t "$AGENT_SESSION_NAME" "clear && $AGENT_LAUNCH_CMD $AGENT_ARGS" Enter
     exit_if_headless "started"

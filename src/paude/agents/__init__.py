@@ -5,6 +5,7 @@ from __future__ import annotations
 from paude.agents.base import Agent, AgentConfig
 from paude.agents.claude import ClaudeAgent
 from paude.agents.cursor import CursorAgent
+from paude.agents.gascity import GascityAgent
 from paude.agents.gemini import GeminiAgent
 from paude.agents.openclaw import OpenClawAgent
 
@@ -13,6 +14,7 @@ __all__ = [
     "AgentConfig",
     "ClaudeAgent",
     "CursorAgent",
+    "GascityAgent",
     "GeminiAgent",
     "OpenClawAgent",
     "get_agent",
@@ -22,6 +24,7 @@ __all__ = [
 _REGISTRY: dict[str, type] = {
     "claude": ClaudeAgent,
     "cursor": CursorAgent,
+    "gascity": GascityAgent,
     "gemini": GeminiAgent,
     "openclaw": OpenClawAgent,
 }

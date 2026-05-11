@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 from paude.config.models import PaudeConfig
 from paude.constants import CONTAINER_ENTRYPOINT, CONTAINER_HOME
 
+TMUX_VERSION = "3.5a"
+
 if TYPE_CHECKING:
     from paude.agents.base import Agent
 
@@ -123,18 +125,38 @@ RUN if command -v apt-get >/dev/null 2>&1; then \\
             tar gzip xz unzip zip; \\
     elif command -v dnf >/dev/null 2>&1; then \\
         dnf install -y --allowerasing \\
-            git curl ca-certificates bash tmux glibc-langpack-en socat \\
+            git curl ca-certificates bash glibc-langpack-en socat \\
             which coreutils findutils grep sed gawk diffutils less file \\
             tar gzip xz unzip zip && \\
         dnf clean all; \\
     elif command -v yum >/dev/null 2>&1; then \\
         yum install -y --allowerasing \\
-            git curl ca-certificates bash tmux glibc-langpack-en socat \\
+            git curl ca-certificates bash glibc-langpack-en socat \\
             which coreutils findutils grep sed gawk diffutils less file \\
             tar gzip xz unzip zip && \\
         yum clean all; \\
     else \\
         echo "Warning: Unknown package manager, git may not be available" >&2; \\
+    fi""")
+
+    # Build tmux from source on dnf/yum distros (CentOS Stream 10 / RHEL 10
+    # distro tmux has a capture-pane -p segfault that crashes the tmux server)
+    lines.append("")
+    lines.append(f"""ARG TMUX_VERSION={TMUX_VERSION}
+RUN if command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then \\
+        PKG_MGR=$(command -v dnf || command -v yum) && \\
+        $PKG_MGR install -y gcc make libevent-devel ncurses-devel bison && \\
+        curl -fsSL "https://github.com/tmux/tmux/releases/download/${{TMUX_VERSION}}/tmux-${{TMUX_VERSION}}.tar.gz" \\
+            -o /tmp/tmux.tar.gz && \\
+        tar -xzf /tmp/tmux.tar.gz -C /tmp && \\
+        cd /tmp/tmux-${{TMUX_VERSION}} && \\
+        ./configure --prefix=/usr/local && \\
+        make -j"$(nproc)" && \\
+        make install && \\
+        rm -rf /tmp/tmux-${{TMUX_VERSION}} /tmp/tmux.tar.gz && \\
+        $PKG_MGR remove -y gcc libevent-devel ncurses-devel bison && \\
+        $PKG_MGR clean all && \\
+        tmux -V; \\
     fi""")
 
     lines.append("")

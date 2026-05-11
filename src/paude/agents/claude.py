@@ -8,6 +8,7 @@ from paude.agents.base import (
     AgentConfig,
     build_environment_from_config,
     build_provider_credentials,
+    claude_trust_script,
     pipefail_install_lines,
 )
 
@@ -67,28 +68,12 @@ class ClaudeAgent:
     def apply_sandbox_config(
         self, home: str, workspace: str, args: str, *, yolo: bool = False
     ) -> str:
-        script = f"""\
-#!/bin/bash
-# Auto-generated sandbox config for Claude Code
-claude_json="{home}/.claude.json"
-settings_json="{home}/.claude/settings.json"
-
-# Suppress trust prompt and onboarding
-if [ -f "$claude_json" ]; then
-    jq --arg ws "{workspace}" '
-        .hasCompletedOnboarding = true |
-        .projects = {{($ws): {{hasTrustDialogAccepted: true}}}}
-    ' "$claude_json" > "${{claude_json}}.tmp" \\
-        && cp -f "${{claude_json}}.tmp" "$claude_json" \\
-        && rm -f "${{claude_json}}.tmp"
-else
-    jq -n --arg ws "{workspace}" '{{
-        hasCompletedOnboarding: true,
-        projects: {{($ws): {{hasTrustDialogAccepted: true}}}}
-    }}' > "$claude_json"
-fi
-chmod g+rw "$claude_json" 2>/dev/null || true
-"""
+        script = (
+            "#!/bin/bash\n"
+            "# Auto-generated sandbox config for Claude Code\n"
+            f'settings_json="{home}/.claude/settings.json"\n\n'
+            + claude_trust_script(home, workspace)
+        )
         if yolo:
             script += f"""
 # Suppress bypass permissions warning when yolo mode is enabled
