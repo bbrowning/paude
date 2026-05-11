@@ -8,6 +8,7 @@ from paude.agents.base import (
     AgentConfig,
     build_environment_from_config,
     build_provider_credentials,
+    gemini_trust_script,
 )
 
 
@@ -50,10 +51,10 @@ class GeminiAgent:
             "USER root",
             "RUN dnf install -y nodejs npm && dnf clean all",
             "",
-            "# Install Gemini CLI",
-            "RUN npm install -g @google/gemini-cli",
-            "# Patch OTEL SDK to route exports through HTTP proxy (httpAgentOptions)",
-            "RUN /usr/local/bin/patch-gemini-otel-proxy.sh --force 2>&1",
+            "# Install Gemini CLI and patch OTEL proxy",
+            "RUN npm install -g @google/gemini-cli"
+            " && /usr/local/bin/patch-gemini-otel-proxy.sh"
+            " --force 2>&1",
             "",
             "# Set up home directory",
             "USER paude",
@@ -64,19 +65,7 @@ class GeminiAgent:
     def apply_sandbox_config(
         self, home: str, workspace: str, args: str, *, yolo: bool = False
     ) -> str:
-        return f"""\
-#!/bin/bash
-# Pre-trust the workspace folder so Gemini doesn't prompt on every connect
-trusted_json="{home}/.gemini/trustedFolders.json"
-mkdir -p "{home}/.gemini" 2>/dev/null || true
-if [ -f "$trusted_json" ]; then
-    jq --arg ws "{workspace}" '. + {{($ws): "TRUST_FOLDER"}}' \\
-        "$trusted_json" > "${{trusted_json}}.tmp" \\
-        && mv "${{trusted_json}}.tmp" "$trusted_json"
-else
-    jq -n --arg ws "{workspace}" '{{($ws): "TRUST_FOLDER"}}' > "$trusted_json"
-fi
-"""
+        return "#!/bin/bash\n" + gemini_trust_script(home, workspace)
 
     def launch_command(self, args: str) -> str:
         if args:

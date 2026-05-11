@@ -16,6 +16,7 @@ from paude.agents.base import (
 )
 from paude.agents.claude import ClaudeAgent
 from paude.agents.cursor import CursorAgent
+from paude.agents.gascity import GascityAgent
 from paude.agents.gemini import GeminiAgent
 from paude.agents.openclaw import OpenClawAgent
 
@@ -44,13 +45,17 @@ class TestRegistry:
         agent = get_agent("gemini")
         assert isinstance(agent, GeminiAgent)
 
+    def test_get_agent_gascity(self) -> None:
+        agent = get_agent("gascity")
+        assert isinstance(agent, GascityAgent)
+
     def test_get_agent_openclaw(self) -> None:
         agent = get_agent("openclaw")
         assert isinstance(agent, OpenClawAgent)
 
     def test_get_agent_error_lists_available(self) -> None:
         with pytest.raises(
-            ValueError, match="Available: claude, cursor, gemini, openclaw"
+            ValueError, match="Available: claude, cursor, gascity, gemini, openclaw"
         ):
             get_agent("bad")
 
@@ -58,6 +63,7 @@ class TestRegistry:
         agents = list_agents()
         assert "claude" in agents
         assert "cursor" in agents
+        assert "gascity" in agents
         assert "gemini" in agents
         assert "openclaw" in agents
         assert agents == sorted(agents)

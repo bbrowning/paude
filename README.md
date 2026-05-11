@@ -8,6 +8,7 @@ Run AI coding agents in secure containers. They make commits, you pull them back
 |-------|------|--------|
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `--agent claude` (default) | Supported |
 | [Cursor CLI](https://docs.cursor.com/cli) | `--agent cursor` | Supported |
+| [Gas City](https://github.com/gastownhall/gascity) | `--agent gascity` | Supported |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `--agent gemini` | Supported |
 | [OpenClaw](https://github.com/openclaw/openclaw) | `--agent openclaw` | Supported |
 

@@ -154,6 +154,42 @@ def pipefail_install_lines(config: AgentConfig, container_home: str) -> list[str
     ]
 
 
+def claude_trust_script(home: str, workspace: str) -> str:
+    """Generate shell snippet to suppress Claude Code trust/onboarding prompts."""
+    return f"""\
+claude_json="{home}/.claude.json"
+if [ -f "$claude_json" ]; then
+    jq --arg ws "{workspace}" '
+        .hasCompletedOnboarding = true |
+        .projects = {{($ws): {{hasTrustDialogAccepted: true}}}}
+    ' "$claude_json" > "${{claude_json}}.tmp" \\
+        && cp -f "${{claude_json}}.tmp" "$claude_json" \\
+        && rm -f "${{claude_json}}.tmp"
+else
+    jq -n --arg ws "{workspace}" '{{
+        hasCompletedOnboarding: true,
+        projects: {{($ws): {{hasTrustDialogAccepted: true}}}}
+    }}' > "$claude_json"
+fi
+chmod g+rw "$claude_json" 2>/dev/null || true
+"""
+
+
+def gemini_trust_script(home: str, workspace: str) -> str:
+    """Generate shell snippet to pre-trust workspace for Gemini CLI."""
+    return f"""\
+trusted_json="{home}/.gemini/trustedFolders.json"
+mkdir -p "{home}/.gemini" 2>/dev/null || true
+if [ -f "$trusted_json" ]; then
+    jq --arg ws "{workspace}" '. + {{($ws): "TRUST_FOLDER"}}' \\
+        "$trusted_json" > "${{trusted_json}}.tmp" \\
+        && mv "${{trusted_json}}.tmp" "$trusted_json"
+else
+    jq -n --arg ws "{workspace}" '{{($ws): "TRUST_FOLDER"}}' > "$trusted_json"
+fi
+"""
+
+
 class Agent(Protocol):
     """Protocol for CLI coding agent implementations."""
 
