@@ -62,10 +62,10 @@ ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
 # Install uv package manager system-wide (available to root for pip_install builds)
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh \
+RUN curl -LsSf https://astral.sh/uv/install.sh -o /tmp/uv-install.sh \
+    && UV_INSTALL_DIR=/usr/local/bin sh /tmp/uv-install.sh \
+    && rm /tmp/uv-install.sh \
     && uv --version
-SHELL ["/bin/sh", "-c"]
 
 # Install tini init process for zombie reaping (not available in EPEL 10)
 ARG TINI_VERSION=v0.19.0
