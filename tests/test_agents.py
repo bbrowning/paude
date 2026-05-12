@@ -317,6 +317,8 @@ class TestGeminiAgentConfig:
     def test_passthrough_vars(self) -> None:
         cfg = GeminiAgent().config
         assert "GOOGLE_CLOUD_PROJECT" in cfg.passthrough_env_vars
+        assert "GOOGLE_CLOUD_LOCATION" in cfg.passthrough_env_vars
+        assert "CLOUD_ML_REGION" in cfg.passthrough_env_vars
 
     def test_passthrough_prefixes(self) -> None:
         cfg = GeminiAgent().config
@@ -803,6 +805,50 @@ class TestBuildEnvironmentFromConfig:
             env = build_environment_from_config(config)
             assert env == {"MY_PUBLIC": "pub"}
             assert "MY_SECRET" not in env
+
+    def test_syncs_cloud_ml_region_to_google_cloud_location(self) -> None:
+        config = AgentConfig(
+            name="test",
+            display_name="Test",
+            process_name="test",
+            session_name="test",
+            install_script="echo hi",
+            passthrough_env_vars=["GOOGLE_CLOUD_LOCATION", "CLOUD_ML_REGION"],
+        )
+        with patch.dict("os.environ", {"CLOUD_ML_REGION": "us-central1"}, clear=True):
+            env = build_environment_from_config(config)
+            assert env["CLOUD_ML_REGION"] == "us-central1"
+            assert env["GOOGLE_CLOUD_LOCATION"] == "us-central1"
+
+    def test_syncs_google_cloud_location_to_cloud_ml_region(self) -> None:
+        config = AgentConfig(
+            name="test",
+            display_name="Test",
+            process_name="test",
+            session_name="test",
+            install_script="echo hi",
+            passthrough_env_vars=["GOOGLE_CLOUD_LOCATION", "CLOUD_ML_REGION"],
+        )
+        with patch.dict(
+            "os.environ", {"GOOGLE_CLOUD_LOCATION": "europe-west1"}, clear=True
+        ):
+            env = build_environment_from_config(config)
+            assert env["GOOGLE_CLOUD_LOCATION"] == "europe-west1"
+            assert env["CLOUD_ML_REGION"] == "europe-west1"
+
+    def test_no_sync_when_only_one_var_in_passthrough(self) -> None:
+        config = AgentConfig(
+            name="test",
+            display_name="Test",
+            process_name="test",
+            session_name="test",
+            install_script="echo hi",
+            passthrough_env_vars=["CLOUD_ML_REGION"],
+        )
+        with patch.dict("os.environ", {"CLOUD_ML_REGION": "us-central1"}, clear=True):
+            env = build_environment_from_config(config)
+            assert env == {"CLOUD_ML_REGION": "us-central1"}
+            assert "GOOGLE_CLOUD_LOCATION" not in env
 
 
 class TestBuildSecretEnvironmentFromConfig:
