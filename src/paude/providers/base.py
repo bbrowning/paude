@@ -61,7 +61,11 @@ _PROVIDERS: dict[str, ProviderConfig] = {
     "google": ProviderConfig(
         name="google",
         display_name="Google AI",
-        passthrough_env_vars=["GOOGLE_CLOUD_PROJECT"],
+        passthrough_env_vars=[
+            "GOOGLE_CLOUD_PROJECT",
+            "GOOGLE_CLOUD_LOCATION",
+            "CLOUD_ML_REGION",
+        ],
         passthrough_env_prefixes=["CLOUDSDK_AUTH_"],
         domain_aliases=["vertexai"],
     ),

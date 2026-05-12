@@ -339,8 +339,8 @@ class ProxyManager:
                                     {"secretRef": {"name": creds_secret}},
                                 ],
                                 "resources": {
-                                    "requests": {"cpu": "100m", "memory": "256Mi"},
-                                    "limits": {"cpu": "500m", "memory": "512Mi"},
+                                    "requests": {"cpu": "100m", "memory": "128Mi"},
+                                    "limits": {"cpu": "500m", "memory": "256Mi"},
                                 },
                                 "volumeMounts": [
                                     {

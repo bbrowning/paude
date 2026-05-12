@@ -125,7 +125,27 @@ def build_environment_from_config(config: AgentConfig) -> dict[str, str]:
         for key, value in os.environ.items():
             if key.startswith(prefix) and key not in secret_set:
                 env[key] = value
+    _sync_equivalent_vars(env, config.passthrough_env_vars)
     return env
+
+
+_EQUIVALENT_PAIRS: list[tuple[str, str]] = [
+    ("GOOGLE_CLOUD_LOCATION", "CLOUD_ML_REGION"),
+]
+
+
+def _sync_equivalent_vars(
+    env: dict[str, str],
+    passthrough_vars: list[str],
+) -> None:
+    """Ensure equivalent env vars are both set when either is present."""
+    passthrough_set = set(passthrough_vars)
+    for a, b in _EQUIVALENT_PAIRS:
+        if a in passthrough_set and b in passthrough_set:
+            if a in env and b not in env:
+                env[b] = env[a]
+            elif b in env and a not in env:
+                env[a] = env[b]
 
 
 def build_secret_environment_from_config(config: AgentConfig) -> dict[str, str]:

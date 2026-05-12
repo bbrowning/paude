@@ -61,6 +61,17 @@ The container has everything needed to refresh tokens (oauth_creds.json with a v
 
 **Workaround**: Kill the existing Gemini process and restart it inside the tmux session. The new process will pick up the refresh token and authenticate successfully.
 
+### AGENT-002: Gemini CLI proxy support broken in 0.36.0+
+
+**Status**: Open (upstream bug, pinned to 0.35.3)
+**Severity**: Medium
+**Discovered**: 2026-05-12
+**Upstream**: https://github.com/google-gemini/gemini-cli/issues/24471
+
+Gemini CLI 0.36.0 introduced a regression where `HttpsProxyAgent is not a constructor` is thrown when the CLI detects proxy environment variables (`HTTPS_PROXY` / `HTTP_PROXY`). This breaks all paude sessions that use the proxy container.
+
+Paude pins to `@google/gemini-cli@0.35.3` (last working version) in `src/paude/agents/gemini.py`. Once the upstream issue is fixed, unpin and test with the proxy container.
+
 ## Architecture: GitOps Migration
 
 Tracking the migration from imperative orchestration to declarative, GitOps-compatible session creation.
