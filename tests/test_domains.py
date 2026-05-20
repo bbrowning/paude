@@ -454,6 +454,34 @@ class TestClaudeAlias:
         assert len(result) == len(set(result))
 
 
+class TestCodexAlias:
+    """Tests for the 'codex' domain alias."""
+
+    def test_codex_alias_exists(self):
+        """'codex' alias exists in DOMAIN_ALIASES."""
+        assert "codex" in DOMAIN_ALIASES
+
+    def test_codex_not_in_defaults(self):
+        """'codex' is NOT in DEFAULT_ALIASES (opt-in only via extra_domain_aliases)."""
+        assert "codex" not in DEFAULT_ALIASES
+
+    def test_codex_has_chatgpt(self):
+        """'codex' expands to include .chatgpt.com."""
+        result = expand_domains(["codex"])
+        assert ".chatgpt.com" in result
+
+    def test_codex_does_not_include_openai(self):
+        """'codex' alias does NOT include .openai.com (covered by 'openai' alias)."""
+        result = expand_domains(["codex"])
+        assert ".openai.com" not in result
+
+    def test_codex_in_format_display(self):
+        """format_domains_for_display recognizes codex alias."""
+        domains = expand_domains(["codex"])
+        result = format_domains_for_display(domains)
+        assert "codex" in result
+
+
 class TestGithubAlias:
     """Tests for the 'github' domain alias."""
 
