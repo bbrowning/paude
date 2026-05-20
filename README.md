@@ -7,6 +7,7 @@ Run AI coding agents in secure containers. They make commits, you pull them back
 | Agent | Flag | Status |
 |-------|------|--------|
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `--agent claude` (default) | Supported |
+| [Codex CLI](https://github.com/openai/codex) | `--agent codex` | Supported |
 | [Cursor CLI](https://docs.cursor.com/cli) | `--agent cursor` | Supported |
 | [Gas City](https://github.com/gastownhall/gascity) | `--agent gascity` | Supported |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `--agent gemini` | Supported |
@@ -74,7 +75,7 @@ paude create --agent openclaw --provider anthropic ...
 </details>
 
 <details>
-<summary><strong>OpenAI API key</strong> (OpenClaw)</summary>
+<summary><strong>OpenAI API key</strong> (Codex CLI, OpenClaw)</summary>
 
 ```bash
 export OPENAI_API_KEY=your-api-key
@@ -111,6 +112,9 @@ paude create --agent openclaw --allowed-domains "default openclaw" my-project
 # Claude Code (default)
 cd your-project
 paude create --yolo --git my-project
+
+# Codex CLI
+paude create --agent codex --yolo --git my-project
 
 # Cursor CLI
 paude create --agent cursor --yolo --git my-project

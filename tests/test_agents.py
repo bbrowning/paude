@@ -15,6 +15,7 @@ from paude.agents.base import (
     pipefail_install_lines,
 )
 from paude.agents.claude import ClaudeAgent
+from paude.agents.codex import CODEX_VERSION, CodexAgent
 from paude.agents.cursor import CursorAgent
 from paude.agents.gascity import GascityAgent
 from paude.agents.gemini import GeminiAgent
@@ -37,6 +38,10 @@ class TestRegistry:
         with pytest.raises(ValueError, match="Unknown agent 'nonexistent'"):
             get_agent("nonexistent")
 
+    def test_get_agent_codex(self) -> None:
+        agent = get_agent("codex")
+        assert isinstance(agent, CodexAgent)
+
     def test_get_agent_cursor(self) -> None:
         agent = get_agent("cursor")
         assert isinstance(agent, CursorAgent)
@@ -55,13 +60,15 @@ class TestRegistry:
 
     def test_get_agent_error_lists_available(self) -> None:
         with pytest.raises(
-            ValueError, match="Available: claude, cursor, gascity, gemini, openclaw"
+            ValueError,
+            match="Available: claude, codex, cursor, gascity, gemini, openclaw",
         ):
             get_agent("bad")
 
     def test_list_agents(self) -> None:
         agents = list_agents()
         assert "claude" in agents
+        assert "codex" in agents
         assert "cursor" in agents
         assert "gascity" in agents
         assert "gemini" in agents
@@ -281,6 +288,215 @@ class TestClaudeAgentSandboxConfig:
             "/home/paude", "/workspace", "--dangerously-skip-permissions"
         )
         assert "skipDangerousModePermissionPrompt" not in script
+
+
+class TestCodexAgentConfig:
+    """Tests for CodexAgent configuration values."""
+
+    def test_name(self) -> None:
+        assert CodexAgent().config.name == "codex"
+
+    def test_display_name(self) -> None:
+        assert CodexAgent().config.display_name == "Codex CLI"
+
+    def test_process_name(self) -> None:
+        assert CodexAgent().config.process_name == "codex"
+
+    def test_session_name(self) -> None:
+        assert CodexAgent().config.session_name == "codex"
+
+    def test_install_script(self) -> None:
+        cfg = CodexAgent().config
+        assert "openai/codex" in cfg.install_script
+
+    def test_install_script_contains_version(self) -> None:
+        cfg = CodexAgent().config
+        assert CODEX_VERSION in cfg.install_script
+
+    def test_config_dir_name(self) -> None:
+        assert CodexAgent().config.config_dir_name == ".codex"
+
+    def test_config_file_name_is_none(self) -> None:
+        assert CodexAgent().config.config_file_name is None
+
+    def test_yolo_flag(self) -> None:
+        assert (
+            CodexAgent().config.yolo_flag
+            == "--dangerously-bypass-approvals-and-sandbox"
+        )
+
+    def test_clear_command_is_none(self) -> None:
+        assert CodexAgent().config.clear_command is None
+
+    def test_secret_env_vars(self) -> None:
+        cfg = CodexAgent().config
+        assert "OPENAI_API_KEY" in cfg.secret_env_vars
+
+    def test_passthrough_vars_empty(self) -> None:
+        assert CodexAgent().config.passthrough_env_vars == []
+
+    def test_passthrough_prefixes_empty(self) -> None:
+        assert CodexAgent().config.passthrough_env_prefixes == []
+
+    def test_extra_domain_aliases(self) -> None:
+        assert CodexAgent().config.extra_domain_aliases == ["codex"]
+
+    def test_env_vars_empty(self) -> None:
+        assert CodexAgent().config.env_vars == {}
+
+    def test_activity_files_empty(self) -> None:
+        assert CodexAgent().config.activity_files == []
+
+    def test_exposed_ports_empty(self) -> None:
+        assert CodexAgent().config.exposed_ports == []
+
+    def test_default_base_image_is_none(self) -> None:
+        assert CodexAgent().config.default_base_image is None
+
+
+class TestCodexAgentDockerfile:
+    """Tests for CodexAgent.dockerfile_install_lines."""
+
+    def test_returns_list(self) -> None:
+        lines = CodexAgent().dockerfile_install_lines("/home/paude")
+        assert isinstance(lines, list)
+        assert len(lines) > 0
+
+    def test_contains_install_url(self) -> None:
+        lines = CodexAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "openai/codex" in text
+
+    def test_contains_version(self) -> None:
+        lines = CodexAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert CODEX_VERSION in text
+
+    def test_contains_arch_detection(self) -> None:
+        lines = CodexAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "uname -m" in text
+
+    def test_contains_x86_64_arch(self) -> None:
+        lines = CodexAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "x86_64-unknown-linux-musl" in text
+
+    def test_contains_aarch64_arch(self) -> None:
+        lines = CodexAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "aarch64-unknown-linux-musl" in text
+
+    def test_sets_path(self) -> None:
+        lines = CodexAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "/home/paude/.local/bin" in text
+
+    def test_uses_container_home(self) -> None:
+        lines = CodexAgent().dockerfile_install_lines("/custom/home")
+        text = "\n".join(lines)
+        assert "/custom/home" in text
+
+    def test_pipefail_shell(self) -> None:
+        lines = CodexAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "pipefail" in text
+
+    def test_binary_verification(self) -> None:
+        lines = CodexAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "test -x /home/paude/.local/bin/codex" in text
+
+    def test_shell_reset(self) -> None:
+        lines = CodexAgent().dockerfile_install_lines("/home/paude")
+        assert 'SHELL ["/bin/sh", "-c"]' in lines
+
+    def test_error_message(self) -> None:
+        lines = CodexAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "ERROR" in text
+        assert "installation failed" in text
+
+    def test_contains_umask(self) -> None:
+        lines = CodexAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "umask 0002" in text
+
+
+class TestCodexAgentLaunchCommand:
+    """Tests for CodexAgent.launch_command."""
+
+    def test_no_args(self) -> None:
+        assert CodexAgent().launch_command("") == "codex"
+
+    def test_with_args(self) -> None:
+        assert CodexAgent().launch_command("--flag") == "codex --flag"
+
+
+class TestCodexAgentHostConfigMounts:
+    """Tests for CodexAgent.host_config_mounts."""
+
+    def test_empty_when_no_config(self, tmp_path: Path) -> None:
+        mounts = CodexAgent().host_config_mounts(tmp_path)
+        assert mounts == []
+
+    def test_empty_when_dir_exists(self, tmp_path: Path) -> None:
+        codex_dir = tmp_path / ".codex"
+        codex_dir.mkdir()
+        mounts = CodexAgent().host_config_mounts(tmp_path)
+        assert mounts == []
+
+
+class TestCodexAgentBuildEnvironment:
+    """Tests for CodexAgent.build_environment."""
+
+    def test_empty_when_no_vars_set(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            env = CodexAgent().build_environment()
+            assert env == {}
+
+    def test_does_not_include_secret_vars(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"OPENAI_API_KEY": "sk-test", "UNRELATED": "x"},
+            clear=True,
+        ):
+            env = CodexAgent().build_environment()
+            assert "OPENAI_API_KEY" not in env
+
+    def test_secret_env_collects_openai_key(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"OPENAI_API_KEY": "sk-test", "UNRELATED": "x"},
+            clear=True,
+        ):
+            env = build_secret_environment_from_config(CodexAgent().config)
+            assert env == {"OPENAI_API_KEY": "sk-test"}
+
+
+class TestCodexAgentSandboxConfig:
+    """Tests for CodexAgent.apply_sandbox_config."""
+
+    def test_returns_bash_script(self) -> None:
+        script = CodexAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert script.startswith("#!/bin/bash")
+
+    def test_creates_config_dir(self) -> None:
+        script = CodexAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert ".codex" in script
+
+    def test_home_path_parameterized(self) -> None:
+        script = CodexAgent().apply_sandbox_config("/custom/home", "/workspace", "")
+        assert "/custom/home/.codex" in script
+
+    def test_yolo_does_not_change_config(self) -> None:
+        script_normal = CodexAgent().apply_sandbox_config(
+            "/home/paude", "/workspace", ""
+        )
+        script_yolo = CodexAgent().apply_sandbox_config(
+            "/home/paude", "/workspace", "", yolo=True
+        )
+        assert script_normal == script_yolo
 
 
 class TestGeminiAgentConfig:
