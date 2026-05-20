@@ -157,6 +157,7 @@ _SECTIONS: tuple[HelpSection, ...] = (
         title="Agents & Providers",
         rows=(
             ("--agent claude", "Claude Code (default)"),
+            ("--agent codex", "Codex CLI"),
             ("--agent cursor", "Cursor CLI"),
             ("--agent gascity", "Gas City (multi-agent orchestration)"),
             ("--agent gemini", "Gemini CLI"),

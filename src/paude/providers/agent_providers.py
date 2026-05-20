@@ -32,6 +32,9 @@ AGENT_PROVIDERS: dict[str, dict[str, AgentProviderConfig]] = {
         ),
         "anthropic": AgentProviderConfig(),
     },
+    "codex": {
+        "openai": AgentProviderConfig(),
+    },
     "openclaw": {
         "vertex": AgentProviderConfig(
             model_config={"primary": "anthropic-vertex/claude-sonnet-4-6"},
@@ -59,6 +62,7 @@ AGENT_PROVIDERS: dict[str, dict[str, AgentProviderConfig]] = {
 # Default provider for each agent (used when --provider is not specified).
 DEFAULT_PROVIDER: dict[str, str] = {
     "claude": "vertex",
+    "codex": "openai",
     "gascity": "vertex",
     "openclaw": "vertex",
     "cursor": "cursor",

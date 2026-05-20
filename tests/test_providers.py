@@ -98,6 +98,15 @@ class TestAgentProviderResolution:
         _, agent_cfg = resolve_agent_provider("openclaw", "anthropic")
         assert agent_cfg.model_config["primary"] == "anthropic/claude-opus-4-6"
 
+    def test_resolve_codex_openai(self) -> None:
+        provider, agent_cfg = resolve_agent_provider("codex", "openai")
+        assert provider.name == "openai"
+        assert isinstance(agent_cfg, AgentProviderConfig)
+
+    def test_resolve_codex_default(self) -> None:
+        provider, _ = resolve_agent_provider("codex")
+        assert provider.name == "openai"
+
     def test_resolve_cursor_cursor(self) -> None:
         provider, _ = resolve_agent_provider("cursor", "cursor")
         assert provider.name == "cursor"
@@ -147,6 +156,9 @@ class TestDefaultProviders:
     def test_gascity_default_is_vertex(self) -> None:
         assert DEFAULT_PROVIDER["gascity"] == "vertex"
 
+    def test_codex_default_is_openai(self) -> None:
+        assert DEFAULT_PROVIDER["codex"] == "openai"
+
     def test_gemini_default_is_google(self) -> None:
         assert DEFAULT_PROVIDER["gemini"] == "google"
 
@@ -173,6 +185,10 @@ class TestSupportedProviders:
         assert "vertex" in providers
         assert "openai" in providers
         assert "anthropic" in providers
+
+    def test_codex_providers(self) -> None:
+        providers = supported_providers("codex")
+        assert providers == ["openai"]
 
     def test_gascity_providers(self) -> None:
         providers = supported_providers("gascity")
