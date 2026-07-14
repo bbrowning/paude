@@ -13,9 +13,9 @@ from paude.agents.base import (
     pipefail_install_lines,
 )
 
-GC_VERSION = "1.1.0"
-DOLT_VERSION = "1.88.0"
-BD_VERSION = "1.0.4"
+GC_VERSION = "1.3.5"
+DOLT_VERSION = "2.1.10"
+BD_VERSION = "1.1.0"
 
 _CLAUDE_INSTALL_SCRIPT = "curl -fsSL https://claude.ai/install.sh | bash"
 
