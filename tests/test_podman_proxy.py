@@ -936,3 +936,44 @@ class TestSourceIpFiltering:
         """derive_agent_ip returns proxy IP + 1."""
         assert derive_agent_ip("10.89.0.2") == "10.89.0.3"
         assert derive_agent_ip("172.16.0.10") == "172.16.0.11"
+
+
+class TestStartIfNeededStoppedProxy:
+    """Tests for start_if_needed with stopped proxies."""
+
+    def test_stopped_proxy_is_started_not_recreated(self) -> None:
+        """start_if_needed restarts a stopped proxy without recreating it."""
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = True
+        mock_runner.container_running.return_value = False
+        mock_network = MagicMock()
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        manager.start_if_needed(session_name="test-session")
+
+        engine_calls = mock_runner.engine.run.call_args_list
+        start_calls = [c for c in engine_calls if c[0] and c[0][0] == "start"]
+        assert start_calls, "Expected start call for stopped proxy"
+
+        mock_runner.stop_container.assert_not_called()
+        mock_runner.remove_container.assert_not_called()
+        create_calls = [c for c in engine_calls if c[0] and c[0][0] == "create"]
+        assert not create_calls, "Should not recreate a stopped proxy"
+
+
+class TestStartIfNeededRunningProxy:
+    """Tests for start_if_needed with running proxies."""
+
+    def test_running_proxy_is_left_alone(self) -> None:
+        """start_if_needed is a no-op when the proxy is already running."""
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = True
+        mock_runner.container_running.return_value = True
+        mock_network = MagicMock()
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        manager.start_if_needed(session_name="test-session")
+
+        mock_runner.engine.run.assert_not_called()
+        mock_runner.stop_container.assert_not_called()
+        mock_runner.remove_container.assert_not_called()
