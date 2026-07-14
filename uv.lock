@@ -321,9 +321,10 @@ wheels = [
 
 [[package]]
 name = "paude"
-version = "0.20.0a3"
+version = "0.20.0a4"
 source = { editable = "." }
 dependencies = [
+    { name = "click" },
     { name = "rich" },
     { name = "typer" },
 ]
@@ -339,6 +340,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "click", specifier = ">=8.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "typer", specifier = ">=0.9.0" },
 ]
