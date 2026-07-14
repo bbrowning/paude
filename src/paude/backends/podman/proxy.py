@@ -216,6 +216,59 @@ class PodmanProxyManager:
         )
         self._proxy_runner.start_session_proxy(pname)
 
+    def _recreate_proxy(
+        self,
+        session_name: str,
+        pname: str,
+        credentials: dict[str, str] | None,
+        proxy_config: tuple[str, list[str], list[int]],
+    ) -> None:
+        """Recreate the proxy container with fresh credentials."""
+        proxy_image, domains, otel_ports = proxy_config
+        nname = network_name(session_name)
+        ca_vol = ca_volume_name(session_name)
+
+        self._network_manager.create_internal_network(
+            nname, disable_dns=self._runner.engine.is_podman
+        )
+
+        proxy_ip = self._get_proxy_ip(nname)
+        agent_ip = self._derive_agent_ip(proxy_ip) if proxy_ip else None
+        dns = _get_host_dns(self._runner.engine)
+        secret_refs = self._create_credential_secrets(session_name, credentials)
+
+        if self._runner.container_exists(pname):
+            print(f"Recreating proxy {pname}...", file=sys.stderr)
+            self._proxy_runner.recreate_session_proxy(
+                name=pname,
+                image=proxy_image,
+                network=nname,
+                dns=dns,
+                allowed_domains=domains,
+                ip=proxy_ip,
+                otel_ports=otel_ports,
+                ca_volume=ca_vol,
+                credentials=credentials,
+                allowed_clients=agent_ip,
+                secret_refs=secret_refs,
+            )
+        else:
+            print(f"Creating proxy {pname}...", file=sys.stderr)
+            self._proxy_runner.create_session_proxy(
+                name=pname,
+                image=proxy_image,
+                network=nname,
+                dns=dns,
+                allowed_domains=domains,
+                ip=proxy_ip,
+                otel_ports=otel_ports,
+                ca_volume=ca_vol,
+                credentials=credentials,
+                allowed_clients=agent_ip,
+                secret_refs=secret_refs,
+            )
+            self._proxy_runner.start_session_proxy(pname)
+
     def start_proxy(self, session_name: str) -> None:
         """Start the proxy container for a session."""
         pname = proxy_container_name(session_name)
