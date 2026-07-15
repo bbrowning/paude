@@ -51,7 +51,10 @@ AGENT_PROVIDERS: dict[str, dict[str, AgentProviderConfig]] = {
     },
     "gascity": {
         "vertex": AgentProviderConfig(
-            extra_env_vars={"CLAUDE_CODE_USE_VERTEX": "1"},
+            extra_env_vars={
+                "CLAUDE_CODE_USE_VERTEX": "1",
+                "CLAUDE_CODE_OAUTH_TOKEN": "paude-proxy-managed",
+            },
         ),
     },
     "gemini": {

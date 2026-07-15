@@ -39,6 +39,7 @@ class TestGascityAgentConfig:
         cfg = GascityAgent().config
         assert cfg.env_vars == {
             "CLAUDE_CODE_USE_VERTEX": "1",
+            "CLAUDE_CODE_OAUTH_TOKEN": "paude-proxy-managed",
             "NODE_USE_ENV_PROXY": "1",
             "BD_DOLT_AUTO_COMMIT": "off",
             "BD_EXPORT_AUTO": "false",
@@ -184,6 +185,7 @@ class TestGascityAgentBuildEnvironment:
             env = GascityAgent().build_environment()
             assert env == {
                 "CLAUDE_CODE_USE_VERTEX": "1",
+                "CLAUDE_CODE_OAUTH_TOKEN": "paude-proxy-managed",
                 "NODE_USE_ENV_PROXY": "1",
                 "BD_DOLT_AUTO_COMMIT": "off",
                 "BD_EXPORT_AUTO": "false",
