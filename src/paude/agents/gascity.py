@@ -113,6 +113,8 @@ class GascityAgent:
             f"/gascity_{GC_VERSION}_linux_${{BIN_ARCH}}"
             '.tar.gz" | tar xz -C $D gc && '
             "$D/dolt config --global --set metrics.disabled true && "
+            '$D/dolt config --global --set user.name "Paude Agent" && '
+            '$D/dolt config --global --set user.email "agent@paude.local" && '
             f"chmod -R g+rwX {container_home}/.dolt",
             "",
             f'ENV PATH="{install_dir}:$PATH"',

@@ -136,6 +136,11 @@ class TestGascityAgentDockerfile:
         assert "metrics.disabled" in text
         assert "dolt config --global --set" in text
 
+    def test_sets_dolt_author_identity(self) -> None:
+        text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
+        assert "user.name" in text
+        assert "user.email" in text
+
     def test_dolt_config_dir_group_writable(self) -> None:
         text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
         assert "chmod -R g+rwX /home/paude/.dolt" in text
