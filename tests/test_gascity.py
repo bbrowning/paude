@@ -240,6 +240,13 @@ class TestGascityAgentSandboxConfig:
         )
         assert "/pvc/workspace" in script
 
+    def test_contains_dolt_identity_from_gitconfig(self) -> None:
+        script = GascityAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert "git config --global user.name" in script
+        assert "git config --global user.email" in script
+        assert "dolt config --global --set user.name" in script
+        assert "dolt config --global --set user.email" in script
+
     def test_home_path_parameterized(self) -> None:
         script = GascityAgent().apply_sandbox_config("/custom/home", "/workspace", "")
         assert "/custom/home/.claude.json" in script
