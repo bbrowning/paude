@@ -456,7 +456,10 @@ class PodmanProxyManager:
         auth_vol = auth_volume_name(session_name)
         volume_mgr = VolumeManager(self._runner.engine)
         volume_mgr.create_volume(ca_vol)
-        volume_mgr.create_volume(auth_vol)
+        auth_volume_created = False
+        if not volume_mgr.volume_exists(auth_vol):
+            volume_mgr.create_volume(auth_vol)
+            auth_volume_created = True
 
         # Compute expected agent IP for source IP filtering
         agent_ip = self._derive_agent_ip(proxy_ip) if proxy_ip else None
@@ -486,7 +489,8 @@ class PodmanProxyManager:
             )
         except Exception:
             volume_mgr.remove_volume(ca_vol, force=True)
-            volume_mgr.remove_volume(auth_vol, force=True)
+            if auth_volume_created:
+                volume_mgr.remove_volume(auth_vol, force=True)
             self.remove_credential_secrets(session_name)
             self._network_manager.remove_network(nname)
             raise
