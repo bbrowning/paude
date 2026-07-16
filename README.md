@@ -101,7 +101,10 @@ allows `chatgpt.com` and `auth.openai.com` for the ChatGPT API and OAuth
 exchange. Paude selects Codex's HTTP/SSE transport for these sessions because
 the local MITM proxy does not support the Responses WebSocket transport. If
 the host login is absent, Codex keeps its normal login prompt; API-key
-sessions continue to use the normal OpenAI provider.
+sessions continue to use the normal OpenAI provider. Codex Apps are disabled
+for these ChatGPT OAuth sessions so the Apps MCP integration does not attempt
+to connect from the container; standalone MCP server configuration is
+unchanged.
 
 </details>
 

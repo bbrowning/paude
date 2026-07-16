@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -358,6 +359,10 @@ class TestCodexAgentConfig:
         )
         assert "requires_openai_auth = true" in SYNTHETIC_CODEX_PROFILE_TOML
         assert "supports_websockets = false" in SYNTHETIC_CODEX_PROFILE_TOML
+
+    def test_chatgpt_profile_disables_apps(self) -> None:
+        profile = tomllib.loads(SYNTHETIC_CODEX_PROFILE_TOML)
+        assert profile["features"]["apps"] is False
 
     def test_activity_files_empty(self) -> None:
         assert CodexAgent().config.activity_files == []

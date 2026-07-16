@@ -149,6 +149,8 @@ _SECTIONS: tuple[HelpSection, ...] = (
             " network access (enables data exfil).\n"
             "Combining --yolo with --allowed-domains all"
             " is maximum risk mode.\n"
+            "Codex Apps are disabled for ChatGPT OAuth sessions;"
+            " standalone MCP servers are unchanged.\n"
             "PAUDE_GITHUB_TOKEN is explicit only;"
             " host GH_TOKEN is never auto-propagated."
         ),

@@ -25,6 +25,9 @@ base_url = "https://chatgpt.com/backend-api/codex"
 wire_api = "responses"
 requires_openai_auth = true
 supports_websockets = false
+
+[features]
+apps = false
 '''
 
 _INSTALL_SCRIPT = (
