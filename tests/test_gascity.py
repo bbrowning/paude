@@ -39,6 +39,7 @@ class TestGascityAgentConfig:
         cfg = GascityAgent().config
         assert cfg.env_vars == {
             "CLAUDE_CODE_USE_VERTEX": "1",
+            "CLAUDE_CODE_OAUTH_TOKEN": "paude-proxy-managed",
             "NODE_USE_ENV_PROXY": "1",
             "BD_DOLT_AUTO_COMMIT": "off",
             "BD_EXPORT_AUTO": "false",
@@ -135,6 +136,11 @@ class TestGascityAgentDockerfile:
         assert "metrics.disabled" in text
         assert "dolt config --global --set" in text
 
+    def test_sets_dolt_author_identity(self) -> None:
+        text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
+        assert "user.name" in text
+        assert "user.email" in text
+
     def test_dolt_config_dir_group_writable(self) -> None:
         text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
         assert "chmod -R g+rwX /home/paude/.dolt" in text
@@ -184,6 +190,7 @@ class TestGascityAgentBuildEnvironment:
             env = GascityAgent().build_environment()
             assert env == {
                 "CLAUDE_CODE_USE_VERTEX": "1",
+                "CLAUDE_CODE_OAUTH_TOKEN": "paude-proxy-managed",
                 "NODE_USE_ENV_PROXY": "1",
                 "BD_DOLT_AUTO_COMMIT": "off",
                 "BD_EXPORT_AUTO": "false",
@@ -232,6 +239,13 @@ class TestGascityAgentSandboxConfig:
             "/home/paude", "/pvc/workspace", ""
         )
         assert "/pvc/workspace" in script
+
+    def test_contains_dolt_identity_from_gitconfig(self) -> None:
+        script = GascityAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert "git config --global user.name" in script
+        assert "git config --global user.email" in script
+        assert "dolt config --global --set user.name" in script
+        assert "dolt config --global --set user.email" in script
 
     def test_home_path_parameterized(self) -> None:
         script = GascityAgent().apply_sandbox_config("/custom/home", "/workspace", "")

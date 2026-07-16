@@ -13,9 +13,9 @@ from paude.agents.base import (
     pipefail_install_lines,
 )
 
-GC_VERSION = "1.1.0"
-DOLT_VERSION = "1.88.0"
-BD_VERSION = "1.0.4"
+GC_VERSION = "1.3.5"
+DOLT_VERSION = "2.1.10"
+BD_VERSION = "1.1.0"
 
 _CLAUDE_INSTALL_SCRIPT = "curl -fsSL https://claude.ai/install.sh | bash"
 
@@ -113,6 +113,8 @@ class GascityAgent:
             f"/gascity_{GC_VERSION}_linux_${{BIN_ARCH}}"
             '.tar.gz" | tar xz -C $D gc && '
             "$D/dolt config --global --set metrics.disabled true && "
+            '$D/dolt config --global --set user.name "Paude Agent" && '
+            '$D/dolt config --global --set user.email "agent@paude.local" && '
             f"chmod -R g+rwX {container_home}/.dolt",
             "",
             f'ENV PATH="{install_dir}:$PATH"',
@@ -126,6 +128,20 @@ class GascityAgent:
             "#!/bin/bash\n"
             + claude_trust_script(home, workspace)
             + gemini_trust_script(home, workspace)
+            + self._dolt_identity_script()
+        )
+
+    @staticmethod
+    def _dolt_identity_script() -> str:
+        return (
+            "GIT_NAME=$(git config --global user.name 2>/dev/null)\n"
+            "GIT_EMAIL=$(git config --global user.email 2>/dev/null)\n"
+            'if [ -n "$GIT_NAME" ]; then '
+            'dolt config --global --set user.name "$GIT_NAME" > /dev/null 2>&1; '
+            "fi\n"
+            'if [ -n "$GIT_EMAIL" ]; then '
+            'dolt config --global --set user.email "$GIT_EMAIL" > /dev/null 2>&1; '
+            "fi\n"
         )
 
     def launch_command(self, args: str) -> str:
