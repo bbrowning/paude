@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from paude.backends.podman.proxy import (
     CA_CERT_CONTAINER_PATH,
     PodmanProxyManager,
     _get_host_dns,
+    auth_volume_name,
     ca_volume_name,
 )
 from paude.backends.shared import derive_agent_ip
@@ -488,12 +491,16 @@ class TestCreateProxyCaVolume:
         manager = PodmanProxyManager(mock_runner, mock_network)
         with patch("paude.container.volume.VolumeManager") as mock_vm_cls:
             mock_vm = mock_vm_cls.return_value
+            mock_vm.volume_exists.return_value = False
             manager.create_proxy(
                 session_name="test-session",
                 proxy_image="proxy:latest",
                 allowed_domains=[".googleapis.com"],
             )
-            mock_vm.create_volume.assert_called_once_with("paude-ca-test-session")
+            assert [call.args for call in mock_vm.create_volume.call_args_list] == [
+                ("paude-ca-test-session",),
+                (auth_volume_name("test-session"),),
+            ]
 
         # Check that -v ca_volume:/data/ca is in the create call
         engine_calls = mock_runner.engine.run.call_args_list
@@ -503,6 +510,63 @@ class TestCreateProxyCaVolume:
         vol_indices = [i for i, a in enumerate(call_args) if a == "-v"]
         vol_args = [call_args[i + 1] for i in vol_indices]
         assert "paude-ca-test-session:/data/ca" in vol_args
+        assert "paude-auth-test-session:/data/auth" in vol_args
+
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    def test_create_proxy_reuses_existing_auth_volume(
+        self, mock_dns: MagicMock
+    ) -> None:
+        """create_proxy preserves an existing OAuth state volume."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = False
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        with patch("paude.container.volume.VolumeManager") as mock_vm_cls:
+            mock_vm = mock_vm_cls.return_value
+            mock_vm.volume_exists.return_value = True
+            manager.create_proxy(
+                session_name="test-session",
+                proxy_image="proxy:latest",
+                allowed_domains=[".googleapis.com"],
+            )
+
+            mock_vm.create_volume.assert_called_once_with("paude-ca-test-session")
+
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    def test_create_proxy_keeps_existing_auth_volume_on_failure(
+        self, mock_dns: MagicMock
+    ) -> None:
+        """Failed proxy creation does not delete existing OAuth state."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = False
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        with patch("paude.container.volume.VolumeManager") as mock_vm_cls:
+            mock_vm = mock_vm_cls.return_value
+            mock_vm.volume_exists.return_value = True
+            with (
+                patch.object(
+                    manager._proxy_runner,
+                    "create_session_proxy",
+                    side_effect=RuntimeError("proxy failed"),
+                ),
+                pytest.raises(RuntimeError, match="^proxy failed$"),
+            ):
+                manager.create_proxy(
+                    session_name="test-session",
+                    proxy_image="proxy:latest",
+                    allowed_domains=[".googleapis.com"],
+                )
+
+            mock_vm.remove_volume.assert_called_once_with(
+                "paude-ca-test-session", force=True
+            )
 
 
 class TestProxyCredentials:

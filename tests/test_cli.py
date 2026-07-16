@@ -287,6 +287,22 @@ class TestAgentSpecificDomainExpansion:
         assert result.exit_code == 0
         assert "gemini" not in _extract_domains_display(result.stdout)
 
+    def test_codex_explicit_domains_include_oauth_requirements(self):
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--agent",
+                "codex",
+                "--allowed-domains",
+                ".example.com",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        output = _extract_domains_display(result.stdout)
+        assert "codex" in output
+
 
 @pytest.mark.parametrize(
     ("command", "patch_target"),

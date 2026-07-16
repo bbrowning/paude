@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from paude.backends.podman.helpers import proxy_secret_name, proxy_secret_prefix
+from paude.backends.shared import PROXY_CHATGPT_AUTH_ENV, ProxyCredentials
 from paude.container.engine import ContainerEngine
 from paude.container.proxy_runner import ProxyRunner
 from paude.container.runner import ContainerRunner
@@ -176,6 +177,41 @@ class TestProxyRunnerSecretArgs:
         assert not any("API_KEY" in v for v in env_vals)
 
     @patch("subprocess.run")
+    def test_file_secret_adds_proxy_path_without_secret_contents(
+        self, mock_run: MagicMock
+    ) -> None:
+        """File-backed credentials expose only the in-container path."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="id123", stderr="")
+        proxy = ProxyRunner(ContainerRunner(ContainerEngine("podman")))
+
+        proxy.create_session_proxy(
+            name="paude-proxy-test",
+            image="proxy:latest",
+            network="test-net",
+            credentials={"OPENAI_API_KEY": "secret-value"},
+            secret_refs=[
+                "api,type=env,target=OPENAI_API_KEY",
+                "auth,type=mount,target=codex-auth.json,mode=0400",
+            ],
+            credential_env={
+                "CHATGPT_AUTH_FILE": "/run/secrets/codex-auth.json",
+                "PAUDE_PROXY_CHATGPT_AUTH_STATE_FILE": "/data/auth/chatgpt-auth.json",
+            },
+            auth_volume="auth-volume",
+        )
+
+        create_call = next(c for c in mock_run.call_args_list if "create" in c[0][0])
+        args = create_call[0][0]
+        env_values = [args[i + 1] for i, value in enumerate(args) if value == "-e"]
+        assert "CHATGPT_AUTH_FILE=/run/secrets/codex-auth.json" in env_values
+        assert (
+            "PAUDE_PROXY_CHATGPT_AUTH_STATE_FILE=/data/auth/chatgpt-auth.json"
+            in env_values
+        )
+        assert not any("secret-value" in value for value in args)
+        assert "auth-volume:/data/auth" in args
+
+    @patch("subprocess.run")
     def test_create_session_proxy_without_secrets_uses_env(
         self, mock_run: MagicMock
     ) -> None:
@@ -235,6 +271,34 @@ class TestProxyManagerCredentialSecrets:
         assert "paude-proxy-cred-sess-api-key,type=env,target=API_KEY" in refs
         assert "paude-proxy-cred-sess-gh-token,type=env,target=GH_TOKEN" in refs
         assert runner.create_secret_from_value.call_count == 2
+
+    def test_create_file_credential_secret_podman(self, tmp_path) -> None:
+        """Codex auth is mounted as a private file secret."""
+        from paude.backends.podman.proxy import PodmanProxyManager
+
+        auth_file = tmp_path / "auth.json"
+        auth_file.write_text("oauth-state")
+        runner = self._make_mock_runner("podman")
+        manager = PodmanProxyManager(runner, MagicMock())
+
+        refs = manager._create_credential_secrets(
+            "sess",
+            ProxyCredentials(files={PROXY_CHATGPT_AUTH_ENV: auth_file}),
+        )
+
+        runner.create_secret.assert_called_once_with(
+            "paude-proxy-cred-sess-chatgpt-auth-file", auth_file
+        )
+        assert refs == [
+            "paude-proxy-cred-sess-chatgpt-auth-file,"
+            "type=mount,target=codex-auth.json,mode=0400"
+        ]
+        assert manager._credential_env(
+            ProxyCredentials(files={PROXY_CHATGPT_AUTH_ENV: auth_file})
+        ) == {
+            "CHATGPT_AUTH_FILE": "/run/secrets/codex-auth.json",
+            "PAUDE_PROXY_CHATGPT_AUTH_STATE_FILE": "/data/auth/chatgpt-auth.json",
+        }
 
     def test_create_credential_secrets_docker_noop(self) -> None:
         """Returns empty list for Docker (no secret support)."""

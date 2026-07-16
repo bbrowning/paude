@@ -7,6 +7,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from paude.agents.codex import (
+    CODEX_CHATGPT_PROFILE_TARGET,
+    SYNTHETIC_CODEX_PROFILE_TOML,
+)
 from paude.backends.base import Session, SessionConfig
 
 if TYPE_CHECKING:
@@ -27,6 +31,7 @@ from paude.backends.podman.helpers import (
 from paude.backends.podman.port_forward import PodmanPortForwardManager
 from paude.backends.podman.proxy import PodmanProxyManager
 from paude.backends.shared import (
+    CODEX_AUTH_TARGET,
     PAUDE_LABEL_AGENT,
     PAUDE_LABEL_APP,
     PAUDE_LABEL_CREATED,
@@ -40,10 +45,15 @@ from paude.backends.shared import (
     PAUDE_LABEL_VERSION,
     PAUDE_LABEL_WORKSPACE,
     PAUDE_LABEL_YOLO,
+    PROXY_CHATGPT_AUTH_ENV,
+    SYNTHETIC_CODEX_AUTH_JSON,
+    ProxyCredentials,
     build_session_env,
+    codex_auth_file_is_usable,
     derive_agent_ip,
     encode_path,
     generate_sandbox_config_script,
+    local_codex_auth_path,
 )
 from paude.constants import (
     CONTAINER_ENTRYPOINT,
@@ -214,12 +224,29 @@ class PodmanBackend:
 
         return local_gcp_adc_path()
 
-    def _gather_proxy_credentials(self, agent: Agent) -> dict[str, str]:
+    def _gather_proxy_credentials(self, agent: Agent) -> ProxyCredentials:
         """Gather real credentials from host environment for the proxy container."""
         from paude.backends.shared import gather_proxy_credentials
 
+        codex_path = None
+        if (
+            agent.config.name == "codex"
+            and self._engine.binary == "podman"
+            and not self._engine.is_remote
+        ):
+            codex_path = local_codex_auth_path()
+            if codex_path is not None and not codex_auth_file_is_usable(codex_path):
+                print(
+                    "WARNING: Host Codex auth file is missing required ChatGPT OAuth "
+                    "state; continuing without ChatGPT-plan authentication.",
+                    file=sys.stderr,
+                )
+                codex_path = None
+
         return gather_proxy_credentials(
-            agent.config, gcp_adc_path=self._local_adc_path()
+            agent.config,
+            gcp_adc_path=self._local_adc_path(),
+            codex_auth_path=codex_path,
         )
 
     def _inject_stub_credentials(self, cname: str) -> None:
@@ -231,6 +258,33 @@ class PodmanBackend:
         from paude.backends.shared import STUB_ADC_JSON
 
         self._runner.inject_file(cname, STUB_ADC_JSON, GCP_ADC_TARGET, owner="paude:0")
+
+    def _inject_codex_auth(self, cname: str, credentials: ProxyCredentials) -> None:
+        """Install synthetic Codex auth, never the host OAuth state."""
+        if PROXY_CHATGPT_AUTH_ENV in credentials.files:
+            self._runner.inject_file(
+                cname,
+                SYNTHETIC_CODEX_AUTH_JSON,
+                CODEX_AUTH_TARGET,
+                owner="paude:0",
+                mode="600",
+            )
+            self._runner.inject_file(
+                cname,
+                SYNTHETIC_CODEX_PROFILE_TOML,
+                CODEX_CHATGPT_PROFILE_TARGET,
+                owner="paude:0",
+                mode="600",
+            )
+        else:
+            # Remove stale auth left by an earlier manual login or session
+            # configuration so real OAuth state cannot persist in the agent.
+            self._runner.exec_in_container(
+                cname, ["rm", "-f", CODEX_AUTH_TARGET], check=False
+            )
+            self._runner.exec_in_container(
+                cname, ["rm", "-f", CODEX_CHATGPT_PROFILE_TARGET], check=False
+            )
 
     def create_session(self, config: SessionConfig) -> Session:
         """Create a new session (does not start it).
@@ -289,6 +343,7 @@ class PodmanBackend:
 
         network: str | None = None
         proxy_ip: str | None = None
+        proxy_creds = ProxyCredentials()
         if config.proxy_image:
             try:
                 proxy_creds = self._gather_proxy_credentials(agent)
@@ -326,7 +381,9 @@ class PodmanBackend:
             else None
         )
         env, _agent_args = build_session_env(
-            config, agent, proxy_name=proxy_name_for_env
+            config,
+            agent,
+            proxy_name=proxy_name_for_env,
         )
         env["PAUDE_WORKSPACE"] = CONTAINER_WORKSPACE
 
@@ -409,6 +466,8 @@ class PodmanBackend:
         self._fix_volume_permissions(cname)
         self._proxy.distribute_ca_cert(name)
         self._inject_stub_credentials(cname)
+        if agent.config.name == "codex":
+            self._inject_codex_auth(cname, proxy_creds)
         self._sync_host_config(cname, agent.config.name)
         self._sync_sandbox_config(cname, name)
         return agent
@@ -462,6 +521,12 @@ class PodmanBackend:
                 raise SessionNotFoundError(f"Session '{name}' not found")
             print(f"Removing orphaned volume {vname}...", file=sys.stderr)
             self._volume_manager.remove_volume_verified(vname)
+            from paude.backends.podman.proxy import auth_volume_name, ca_volume_name
+
+            for proxy_volume in (ca_volume_name(name), auth_volume_name(name)):
+                if self._volume_manager.volume_exists(proxy_volume):
+                    self._volume_manager.remove_volume(proxy_volume, force=True)
+            self._proxy.remove_credential_secrets(name)
             return
 
         print(f"Deleting session '{name}'...", file=sys.stderr)
@@ -487,11 +552,12 @@ class PodmanBackend:
         self._network_manager.remove_network(network_name(name))
 
         # Remove CA volume if it exists
-        from paude.backends.podman.proxy import ca_volume_name
+        from paude.backends.podman.proxy import auth_volume_name, ca_volume_name
 
         ca_vol = ca_volume_name(name)
-        if self._volume_manager.volume_exists(ca_vol):
-            self._volume_manager.remove_volume(ca_vol, force=True)
+        for proxy_volume in (ca_vol, auth_volume_name(name)):
+            if self._volume_manager.volume_exists(proxy_volume):
+                self._volume_manager.remove_volume(proxy_volume, force=True)
 
         # Remove proxy credential secrets
         self._proxy.remove_credential_secrets(name)

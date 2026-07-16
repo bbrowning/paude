@@ -10,8 +10,25 @@ from paude.agents.base import (
     build_provider_credentials,
     pipefail_install_lines,
 )
+from paude.constants import CONTAINER_HOME
 
-CODEX_VERSION = "0.132.0"
+CODEX_VERSION = "0.144.5"
+CODEX_CHATGPT_PROFILE_NAME = "paude-chatgpt-http"
+CODEX_CHATGPT_PROFILE_TARGET = (
+    f"/home/paude/.codex/{CODEX_CHATGPT_PROFILE_NAME}.config.toml"
+)
+SYNTHETIC_CODEX_PROFILE_TOML = f'''model_provider = "{CODEX_CHATGPT_PROFILE_NAME}"
+
+[model_providers.{CODEX_CHATGPT_PROFILE_NAME}]
+name = "Paude ChatGPT HTTP"
+base_url = "https://chatgpt.com/backend-api/codex"
+wire_api = "responses"
+requires_openai_auth = true
+supports_websockets = false
+
+[features]
+apps = false
+'''
 
 _INSTALL_SCRIPT = (
     'mkdir -p "$HOME/.local/bin" && '
@@ -42,7 +59,7 @@ class CodexAgent:
             session_name="codex",
             install_script=_INSTALL_SCRIPT,
             install_dir=".local/bin",
-            env_vars=creds.extra_env_vars,
+            env_vars={"CODEX_HOME": f"{CONTAINER_HOME}/.codex", **creds.extra_env_vars},
             passthrough_env_vars=creds.passthrough_env_vars,
             secret_env_vars=creds.secret_env_vars,
             passthrough_env_prefixes=creds.passthrough_env_prefixes,
@@ -52,6 +69,7 @@ class CodexAgent:
             yolo_flag="--dangerously-bypass-approvals-and-sandbox",
             clear_command=None,
             extra_domain_aliases=["codex"],
+            required_domain_aliases=["codex"],
             provider=creds.resolved_provider_name,
         )
 

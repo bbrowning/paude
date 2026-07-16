@@ -265,6 +265,7 @@ def session_create(
             r_allowed_domains,
             extra_aliases=agent_instance.config.extra_domain_aliases,
             provider_aliases=_get_provider_aliases(r_provider, r_agent),
+            required_aliases=agent_instance.config.required_domain_aliases,
         )
         show_dry_run(
             flags={
