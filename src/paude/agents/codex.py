@@ -11,7 +11,7 @@ from paude.agents.base import (
     pipefail_install_lines,
 )
 
-CODEX_VERSION = "0.132.0"
+CODEX_VERSION = "0.144.5"
 
 _INSTALL_SCRIPT = (
     'mkdir -p "$HOME/.local/bin" && '
