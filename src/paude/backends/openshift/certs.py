@@ -7,6 +7,7 @@ import json
 import subprocess
 import sys
 import tempfile
+from collections.abc import Mapping
 from typing import Any
 
 from paude.backends.openshift.oc import OcClient
@@ -146,7 +147,7 @@ def create_credentials_secret(
     oc: OcClient,
     namespace: str,
     session_name: str,
-    credentials: dict[str, str],
+    credentials: Mapping[str, str],
 ) -> str:
     """Create a Kubernetes Secret for proxy credentials.
 

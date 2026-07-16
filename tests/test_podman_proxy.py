@@ -8,6 +8,7 @@ from paude.backends.podman.proxy import (
     CA_CERT_CONTAINER_PATH,
     PodmanProxyManager,
     _get_host_dns,
+    auth_volume_name,
     ca_volume_name,
 )
 from paude.backends.shared import derive_agent_ip
@@ -493,7 +494,10 @@ class TestCreateProxyCaVolume:
                 proxy_image="proxy:latest",
                 allowed_domains=[".googleapis.com"],
             )
-            mock_vm.create_volume.assert_called_once_with("paude-ca-test-session")
+            assert [call.args for call in mock_vm.create_volume.call_args_list] == [
+                ("paude-ca-test-session",),
+                (auth_volume_name("test-session"),),
+            ]
 
         # Check that -v ca_volume:/data/ca is in the create call
         engine_calls = mock_runner.engine.run.call_args_list
@@ -503,6 +507,7 @@ class TestCreateProxyCaVolume:
         vol_indices = [i for i, a in enumerate(call_args) if a == "-v"]
         vol_args = [call_args[i + 1] for i in vol_indices]
         assert "paude-ca-test-session:/data/ca" in vol_args
+        assert "paude-auth-test-session:/data/auth" in vol_args
 
 
 class TestProxyCredentials:

@@ -55,6 +55,7 @@ class AgentConfig:
     clear_command: str | None = "/clear"
     args_env_var: str = "PAUDE_AGENT_ARGS"
     extra_domain_aliases: list[str] = field(default_factory=lambda: ["claude"])
+    required_domain_aliases: list[str] = field(default_factory=list)
     exposed_ports: list[tuple[int, int]] = field(default_factory=list)
     default_base_image: str | None = None
     provider: str | None = None

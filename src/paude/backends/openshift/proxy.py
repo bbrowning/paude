@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Mapping
 from typing import Any
 
 from paude.backends.openshift.certs import (
@@ -487,7 +488,7 @@ class ProxyManager:
     def update_credentials(
         self,
         session_name: str,
-        credentials: dict[str, str],
+        credentials: Mapping[str, str],
     ) -> None:
         """Update the proxy credentials Secret with fresh values.
 

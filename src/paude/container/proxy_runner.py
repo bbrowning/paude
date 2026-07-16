@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 
 from paude.container.engine import ContainerEngine
 from paude.container.runner import ContainerRunner
@@ -58,8 +59,10 @@ class ProxyRunner:
         dns: str | None,
         allowed_domains: list[str] | None,
         otel_ports: list[int] | None = None,
-        credentials: dict[str, str] | None = None,
+        credentials: Mapping[str, str] | None = None,
         allowed_clients: str | None = None,
+        credential_env: Mapping[str, str] | None = None,
+        secret_refs: list[str] | None = None,
     ) -> list[str]:
         """Build environment variable arguments for proxy containers."""
         args: list[str] = []
@@ -71,8 +74,18 @@ class ProxyRunner:
             args.extend(
                 ["-e", f"ALLOWED_OTEL_PORTS={','.join(str(p) for p in otel_ports)}"]
             )
+        secret_targets = {
+            part.split("=", 1)[1]
+            for ref in (secret_refs or [])
+            for part in ref.split(",")
+            if part.startswith("target=")
+        }
         if credentials:
             for key, value in credentials.items():
+                if key not in secret_targets:
+                    args.extend(["-e", f"{key}={value}"])
+        if credential_env:
+            for key, value in credential_env.items():
                 args.extend(["-e", f"{key}={value}"])
         if allowed_clients:
             args.extend(["-e", f"PAUDE_PROXY_ALLOWED_CLIENTS={allowed_clients}"])
@@ -87,11 +100,17 @@ class ProxyRunner:
                 args.extend(["--secret", ref])
         return args
 
-    def _build_volume_args(self, ca_volume: str | None = None) -> list[str]:
+    def _build_volume_args(
+        self,
+        ca_volume: str | None = None,
+        auth_volume: str | None = None,
+    ) -> list[str]:
         """Build volume mount arguments for proxy containers."""
         args: list[str] = []
         if ca_volume:
             args.extend(["-v", f"{ca_volume}:/data/ca"])
+        if auth_volume:
+            args.extend(["-v", f"{auth_volume}:/data/auth"])
         return args
 
     def create_session_proxy(
@@ -104,9 +123,11 @@ class ProxyRunner:
         ip: str | None = None,
         otel_ports: list[int] | None = None,
         ca_volume: str | None = None,
-        credentials: dict[str, str] | None = None,
+        credentials: Mapping[str, str] | None = None,
         allowed_clients: str | None = None,
         secret_refs: list[str] | None = None,
+        credential_env: Mapping[str, str] | None = None,
+        auth_volume: str | None = None,
     ) -> str:
         """Create a proxy container for a session (does not start it).
 
@@ -118,12 +139,17 @@ class ProxyRunner:
             Container name.
         """
         net_args = self._build_multi_network(network, ip=ip)
-        env_credentials = None if secret_refs else credentials
         env_args = self._build_env_args(
-            dns, allowed_domains, otel_ports, env_credentials, allowed_clients
+            dns,
+            allowed_domains,
+            otel_ports,
+            credentials,
+            allowed_clients,
+            credential_env,
+            secret_refs,
         )
         secret_args = self._build_secret_args(secret_refs)
-        vol_args = self._build_volume_args(ca_volume)
+        vol_args = self._build_volume_args(ca_volume, auth_volume)
 
         ip_args: list[str] = []
         if ip and not self._engine.supports_multi_network_create:
@@ -170,9 +196,11 @@ class ProxyRunner:
         ip: str | None = None,
         otel_ports: list[int] | None = None,
         ca_volume: str | None = None,
-        credentials: dict[str, str] | None = None,
+        credentials: Mapping[str, str] | None = None,
         allowed_clients: str | None = None,
         secret_refs: list[str] | None = None,
+        credential_env: Mapping[str, str] | None = None,
+        auth_volume: str | None = None,
     ) -> str:
         """Recreate a session proxy with new configuration.
 
@@ -194,6 +222,8 @@ class ProxyRunner:
             credentials=credentials,
             allowed_clients=allowed_clients,
             secret_refs=secret_refs,
+            credential_env=credential_env,
+            auth_volume=auth_volume,
         )
         self.start_session_proxy(name)
 

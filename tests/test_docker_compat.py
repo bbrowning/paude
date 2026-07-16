@@ -4,8 +4,17 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from paude.agents.codex import (
+    CODEX_CHATGPT_PROFILE_TARGET,
+    SYNTHETIC_CODEX_PROFILE_TOML,
+)
 from paude.backends.podman import PodmanBackend
-from paude.backends.shared import is_local_backend
+from paude.backends.shared import (
+    PROXY_CHATGPT_AUTH_ENV,
+    SYNTHETIC_CODEX_AUTH_JSON,
+    ProxyCredentials,
+    is_local_backend,
+)
 from paude.container.engine import ContainerEngine
 from paude.container.proxy_runner import ProxyRunner
 from paude.container.runner import ContainerRunner
@@ -370,3 +379,48 @@ class TestStubCredentialInjection:
         ]
         assert len(exec_calls) == 1
         assert exec_calls[0][1].get("input") == STUB_ADC_JSON
+
+
+class TestCodexSyntheticAuth:
+    """Tests for synthetic Codex auth state in the agent container."""
+
+    @patch("subprocess.run")
+    def test_injects_only_synthetic_auth(self, mock_run: MagicMock, tmp_path) -> None:
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        auth_file = tmp_path / "auth.json"
+        auth_file.write_text("real-oauth-state")
+        backend = PodmanBackend(engine=ContainerEngine("podman"))
+
+        backend._inject_codex_auth(
+            "paude-test",
+            ProxyCredentials(files={PROXY_CHATGPT_AUTH_ENV: auth_file}),
+        )
+
+        injection = next(
+            c for c in mock_run.call_args_list if c[1].get("input") is not None
+        )
+        assert injection[1]["input"] == SYNTHETIC_CODEX_AUTH_JSON
+        assert "real-oauth-state" not in str(injection)
+
+        profile_injection = next(
+            c
+            for c in mock_run.call_args_list
+            if c[1].get("input") == SYNTHETIC_CODEX_PROFILE_TOML
+        )
+        assert CODEX_CHATGPT_PROFILE_TARGET in profile_injection[0][0][-1]
+
+    @patch("subprocess.run")
+    def test_removes_auth_when_host_login_missing(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        backend = PodmanBackend(engine=ContainerEngine("podman"))
+
+        backend._inject_codex_auth("paude-test", ProxyCredentials())
+
+        exec_args = [c[0][0] for c in mock_run.call_args_list if "exec" in c[0][0]]
+        assert any(
+            "rm" in args and "/home/paude/.codex/auth.json" in args
+            for args in exec_args
+        )
+        assert any(
+            "rm" in args and CODEX_CHATGPT_PROFILE_TARGET in args for args in exec_args
+        )

@@ -466,9 +466,11 @@ class TestCodexAlias:
         assert "codex" not in DEFAULT_ALIASES
 
     def test_codex_has_chatgpt(self):
-        """'codex' expands to include .chatgpt.com."""
+        """'codex' expands to include ChatGPT and OAuth domains."""
         result = expand_domains(["codex"])
+        assert "chatgpt.com" in result
         assert ".chatgpt.com" in result
+        assert "auth.openai.com" in result
 
     def test_codex_does_not_include_openai(self):
         """'codex' alias does NOT include .openai.com (covered by 'openai' alias)."""

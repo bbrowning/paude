@@ -168,6 +168,10 @@ _SECTIONS: tuple[HelpSection, ...] = (
             ("--provider openai", "OpenAI API"),
             ("--provider cursor", "Cursor API (default for cursor)"),
             ("--provider google", "Google AI (default for gemini)"),
+            (
+                "codex login",
+                "Host ChatGPT login reused by local Podman Codex (HTTP/SSE)",
+            ),
         ),
     ),
 )

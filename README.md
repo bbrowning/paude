@@ -85,6 +85,27 @@ paude create --agent openclaw --provider openai ...
 </details>
 
 <details>
+<summary><strong>ChatGPT plan login</strong> (Codex CLI)</summary>
+
+Log in to Codex on the host once:
+
+```bash
+codex login
+paude create --agent codex --yolo --git my-project
+```
+
+For local Podman sessions, Paude detects `~/.codex/auth.json` and gives the
+proxy a per-session secret. The Codex container receives only synthetic auth
+state; real OAuth tokens stay in the proxy. The default Codex network policy
+allows `chatgpt.com` and `auth.openai.com` for the ChatGPT API and OAuth
+exchange. Paude selects Codex's HTTP/SSE transport for these sessions because
+the local MITM proxy does not support the Responses WebSocket transport. If
+the host login is absent, Codex keeps its normal login prompt; API-key
+sessions continue to use the normal OpenAI provider.
+
+</details>
+
+<details>
 <summary><strong>Cursor</strong></summary>
 
 ```bash

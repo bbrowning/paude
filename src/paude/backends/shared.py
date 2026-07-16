@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import base64
 import ipaddress
+import json
+import os
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -76,6 +80,51 @@ STUB_ADC_JSON = (
 
 # Environment variable name for passing GCP ADC JSON content to the proxy.
 PROXY_GCP_ADC_ENV = "GCP_ADC_JSON"
+
+# Codex ChatGPT OAuth is file-backed in paude-proxy.  The host file is never
+# copied into an environment variable; Podman mounts it as a secret instead.
+PROXY_CHATGPT_AUTH_ENV = "CHATGPT_AUTH_FILE"
+PROXY_CHATGPT_AUTH_STATE_ENV = "PAUDE_PROXY_CHATGPT_AUTH_STATE_FILE"
+CODEX_AUTH_TARGET = "/home/paude/.codex/auth.json"
+
+# Synthetic state accepted by the Codex CLI.  These values are deliberately
+# non-functional; paude-proxy vendors synthetic values back to the agent and
+# injects the real OAuth credential only on the upstream request.
+SYNTHETIC_CODEX_AUTH_JSON = (
+    '{"auth_mode":"chatgpt","tokens":{'
+    '"id_token":"eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.'
+    "eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjo"
+    'icGF1ZGUtcHJveHktbWFuYWdlZC1hY2NvdW50In19.paude-proxy-managed",'
+    '"access_token":"paude-proxy-managed-access",'
+    '"refresh_token":"paude-proxy-managed-refresh",'
+    '"account_id":"paude-proxy-managed-account"}}'
+)
+
+
+@dataclass
+class ProxyCredentials(Mapping[str, str]):
+    """Credentials for a proxy, split by how the proxy consumes them.
+
+    ``environment`` contains ordinary proxy environment credentials.  ``files``
+    contains host file paths which must be mounted as secrets, keyed by the
+    proxy environment variable that points at the mounted file.  Implementing
+    the mapping protocol keeps existing environment-only backend consumers
+    source-compatible while allowing Podman to handle file credentials
+    separately.
+    """
+
+    environment: dict[str, str] = field(default_factory=dict)
+    files: dict[str, Path] = field(default_factory=dict)
+
+    def __getitem__(self, key: str) -> str:
+        return self.environment[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.environment)
+
+    def __len__(self) -> int:
+        return len(self.environment)
+
 
 # Python snippet executed inside containers to extract the OpenClaw auth token.
 # Used by both Podman and OpenShift backends via exec.
@@ -272,11 +321,36 @@ def local_gcp_adc_path() -> Path | None:
     return path if path.is_file() else None
 
 
+def local_codex_auth_path() -> Path | None:
+    """Return the host Codex ChatGPT auth file when it exists."""
+    path = Path.home() / ".codex" / "auth.json"
+    return path if path.is_file() else None
+
+
+def codex_auth_file_is_usable(path: Path) -> bool:
+    """Check the non-secret structure required by paude-proxy."""
+    try:
+        document = json.loads(path.read_text())
+        tokens = document.get("tokens", {})
+        if not isinstance(document, dict) or not isinstance(tokens, dict):
+            return False
+        if document.get("auth_mode", "chatgpt") != "chatgpt":
+            return False
+        return bool(
+            tokens.get("access_token")
+            and tokens.get("refresh_token")
+            and (tokens.get("account_id") or tokens.get("id_token"))
+        )
+    except (OSError, ValueError, AttributeError, TypeError):
+        return False
+
+
 def gather_proxy_credentials(
     agent_config: AgentConfig,
     *,
     gcp_adc_path: Path | None = None,
-) -> dict[str, str]:
+    codex_auth_path: Path | None = None,
+) -> ProxyCredentials:
     """Gather real credentials from the host for the proxy container.
 
     Reads secret env vars (API keys) and GH_TOKEN from the host
@@ -290,8 +364,6 @@ def gather_proxy_credentials(
     Returns:
         Dict of environment variables for the proxy container.
     """
-    import os
-
     from paude.agents.base import build_secret_environment_from_config
 
     creds = build_secret_environment_from_config(agent_config)
@@ -303,7 +375,15 @@ def gather_proxy_credentials(
     if gcp_adc_path is not None:
         creds[PROXY_GCP_ADC_ENV] = gcp_adc_path.read_text()
 
-    return creds
+    files: dict[str, Path] = {}
+    if (
+        codex_auth_path is not None
+        and agent_config.name == "codex"
+        and codex_auth_path.is_file()
+    ):
+        files[PROXY_CHATGPT_AUTH_ENV] = codex_auth_path
+
+    return ProxyCredentials(environment=creds, files=files)
 
 
 def generate_sandbox_config_script(

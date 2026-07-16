@@ -78,6 +78,13 @@ if ! mkdir -p "$HOME" 2>/dev/null || ! touch "$HOME/.test" 2>/dev/null; then
 fi
 rm -f "$HOME/.test" 2>/dev/null || true
 
+# Paude's ChatGPT OAuth profile uses HTTP/SSE because the local MITM proxy
+# does not transparently support Codex's Responses WebSocket transport.  The
+# profile file is injected only for sessions with host ChatGPT OAuth state.
+if [[ "$AGENT_NAME" == "codex" ]] && [[ -f "$HOME/.codex/paude-chatgpt-http.config.toml" ]]; then
+    AGENT_ARGS="--profile paude-chatgpt-http ${AGENT_ARGS}"
+fi
+
 # Ensure all home directories are group-writable for OpenShift arbitrary UID
 chmod -R g+rwX "$HOME" 2>/dev/null || true
 

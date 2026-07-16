@@ -25,7 +25,9 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
         ".anthropic.com",
     ],
     "codex": [
+        "chatgpt.com",
         ".chatgpt.com",
+        "auth.openai.com",
     ],
     "gemini": [
         "cloudcode-pa.googleapis.com",

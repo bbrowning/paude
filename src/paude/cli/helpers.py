@@ -235,6 +235,7 @@ def _expand_allowed_domains(
     allowed_domains: list[str] | None,
     extra_aliases: list[str] | None = None,
     provider_aliases: list[str] | None = None,
+    required_aliases: list[str] | None = None,
 ) -> list[str]:
     """Expand domain aliases, defaulting to ["default"].
 
@@ -254,7 +255,13 @@ def _expand_allowed_domains(
         extra_aliases = merged
 
     domains_input = allowed_domains if allowed_domains else ["default"]
-    return expand_domains(domains_input, extra_aliases=extra_aliases)
+    expanded = expand_domains(domains_input, extra_aliases=extra_aliases)
+    if expanded and required_aliases:
+        required = expand_domains(required_aliases)
+        for domain in required:
+            if domain not in expanded:
+                expanded.append(domain)
+    return expanded
 
 
 def _prepare_session_create(
@@ -285,6 +292,7 @@ def _prepare_session_create(
         allowed_domains,
         extra_aliases=agent_instance.config.extra_domain_aliases,
         provider_aliases=_get_provider_aliases(provider_name, agent_name),
+        required_aliases=agent_instance.config.required_domain_aliases,
     )
 
     # Inject OTEL env vars and auto-add endpoint hostname to allowed domains
