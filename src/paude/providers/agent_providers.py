@@ -34,6 +34,7 @@ AGENT_PROVIDERS: dict[str, dict[str, AgentProviderConfig]] = {
     },
     "codex": {
         "openai": AgentProviderConfig(),
+        "chatgpt": AgentProviderConfig(),
     },
     "openclaw": {
         "vertex": AgentProviderConfig(

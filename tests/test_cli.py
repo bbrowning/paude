@@ -287,13 +287,25 @@ class TestAgentSpecificDomainExpansion:
         assert result.exit_code == 0
         assert "gemini" not in _extract_domains_display(result.stdout)
 
-    def test_codex_explicit_domains_include_oauth_requirements(self):
+    @pytest.mark.parametrize(
+        ("provider", "expect_codex_alias"),
+        [
+            pytest.param("chatgpt", True, id="chatgpt-forces-alias-in"),
+            pytest.param("openai", False, id="openai-excludes-alias"),
+        ],
+    )
+    def test_codex_explicit_domains_oauth_requirements(
+        self, provider: str, expect_codex_alias: bool
+    ):
+        """Only --provider chatgpt forces the codex alias in over custom domains."""
         result = runner.invoke(
             app,
             [
                 "create",
                 "--agent",
                 "codex",
+                "--provider",
+                provider,
                 "--allowed-domains",
                 ".example.com",
                 "--dry-run",
@@ -301,7 +313,44 @@ class TestAgentSpecificDomainExpansion:
         )
         assert result.exit_code == 0
         output = _extract_domains_display(result.stdout)
-        assert "codex" in output
+        assert ("codex" in output) is expect_codex_alias
+
+
+class TestCodexChatgptProvider:
+    """Tests for `--agent codex --provider chatgpt`."""
+
+    @pytest.mark.parametrize("provider", ["chatgpt", "openai"])
+    def test_codex_provider_dry_run(self, provider: str):
+        result = runner.invoke(
+            app, ["create", "--agent", "codex", "--provider", provider, "--dry-run"]
+        )
+        assert result.exit_code == 0
+        assert f"provider: {provider}" in result.stdout
+
+    def test_codex_invalid_provider_rejected(self):
+        result = runner.invoke(
+            app, ["create", "--agent", "codex", "--provider", "vertex", "--dry-run"]
+        )
+        assert result.exit_code != 0
+
+    def test_codex_chatgpt_openshift_rejected(self):
+        """--provider chatgpt has no OpenShift credential/injection wiring yet."""
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--agent",
+                "codex",
+                "--provider",
+                "chatgpt",
+                "--backend",
+                "openshift",
+            ],
+        )
+        output = result.stdout + (result.stderr or "")
+        assert result.exit_code == 1
+        assert "not supported" in output
+        assert "openshift" in output.lower()
 
 
 @pytest.mark.parametrize(

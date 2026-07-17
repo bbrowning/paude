@@ -45,15 +45,12 @@ from paude.backends.shared import (
     PAUDE_LABEL_VERSION,
     PAUDE_LABEL_WORKSPACE,
     PAUDE_LABEL_YOLO,
-    PROXY_CHATGPT_AUTH_ENV,
     SYNTHETIC_CODEX_AUTH_JSON,
     ProxyCredentials,
     build_session_env,
-    codex_auth_file_is_usable,
     derive_agent_ip,
     encode_path,
     generate_sandbox_config_script,
-    local_codex_auth_path,
 )
 from paude.constants import (
     CONTAINER_ENTRYPOINT,
@@ -228,25 +225,9 @@ class PodmanBackend:
         """Gather real credentials from host environment for the proxy container."""
         from paude.backends.shared import gather_proxy_credentials
 
-        codex_path = None
-        if (
-            agent.config.name == "codex"
-            and self._engine.binary == "podman"
-            and not self._engine.is_remote
-        ):
-            codex_path = local_codex_auth_path()
-            if codex_path is not None and not codex_auth_file_is_usable(codex_path):
-                print(
-                    "WARNING: Host Codex auth file is missing required ChatGPT OAuth "
-                    "state; continuing without ChatGPT-plan authentication.",
-                    file=sys.stderr,
-                )
-                codex_path = None
-
         return gather_proxy_credentials(
             agent.config,
             gcp_adc_path=self._local_adc_path(),
-            codex_auth_path=codex_path,
         )
 
     def _inject_stub_credentials(self, cname: str) -> None:
@@ -259,9 +240,15 @@ class PodmanBackend:
 
         self._runner.inject_file(cname, STUB_ADC_JSON, GCP_ADC_TARGET, owner="paude:0")
 
-    def _inject_codex_auth(self, cname: str, credentials: ProxyCredentials) -> None:
-        """Install synthetic Codex auth, never the host OAuth state."""
-        if PROXY_CHATGPT_AUTH_ENV in credentials.files:
+    def _inject_codex_auth(self, cname: str, *, chatgpt_mode: bool) -> None:
+        """Install synthetic Codex auth for ChatGPT-OAuth sessions; else clear it.
+
+        Real OAuth tokens never reach the agent container. paude-proxy
+        manages them via the per-session auth-state volume; `codex login`
+        inside the container talks to the proxy, which captures the
+        resulting tokens.
+        """
+        if chatgpt_mode:
             self._runner.inject_file(
                 cname,
                 SYNTHETIC_CODEX_AUTH_JSON,
@@ -467,7 +454,7 @@ class PodmanBackend:
         self._proxy.distribute_ca_cert(name)
         self._inject_stub_credentials(cname)
         if agent.config.name == "codex":
-            self._inject_codex_auth(cname, proxy_creds)
+            self._inject_codex_auth(cname, chatgpt_mode=proxy_creds.chatgpt_oauth_mode)
         self._sync_host_config(cname, agent.config.name)
         self._sync_sandbox_config(cname, name)
         return agent

@@ -253,6 +253,18 @@ def session_create(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
 
+    if (
+        r_agent == "codex"
+        and r_provider == "chatgpt"
+        and r_backend == BackendType.openshift
+    ):
+        typer.echo(
+            "Error: --provider chatgpt is not supported with --backend openshift "
+            "(local Podman/Docker only).",
+            err=True,
+        )
+        raise typer.Exit(1)
+
     # Handle dry-run mode
     if dry_run:
         from paude.cli.helpers import _get_provider_aliases

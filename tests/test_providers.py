@@ -40,6 +40,11 @@ class TestProviderRegistry:
         p = get_provider("google")
         assert "GOOGLE_CLOUD_PROJECT" in p.passthrough_env_vars
 
+    def test_get_provider_chatgpt(self) -> None:
+        p = get_provider("chatgpt")
+        assert p.name == "chatgpt"
+        assert p.secret_env_vars == []
+
     def test_get_provider_unknown_raises(self) -> None:
         with pytest.raises(ValueError, match="Unknown provider 'nonexistent'"):
             get_provider("nonexistent")
@@ -106,6 +111,11 @@ class TestAgentProviderResolution:
     def test_resolve_codex_default(self) -> None:
         provider, _ = resolve_agent_provider("codex")
         assert provider.name == "openai"
+
+    def test_resolve_codex_chatgpt(self) -> None:
+        provider, agent_cfg = resolve_agent_provider("codex", "chatgpt")
+        assert provider.name == "chatgpt"
+        assert isinstance(agent_cfg, AgentProviderConfig)
 
     def test_resolve_cursor_cursor(self) -> None:
         provider, _ = resolve_agent_provider("cursor", "cursor")
@@ -188,7 +198,7 @@ class TestSupportedProviders:
 
     def test_codex_providers(self) -> None:
         providers = supported_providers("codex")
-        assert providers == ["openai"]
+        assert providers == ["chatgpt", "openai"]
 
     def test_gascity_providers(self) -> None:
         providers = supported_providers("gascity")

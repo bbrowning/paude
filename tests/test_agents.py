@@ -344,8 +344,22 @@ class TestCodexAgentConfig:
     def test_passthrough_prefixes_empty(self) -> None:
         assert CodexAgent().config.passthrough_env_prefixes == []
 
-    def test_extra_domain_aliases(self) -> None:
-        assert CodexAgent().config.extra_domain_aliases == ["codex"]
+    def test_extra_domain_aliases_default_openai(self) -> None:
+        """Plain API-key sessions don't need chatgpt.com/auth.openai.com allowlisted."""
+        assert CodexAgent().config.extra_domain_aliases == []
+        assert CodexAgent().config.required_domain_aliases == []
+
+    def test_extra_domain_aliases_chatgpt(self) -> None:
+        cfg = CodexAgent(provider="chatgpt").config
+        assert cfg.extra_domain_aliases == ["codex"]
+        assert cfg.required_domain_aliases == ["codex"]
+
+    def test_chatgpt_provider_has_no_secret_env_vars(self) -> None:
+        """ChatGPT-plan sessions are proxy-managed OAuth, not an API key."""
+        assert CodexAgent(provider="chatgpt").config.secret_env_vars == []
+
+    def test_chatgpt_provider_is_resolved_provider(self) -> None:
+        assert CodexAgent(provider="chatgpt").config.provider == "chatgpt"
 
     def test_env_vars_empty(self) -> None:
         assert CodexAgent().config.env_vars == {"CODEX_HOME": "/home/paude/.codex"}

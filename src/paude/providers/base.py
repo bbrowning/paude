@@ -46,6 +46,13 @@ _PROVIDERS: dict[str, ProviderConfig] = {
         secret_env_vars=["OPENAI_API_KEY"],
         domain_aliases=["openai"],
     ),
+    "chatgpt": ProviderConfig(
+        name="chatgpt",
+        display_name="ChatGPT Plan (OAuth)",
+        # No secret env vars: auth is proxy-managed OAuth, not an API key.
+        # No domain_aliases: CodexAgent sets its own required_domain_aliases
+        # for this provider (chatgpt.com/auth.openai.com).
+    ),
     "anthropic": ProviderConfig(
         name="anthropic",
         display_name="Anthropic",
