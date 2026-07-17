@@ -248,14 +248,14 @@ def session_create(
 
     # Validate agent name and provider combination
     try:
-        get_agent(r_agent, provider=r_provider)
+        validated_agent = get_agent(r_agent, provider=r_provider)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
 
     if (
         r_agent == "codex"
-        and r_provider == "chatgpt"
+        and validated_agent.config.provider == "chatgpt"
         and r_backend == BackendType.openshift
     ):
         typer.echo(

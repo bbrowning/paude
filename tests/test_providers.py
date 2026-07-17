@@ -110,7 +110,7 @@ class TestAgentProviderResolution:
 
     def test_resolve_codex_default(self) -> None:
         provider, _ = resolve_agent_provider("codex")
-        assert provider.name == "openai"
+        assert provider.name == "chatgpt"
 
     def test_resolve_codex_chatgpt(self) -> None:
         provider, agent_cfg = resolve_agent_provider("codex", "chatgpt")
@@ -166,8 +166,8 @@ class TestDefaultProviders:
     def test_gascity_default_is_vertex(self) -> None:
         assert DEFAULT_PROVIDER["gascity"] == "vertex"
 
-    def test_codex_default_is_openai(self) -> None:
-        assert DEFAULT_PROVIDER["codex"] == "openai"
+    def test_codex_default_is_chatgpt(self) -> None:
+        assert DEFAULT_PROVIDER["codex"] == "chatgpt"
 
     def test_gemini_default_is_google(self) -> None:
         assert DEFAULT_PROVIDER["gemini"] == "google"
