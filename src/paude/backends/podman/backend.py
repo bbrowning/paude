@@ -45,7 +45,6 @@ from paude.backends.shared import (
     PAUDE_LABEL_VERSION,
     PAUDE_LABEL_WORKSPACE,
     PAUDE_LABEL_YOLO,
-    SYNTHETIC_CODEX_AUTH_JSON,
     ProxyCredentials,
     build_session_env,
     derive_agent_ip,
@@ -241,21 +240,16 @@ class PodmanBackend:
         self._runner.inject_file(cname, STUB_ADC_JSON, GCP_ADC_TARGET, owner="paude:0")
 
     def _inject_codex_auth(self, cname: str, *, chatgpt_mode: bool) -> None:
-        """Install synthetic Codex auth for ChatGPT-OAuth sessions; else clear it.
+        """Install the ChatGPT provider profile for Codex; else clear codex auth.
 
-        Real OAuth tokens never reach the agent container. paude-proxy
-        manages them via the per-session auth-state volume; `codex login`
-        inside the container talks to the proxy, which captures the
-        resulting tokens.
+        Real OAuth tokens never reach the agent container. paude never seeds
+        `auth.json` itself — that would make Codex think it's already logged
+        in before paude-proxy has any real tokens for the session. Codex's
+        own `codex login` flow writes that file after talking to the proxy,
+        which captures the resulting tokens into its per-session auth-state
+        volume and hands back synthetic values.
         """
         if chatgpt_mode:
-            self._runner.inject_file(
-                cname,
-                SYNTHETIC_CODEX_AUTH_JSON,
-                CODEX_AUTH_TARGET,
-                owner="paude:0",
-                mode="600",
-            )
             self._runner.inject_file(
                 cname,
                 SYNTHETIC_CODEX_PROFILE_TOML,

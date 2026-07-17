@@ -9,10 +9,7 @@ from paude.agents.codex import (
     SYNTHETIC_CODEX_PROFILE_TOML,
 )
 from paude.backends.podman import PodmanBackend
-from paude.backends.shared import (
-    SYNTHETIC_CODEX_AUTH_JSON,
-    is_local_backend,
-)
+from paude.backends.shared import is_local_backend
 from paude.container.engine import ContainerEngine
 from paude.container.proxy_runner import ProxyRunner
 from paude.container.runner import ContainerRunner
@@ -380,26 +377,22 @@ class TestStubCredentialInjection:
 
 
 class TestCodexSyntheticAuth:
-    """Tests for synthetic Codex auth state in the agent container."""
+    """Tests for Codex ChatGPT provider profile injection in the agent container."""
 
     @patch("subprocess.run")
-    def test_injects_only_synthetic_auth(self, mock_run: MagicMock) -> None:
+    def test_injects_only_provider_profile(self, mock_run: MagicMock) -> None:
+        """No auth.json is ever seeded; only `codex login` itself writes it."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         backend = PodmanBackend(engine=ContainerEngine("podman"))
 
         backend._inject_codex_auth("paude-test", chatgpt_mode=True)
 
-        injection = next(
+        injections = [
             c for c in mock_run.call_args_list if c[1].get("input") is not None
-        )
-        assert injection[1]["input"] == SYNTHETIC_CODEX_AUTH_JSON
-
-        profile_injection = next(
-            c
-            for c in mock_run.call_args_list
-            if c[1].get("input") == SYNTHETIC_CODEX_PROFILE_TOML
-        )
-        assert CODEX_CHATGPT_PROFILE_TARGET in profile_injection[0][0][-1]
+        ]
+        assert len(injections) == 1
+        assert injections[0][1]["input"] == SYNTHETIC_CODEX_PROFILE_TOML
+        assert CODEX_CHATGPT_PROFILE_TARGET in injections[0][0][0][-1]
 
     @patch("subprocess.run")
     def test_removes_auth_when_not_chatgpt_mode(self, mock_run: MagicMock) -> None:

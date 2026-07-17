@@ -86,21 +86,15 @@ PROXY_GCP_ADC_ENV = "GCP_ADC_JSON"
 # container, and paude-proxy captures, persists, and refreshes the resulting
 # real tokens independently per session (see paude-proxy's ChatGPTInjector /
 # TokenVendor). No host file is ever read or shared across sessions.
+#
+# paude never pre-seeds `codex login` state either: doing so made Codex
+# believe it was already authenticated on a fresh session (skipping its own
+# login prompt) while paude-proxy had no real tokens yet for that session.
+# Codex's own login flow writes CODEX_AUTH_TARGET itself; paude-proxy swaps
+# in synthetic values at the token exchange so real tokens never land in the
+# agent container.
 PROXY_CHATGPT_AUTH_STATE_ENV = "PAUDE_PROXY_CHATGPT_AUTH_STATE_FILE"
 CODEX_AUTH_TARGET = "/home/paude/.codex/auth.json"
-
-# Synthetic state accepted by the Codex CLI.  These values are deliberately
-# non-functional; paude-proxy vendors synthetic values back to the agent and
-# injects the real OAuth credential only on the upstream request.
-SYNTHETIC_CODEX_AUTH_JSON = (
-    '{"auth_mode":"chatgpt","tokens":{'
-    '"id_token":"eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.'
-    "eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjo"
-    'icGF1ZGUtcHJveHktbWFuYWdlZC1hY2NvdW50In19.paude-proxy-managed",'
-    '"access_token":"paude-proxy-managed-access",'
-    '"refresh_token":"paude-proxy-managed-refresh",'
-    '"account_id":"paude-proxy-managed-account"}}'
-)
 
 
 @dataclass
