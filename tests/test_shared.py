@@ -9,12 +9,9 @@ import pytest
 from paude.agents.claude import ClaudeAgent
 from paude.backends.base import SessionConfig
 from paude.backends.shared import (
-    PROXY_CHATGPT_AUTH_ENV,
     PROXY_GCP_ADC_ENV,
     build_session_env,
-    codex_auth_file_is_usable,
     gather_proxy_credentials,
-    local_codex_auth_path,
     network_name,
     pod_name,
     proxy_resource_name,
@@ -154,28 +151,27 @@ class TestGatherProxyCredentials:
 
         assert PROXY_GCP_ADC_ENV not in creds
 
-    def test_includes_codex_auth_as_file_credential(self, tmp_path: Path) -> None:
-        """Codex auth is represented as a path, not environment content."""
+    def test_chatgpt_mode_flag_set_for_codex_chatgpt_provider(self) -> None:
+        """chatgpt_oauth_mode is True for a codex agent using the chatgpt provider."""
         from paude.agents.codex import CodexAgent
 
-        auth_file = tmp_path / "auth.json"
-        auth_file.write_text(
-            '{"auth_mode":"chatgpt","tokens":{"access_token":"a",'
-            '"refresh_token":"r","account_id":"acct"}}'
-        )
+        creds = gather_proxy_credentials(CodexAgent(provider="chatgpt").config)
 
-        creds = gather_proxy_credentials(CodexAgent().config, codex_auth_path=auth_file)
+        assert creds.chatgpt_oauth_mode is True
 
-        assert creds.files[PROXY_CHATGPT_AUTH_ENV] == auth_file
-        assert PROXY_CHATGPT_AUTH_ENV not in creds
+    def test_chatgpt_mode_flag_false_for_codex_openai_provider(self) -> None:
+        """chatgpt_oauth_mode is False for a codex agent using the openai provider."""
+        from paude.agents.codex import CodexAgent
 
-    def test_codex_auth_file_helpers(self, tmp_path: Path, monkeypatch) -> None:
-        auth_file = tmp_path / ".codex" / "auth.json"
-        auth_file.parent.mkdir()
-        auth_file.write_text('{"tokens": {}}')
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        assert local_codex_auth_path() == auth_file
-        assert codex_auth_file_is_usable(auth_file) is False
+        creds = gather_proxy_credentials(CodexAgent(provider="openai").config)
+
+        assert creds.chatgpt_oauth_mode is False
+
+    def test_chatgpt_mode_flag_false_for_non_codex_agent(self) -> None:
+        """chatgpt_oauth_mode is False for agents other than codex."""
+        creds = gather_proxy_credentials(ClaudeAgent().config)
+
+        assert creds.chatgpt_oauth_mode is False
 
 
 class TestNamingHelpers:

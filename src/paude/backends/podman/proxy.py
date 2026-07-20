@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 import time
 from collections.abc import Mapping
-from pathlib import Path
 
 from paude.backends.podman.helpers import (
     find_container_by_session_name,
@@ -22,7 +21,6 @@ from paude.backends.shared import (
     PAUDE_LABEL_OTEL_PORTS,
     PAUDE_LABEL_PROXY_IMAGE,
     PROXY_BLOCKED_LOG_PATH,
-    PROXY_CHATGPT_AUTH_ENV,
     PROXY_CHATGPT_AUTH_STATE_ENV,
     SYS_CA_BUNDLE_PATHS,
     ProxyCredentials,
@@ -139,31 +137,21 @@ class PodmanProxyManager:
             sname = proxy_secret_name(session_name, key)
             self._runner.create_secret_from_value(sname, value)
             secret_refs.append(f"{sname},type=env,target={key}")
-        for key, source_path in credentials.files.items():
-            if not source_path.is_file():
-                continue
-            sname = proxy_secret_name(session_name, key)
-            self._runner.create_secret(sname, Path(source_path))
-            target = "codex-auth.json" if key == PROXY_CHATGPT_AUTH_ENV else key.lower()
-            secret_refs.append(f"{sname},type=mount,target={target},mode=0400")
         return secret_refs
 
     def _credential_env(
         self,
         credentials: ProxyCredentials | Mapping[str, str] | None,
     ) -> dict[str, str]:
-        """Return proxy env paths for file-backed credentials."""
-        if not self._runner.engine.supports_secrets or credentials is None:
-            return {}
-        if not isinstance(credentials, ProxyCredentials):
-            credentials = ProxyCredentials(environment=dict(credentials))
+        """Return extra plain (non-secret) env vars derived from credential signals.
 
-        env: dict[str, str] = {}
-        for key in credentials.files:
-            if key == PROXY_CHATGPT_AUTH_ENV:
-                env[key] = "/run/secrets/codex-auth.json"
-                env[PROXY_CHATGPT_AUTH_STATE_ENV] = "/data/auth/chatgpt-auth.json"
-        return env
+        Currently only used to tell paude-proxy a session wants Codex
+        ChatGPT-OAuth mode. This is a plain env var, not a secret, so it
+        works identically on Podman and Docker.
+        """
+        if isinstance(credentials, ProxyCredentials) and credentials.chatgpt_oauth_mode:
+            return {PROXY_CHATGPT_AUTH_STATE_ENV: "/data/auth/chatgpt-auth.json"}
+        return {}
 
     def remove_credential_secrets(self, session_name: str) -> None:
         """Remove all podman secrets for a session's proxy credentials."""

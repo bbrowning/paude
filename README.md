@@ -87,24 +87,37 @@ paude create --agent openclaw --provider openai ...
 <details>
 <summary><strong>ChatGPT plan login</strong> (Codex CLI)</summary>
 
-Log in to Codex on the host once:
-
 ```bash
-codex login
 paude create --agent codex --yolo --git my-project
+paude connect my-project
 ```
 
-For local Podman sessions, Paude detects `~/.codex/auth.json` and gives the
-proxy a per-session secret. The Codex container receives only synthetic auth
-state; real OAuth tokens stay in the proxy. The default Codex network policy
-allows `chatgpt.com` and `auth.openai.com` for the ChatGPT API and OAuth
-exchange. Paude selects Codex's HTTP/SSE transport for these sessions because
-the local MITM proxy does not support the Responses WebSocket transport. If
-the host login is absent, Codex keeps its normal login prompt; API-key
-sessions continue to use the normal OpenAI provider. Codex Apps are disabled
-for these ChatGPT OAuth sessions so the Apps MCP integration does not attempt
-to connect from the container; standalone MCP server configuration is
-unchanged.
+`chatgpt` is the default provider for the Codex agent and is only supported
+on the local Podman/Docker backend (not `--backend openshift`, which needs
+`--provider openai` instead — see below).
+
+Inside the session, run `codex login`. Codex prints a URL and code — complete
+the login in any browser, on any device (no localhost callback or port
+forwarding is needed). The session's own proxy sidecar captures the resulting
+OAuth tokens and manages refresh transparently and independently; real tokens
+never reach the agent container. Each session has its own OAuth lineage tied
+to its own private state volume, so multiple ChatGPT-plan sessions can run
+concurrently without one session's token refresh invalidating another's.
+
+Pass `--provider openai` to use the plain `OPENAI_API_KEY` provider instead
+— no ChatGPT plan, no proxy-managed auth (this is the only provider Codex
+supports on `--backend openshift`). The default Codex network policy allows
+`chatgpt.com` and `auth.openai.com` for the ChatGPT API and OAuth exchange.
+Paude selects Codex's HTTP/SSE transport by default because the local MITM
+proxy does not support the Responses WebSocket transport. Codex Apps are
+disabled for ChatGPT OAuth sessions so the Apps MCP integration does not
+attempt to connect from the container; standalone MCP server configuration
+is unchanged.
+
+**Breaking change from previous versions**: paude no longer reads
+`~/.codex/auth.json` from the host. Sessions created under the old
+host-seeded model must be recreated (`paude delete` + `paude create --agent
+codex`) and re-authenticated with `codex login` inside the container.
 
 </details>
 
