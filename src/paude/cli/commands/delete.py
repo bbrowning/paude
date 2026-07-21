@@ -52,7 +52,10 @@ def session_delete(
         bool,
         typer.Option(
             "--force",
-            help="Remove from local config without contacting the backend.",
+            help=(
+                "Remove from local config without contacting the backend"
+                " (useful for orphaned or legacy sessions)."
+            ),
         ),
     ] = False,
 ) -> None:

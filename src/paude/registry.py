@@ -9,6 +9,7 @@ import tempfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from paude.backends.base import Session
 from paude.config.user_config import _paude_config_dir
@@ -93,7 +94,7 @@ class SessionRegistry:
         except (FileNotFoundError, json.JSONDecodeError, TypeError, KeyError):
             return {}
 
-    def _write_raw(self, data: dict) -> None:  # type: ignore[type-arg]
+    def _write_raw(self, data: dict[str, Any]) -> None:
         """Write raw JSON data to the registry file atomically."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=self._path.parent, suffix=".tmp")
