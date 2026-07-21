@@ -11,19 +11,16 @@ from paude.agents.base import Agent
 from paude.config.claude_layer import generate_claude_layer_dockerfile
 from paude.config.models import PaudeConfig
 from paude.container.build_context import (
-    BuildContext,
     copy_entrypoints,
     copy_features_cache,
     generate_dockerfile_content,
-    prepare_build_context,
     resolve_entrypoint,
 )
 from paude.container.engine import ContainerEngine
 from paude.hash import compute_config_hash, compute_content_hash
 from paude.platform import is_macos
 
-# Re-export for backward compatibility
-__all__ = ["BuildContext", "ImageManager", "prepare_build_context"]
+__all__ = ["ImageManager"]
 
 
 def _detect_native_platform() -> str:
@@ -72,8 +69,7 @@ class ImageManager:
     def _ensure_agent_base_image(self, force_rebuild: bool = False) -> str:
         """Build image using agent's default base image with paude infrastructure.
 
-        Mirrors the OpenShift path in prepare_build_context() for agents
-        that declare their own base image (e.g. openclaw).
+        Used for agents that declare their own base image (e.g. openclaw).
         """
         import sys
 

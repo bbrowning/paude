@@ -206,14 +206,6 @@ def test_backend_flag_recognized():
     assert "backend: podman" in result.stdout
 
 
-def test_backend_openshift_shows_openshift_options():
-    """--backend=openshift shows OpenShift-specific options."""
-    result = runner.invoke(app, ["create", "--backend=openshift", "--dry-run"])
-    assert result.exit_code == 0
-    assert "backend: openshift" in result.stdout
-    assert "openshift-namespace:" in result.stdout
-
-
 def test_github_domains_in_default_dry_run():
     """GitHub domains appear in dry-run output by default (github is in DEFAULT_ALIASES)."""
     result = runner.invoke(app, ["create", "--dry-run"])
@@ -333,22 +325,6 @@ class TestCodexChatgptProvider:
         )
         assert result.exit_code != 0
 
-    @pytest.mark.parametrize(
-        "extra_args",
-        [["--provider", "chatgpt"], []],
-        ids=["explicit", "implicit-default"],
-    )
-    def test_codex_chatgpt_openshift_rejected(self, extra_args: list[str]):
-        """chatgpt has no OpenShift credential/injection wiring yet, explicit or default."""
-        result = runner.invoke(
-            app,
-            ["create", "--agent", "codex", "--backend", "openshift", *extra_args],
-        )
-        output = result.stdout + (result.stderr or "")
-        assert result.exit_code == 1
-        assert "not supported" in output
-        assert "openshift" in output.lower()
-
 
 @pytest.mark.parametrize(
     ("command", "patch_target"),
@@ -453,15 +429,6 @@ class TestCreateHostFlag:
         result = runner.invoke(app, ["create", "--help"])
         assert "--ssh-key" in _strip_ansi(result.stdout)
 
-    def test_host_with_openshift_rejected(self):
-        """--host is not supported with --backend openshift."""
-        result = runner.invoke(
-            app, ["create", "--backend=openshift", "--host", "user@host"]
-        )
-        output = result.stdout + (result.stderr or "")
-        assert result.exit_code == 1
-        assert "--host is not supported with --backend openshift" in output
-
     def test_ssh_key_without_host_rejected(self):
         """--ssh-key requires --host."""
         result = runner.invoke(app, ["create", "--ssh-key", "/path/to/key"])
@@ -512,33 +479,6 @@ def test_bare_paude_shows_list():
     # When no sessions, should show helpful next steps
     if "No sessions found." in result.stdout:
         assert "paude create" in result.stdout
-
-
-@patch("paude.session_discovery.PodmanBackend")
-@patch("paude.session_discovery.OpenShiftBackend")
-@patch("paude.session_discovery.OpenShiftConfig")
-def test_start_without_session_shows_helpful_error(
-    mock_os_config_class: MagicMock,
-    mock_os_backend_class: MagicMock,
-    mock_podman_class: MagicMock,
-):
-    """'paude start' without a session shows helpful error with create hint."""
-    # Mock both backends to return no sessions
-    mock_podman = MagicMock()
-    mock_podman.find_session_for_workspace.return_value = None
-    mock_podman.list_sessions.return_value = []
-    mock_podman_class.return_value = mock_podman
-
-    mock_os_backend = MagicMock()
-    mock_os_backend.find_session_for_workspace.return_value = None
-    mock_os_backend.list_sessions.return_value = []
-    mock_os_backend_class.return_value = mock_os_backend
-
-    result = runner.invoke(app, ["start"])
-    assert result.exit_code == 1
-    # Should show helpful message with create command (error goes to stderr)
-    output = result.stdout + (result.stderr or "")
-    assert "No sessions found" in output or "paude create" in output
 
 
 def test_help_shows_commands():
@@ -600,7 +540,7 @@ class TestRemoteCommand:
         """remote list shows all paude git remotes."""
         mock_list.return_value = [
             ("paude-my-session", "ext::podman exec paude-my-session %S /pvc/workspace"),
-            ("paude-other", "ext::oc exec pod -n ns -- %S /pvc/workspace"),
+            ("paude-other", "ext::docker exec paude-other %S /pvc/workspace"),
         ]
 
         result = runner.invoke(app, ["remote", "list"])
@@ -838,279 +778,6 @@ class TestConnectMultiBackend:
         ):
             yield
 
-    @patch("paude.session_discovery.PodmanBackend")
-    @patch("paude.session_discovery.OpenShiftBackend")
-    @patch("paude.session_discovery.OpenShiftConfig")
-    def test_connect_finds_openshift_session_when_podman_empty(
-        self,
-        mock_os_config_class: MagicMock,
-        mock_os_backend_class: MagicMock,
-        mock_podman_class: MagicMock,
-    ):
-        """Connect finds OpenShift running session when podman has none."""
-        mock_podman = MagicMock()
-        mock_podman.find_session_for_workspace.return_value = None
-        mock_podman.list_sessions.return_value = []
-        mock_podman_class.return_value = mock_podman
-
-        os_session = _make_session("os-session", backend_type="openshift")
-        mock_os_backend = MagicMock()
-        mock_os_backend.find_session_for_workspace.return_value = None
-        mock_os_backend.list_sessions.return_value = [os_session]
-        mock_os_backend.connect_session.return_value = 0
-        mock_os_backend_class.return_value = mock_os_backend
-
-        result = runner.invoke(app, ["connect"])
-
-        assert result.exit_code == 0
-        assert "Connecting to 'os-session' (openshift)..." in result.output
-        mock_os_backend.connect_session.assert_called_once_with(
-            "os-session", github_token=None
-        )
-
-    @patch("paude.session_discovery.PodmanBackend")
-    @patch("paude.session_discovery.OpenShiftBackend")
-    @patch("paude.session_discovery.OpenShiftConfig")
-    def test_connect_finds_podman_session_when_openshift_empty(
-        self,
-        mock_os_config_class: MagicMock,
-        mock_os_backend_class: MagicMock,
-        mock_podman_class: MagicMock,
-    ):
-        """Connect finds podman running session when OpenShift has none."""
-        podman_session = _make_session("podman-session", backend_type="podman")
-        mock_podman = MagicMock()
-        mock_podman.find_session_for_workspace.return_value = None
-        mock_podman.list_sessions.return_value = [podman_session]
-        mock_podman.connect_session.return_value = 0
-        mock_podman_class.return_value = mock_podman
-
-        mock_os_backend = MagicMock()
-        mock_os_backend.find_session_for_workspace.return_value = None
-        mock_os_backend.list_sessions.return_value = []
-        mock_os_backend_class.return_value = mock_os_backend
-
-        result = runner.invoke(app, ["connect"])
-
-        assert result.exit_code == 0
-        assert "Connecting to 'podman-session' (podman)..." in result.output
-        mock_podman.connect_session.assert_called_once_with(
-            "podman-session", github_token=None
-        )
-
-    @patch("paude.session_discovery.PodmanBackend")
-    @patch("paude.session_discovery.OpenShiftBackend")
-    @patch("paude.session_discovery.OpenShiftConfig")
-    def test_connect_shows_multiple_sessions_across_backends(
-        self,
-        mock_os_config_class: MagicMock,
-        mock_os_backend_class: MagicMock,
-        mock_podman_class: MagicMock,
-    ):
-        """Connect shows all sessions when multiple exist across backends."""
-        podman_session = _make_session("podman-session", backend_type="podman")
-        mock_podman = MagicMock()
-        mock_podman.find_session_for_workspace.return_value = None
-        mock_podman.list_sessions.return_value = [podman_session]
-        mock_podman_class.return_value = mock_podman
-
-        os_session = _make_session("os-session", backend_type="openshift")
-        mock_os_backend = MagicMock()
-        mock_os_backend.find_session_for_workspace.return_value = None
-        mock_os_backend.list_sessions.return_value = [os_session]
-        mock_os_backend_class.return_value = mock_os_backend
-
-        result = runner.invoke(app, ["connect"])
-
-        assert result.exit_code == 1
-        assert "Multiple running sessions found" in result.output
-        # Verify actionable command syntax is shown
-        assert "paude connect podman-session" in result.output
-        assert "paude connect os-session" in result.output
-        # Verify backend info is shown
-        assert "podman" in result.output
-        assert "openshift" in result.output
-
-    @patch("paude.session_discovery.PodmanBackend")
-    @patch("paude.session_discovery.OpenShiftBackend")
-    @patch("paude.session_discovery.OpenShiftConfig")
-    def test_connect_no_sessions_shows_error(
-        self,
-        mock_os_config_class: MagicMock,
-        mock_os_backend_class: MagicMock,
-        mock_podman_class: MagicMock,
-    ):
-        """Connect shows error when no running sessions exist."""
-        mock_podman = MagicMock()
-        mock_podman.find_session_for_workspace.return_value = None
-        mock_podman.list_sessions.return_value = []
-        mock_podman_class.return_value = mock_podman
-
-        mock_os_backend = MagicMock()
-        mock_os_backend.find_session_for_workspace.return_value = None
-        mock_os_backend.list_sessions.return_value = []
-        mock_os_backend_class.return_value = mock_os_backend
-
-        result = runner.invoke(app, ["connect"])
-
-        assert result.exit_code == 1
-        assert "No running sessions to connect to" in result.output
-        # Verify helpful guidance is shown
-        assert "paude list" in result.output
-        assert "paude start" in result.output
-
-    @patch("paude.session_discovery.PodmanBackend")
-    @patch("paude.session_discovery.OpenShiftBackend")
-    @patch("paude.session_discovery.OpenShiftConfig")
-    def test_connect_prefers_workspace_match_in_podman(
-        self,
-        mock_os_config_class: MagicMock,
-        mock_os_backend_class: MagicMock,
-        mock_podman_class: MagicMock,
-    ):
-        """Connect prefers workspace-matching session in podman."""
-        cwd = Path("/my/workspace")
-
-        workspace_session = _make_session(
-            "workspace-session", workspace=cwd, backend_type="podman"
-        )
-        workspace_session.status = "running"
-        mock_podman = MagicMock()
-        mock_podman.find_session_for_workspace.return_value = workspace_session
-        mock_podman.connect_session.return_value = 0
-        mock_podman_class.return_value = mock_podman
-
-        mock_os_backend = MagicMock()
-        mock_os_backend_class.return_value = mock_os_backend
-
-        result = runner.invoke(app, ["connect"])
-
-        assert result.exit_code == 0
-        assert "Connecting to 'workspace-session' (podman)..." in result.output
-        mock_podman.connect_session.assert_called_once_with(
-            "workspace-session", github_token=None
-        )
-        # OpenShift should not be checked since podman had workspace match
-        mock_os_backend.find_session_for_workspace.assert_not_called()
-
-    @patch("paude.session_discovery.PodmanBackend")
-    @patch("paude.session_discovery.OpenShiftBackend")
-    @patch("paude.session_discovery.OpenShiftConfig")
-    def test_connect_finds_workspace_match_in_openshift(
-        self,
-        mock_os_config_class: MagicMock,
-        mock_os_backend_class: MagicMock,
-        mock_podman_class: MagicMock,
-    ):
-        """Connect finds workspace-matching session in OpenShift when podman has none."""
-        cwd = Path("/my/workspace")
-
-        mock_podman = MagicMock()
-        mock_podman.find_session_for_workspace.return_value = None
-        mock_podman_class.return_value = mock_podman
-
-        workspace_session = _make_session(
-            "os-workspace-session", workspace=cwd, backend_type="openshift"
-        )
-        workspace_session.status = "running"
-        mock_os_backend = MagicMock()
-        mock_os_backend.find_session_for_workspace.return_value = workspace_session
-        mock_os_backend.connect_session.return_value = 0
-        mock_os_backend_class.return_value = mock_os_backend
-
-        result = runner.invoke(app, ["connect"])
-
-        assert result.exit_code == 0
-        assert "Connecting to 'os-workspace-session' (openshift)..." in result.output
-        mock_os_backend.connect_session.assert_called_once_with(
-            "os-workspace-session", github_token=None
-        )
-
-    @patch("paude.session_discovery.PodmanBackend")
-    @patch("paude.session_discovery.OpenShiftBackend")
-    @patch("paude.session_discovery.OpenShiftConfig")
-    def test_connect_handles_podman_unavailable(
-        self,
-        mock_os_config_class: MagicMock,
-        mock_os_backend_class: MagicMock,
-        mock_podman_class: MagicMock,
-    ):
-        """Connect works when podman is unavailable."""
-        mock_podman_class.side_effect = Exception("podman not found")
-
-        os_session = _make_session("os-session", backend_type="openshift")
-        mock_os_backend = MagicMock()
-        mock_os_backend.find_session_for_workspace.return_value = None
-        mock_os_backend.list_sessions.return_value = [os_session]
-        mock_os_backend.connect_session.return_value = 0
-        mock_os_backend_class.return_value = mock_os_backend
-
-        result = runner.invoke(app, ["connect"])
-
-        assert result.exit_code == 0
-        mock_os_backend.connect_session.assert_called_once_with(
-            "os-session", github_token=None
-        )
-
-    @patch("paude.session_discovery.PodmanBackend")
-    @patch("paude.session_discovery.OpenShiftBackend")
-    @patch("paude.session_discovery.OpenShiftConfig")
-    def test_connect_handles_openshift_unavailable(
-        self,
-        mock_os_config_class: MagicMock,
-        mock_os_backend_class: MagicMock,
-        mock_podman_class: MagicMock,
-    ):
-        """Connect works when OpenShift is unavailable."""
-        podman_session = _make_session("podman-session", backend_type="podman")
-        mock_podman = MagicMock()
-        mock_podman.find_session_for_workspace.return_value = None
-        mock_podman.list_sessions.return_value = [podman_session]
-        mock_podman.connect_session.return_value = 0
-        mock_podman_class.return_value = mock_podman
-
-        mock_os_backend_class.side_effect = Exception("oc not found")
-
-        result = runner.invoke(app, ["connect"])
-
-        assert result.exit_code == 0
-        mock_podman.connect_session.assert_called_once_with(
-            "podman-session", github_token=None
-        )
-
-    @patch("paude.session_discovery.PodmanBackend")
-    @patch("paude.session_discovery.OpenShiftBackend")
-    @patch("paude.session_discovery.OpenShiftConfig")
-    def test_connect_ignores_stopped_sessions(
-        self,
-        mock_os_config_class: MagicMock,
-        mock_os_backend_class: MagicMock,
-        mock_podman_class: MagicMock,
-    ):
-        """Connect ignores stopped sessions when searching."""
-        stopped_session = _make_session(
-            "stopped-session", status="stopped", backend_type="podman"
-        )
-        running_session = _make_session("running-session", backend_type="openshift")
-
-        mock_podman = MagicMock()
-        mock_podman.find_session_for_workspace.return_value = None
-        mock_podman.list_sessions.return_value = [stopped_session]
-        mock_podman_class.return_value = mock_podman
-
-        mock_os_backend = MagicMock()
-        mock_os_backend.find_session_for_workspace.return_value = None
-        mock_os_backend.list_sessions.return_value = [running_session]
-        mock_os_backend.connect_session.return_value = 0
-        mock_os_backend_class.return_value = mock_os_backend
-
-        result = runner.invoke(app, ["connect"])
-
-        assert result.exit_code == 0
-        mock_os_backend.connect_session.assert_called_once_with(
-            "running-session", github_token=None
-        )
-
 
 class TestStartMultiBackend:
     """Tests for start command searching multiple backends."""
@@ -1124,149 +791,6 @@ class TestStartMultiBackend:
         ):
             yield
 
-    @patch("paude.session_discovery.PodmanBackend")
-    @patch("paude.session_discovery.OpenShiftBackend")
-    @patch("paude.session_discovery.OpenShiftConfig")
-    def test_start_finds_openshift_session_when_podman_empty(
-        self,
-        mock_os_config_class: MagicMock,
-        mock_os_backend_class: MagicMock,
-        mock_podman_class: MagicMock,
-    ):
-        """Start finds OpenShift session when podman has none."""
-        mock_podman = MagicMock()
-        mock_podman.find_session_for_workspace.return_value = None
-        mock_podman.list_sessions.return_value = []
-        mock_podman_class.return_value = mock_podman
-
-        os_session = _make_session("os-session", backend_type="openshift")
-        mock_os_backend = MagicMock()
-        mock_os_backend.find_session_for_workspace.return_value = None
-        mock_os_backend.list_sessions.return_value = [os_session]
-        mock_os_backend.start_session.return_value = 0
-        mock_os_backend_class.return_value = mock_os_backend
-
-        result = runner.invoke(app, ["start"])
-
-        assert result.exit_code == 0
-        assert "Starting 'os-session' (openshift)..." in result.output
-        mock_os_backend.start_session.assert_called_once()
-
-    @patch("paude.session_discovery.PodmanBackend")
-    @patch("paude.session_discovery.OpenShiftBackend")
-    @patch("paude.session_discovery.OpenShiftConfig")
-    def test_start_finds_podman_session_when_openshift_empty(
-        self,
-        mock_os_config_class: MagicMock,
-        mock_os_backend_class: MagicMock,
-        mock_podman_class: MagicMock,
-    ):
-        """Start finds podman session when OpenShift has none."""
-        podman_session = _make_session("podman-session", backend_type="podman")
-        mock_podman = MagicMock()
-        mock_podman.find_session_for_workspace.return_value = None
-        mock_podman.list_sessions.return_value = [podman_session]
-        mock_podman.start_session.return_value = 0
-        mock_podman_class.return_value = mock_podman
-
-        mock_os_backend = MagicMock()
-        mock_os_backend.find_session_for_workspace.return_value = None
-        mock_os_backend.list_sessions.return_value = []
-        mock_os_backend_class.return_value = mock_os_backend
-
-        result = runner.invoke(app, ["start"])
-
-        assert result.exit_code == 0
-        assert "Starting 'podman-session' (podman)..." in result.output
-        mock_podman.start_session.assert_called_once()
-
-    @patch("paude.session_discovery.PodmanBackend")
-    @patch("paude.session_discovery.OpenShiftBackend")
-    @patch("paude.session_discovery.OpenShiftConfig")
-    def test_start_shows_multiple_sessions_across_backends(
-        self,
-        mock_os_config_class: MagicMock,
-        mock_os_backend_class: MagicMock,
-        mock_podman_class: MagicMock,
-    ):
-        """Start shows all sessions when multiple exist across backends."""
-        podman_session = _make_session("podman-session", backend_type="podman")
-        mock_podman = MagicMock()
-        mock_podman.find_session_for_workspace.return_value = None
-        mock_podman.list_sessions.return_value = [podman_session]
-        mock_podman_class.return_value = mock_podman
-
-        os_session = _make_session("os-session", backend_type="openshift")
-        mock_os_backend = MagicMock()
-        mock_os_backend.find_session_for_workspace.return_value = None
-        mock_os_backend.list_sessions.return_value = [os_session]
-        mock_os_backend_class.return_value = mock_os_backend
-
-        result = runner.invoke(app, ["start"])
-
-        assert result.exit_code == 1
-        assert "Multiple sessions found" in result.output
-        assert "paude start podman-session" in result.output
-        assert "paude start os-session" in result.output
-
-    @patch("paude.session_discovery.PodmanBackend")
-    @patch("paude.session_discovery.OpenShiftBackend")
-    @patch("paude.session_discovery.OpenShiftConfig")
-    def test_start_prefers_workspace_match(
-        self,
-        mock_os_config_class: MagicMock,
-        mock_os_backend_class: MagicMock,
-        mock_podman_class: MagicMock,
-    ):
-        """Start prefers workspace-matching session."""
-        workspace_session = _make_session("workspace-session", backend_type="openshift")
-        mock_podman = MagicMock()
-        mock_podman.find_session_for_workspace.return_value = None
-        mock_podman_class.return_value = mock_podman
-
-        mock_os_backend = MagicMock()
-        mock_os_backend.find_session_for_workspace.return_value = workspace_session
-        mock_os_backend.start_session.return_value = 0
-        mock_os_backend_class.return_value = mock_os_backend
-
-        result = runner.invoke(app, ["start"])
-
-        assert result.exit_code == 0
-        assert "Starting 'workspace-session' (openshift)..." in result.output
-        mock_os_backend.start_session.assert_called_once()
-
-    @patch("paude.session_discovery.PodmanBackend")
-    @patch("paude.session_discovery.OpenShiftBackend")
-    @patch("paude.session_discovery.OpenShiftConfig")
-    def test_start_includes_stopped_sessions(
-        self,
-        mock_os_config_class: MagicMock,
-        mock_os_backend_class: MagicMock,
-        mock_podman_class: MagicMock,
-    ):
-        """Start includes stopped sessions (unlike stop which only considers running)."""
-        # Create a stopped session - start should still find and start it
-        stopped_session = _make_session(
-            "stopped-session", status="stopped", backend_type="podman"
-        )
-        mock_podman = MagicMock()
-        mock_podman.find_session_for_workspace.return_value = None
-        mock_podman.list_sessions.return_value = [stopped_session]
-        mock_podman.start_session.return_value = 0
-        mock_podman_class.return_value = mock_podman
-
-        mock_os_backend = MagicMock()
-        mock_os_backend.find_session_for_workspace.return_value = None
-        mock_os_backend.list_sessions.return_value = []
-        mock_os_backend_class.return_value = mock_os_backend
-
-        result = runner.invoke(app, ["start"])
-
-        # Start should find the stopped session and start it
-        assert result.exit_code == 0
-        assert "Starting 'stopped-session' (podman)..." in result.output
-        mock_podman.start_session.assert_called_once()
-
 
 class TestStopMultiBackend:
     """Tests for stop command searching multiple backends."""
@@ -1279,145 +803,6 @@ class TestStopMultiBackend:
             side_effect=Exception("docker not available"),
         ):
             yield
-
-    @patch("paude.session_discovery.PodmanBackend")
-    @patch("paude.session_discovery.OpenShiftBackend")
-    @patch("paude.session_discovery.OpenShiftConfig")
-    def test_stop_finds_openshift_session_when_podman_empty(
-        self,
-        mock_os_config_class: MagicMock,
-        mock_os_backend_class: MagicMock,
-        mock_podman_class: MagicMock,
-    ):
-        """Stop finds OpenShift running session when podman has none."""
-        mock_podman = MagicMock()
-        mock_podman.find_session_for_workspace.return_value = None
-        mock_podman.list_sessions.return_value = []
-        mock_podman_class.return_value = mock_podman
-
-        os_session = _make_session("os-session", backend_type="openshift")
-        mock_os_backend = MagicMock()
-        mock_os_backend.find_session_for_workspace.return_value = None
-        mock_os_backend.list_sessions.return_value = [os_session]
-        mock_os_backend_class.return_value = mock_os_backend
-
-        result = runner.invoke(app, ["stop"])
-
-        assert result.exit_code == 0
-        assert "Stopping 'os-session' (openshift)..." in result.output
-        assert "Session 'os-session' stopped." in result.output
-        mock_os_backend.stop_session.assert_called_once()
-
-    @patch("paude.session_discovery.PodmanBackend")
-    @patch("paude.session_discovery.OpenShiftBackend")
-    @patch("paude.session_discovery.OpenShiftConfig")
-    def test_stop_finds_podman_session_when_openshift_empty(
-        self,
-        mock_os_config_class: MagicMock,
-        mock_os_backend_class: MagicMock,
-        mock_podman_class: MagicMock,
-    ):
-        """Stop finds podman running session when OpenShift has none."""
-        podman_session = _make_session("podman-session", backend_type="podman")
-        mock_podman = MagicMock()
-        mock_podman.find_session_for_workspace.return_value = None
-        mock_podman.list_sessions.return_value = [podman_session]
-        mock_podman_class.return_value = mock_podman
-
-        mock_os_backend = MagicMock()
-        mock_os_backend.find_session_for_workspace.return_value = None
-        mock_os_backend.list_sessions.return_value = []
-        mock_os_backend_class.return_value = mock_os_backend
-
-        result = runner.invoke(app, ["stop"])
-
-        assert result.exit_code == 0
-        assert "Stopping 'podman-session' (podman)..." in result.output
-        assert "Session 'podman-session' stopped." in result.output
-        mock_podman.stop_session.assert_called_once()
-
-    @patch("paude.session_discovery.PodmanBackend")
-    @patch("paude.session_discovery.OpenShiftBackend")
-    @patch("paude.session_discovery.OpenShiftConfig")
-    def test_stop_shows_multiple_running_sessions_across_backends(
-        self,
-        mock_os_config_class: MagicMock,
-        mock_os_backend_class: MagicMock,
-        mock_podman_class: MagicMock,
-    ):
-        """Stop shows all running sessions when multiple exist across backends."""
-        podman_session = _make_session("podman-session", backend_type="podman")
-        mock_podman = MagicMock()
-        mock_podman.find_session_for_workspace.return_value = None
-        mock_podman.list_sessions.return_value = [podman_session]
-        mock_podman_class.return_value = mock_podman
-
-        os_session = _make_session("os-session", backend_type="openshift")
-        mock_os_backend = MagicMock()
-        mock_os_backend.find_session_for_workspace.return_value = None
-        mock_os_backend.list_sessions.return_value = [os_session]
-        mock_os_backend_class.return_value = mock_os_backend
-
-        result = runner.invoke(app, ["stop"])
-
-        assert result.exit_code == 1
-        assert "Multiple running sessions found" in result.output
-        assert "paude stop podman-session" in result.output
-        assert "paude stop os-session" in result.output
-
-    @patch("paude.session_discovery.PodmanBackend")
-    @patch("paude.session_discovery.OpenShiftBackend")
-    @patch("paude.session_discovery.OpenShiftConfig")
-    def test_stop_prefers_workspace_match(
-        self,
-        mock_os_config_class: MagicMock,
-        mock_os_backend_class: MagicMock,
-        mock_podman_class: MagicMock,
-    ):
-        """Stop prefers workspace-matching running session."""
-        workspace_session = _make_session("workspace-session", backend_type="openshift")
-        mock_podman = MagicMock()
-        mock_podman.find_session_for_workspace.return_value = None
-        mock_podman_class.return_value = mock_podman
-
-        mock_os_backend = MagicMock()
-        mock_os_backend.find_session_for_workspace.return_value = workspace_session
-        mock_os_backend_class.return_value = mock_os_backend
-
-        result = runner.invoke(app, ["stop"])
-
-        assert result.exit_code == 0
-        assert "Stopping 'workspace-session' (openshift)..." in result.output
-        assert "Session 'workspace-session' stopped." in result.output
-        mock_os_backend.stop_session.assert_called_once()
-
-    @patch("paude.session_discovery.PodmanBackend")
-    @patch("paude.session_discovery.OpenShiftBackend")
-    @patch("paude.session_discovery.OpenShiftConfig")
-    def test_stop_ignores_stopped_sessions(
-        self,
-        mock_os_config_class: MagicMock,
-        mock_os_backend_class: MagicMock,
-        mock_podman_class: MagicMock,
-    ):
-        """Stop only considers running sessions, not stopped ones."""
-        stopped_session = _make_session(
-            "stopped-session", status="stopped", backend_type="podman"
-        )
-        mock_podman = MagicMock()
-        mock_podman.find_session_for_workspace.return_value = None
-        mock_podman.list_sessions.return_value = [stopped_session]
-        mock_podman_class.return_value = mock_podman
-
-        mock_os_backend = MagicMock()
-        mock_os_backend.find_session_for_workspace.return_value = None
-        mock_os_backend.list_sessions.return_value = []
-        mock_os_backend_class.return_value = mock_os_backend
-
-        result = runner.invoke(app, ["stop"])
-
-        assert result.exit_code == 1
-        assert "No running sessions to stop." in result.output
 
 
 class TestDeleteGitRemoteCleanup:
@@ -1601,30 +986,6 @@ class TestDeleteGitRemoteCleanup:
         assert result.exit_code == 0
         mock_cleanup.assert_called_once_with("auto-session", Path("/some/project"))
 
-    @patch("paude.cli.remote._cleanup_session_git_remote")
-    @patch("paude.cli.helpers.OpenShiftBackend")
-    @patch("paude.cli.helpers.OpenShiftConfig")
-    def test_delete_cleans_git_remote_with_openshift_backend(
-        self,
-        mock_os_config_class: MagicMock,
-        mock_os_backend_class: MagicMock,
-        mock_cleanup: MagicMock,
-    ):
-        """Delete cleans up git remote when using OpenShift backend."""
-        mock_os_backend = MagicMock()
-        mock_os_backend.get_session.return_value = MagicMock(
-            workspace=Path("/some/project")
-        )
-        mock_os_backend_class.return_value = mock_os_backend
-
-        result = runner.invoke(
-            app, ["delete", "os-session", "--confirm", "--backend=openshift"]
-        )
-
-        assert result.exit_code == 0
-        assert "Session 'os-session' deleted." in result.output
-        mock_cleanup.assert_called_once_with("os-session", Path("/some/project"))
-
 
 class TestDeleteUsesWorkspacePath:
     """Tests for delete using stored workspace path for git remote cleanup."""
@@ -1707,6 +1068,57 @@ class TestDeleteUsesWorkspacePath:
 
         assert result.exit_code == 0
         mock_cleanup.assert_called_once_with("my-session", None)
+
+
+class TestDeleteForce:
+    """Tests for --force flag on delete command."""
+
+    @patch("paude.cli.remote._cleanup_session_git_remote")
+    @patch("paude.registry.SessionRegistry")
+    def test_force_delete_removes_from_registry(
+        self,
+        mock_registry_class: MagicMock,
+        mock_cleanup: MagicMock,
+    ):
+        """Force delete removes an orphaned session from the registry."""
+        mock_registry = MagicMock()
+        mock_registry.get.return_value = MagicMock(
+            workspace="/some/project",
+            ssh_host=None,
+            remote_config_dir=None,
+        )
+        mock_registry.unregister.return_value = True
+        mock_registry_class.return_value = mock_registry
+
+        result = runner.invoke(app, ["delete", "orphan", "--confirm", "--force"])
+
+        assert result.exit_code == 0
+        assert "removed from local config" in result.output
+        mock_registry.unregister.assert_called_once_with("orphan")
+        mock_cleanup.assert_called_once_with("orphan", Path("/some/project"))
+
+    @patch("paude.registry.SessionRegistry")
+    def test_force_delete_not_found(
+        self,
+        mock_registry_class: MagicMock,
+    ):
+        """Force delete exits with error when session not in registry."""
+        mock_registry = MagicMock()
+        mock_registry.get.return_value = None
+        mock_registry.unregister.return_value = False
+        mock_registry_class.return_value = mock_registry
+
+        result = runner.invoke(app, ["delete", "ghost", "--confirm", "--force"])
+
+        assert result.exit_code == 1
+        assert "not found in local config" in result.output
+
+    def test_force_delete_requires_confirm(self):
+        """Force delete still requires --confirm."""
+        result = runner.invoke(app, ["delete", "orphan", "--force"])
+
+        assert result.exit_code == 1
+        assert "Use --confirm to proceed" in result.output
 
 
 class TestRemoteCleanup:
@@ -1960,95 +1372,6 @@ class TestCpCommand:
 
         assert result.exit_code == 0
         assert "cp" in result.stdout
-
-
-class TestCreateGitEnvVar:
-    """Tests for PAUDE_WAIT_FOR_GIT env var on OpenShift create --git."""
-
-    @pytest.mark.parametrize(
-        ("extra_flags", "expect_env_var"),
-        [
-            (["--git"], True),
-            ([], False),
-        ],
-        ids=["with-git", "without-git"],
-    )
-    @patch("paude.cli.create_openshift.is_git_repository", return_value=True)
-    @patch("paude.cli.remote_git_setup._setup_git_after_create")
-    @patch("paude.cli.create_openshift.OpenShiftBackend")
-    @patch("paude.cli.create_openshift.OpenShiftConfig")
-    @patch("paude.config.detect_config", return_value=None)
-    @patch("paude.environment.build_environment")
-    def test_openshift_create_git_wait_env(
-        self,
-        mock_build_env,
-        mock_detect_config,
-        mock_os_config_class,
-        mock_os_backend_class,
-        mock_git_setup,
-        mock_is_git_repo,
-        extra_flags,
-        expect_env_var,
-    ):
-        """PAUDE_WAIT_FOR_GIT is set only when --git is used with OpenShift."""
-        mock_build_env.return_value = {}
-        mock_backend = MagicMock()
-        mock_backend.namespace = "test-ns"
-        mock_backend.ensure_image_via_build.return_value = "test-image:latest"
-        mock_backend.ensure_proxy_image_via_build.return_value = None
-        mock_session = MagicMock()
-        mock_session.name = "test-session"
-        mock_backend.create_session.return_value = mock_session
-        mock_os_backend_class.return_value = mock_backend
-
-        runner.invoke(
-            app,
-            ["create", "--backend", "openshift", *extra_flags, "test-session"],
-        )
-
-        mock_backend.create_session.assert_called_once()
-        session_config = mock_backend.create_session.call_args[0][0]
-        if expect_env_var:
-            assert session_config.env.get("PAUDE_WAIT_FOR_GIT") == "1"
-        else:
-            assert "PAUDE_WAIT_FOR_GIT" not in session_config.env
-
-    @patch("paude.cli.create_openshift.is_git_repository", return_value=False)
-    @patch("paude.cli.remote_git_setup._setup_git_after_create")
-    @patch("paude.cli.create_openshift.OpenShiftBackend")
-    @patch("paude.cli.create_openshift.OpenShiftConfig")
-    @patch("paude.config.detect_config", return_value=None)
-    @patch("paude.environment.build_environment")
-    def test_openshift_create_git_no_repo_skips_wait(
-        self,
-        mock_build_env,
-        mock_detect_config,
-        mock_os_config_class,
-        mock_os_backend_class,
-        mock_git_setup,
-        mock_is_git_repo,
-    ):
-        """PAUDE_WAIT_FOR_GIT is NOT set when --git is used outside a git repo."""
-        mock_build_env.return_value = {}
-        mock_backend = MagicMock()
-        mock_backend.namespace = "test-ns"
-        mock_backend.ensure_image_via_build.return_value = "test-image:latest"
-        mock_backend.ensure_proxy_image_via_build.return_value = None
-        mock_session = MagicMock()
-        mock_session.name = "test-session"
-        mock_backend.create_session.return_value = mock_session
-        mock_os_backend_class.return_value = mock_backend
-
-        result = runner.invoke(
-            app,
-            ["create", "--backend", "openshift", "--git", "test-session"],
-        )
-
-        mock_backend.create_session.assert_called_once()
-        session_config = mock_backend.create_session.call_args[0][0]
-        assert "PAUDE_WAIT_FOR_GIT" not in session_config.env
-        mock_git_setup.assert_not_called()
-        assert "Not in a git repository" in result.output
 
 
 # ---------------------------------------------------------------------------

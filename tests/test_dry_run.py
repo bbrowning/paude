@@ -124,40 +124,6 @@ class TestShowDryRun:
         captured = capsys.readouterr()
         assert "--allowed-domains:" in captured.out
 
-    def test_shows_provenance_with_resolved(self, capsys: pytest.CaptureFixture[str]):
-        """Shows provenance when resolved options are provided."""
-        from paude.config.resolver import ResolvedCreateOptions, SettingValue
-
-        resolved = ResolvedCreateOptions(
-            backend=SettingValue("openshift", "user defaults"),
-            agent=SettingValue("claude", "paude.json"),
-            yolo=SettingValue(True, "user defaults"),
-            git=SettingValue(False, "built-in"),
-        )
-        resolved.allowed_domains = ["default", "golang", ".vllm.ai"]
-        resolved.allowed_domains_provenance = [
-            (["default", "golang"], "user defaults"),
-            ([".vllm.ai"], "paude.json"),
-        ]
-
-        with patch("paude.dry_run.Path.cwd") as mock_cwd:
-            mock_cwd.return_value = Path("/test")
-            with patch("paude.dry_run.detect_config") as mock_detect:
-                mock_detect.return_value = None
-                show_dry_run(
-                    {
-                        "allowed_domains": ["default", "golang", ".vllm.ai"],
-                    },
-                    resolved=resolved,
-                )
-
-        captured = capsys.readouterr()
-        assert "openshift" in captured.out
-        assert "user defaults" in captured.out
-        assert "paude.json" in captured.out
-        assert "default, golang" in captured.out
-        assert ".vllm.ai" in captured.out
-
     def test_shows_gpu_when_set(self, capsys: pytest.CaptureFixture[str]):
         """Shows gpu in resolved output when set."""
         from paude.config.resolver import ResolvedCreateOptions, SettingValue

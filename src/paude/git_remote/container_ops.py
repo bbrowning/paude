@@ -12,7 +12,6 @@ if TYPE_CHECKING:
 
 from paude.constants import (
     CLONE_FROM_ORIGIN_TIMEOUT,
-    CONTAINER_HOME,
     CONTAINER_WORKSPACE,
 )
 from paude.git_remote.exec_cmd import ExecCmdBuilder
@@ -64,11 +63,6 @@ def _build_set_origin_cmd(origin_url: str) -> str:
 _PRECOMMIT_CMD = (
     f"test -f {CONTAINER_WORKSPACE}/.pre-commit-config.yaml && "
     f"cd {CONTAINER_WORKSPACE} && pre-commit install"
-)
-
-_PRECOMMIT_CMD_OPENSHIFT = (
-    f'[[ -z "$HOME" || "$HOME" == "/" ]] && export HOME={CONTAINER_HOME}; '
-    f"{_PRECOMMIT_CMD}"
 )
 
 from paude.constants import BASE_REF_NAME  # noqa: E402
@@ -127,12 +121,10 @@ def set_base_ref_in_container(
 
 def setup_precommit_in_container(
     exec_builder: ExecCmdBuilder,
-    set_home: bool = False,
     transport: Transport | None = None,
 ) -> bool:
     """Install pre-commit hooks in a container's workspace."""
-    cmd = _PRECOMMIT_CMD_OPENSHIFT if set_home else _PRECOMMIT_CMD
-    exec_cmd = exec_builder(cmd)
+    exec_cmd = exec_builder(_PRECOMMIT_CMD)
     return _exec_in_container(exec_cmd, transport=transport)
 
 

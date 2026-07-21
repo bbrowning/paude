@@ -28,4 +28,4 @@ When splitting, create a package directory with `__init__.py` that preserves the
 
 ## Testability
 
-- Wrap external commands (`podman`, `oc`) in testable classes rather than calling subprocess directly.
+- Wrap external commands (`podman`, `docker`, `ssh`) in testable classes rather than calling subprocess directly.

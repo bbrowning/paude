@@ -15,29 +15,11 @@ def status_cmd(
         str | None,
         typer.Argument(help="Session name (all sessions if not specified)"),
     ] = None,
-    openshift_context: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-context",
-            help="Kubeconfig context for OpenShift.",
-        ),
-    ] = None,
-    openshift_namespace: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-namespace",
-            help="OpenShift namespace (default: current context namespace).",
-        ),
-    ] = None,
 ) -> None:
     """Show enriched status for all sessions."""
     from paude.workflow import status_sessions
 
-    status_sessions(
-        session_name=session,
-        openshift_context=openshift_context,
-        openshift_namespace=openshift_namespace,
-    )
+    status_sessions(session_name=session)
 
 
 @app.command("reset")
@@ -62,20 +44,6 @@ def reset_cmd(
             help="Keep Claude conversation history.",
         ),
     ] = False,
-    openshift_context: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-context",
-            help="Kubeconfig context for OpenShift.",
-        ),
-    ] = None,
-    openshift_namespace: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-namespace",
-            help="OpenShift namespace (default: current context namespace).",
-        ),
-    ] = None,
 ) -> None:
     """Reset a session's workspace for a new task."""
     from paude.workflow import reset_session
@@ -85,8 +53,6 @@ def reset_cmd(
         branch=branch,
         force=force,
         keep_conversation=keep_conversation,
-        openshift_context=openshift_context,
-        openshift_namespace=openshift_namespace,
     )
 
 
@@ -105,20 +71,6 @@ def harvest_cmd(
         str | None,
         typer.Option("--pr-title", help="PR title (defaults to branch name)."),
     ] = None,
-    openshift_context: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-context",
-            help="Kubeconfig context for OpenShift.",
-        ),
-    ] = None,
-    openshift_namespace: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-namespace",
-            help="OpenShift namespace (default: current context namespace).",
-        ),
-    ] = None,
 ) -> None:
     """Harvest changes from a running session into a local branch."""
     from paude.workflow import harvest_session
@@ -128,6 +80,4 @@ def harvest_cmd(
         branch_name=branch,
         create_pr=pr,
         pr_title=pr_title,
-        openshift_context=openshift_context,
-        openshift_namespace=openshift_namespace,
     )

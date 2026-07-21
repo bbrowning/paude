@@ -10,8 +10,6 @@ import typer
 
 from paude.backends.shared import (
     engine_binary_for_backend,
-    is_local_backend,
-    pod_name,
     resource_name,
 )
 from paude.cli.app import app
@@ -39,20 +37,6 @@ def remote_command(
             help="Push current branch after adding remote (for 'add' action).",
         ),
     ] = False,
-    openshift_context: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-context",
-            help="Kubeconfig context for OpenShift.",
-        ),
-    ] = None,
-    openshift_namespace: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-namespace",
-            help="OpenShift namespace (default: current context namespace).",
-        ),
-    ] = None,
 ) -> None:
     """Manage git remotes for paude sessions.
 
@@ -93,7 +77,7 @@ def remote_command(
             typer.echo("Initialize git first: git init", err=True)
             raise typer.Exit(1)
 
-        _remote_add(name, openshift_context, openshift_namespace, push=push)
+        _remote_add(name, push=push)
         return
 
     if action == "remove":
@@ -102,7 +86,7 @@ def remote_command(
             raise typer.Exit(1)
 
         if not name:
-            sess_result = find_workspace_session(openshift_context, openshift_namespace)
+            sess_result = find_workspace_session()
             if sess_result:
                 name = sess_result[0].name
             else:
@@ -121,7 +105,7 @@ def remote_command(
             typer.echo("Error: Not a git repository.", err=True)
             raise typer.Exit(1)
 
-        _remote_cleanup(openshift_context, openshift_namespace)
+        _remote_cleanup()
         return
 
     typer.echo(f"Unknown action: {action}", err=True)
@@ -177,10 +161,7 @@ def _cleanup_session_git_remote(
         typer.echo(f"Warning: Failed to remove git remote: {err_msg}", err=True)
 
 
-def _remote_cleanup(
-    openshift_context: str | None,
-    openshift_namespace: str | None,
-) -> None:
+def _remote_cleanup() -> None:
     """Remove paude git remotes whose sessions no longer exist."""
     from paude.git_remote import git_remote_remove, list_paude_remotes
     from paude.session_discovery import collect_all_sessions
@@ -191,7 +172,7 @@ def _remote_cleanup(
         return
 
     active_sessions: set[str] = set()
-    all_sessions, _ = collect_all_sessions(openshift_context, openshift_namespace)
+    all_sessions, _ = collect_all_sessions()
     for session, _ in all_sessions:
         active_sessions.add(session.name)
 
@@ -211,8 +192,6 @@ def _remote_cleanup(
 
 def _remote_add(
     name: str | None,
-    openshift_context: str | None,
-    openshift_namespace: str | None,
     push: bool = False,
     transport: Transport | None = None,
 ) -> None:
@@ -237,14 +216,14 @@ def _remote_add(
     # Resolve session
     session = None
     if name:
-        result = find_session_backend(name, openshift_context, openshift_namespace)
+        result = find_session_backend(name)
         if result:
             _, backend_obj = result
             session = backend_obj.get_session(name)
     else:
         from paude.session_discovery import find_workspace_session
 
-        ws_result = find_workspace_session(openshift_context, openshift_namespace)
+        ws_result = find_workspace_session()
         if ws_result:
             session = ws_result[0]
 
@@ -260,12 +239,7 @@ def _remote_add(
     rname = resource_name(session.name)
     branch = get_current_branch() or "main"
 
-    if not is_local_backend(session.backend_type):
-        remote_url = _remote_add_openshift(
-            session, rname, branch, openshift_context, openshift_namespace
-        )
-    else:
-        remote_url, transport = _remote_add_local(session, rname, branch, transport)
+    remote_url, transport = _remote_add_local(session, rname, branch, transport)
 
     # Add the remote
     if git_remote_add(rname, remote_url):
@@ -277,8 +251,6 @@ def _remote_add(
                 session,
                 rname,
                 branch,
-                openshift_context,
-                openshift_namespace,
                 transport,
             )
         else:
@@ -289,56 +261,6 @@ def _remote_add(
             typer.echo(f"  git fetch {rname}          # Fetch without merging")
     else:
         raise typer.Exit(1)
-
-
-def _remote_add_openshift(
-    session: Session,
-    rname: str,
-    branch: str,
-    openshift_context: str | None,
-    openshift_namespace: str | None,
-) -> str:
-    """Handle OpenShift-specific remote add: check pod, init workspace, build URL."""
-    from paude.backends.openshift import OpenShiftBackend, OpenShiftConfig
-    from paude.git_remote import (
-        build_openshift_remote_url,
-        initialize_container_workspace,
-        is_pod_running_openshift,
-        openshift_exec_builder,
-    )
-
-    os_config = OpenShiftConfig(
-        context=openshift_context,
-        namespace=openshift_namespace,
-    )
-
-    if os_config.namespace:
-        namespace = os_config.namespace
-    else:
-        try:
-            os_backend = OpenShiftBackend(config=os_config)
-            namespace = os_backend.namespace
-        except Exception:
-            namespace = "default"
-
-    pname = pod_name(session.name)
-
-    if not is_pod_running_openshift(
-        pod_name=pname, namespace=namespace, context=openshift_context
-    ):
-        typer.echo("Error: Container not running.", err=True)
-        typer.echo("Start it first:", err=True)
-        typer.echo(f"  paude start {session.name}", err=True)
-        raise typer.Exit(1)
-
-    typer.echo("Initializing git repository in container...")
-    exec_builder = openshift_exec_builder(pname, namespace, openshift_context)
-    if not initialize_container_workspace(exec_builder, branch=branch):
-        raise typer.Exit(1)
-
-    return build_openshift_remote_url(
-        pod_name=pname, namespace=namespace, context=openshift_context
-    )
 
 
 def _remote_add_local(

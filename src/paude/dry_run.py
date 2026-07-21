@@ -106,11 +106,6 @@ def _show_resolved_flags(
 
     typer.echo(f"  rebuild: {flags.get('rebuild', False)}")
 
-    backend_val = resolved.backend.value
-    if backend_val == "openshift":
-        typer.echo(format_setting("openshift-context", resolved.openshift_context))
-        typer.echo(format_setting("openshift-namespace", resolved.openshift_namespace))
-        typer.echo(format_setting("pvc-size", resolved.pvc_size))
     if resolved.gpu.value:
         typer.echo(format_setting("gpu", resolved.gpu))
 
@@ -136,13 +131,6 @@ def _show_legacy_flags(flags: dict[str, Any]) -> None:
     typer.echo(f"  --allowed-domains: {domains_display}")
 
     typer.echo(f"  --rebuild: {flags.get('rebuild', False)}")
-
-    backend = flags.get("backend", "podman")
-    if backend == "openshift":
-        ctx = flags.get("openshift_context") or "(current context)"
-        ns = flags.get("openshift_namespace") or "(current namespace)"
-        typer.echo(f"  --openshift-context: {ctx}")
-        typer.echo(f"  --openshift-namespace: {ns}")
 
     if flags.get("claude_args"):
         typer.echo(f"  claude_args: {flags['claude_args']}")

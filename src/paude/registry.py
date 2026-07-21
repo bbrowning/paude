@@ -9,6 +9,7 @@ import tempfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from paude.backends.base import Session
 from paude.config.user_config import _paude_config_dir
@@ -22,12 +23,10 @@ class RegistryEntry:
 
     Attributes:
         name: Session name.
-        backend_type: Backend type ("podman", "docker", or "openshift").
+        backend_type: Container engine ("podman" or "docker").
         workspace: Resolved absolute path as string.
         agent: Agent name (e.g. "claude", "gemini").
         created_at: ISO timestamp of session creation.
-        openshift_context: OpenShift kubeconfig context, if applicable.
-        openshift_namespace: OpenShift namespace, if applicable.
         engine: Container engine binary ("podman" or "docker").
     """
 
@@ -36,8 +35,6 @@ class RegistryEntry:
     workspace: str
     agent: str
     created_at: str
-    openshift_context: str | None = None
-    openshift_namespace: str | None = None
     engine: str = "podman"
     ssh_host: str | None = None
     ssh_key: str | None = None
@@ -80,33 +77,46 @@ class SessionRegistry:
         try:
             data = json.loads(self._path.read_text())
             sessions = data.get("sessions", {})
-            return {name: RegistryEntry(**entry) for name, entry in sessions.items()}
+            entries: dict[str, RegistryEntry] = {}
+            for name, raw_entry in sessions.items():
+                entry = dict(raw_entry)
+                if entry.get("backend_type") == "openshift":
+                    logger.warning(
+                        "Ignoring legacy OpenShift session '%s'; this backend is no "
+                        "longer supported",
+                        name,
+                    )
+                    continue
+                entry.pop("openshift_context", None)
+                entry.pop("openshift_namespace", None)
+                entries[name] = RegistryEntry(**entry)
+            return entries
         except (FileNotFoundError, json.JSONDecodeError, TypeError, KeyError):
             return {}
 
-    def _save(self, entries: dict[str, RegistryEntry]) -> None:
-        """Write entries to the registry file atomically."""
+    def _write_raw(self, data: dict[str, Any]) -> None:
+        """Write raw JSON data to the registry file atomically."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        data = {"sessions": {k: asdict(v) for k, v in entries.items()}}
-        # Atomic write: write to temp file then rename
         fd, tmp = tempfile.mkstemp(dir=self._path.parent, suffix=".tmp")
         try:
             with os.fdopen(fd, "w") as f:
                 json.dump(data, f, indent=2)
             os.replace(tmp, self._path)
         except Exception:
-            # Clean up temp file on failure
             try:
                 os.unlink(tmp)
             except OSError:
                 pass
             raise
 
+    def _save(self, entries: dict[str, RegistryEntry]) -> None:
+        """Write entries to the registry file atomically."""
+        data = {"sessions": {k: asdict(v) for k, v in entries.items()}}
+        self._write_raw(data)
+
     def register(
         self,
         session: Session,
-        openshift_context: str | None = None,
-        openshift_namespace: str | None = None,
         ssh_host: str | None = None,
         ssh_key: str | None = None,
         remote_config_dir: str | None = None,
@@ -126,8 +136,6 @@ class SessionRegistry:
             workspace=str(session.workspace),
             agent=session.agent,
             created_at=session.created_at or datetime.now(UTC).isoformat(),
-            openshift_context=openshift_context,
-            openshift_namespace=openshift_namespace,
             engine=engine,
             ssh_host=ssh_host,
             ssh_key=ssh_key,
@@ -136,12 +144,25 @@ class SessionRegistry:
         )
         self._save(entries)
 
-    def unregister(self, name: str) -> None:
-        """Remove a session from the registry. No-op if missing."""
-        entries = self.load()
-        if name in entries:
-            del entries[name]
-            self._save(entries)
+    def unregister(self, name: str) -> bool:
+        """Remove a session from the registry by name.
+
+        Operates on raw JSON so it can remove any entry, including ones
+        that ``load()`` would filter (e.g. legacy backends).
+
+        Returns True if an entry was removed, False if not found.
+        """
+        try:
+            data = json.loads(self._path.read_text())
+        except (FileNotFoundError, json.JSONDecodeError):
+            return False
+        sessions = data.get("sessions", {})
+        if name not in sessions:
+            return False
+        del sessions[name]
+        data["sessions"] = sessions
+        self._write_raw(data)
+        return True
 
     def get(self, name: str) -> RegistryEntry | None:
         """Get a single registry entry by name."""

@@ -30,7 +30,7 @@ class Session:
             expected proxy is missing or stopped.
         workspace: Local workspace path.
         created_at: ISO timestamp of session creation.
-        backend_type: Backend type ("podman" or "openshift").
+        backend_type: Container engine ("podman" or "docker").
         container_id: Backend-specific container/pod identifier.
         volume_name: Backend-specific volume/PVC name.
     """
@@ -61,8 +61,6 @@ class SessionConfig:
         workdir: Working directory inside container.
         allowed_domains: List of domains to allow. Empty list means unrestricted.
         yolo: Enable YOLO mode.
-        pvc_size: PVC size for OpenShift (e.g., "10Gi").
-        storage_class: Storage class for OpenShift.
         network: Podman network name for proxy setup.
         ports: Ports to expose as (host_port, container_port) tuples.
     """
@@ -76,8 +74,6 @@ class SessionConfig:
     workdir: str | None = None
     allowed_domains: list[str] = field(default_factory=list)
     yolo: bool = False
-    pvc_size: str = "10Gi"
-    storage_class: str | None = None
     network: str | None = None
     proxy_image: str | None = None
     wait_for_ready: bool = True
@@ -93,7 +89,7 @@ class SessionConfig:
 class Backend(Protocol):
     """Container backend interface.
 
-    All container backends (Podman, OpenShift) must implement this protocol.
+    Both supported container engines implement this protocol.
     The CLI delegates to the appropriate backend based on configuration.
 
     Session Lifecycle:

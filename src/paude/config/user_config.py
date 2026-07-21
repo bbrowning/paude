@@ -11,16 +11,6 @@ from typing import Any
 
 
 @dataclass
-class OpenShiftDefaults:
-    """OpenShift-specific user defaults."""
-
-    context: str | None = None
-    namespace: str | None = None
-    resources: dict[str, dict[str, str]] | None = None
-    build_resources: dict[str, dict[str, str]] | None = None
-
-
-@dataclass
 class UserDefaults:
     """User-level default configuration.
 
@@ -33,12 +23,10 @@ class UserDefaults:
     provider: str | None = None
     yolo: bool | None = None
     git: bool | None = None
-    pvc_size: str | None = None
     platform: str | None = None
     gpu: str | None = None
     allowed_domains: list[str] = field(default_factory=list)
     otel_endpoint: str | None = None
-    openshift: OpenShiftDefaults = field(default_factory=OpenShiftDefaults)
 
 
 # Keys allowed in the top-level "defaults" object
@@ -48,16 +36,11 @@ _KNOWN_KEYS = {
     "provider",
     "yolo",
     "git",
-    "pvc-size",
     "platform",
     "gpu",
     "allowed-domains",
     "otel-endpoint",
-    "openshift",
 }
-
-# Keys allowed inside "openshift"
-_KNOWN_OPENSHIFT_KEYS = {"context", "namespace", "resources", "build-resources"}
 
 
 def _paude_config_dir() -> Path:
@@ -126,43 +109,6 @@ def _warn_unknown_keys(
 
 def _parse_defaults(data: dict[str, Any], path: Path) -> UserDefaults:
     """Parse the 'defaults' object into a UserDefaults dataclass."""
-    openshift_data = data.get("openshift", {})
-    if isinstance(openshift_data, dict):
-        _warn_unknown_keys(openshift_data, _KNOWN_OPENSHIFT_KEYS, path)
-
-        raw_resources = openshift_data.get("resources")
-        resources: dict[str, dict[str, str]] | None = None
-        if raw_resources is not None:
-            if isinstance(raw_resources, dict):
-                resources = raw_resources
-            else:
-                print(
-                    f"Warning: 'openshift.resources' in {path}"
-                    " is not an object, ignoring",
-                    file=sys.stderr,
-                )
-
-        raw_build = openshift_data.get("build-resources")
-        build_resources: dict[str, dict[str, str]] | None = None
-        if raw_build is not None:
-            if isinstance(raw_build, dict):
-                build_resources = raw_build
-            else:
-                print(
-                    f"Warning: 'openshift.build-resources' in {path}"
-                    " is not an object, ignoring",
-                    file=sys.stderr,
-                )
-
-        openshift = OpenShiftDefaults(
-            context=openshift_data.get("context"),
-            namespace=openshift_data.get("namespace"),
-            resources=resources,
-            build_resources=build_resources,
-        )
-    else:
-        openshift = OpenShiftDefaults()
-
     allowed_domains = data.get("allowed-domains", [])
     if not isinstance(allowed_domains, list):
         allowed_domains = []
@@ -173,10 +119,8 @@ def _parse_defaults(data: dict[str, Any], path: Path) -> UserDefaults:
         provider=data.get("provider"),
         yolo=data.get("yolo"),
         git=data.get("git"),
-        pvc_size=data.get("pvc-size"),
         platform=data.get("platform"),
         gpu=data.get("gpu"),
         allowed_domains=allowed_domains,
         otel_endpoint=data.get("otel-endpoint"),
-        openshift=openshift,
     )

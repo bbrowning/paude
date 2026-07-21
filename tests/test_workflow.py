@@ -470,7 +470,7 @@ class TestStatusSessions:
         assert "remote-1" in captured.out
         assert "Active" in captured.out
         assert "feat-x WIP (+1)" in captured.out
-        mock_find.assert_called_once_with("remote-1", None, None, connect_timeout=2)
+        mock_find.assert_called_once_with("remote-1", connect_timeout=2)
 
     @patch("paude.cli.find_session_backend")
     def test_single_session_not_found(

@@ -5,18 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from paude.config.models import FeatureSpec, PaudeConfig
 from paude.container.build_context import (
-    BuildContext,
-    _add_stage_alias,
-    _write_dockerignore,
     copy_entrypoints,
     copy_features_cache,
     generate_dockerfile_content,
     inject_features,
-    prepare_build_context,
     resolve_entrypoint,
 )
 
@@ -290,137 +284,3 @@ class TestGenerateDockerfileContent:
         generate_dockerfile_content(config, using_default_paude_image=True)
 
         mock_inject.assert_called_once_with("FROM base", features)
-
-
-class TestWriteDockerignore:
-    """Tests for _write_dockerignore()."""
-
-    def test_writes_dockerignore_file(self, tmp_path: Path) -> None:
-        _write_dockerignore(tmp_path)
-
-        ignore_file = tmp_path / ".dockerignore"
-        assert ignore_file.exists()
-        content = ignore_file.read_text()
-        assert ".venv" in content
-        assert "__pycache__" in content
-        assert ".git" in content
-        assert "node_modules" in content
-
-
-class TestAddStageAlias:
-    """Tests for _add_stage_alias()."""
-
-    def test_adds_alias_to_from_line(self) -> None:
-        result = _add_stage_alias("FROM ubuntu:22.04")
-        assert result == "FROM ubuntu:22.04 AS user-base"
-
-    def test_preserves_existing_alias(self) -> None:
-        result = _add_stage_alias("FROM ubuntu:22.04 AS mybase")
-        assert result == "FROM ubuntu:22.04 AS mybase"
-
-    def test_handles_multiline_dockerfile(self) -> None:
-        dockerfile = "FROM ubuntu:22.04\nRUN apt-get update\nFROM python:3.11"
-        result = _add_stage_alias(dockerfile)
-        lines = result.split("\n")
-        assert lines[0] == "FROM ubuntu:22.04 AS user-base"
-        # Second FROM should be untouched
-        assert lines[2] == "FROM python:3.11"
-
-
-class TestPrepareBuildContext:
-    """Integration-style tests for prepare_build_context()."""
-
-    @patch("paude.container.build_context._resolve_default_base")
-    @patch("paude.container.build_context.generate_dockerfile_content")
-    @patch("paude.container.build_context.compute_config_hash", return_value="abc123")
-    def test_returns_build_context_with_default_image(
-        self,
-        mock_hash: MagicMock,
-        mock_gen: MagicMock,
-        mock_resolve: MagicMock,
-    ) -> None:
-        mock_resolve.return_value = "quay.io/bbrowning/paude-base-centos10:1.0"
-        mock_gen.return_value = "ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\nRUN echo hi"
-        config = PaudeConfig()
-
-        import shutil
-
-        try:
-            result = prepare_build_context(config)
-            assert isinstance(result, BuildContext)
-            assert result.config_hash == "abc123"
-            assert result.base_image == "quay.io/bbrowning/paude-base-centos10:1.0"
-            assert result.dockerfile_path.exists()
-            # Verify BASE_IMAGE was replaced
-            content = result.dockerfile_path.read_text()
-            assert "ARG BASE_IMAGE" not in content
-            assert "quay.io/bbrowning/paude-base-centos10:1.0" in content
-        finally:
-            if result.context_dir.exists():
-                shutil.rmtree(result.context_dir)
-
-    @patch("paude.container.build_context.generate_dockerfile_content")
-    @patch("paude.container.build_context.compute_config_hash", return_value="abc123")
-    def test_uses_agent_default_base_image(
-        self,
-        mock_hash: MagicMock,
-        mock_gen: MagicMock,
-    ) -> None:
-        mock_gen.return_value = "ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\nRUN echo hi"
-        config = PaudeConfig()
-        agent = MagicMock()
-        agent.config.default_base_image = "ghcr.io/openclaw/openclaw:latest"
-        agent.config.name = "openclaw"
-
-        import shutil
-
-        result = prepare_build_context(config, agent=agent)
-        try:
-            assert result.base_image == "ghcr.io/openclaw/openclaw:latest"
-            content = result.dockerfile_path.read_text()
-            assert "ghcr.io/openclaw/openclaw:latest" in content
-            assert "ARG BASE_IMAGE" not in content
-        finally:
-            if result.context_dir.exists():
-                shutil.rmtree(result.context_dir)
-
-    @patch("paude.container.build_context._resolve_default_base")
-    @patch("paude.container.build_context.generate_dockerfile_content")
-    def test_agent_default_base_image_affects_config_hash(
-        self,
-        mock_gen: MagicMock,
-        mock_default_base: MagicMock,
-    ) -> None:
-        """Config hash differs when agent has default_base_image vs not."""
-        import shutil
-
-        mock_gen.return_value = "ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\nRUN echo hi"
-        mock_default_base.return_value = "paude-base-centos10:0.1.0"
-        config = PaudeConfig()
-
-        agent_with_base = MagicMock()
-        agent_with_base.config.default_base_image = "ghcr.io/openclaw/openclaw:latest"
-        agent_with_base.config.name = "openclaw"
-
-        agent_without_base = MagicMock()
-        agent_without_base.config.default_base_image = None
-        agent_without_base.config.name = "openclaw"
-
-        result1 = prepare_build_context(config, agent=agent_with_base)
-        result2 = prepare_build_context(config, agent=agent_without_base)
-        try:
-            assert result1.config_hash != result2.config_hash
-        finally:
-            for r in (result1, result2):
-                if r.context_dir.exists():
-                    shutil.rmtree(r.context_dir)
-
-    @patch("paude.container.build_context.compute_config_hash", return_value="abc123")
-    def test_raises_on_missing_dockerfile(
-        self, mock_hash: MagicMock, tmp_path: Path
-    ) -> None:
-        missing = tmp_path / "Dockerfile"
-        config = PaudeConfig(dockerfile=missing)
-
-        with pytest.raises(FileNotFoundError, match="Dockerfile not found"):
-            prepare_build_context(config)

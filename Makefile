@@ -21,7 +21,7 @@ LATEST_PROXY_IMAGE = $(REGISTRY)/$(PROXY_IMAGE_NAME):latest
 # Architectures for multi-arch builds
 PLATFORMS = linux/amd64,linux/arm64
 
-.PHONY: build run publish release clean login help test test-all test-integration test-podman test-kubernetes install install-hooks lint format typecheck pypi-build pypi-publish
+.PHONY: build run publish release clean login help test test-all test-integration test-podman install install-hooks lint format typecheck pypi-build pypi-publish
 
 help:
 	@echo "Paude build targets:"
@@ -40,7 +40,6 @@ help:
 	@echo "  make test-all       - Run all tests (unit + integration)"
 	@echo "  make test-integration - Run all integration tests"
 	@echo "  make test-podman    - Run Podman integration tests (requires podman)"
-	@echo "  make test-kubernetes - Run Kubernetes integration tests (requires cluster)"
 	@echo ""
 	@echo "Development targets:"
 	@echo "  make install        - Install Python package with dev dependencies"
@@ -80,10 +79,6 @@ test-all:
 # Run Podman integration tests
 test-podman:
 	uv run pytest tests/integration/ -v -m podman
-
-# Run Kubernetes integration tests
-test-kubernetes:
-	uv run pytest tests/integration/ -v -m kubernetes
 
 # Development targets
 install:

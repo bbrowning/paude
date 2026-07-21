@@ -6,7 +6,7 @@ The container intentionally restricts certain operations:
 |----------|--------|---------|
 | Network | proxy-filtered (Vertex AI, PyPI, GitHub, agent-specific) | Prevents data exfiltration |
 | Current directory | read-write | Working files |
-| gcloud credentials | injected (Podman secret / oc cp) | Vertex AI auth |
+| gcloud credentials | injected by the selected container engine | Vertex AI auth |
 | Agent config | copied in, not mounted | Prevents host config poisoning |
 | `~/.gitconfig` | read-only | Git identity |
 | SSH keys | not mounted | Prevents git push via SSH |

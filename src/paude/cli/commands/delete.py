@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -47,20 +48,16 @@ def session_delete(
             help="Container backend (auto-detected from session if not specified).",
         ),
     ] = None,
-    openshift_context: Annotated[
-        str | None,
+    force: Annotated[
+        bool,
         typer.Option(
-            "--openshift-context",
-            help="Kubeconfig context for OpenShift.",
+            "--force",
+            help=(
+                "Remove from local config without contacting the backend"
+                " (useful for orphaned or legacy sessions)."
+            ),
         ),
-    ] = None,
-    openshift_namespace: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-namespace",
-            help="OpenShift namespace (default: current context namespace).",
-        ),
-    ] = None,
+    ] = False,
 ) -> None:
     """Delete a session and all its resources permanently."""
     from paude.cli.remote import _cleanup_session_git_remote, _get_session_workspace
@@ -77,9 +74,24 @@ def session_delete(
 
     registry = SessionRegistry()
 
+    if force:
+        reg_entry = registry.get(name)
+        workspace = Path(reg_entry.workspace) if reg_entry else None
+        _cleanup_remote_config_dir(reg_entry)
+        removed = registry.unregister(name)
+        if not removed:
+            typer.echo(f"Session '{name}' not found in local config.", err=True)
+            raise typer.Exit(1)
+        typer.echo(
+            f"Session '{name}' removed from local config. "
+            "Backend resources were not cleaned up.",
+        )
+        _cleanup_session_git_remote(name, workspace)
+        return
+
     # Auto-detect backend if not specified
     if backend is None:
-        result = find_session_backend(name, openshift_context, openshift_namespace)
+        result = find_session_backend(name)
         if result:
             backend, backend_obj = result
             workspace = _get_session_workspace(backend_obj, name)
@@ -98,9 +110,7 @@ def session_delete(
             typer.echo(f"Session '{name}' not found.", err=True)
             raise typer.Exit(1)
 
-    backend_instance = _get_backend_instance(
-        backend, openshift_context, openshift_namespace
-    )
+    backend_instance = _get_backend_instance(backend)
     workspace = _get_session_workspace(backend_instance, name)
     try:
         reg_entry = registry.get(name)

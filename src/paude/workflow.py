@@ -14,8 +14,6 @@ import typer
 from paude.backends.base import Backend, Session
 from paude.backends.shared import (
     engine_binary_for_backend,
-    is_local_backend,
-    pod_name,
     resource_name,
 )
 from paude.constants import BASE_REF_NAME, CONTAINER_HOME, CONTAINER_WORKSPACE
@@ -44,8 +42,6 @@ def _validate_harvest_branch(branch_name: str) -> None:
 
 def _find_backend_and_session(
     session_name: str,
-    openshift_context: str | None = None,
-    openshift_namespace: str | None = None,
     connect_timeout: int | None = None,
 ) -> tuple[str, Backend, Session]:
     """Find the backend and session. Raises typer.Exit if not found."""
@@ -53,8 +49,6 @@ def _find_backend_and_session(
 
     result = find_session_backend(
         session_name,
-        openshift_context,
-        openshift_namespace,
         connect_timeout=connect_timeout,
     )
     if result is None:
@@ -75,19 +69,15 @@ def _ensure_remote_exists(
     backend_type: str,
     backend: Backend,
     workspace: Path,
-    openshift_context: str | None = None,
-    openshift_namespace: str | None = None,
 ) -> str:
     """Ensure a paude git remote exists, auto-adding if needed."""
     from paude.git_remote import (
-        build_openshift_remote_url,
         build_podman_remote_url,
         enable_ext_protocol,
         git_remote_add,
         initialize_container_workspace,
         is_ext_protocol_allowed,
         list_paude_remotes,
-        openshift_exec_builder,
         podman_exec_builder,
     )
 
@@ -106,30 +96,10 @@ def _ensure_remote_exists(
 
     cname = resource_name(session_name)
 
-    if not is_local_backend(backend_type):
-        from paude.backends.openshift import OpenShiftBackend, OpenShiftConfig
-
-        os_config = OpenShiftConfig(
-            context=openshift_context,
-            namespace=openshift_namespace,
-        )
-        try:
-            os_backend = OpenShiftBackend(config=os_config)
-            namespace = os_backend.namespace
-        except Exception:
-            namespace = openshift_namespace or "default"
-
-        pname = pod_name(session_name)
-        exec_builder = openshift_exec_builder(pname, namespace, openshift_context)
-        initialize_container_workspace(exec_builder)
-        remote_url = build_openshift_remote_url(
-            pname, namespace, context=openshift_context
-        )
-    else:
-        engine = engine_binary_for_backend(backend_type)
-        exec_builder = podman_exec_builder(cname, engine)
-        initialize_container_workspace(exec_builder)
-        remote_url = build_podman_remote_url(cname, engine=engine)
+    engine = engine_binary_for_backend(backend_type)
+    exec_builder = podman_exec_builder(cname, engine)
+    initialize_container_workspace(exec_builder)
+    remote_url = build_podman_remote_url(cname, engine=engine)
 
     if not git_remote_add(remote_name, remote_url):
         typer.echo(f"Error: Failed to add remote '{remote_name}'.", err=True)
@@ -158,17 +128,13 @@ def harvest_session(
     branch_name: str,
     create_pr: bool = False,
     pr_title: str | None = None,
-    openshift_context: str | None = None,
-    openshift_namespace: str | None = None,
 ) -> None:
     """Harvest changes from a running session into a local branch."""
     from paude.git_remote import git_diff_stat, git_fetch_from_remote
 
     _validate_harvest_branch(branch_name)
 
-    backend_type, backend, session = _find_backend_and_session(
-        session_name, openshift_context, openshift_namespace
-    )
+    backend_type, backend, session = _find_backend_and_session(session_name)
 
     workspace = session.workspace
     if not (workspace / ".git").is_dir():
@@ -184,8 +150,6 @@ def harvest_session(
         backend_type,
         backend,
         workspace,
-        openshift_context,
-        openshift_namespace,
     )
 
     container_branch = _get_container_branch(backend, session_name)
@@ -269,8 +233,6 @@ def harvest_session(
 
 def status_sessions(
     session_name: str | None = None,
-    openshift_context: str | None = None,
-    openshift_namespace: str | None = None,
 ) -> None:
     """Display enriched status for all sessions, or a single named session."""
     from paude.session_status import (
@@ -285,8 +247,6 @@ def status_sessions(
 
         _btype, found_backend, found_session = _find_backend_and_session(
             session_name,
-            openshift_context,
-            openshift_namespace,
             connect_timeout=SSH_STATUS_TIMEOUT,
         )
         all_merged = [found_session]
@@ -295,10 +255,7 @@ def status_sessions(
         from paude.registry import SessionRegistry, merge_registry_with_live
         from paude.session_discovery import collect_all_sessions
 
-        live_results, reachable_backends = collect_all_sessions(
-            openshift_context=openshift_context,
-            openshift_namespace=openshift_namespace,
-        )
+        live_results, reachable_backends = collect_all_sessions()
         registry = SessionRegistry()
         live_sessions = [s for s, _b in live_results]
         all_merged = merge_registry_with_live(
@@ -391,13 +348,9 @@ def reset_session(
     branch: str = "main",
     force: bool = False,
     keep_conversation: bool = False,
-    openshift_context: str | None = None,
-    openshift_namespace: str | None = None,
 ) -> None:
     """Reset a session's workspace for a new task."""
-    _backend_type, backend, session = _find_backend_and_session(
-        session_name, openshift_context, openshift_namespace
-    )
+    _backend_type, backend, session = _find_backend_and_session(session_name)
 
     if session.status != "running":
         typer.echo(

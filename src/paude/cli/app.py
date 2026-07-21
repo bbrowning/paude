@@ -27,7 +27,6 @@ class BackendType(StrEnum):
 
     podman = "podman"
     docker = "docker"
-    openshift = "openshift"
 
 
 def version_callback(value: bool) -> None:

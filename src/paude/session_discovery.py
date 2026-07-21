@@ -9,28 +9,9 @@ import typer
 
 from paude.backends import PodmanBackend, Session
 from paude.backends.base import Backend
-from paude.backends.openshift import OpenShiftBackend, OpenShiftConfig
 from paude.container.engine import ContainerEngine
 from paude.registry import RegistryEntry
 from paude.transport.ssh import SSH_STATUS_TIMEOUT
-
-
-def create_openshift_backend(
-    openshift_context: str | None = None,
-    openshift_namespace: str | None = None,
-) -> OpenShiftBackend | None:
-    """Create an OpenShift backend if available.
-
-    Returns None if OpenShift is not reachable or oc is not installed.
-    """
-    try:
-        os_config = OpenShiftConfig(
-            context=openshift_context,
-            namespace=openshift_namespace,
-        )
-        return OpenShiftBackend(config=os_config)
-    except Exception:  # noqa: S110 - OpenShift may not be available
-        return None
 
 
 def _status_matches(session_status: str, status_filter: str | None) -> bool:
@@ -50,19 +31,12 @@ def _status_matches(session_status: str, status_filter: str | None) -> bool:
 
 
 def find_workspace_session(
-    openshift_context: str | None = None,
-    openshift_namespace: str | None = None,
     status_filter: str | None = None,
 ) -> tuple[Session, Backend] | None:
-    """Find a session matching the current workspace across all backends.
-
-    Checks Podman first, then OpenShift. Returns the first match found.
+    """Find a session matching the current workspace across all engines.
 
     Args:
-        openshift_context: Optional OpenShift kubeconfig context.
-        openshift_namespace: Optional OpenShift namespace.
-        status_filter: If set, only match sessions with this status
-            (e.g. "running"). If None, matches any status.
+        status_filter: If set, only match sessions with this status.
 
     Returns:
         Tuple of (session, backend) if found, None otherwise.
@@ -86,16 +60,6 @@ def find_workspace_session(
             return (session, docker)
     except Exception:  # noqa: S110 - Docker may not be available
         pass
-
-    # Check OpenShift
-    os_backend = create_openshift_backend(openshift_context, openshift_namespace)
-    if os_backend is not None:
-        try:
-            session = os_backend.find_session_for_workspace(workspace)
-            if session and (_status_matches(session.status, status_filter)):
-                return (session, os_backend)
-        except Exception:  # noqa: S110
-            pass
 
     # Check SSH sessions from registry
     result = _find_ssh_workspace_session(workspace, status_filter)
@@ -207,45 +171,19 @@ def _collect_docker_sessions(
     ]
 
 
-def _collect_openshift_sessions(
-    os_backend: OpenShiftBackend | None,
-    openshift_context: str | None,
-    openshift_namespace: str | None,
-    status_filter: str | None,
-) -> list[tuple[Session, Backend]]:
-    """Collect sessions from the OpenShift backend."""
-    if os_backend is None:
-        os_backend = create_openshift_backend(openshift_context, openshift_namespace)
-    if os_backend is None:
-        raise RuntimeError("OpenShift not available")
-    return [
-        (s, os_backend)
-        for s in os_backend.list_sessions()
-        if _status_matches(s.status, status_filter)
-    ]
-
-
 def collect_all_sessions(
-    openshift_context: str | None = None,
-    openshift_namespace: str | None = None,
     status_filter: str | None = None,
     podman_backend: PodmanBackend | None = None,
-    os_backend: OpenShiftBackend | None = None,
     *,
-    skip_podman: bool = False,
-    skip_openshift: bool = False,
+    backend_filter: str | None = None,
 ) -> tuple[list[tuple[Session, Backend]], set[str]]:
-    """Collect sessions from all available backends concurrently.
+    """Collect sessions from supported engines and registered SSH hosts.
 
     Args:
-        openshift_context: Optional OpenShift kubeconfig context.
-        openshift_namespace: Optional OpenShift namespace.
         status_filter: If set, only include sessions with this status
             (e.g. "running"). If None, includes all sessions.
         podman_backend: Reuse an existing PodmanBackend instance.
-        os_backend: Reuse an existing OpenShiftBackend instance.
-        skip_podman: If True, skip Podman backend entirely.
-        skip_openshift: If True, skip OpenShift backend entirely.
+        backend_filter: Limit local discovery to "podman" or "docker".
 
     Returns:
         Tuple of (list of (session, backend) tuples, set of reachable
@@ -257,20 +195,12 @@ def collect_all_sessions(
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures: dict[str, Future[list[tuple[Session, Backend]]]] = {}
 
-        if not skip_podman:
+        if backend_filter in (None, "podman"):
             futures["podman"] = pool.submit(
                 _collect_podman_sessions, podman_backend, status_filter
             )
+        if backend_filter in (None, "docker"):
             futures["docker"] = pool.submit(_collect_docker_sessions, status_filter)
-
-        if not skip_openshift:
-            futures["openshift"] = pool.submit(
-                _collect_openshift_sessions,
-                os_backend,
-                openshift_context,
-                openshift_namespace,
-                status_filter,
-            )
 
         futures["ssh"] = pool.submit(_collect_ssh_sessions, status_filter)
 
@@ -352,9 +282,7 @@ def _print_no_sessions_message(
         typer.echo("No running sessions to stop.", err=True)
     else:
         backend_flag = ""
-        if isinstance(backend, OpenShiftBackend):
-            backend_flag = " --backend=openshift"
-        elif isinstance(backend, PodmanBackend) and backend.engine.binary == "docker":
+        if isinstance(backend, PodmanBackend) and backend.engine.binary == "docker":
             backend_flag = " --backend=docker"
         typer.echo("No sessions found for this workspace.", err=True)
         typer.echo("", err=True)

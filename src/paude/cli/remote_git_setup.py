@@ -10,8 +10,6 @@ import typer
 
 from paude.backends.shared import (
     engine_binary_for_backend,
-    is_local_backend,
-    pod_name,
     resource_name,
 )
 
@@ -27,46 +25,31 @@ class GitSetupContext:
 
     session_name: str
     backend_type: str
-    openshift_context: str | None
-    openshift_namespace: str | None
     transport: Transport | None = None
 
     def make_exec_context(self) -> tuple[ExecCmdBuilder, Transport | None]:
         """Build an exec builder and resolve transport.
 
-        For local backends, returns a podman exec builder with transport passed through.
-        For OpenShift backends, returns an openshift exec builder with transport=None
-        (OpenShift exec goes through the API server, not SSH).
+        Returns an engine exec builder with the configured transport.
         """
-        from paude.git_remote import openshift_exec_builder, podman_exec_builder
+        from paude.git_remote import podman_exec_builder
 
-        if is_local_backend(self.backend_type):
-            eb = podman_exec_builder(
-                resource_name(self.session_name),
-                engine_binary_for_backend(self.backend_type),
-            )
-            return eb, self.transport
-        eb = openshift_exec_builder(
-            pod_name(self.session_name),
-            self.openshift_namespace or "default",
-            self.openshift_context,
+        eb = podman_exec_builder(
+            resource_name(self.session_name),
+            engine_binary_for_backend(self.backend_type),
         )
-        return eb, None
+        return eb, self.transport
 
     @classmethod
     def from_session(
         cls,
         session: Session,
-        openshift_context: str | None,
-        openshift_namespace: str | None,
         transport: Transport | None = None,
     ) -> GitSetupContext:
         """Create from a Session object."""
         return cls(
             session_name=session.name,
             backend_type=session.backend_type,
-            openshift_context=openshift_context,
-            openshift_namespace=openshift_namespace,
             transport=transport,
         )
 
@@ -86,8 +69,6 @@ def _build_transport(
 def _setup_git_after_create(
     session_name: str,
     backend_type: str,
-    openshift_context: str | None = None,
-    openshift_namespace: str | None = None,
     no_clone_origin: bool = False,
     ssh_host: str | None = None,
     ssh_key: str | None = None,
@@ -130,8 +111,6 @@ def _setup_git_after_create(
     ctx = GitSetupContext(
         session_name=session_name,
         backend_type=backend_type,
-        openshift_context=openshift_context,
-        openshift_namespace=openshift_namespace,
         transport=transport,
     )
 
@@ -184,8 +163,6 @@ def _setup_after_clone(
 
     _remote_add(
         name=ctx.session_name,
-        openshift_context=ctx.openshift_context,
-        openshift_namespace=ctx.openshift_namespace,
         push=False,
         transport=ctx.transport,
     )
@@ -227,8 +204,6 @@ def _setup_full_push(
 
     _remote_add(
         name=ctx.session_name,
-        openshift_context=ctx.openshift_context,
-        openshift_namespace=ctx.openshift_namespace,
         push=False,
         transport=ctx.transport,
     )
@@ -264,9 +239,7 @@ def _setup_precommit(ctx: GitSetupContext) -> None:
 
     typer.echo("Setting up pre-commit hooks in container...")
     eb, tp = ctx.make_exec_context()
-    success = setup_precommit_in_container(
-        eb, set_home=not is_local_backend(ctx.backend_type), transport=tp
-    )
+    success = setup_precommit_in_container(eb, transport=tp)
     if not success:
         typer.echo(
             "Warning: Failed to install pre-commit hooks in container.",
@@ -278,8 +251,6 @@ def _push_after_add(
     session: Session,
     rname: str,
     branch: str,
-    openshift_context: str | None,
-    openshift_namespace: str | None,
     transport: Transport | None,
 ) -> None:
     """Push branch and set base ref after adding a remote."""
@@ -291,9 +262,7 @@ def _push_after_add(
         typer.echo("Push failed.", err=True)
         raise typer.Exit(1)
 
-    ctx = GitSetupContext.from_session(
-        session, openshift_context, openshift_namespace, transport
-    )
+    ctx = GitSetupContext.from_session(session, transport)
     eb, tp = ctx.make_exec_context()
     set_base_ref_in_container(eb, transport=tp)
     typer.echo("Push complete.")

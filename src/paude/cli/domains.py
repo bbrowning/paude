@@ -16,16 +16,12 @@ from paude.proxy_log import parse_blocked_log
 def _resolve_backend_for_domains(
     name: str,
     backend: BackendType | None,
-    openshift_context: str | None,
-    openshift_namespace: str | None,
 ) -> Backend:
     """Resolve the backend instance for allowed-domains command.
 
     Args:
         name: Session name.
         backend: Explicit backend type, or None for auto-detect.
-        openshift_context: Optional OpenShift context.
-        openshift_namespace: Optional OpenShift namespace.
 
     Returns:
         Backend instance.
@@ -34,14 +30,14 @@ def _resolve_backend_for_domains(
         typer.Exit: If session not found or backend not supported.
     """
     if backend is None:
-        result = find_session_backend(name, openshift_context, openshift_namespace)
+        result = find_session_backend(name)
         if result is None:
             typer.echo(f"Session '{name}' not found.", err=True)
             raise typer.Exit(1)
         _, backend_obj = result
         return backend_obj
 
-    return _get_backend_instance(backend, openshift_context, openshift_namespace)
+    return _get_backend_instance(backend)
 
 
 def _check_domains_mutual_exclusivity(
@@ -204,27 +200,11 @@ def allowed_domains_cmd(
             help="Container backend (auto-detected from session if not specified).",
         ),
     ] = None,
-    openshift_context: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-context",
-            help="Kubeconfig context for OpenShift.",
-        ),
-    ] = None,
-    openshift_namespace: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-namespace",
-            help="OpenShift namespace (default: current context namespace).",
-        ),
-    ] = None,
 ) -> None:
     """Manage allowed egress domains for a session."""
     _check_domains_mutual_exclusivity(add, remove, replace)
 
-    backend_obj = _resolve_backend_for_domains(
-        name, backend, openshift_context, openshift_namespace
-    )
+    backend_obj = _resolve_backend_for_domains(name, backend)
 
     try:
         if add:
@@ -263,25 +243,9 @@ def blocked_domains_cmd(
             help="Container backend (auto-detected from session if not specified).",
         ),
     ] = None,
-    openshift_context: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-context",
-            help="Kubeconfig context for OpenShift.",
-        ),
-    ] = None,
-    openshift_namespace: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-namespace",
-            help="OpenShift namespace (default: current context namespace).",
-        ),
-    ] = None,
 ) -> None:
     """Show domains blocked by the proxy for a session."""
-    backend_obj = _resolve_backend_for_domains(
-        name, backend, openshift_context, openshift_namespace
-    )
+    backend_obj = _resolve_backend_for_domains(name, backend)
 
     try:
         log_content = backend_obj.get_proxy_blocked_log(name)

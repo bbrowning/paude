@@ -13,47 +13,16 @@ from pathlib import Path
 import pytest
 
 from paude.backends.base import Session, SessionConfig
-from paude.backends.openshift.backend import OpenShiftBackend
-from paude.backends.openshift.config import OpenShiftConfig
 from paude.backends.podman import PodmanBackend, SessionNotFoundError
 
 # Default test images - can be overridden via environment variables
 DEFAULT_PODMAN_IMAGE = "paude-base-centos10:latest"
-DEFAULT_K8S_IMAGE = "quay.io/bbrowning/paude-base-centos10:latest"
-
-
-def pytest_configure(config: pytest.Config) -> None:
-    """Register custom markers for integration tests."""
-    config.addinivalue_line(
-        "markers",
-        "integration: integration tests requiring real infrastructure",
-    )
-    config.addinivalue_line(
-        "markers",
-        "podman: tests requiring real podman installation",
-    )
-    config.addinivalue_line(
-        "markers",
-        "kubernetes: tests requiring kubernetes cluster (Kind or OpenShift)",
-    )
 
 
 @pytest.fixture(scope="session")
 def has_podman() -> bool:
     """Check if podman is available on the system."""
     return shutil.which("podman") is not None
-
-
-@pytest.fixture(scope="session")
-def has_oc() -> bool:
-    """Check if oc CLI is available on the system."""
-    return shutil.which("oc") is not None
-
-
-@pytest.fixture(scope="session")
-def has_kubectl() -> bool:
-    """Check if kubectl is available on the system."""
-    return shutil.which("kubectl") is not None
 
 
 @pytest.fixture(scope="session")
@@ -68,26 +37,6 @@ def podman_available(has_podman: bool) -> bool:
             capture_output=True,
             text=True,
             timeout=10,
-        )
-        return result.returncode == 0
-    except (subprocess.TimeoutExpired, OSError):
-        return False
-
-
-@pytest.fixture(scope="session")
-def kubernetes_available(has_oc: bool, has_kubectl: bool) -> bool:
-    """Check if a Kubernetes cluster is accessible."""
-    # Prefer oc, fall back to kubectl
-    cli = "oc" if has_oc else "kubectl" if has_kubectl else None
-    if cli is None:
-        return False
-
-    try:
-        result = subprocess.run(
-            [cli, "cluster-info"],
-            capture_output=True,
-            text=True,
-            timeout=30,
         )
         return result.returncode == 0
     except (subprocess.TimeoutExpired, OSError):
@@ -116,13 +65,6 @@ def require_podman(podman_available: bool) -> None:
     """Skip test if podman is not available."""
     if not podman_available:
         pytest.skip("podman not available")
-
-
-@pytest.fixture
-def require_kubernetes(kubernetes_available: bool) -> None:
-    """Skip test if kubernetes cluster is not available."""
-    if not kubernetes_available:
-        pytest.skip("kubernetes cluster not available")
 
 
 @pytest.fixture
@@ -167,16 +109,6 @@ def podman_test_image() -> str:
     return os.environ.get("PAUDE_TEST_IMAGE", DEFAULT_PODMAN_IMAGE)
 
 
-@pytest.fixture(scope="session")
-def kubernetes_test_image() -> str:
-    """Get the Kubernetes test image name.
-
-    Can be overridden with PAUDE_K8S_TEST_IMAGE environment variable.
-    For CI with Kind, set this to the local image name that was loaded.
-    """
-    return os.environ.get("PAUDE_K8S_TEST_IMAGE", DEFAULT_K8S_IMAGE)
-
-
 DEFAULT_PROXY_IMAGE = "paude-proxy-centos10:latest"
 
 
@@ -211,117 +143,6 @@ def podman_proxy_image() -> str:
     Can be overridden with PAUDE_PROXY_IMAGE environment variable.
     """
     return os.environ.get("PAUDE_PROXY_IMAGE", DEFAULT_PROXY_IMAGE)
-
-
-@pytest.fixture(scope="session", autouse=True)
-def shorter_pod_timeout() -> None:
-    """Set a shorter pod ready timeout for integration tests.
-
-    Uses 60 seconds instead of the default 300 seconds to fail faster
-    in CI when pods have issues like ImagePullBackOff.
-    """
-    # Only set if not already configured
-    if "PAUDE_POD_READY_TIMEOUT" not in os.environ:
-        os.environ["PAUDE_POD_READY_TIMEOUT"] = "60"
-
-
-# ---------------------------------------------------------------------------
-# Shared OpenShift/Kubernetes helpers and fixtures
-# ---------------------------------------------------------------------------
-
-
-def run_oc(
-    *args: str, check: bool = True, timeout: int = 120
-) -> subprocess.CompletedProcess[str]:
-    """Run an oc command and return the result."""
-    result = subprocess.run(
-        ["oc", *args],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-    if check and result.returncode != 0:
-        raise RuntimeError(f"oc {' '.join(args)} failed: {result.stderr}")
-    return result
-
-
-def resource_exists(kind: str, name: str, namespace: str | None = None) -> bool:
-    """Check if a Kubernetes resource exists."""
-    cmd = ["get", kind, name, "-o", "name"]
-    if namespace:
-        cmd.extend(["-n", namespace])
-    result = run_oc(*cmd, check=False)
-    return result.returncode == 0
-
-
-def wait_for_resource(
-    kind: str,
-    name: str,
-    namespace: str | None = None,
-    timeout: int = 30,
-    interval: float = 2,
-) -> bool:
-    """Poll until a Kubernetes resource exists, or timeout is reached."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if resource_exists(kind, name, namespace):
-            return True
-        time.sleep(interval)
-    return False
-
-
-@pytest.fixture(scope="session")
-def test_namespace(kubernetes_available: bool) -> str:
-    """Get or create a test namespace."""
-    if not kubernetes_available:
-        pytest.skip("kubernetes not available")
-
-    namespace = "paude-integration-test"
-
-    if not resource_exists("namespace", namespace):
-        run_oc("create", "namespace", namespace)
-
-    return namespace
-
-
-@pytest.fixture
-def openshift_backend(test_namespace: str) -> OpenShiftBackend:
-    """Create an OpenShift backend configured for the test namespace."""
-    config = OpenShiftConfig(namespace=test_namespace)
-    return OpenShiftBackend(config)
-
-
-@pytest.fixture(autouse=False)
-def cleanup_k8s_test_resources(test_namespace: str, unique_session_name: str):
-    """Clean up Kubernetes test resources after each test.
-
-    Not autouse — test modules must request it explicitly or mark it autouse
-    via their own fixture.
-    """
-    yield
-
-    run_oc(
-        "delete",
-        "statefulset,networkpolicy,deployment,service",
-        "-n",
-        test_namespace,
-        "-l",
-        f"paude.io/session-name={unique_session_name}",
-        "--ignore-not-found",
-        check=False,
-    )
-
-    sts_name = f"paude-{unique_session_name}"
-    pvc_name = f"workspace-{sts_name}-0"
-    run_oc(
-        "delete",
-        "pvc",
-        pvc_name,
-        "-n",
-        test_namespace,
-        "--ignore-not-found",
-        check=False,
-    )
 
 
 # ---------------------------------------------------------------------------

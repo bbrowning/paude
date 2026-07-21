@@ -33,20 +33,6 @@ def session_cp(
             help="Container backend (auto-detected from session if not specified).",
         ),
     ] = None,
-    openshift_context: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-context",
-            help="Kubeconfig context for OpenShift.",
-        ),
-    ] = None,
-    openshift_namespace: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-namespace",
-            help="OpenShift namespace (default: current context namespace).",
-        ),
-    ] = None,
 ) -> None:
     """Copy files between local and a session."""
     src_session, src_path = _parse_copy_path(src)
@@ -86,9 +72,7 @@ def session_cp(
     backend_obj: Backend | None = None
     if session_name:
         # Explicit session name
-        result = find_session_backend(
-            session_name, openshift_context, openshift_namespace
-        )
+        result = find_session_backend(session_name)
         if result is None:
             typer.echo(f"Session '{session_name}' not found.", err=True)
             raise typer.Exit(1)
@@ -96,8 +80,6 @@ def session_cp(
     else:
         # Auto-detect session (empty string from `:path` syntax)
         session_obj, backend_obj = _auto_select_session(
-            openshift_context,
-            openshift_namespace,
             status_filter="running",
             no_sessions_hints=["No running sessions found."],
             multi_hint_format="  paude cp ... {name}:path",

@@ -35,7 +35,6 @@ RUN dnf install -y dnf-plugins-core && \
         unzip \
         zip \
         tree \
-        nss_wrapper \
     && dnf clean all && \
     alternatives --install /usr/bin/python python /usr/bin/python3.12 1 && \
     alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
@@ -88,12 +87,12 @@ RUN curl -fsSL https://cli.github.com/packages/rpm/gh-cli.repo -o /etc/yum.repos
     dnf install -y gh && \
     dnf clean all
 
-# Create non-root user with GID 0 for OpenShift compatibility
-RUN useradd -M -d /home/paude -s /bin/bash -g 0 paude && \
+# Create the fixed non-root runtime user
+RUN groupadd --system paude && \
+    useradd --system -M -d /home/paude -s /bin/bash -g paude paude && \
     umask 0002 && \
     mkdir -p /home/paude/.claude /home/paude/.config && \
-    chown -R paude:0 /home/paude && \
-    chmod g+w /etc/passwd
+    chown -R paude:paude /home/paude
 
 # NOTE: Claude Code is NOT installed here due to licensing restrictions.
 # It gets installed at user-side build time via a runtime layer.
