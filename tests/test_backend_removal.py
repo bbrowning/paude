@@ -87,6 +87,48 @@ def test_legacy_registry_entry_is_ignored(
     assert "Ignoring legacy OpenShift session 'old'" in caplog.text
 
 
+def test_force_delete_removes_legacy_openshift_session(tmp_path: Path) -> None:
+    path = tmp_path / "sessions.json"
+    path.write_text(
+        json.dumps(
+            {
+                "sessions": {
+                    "old-ocp": {
+                        "name": "old-ocp",
+                        "backend_type": "openshift",
+                        "workspace": "/tmp/old",
+                        "agent": "claude",
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "openshift_context": "ctx",
+                        "openshift_namespace": "ns",
+                    },
+                    "keep": {
+                        "name": "keep",
+                        "backend_type": "podman",
+                        "workspace": "/tmp/keep",
+                        "agent": "claude",
+                        "created_at": "2026-01-01T00:00:00Z",
+                    },
+                }
+            }
+        )
+    )
+    reg = SessionRegistry(path)
+
+    assert reg.unregister("old-ocp") is True
+    data = json.loads(path.read_text())
+    assert "old-ocp" not in data["sessions"]
+    assert "keep" in data["sessions"]
+
+
+def test_unregister_returns_false_for_missing(tmp_path: Path) -> None:
+    path = tmp_path / "sessions.json"
+    path.write_text(json.dumps({"sessions": {}}))
+    reg = SessionRegistry(path)
+
+    assert reg.unregister("nonexistent") is False
+
+
 @pytest.mark.parametrize("backend", [BackendType.podman, BackendType.docker])
 def test_local_engine_backend(backend: BackendType) -> None:
     instance = _get_backend_instance(backend)

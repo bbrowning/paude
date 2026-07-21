@@ -50,6 +50,7 @@ _SECTIONS: tuple[HelpSection, ...] = (
             ("paude stop", "Stop session (preserves data)"),
             ("paude upgrade NAME", "Upgrade or reconfigure session"),
             ("paude delete NAME --confirm", "Delete session permanently"),
+            ("paude delete NAME --confirm --force", "Remove from local config only"),
         ),
     ),
     HelpSection(

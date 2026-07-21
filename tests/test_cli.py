@@ -1086,6 +1086,57 @@ class TestDeleteUsesWorkspacePath:
         mock_cleanup.assert_called_once_with("my-session", None)
 
 
+class TestDeleteForce:
+    """Tests for --force flag on delete command."""
+
+    @patch("paude.cli.remote._cleanup_session_git_remote")
+    @patch("paude.registry.SessionRegistry")
+    def test_force_delete_removes_from_registry(
+        self,
+        mock_registry_class: MagicMock,
+        mock_cleanup: MagicMock,
+    ):
+        """Force delete removes an orphaned session from the registry."""
+        mock_registry = MagicMock()
+        mock_registry.get.return_value = MagicMock(
+            workspace="/some/project",
+            ssh_host=None,
+            remote_config_dir=None,
+        )
+        mock_registry.unregister.return_value = True
+        mock_registry_class.return_value = mock_registry
+
+        result = runner.invoke(app, ["delete", "orphan", "--confirm", "--force"])
+
+        assert result.exit_code == 0
+        assert "removed from local config" in result.output
+        mock_registry.unregister.assert_called_once_with("orphan")
+        mock_cleanup.assert_called_once_with("orphan", Path("/some/project"))
+
+    @patch("paude.registry.SessionRegistry")
+    def test_force_delete_not_found(
+        self,
+        mock_registry_class: MagicMock,
+    ):
+        """Force delete exits with error when session not in registry."""
+        mock_registry = MagicMock()
+        mock_registry.get.return_value = None
+        mock_registry.unregister.return_value = False
+        mock_registry_class.return_value = mock_registry
+
+        result = runner.invoke(app, ["delete", "ghost", "--confirm", "--force"])
+
+        assert result.exit_code == 1
+        assert "not found in local config" in result.output
+
+    def test_force_delete_requires_confirm(self):
+        """Force delete still requires --confirm."""
+        result = runner.invoke(app, ["delete", "orphan", "--force"])
+
+        assert result.exit_code == 1
+        assert "Use --confirm to proceed" in result.output
+
+
 class TestRemoteCleanup:
     """Tests for paude remote cleanup command."""
 

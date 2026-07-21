@@ -93,23 +93,25 @@ class SessionRegistry:
         except (FileNotFoundError, json.JSONDecodeError, TypeError, KeyError):
             return {}
 
-    def _save(self, entries: dict[str, RegistryEntry]) -> None:
-        """Write entries to the registry file atomically."""
+    def _write_raw(self, data: dict) -> None:  # type: ignore[type-arg]
+        """Write raw JSON data to the registry file atomically."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        data = {"sessions": {k: asdict(v) for k, v in entries.items()}}
-        # Atomic write: write to temp file then rename
         fd, tmp = tempfile.mkstemp(dir=self._path.parent, suffix=".tmp")
         try:
             with os.fdopen(fd, "w") as f:
                 json.dump(data, f, indent=2)
             os.replace(tmp, self._path)
         except Exception:
-            # Clean up temp file on failure
             try:
                 os.unlink(tmp)
             except OSError:
                 pass
             raise
+
+    def _save(self, entries: dict[str, RegistryEntry]) -> None:
+        """Write entries to the registry file atomically."""
+        data = {"sessions": {k: asdict(v) for k, v in entries.items()}}
+        self._write_raw(data)
 
     def register(
         self,
@@ -141,12 +143,25 @@ class SessionRegistry:
         )
         self._save(entries)
 
-    def unregister(self, name: str) -> None:
-        """Remove a session from the registry. No-op if missing."""
-        entries = self.load()
-        if name in entries:
-            del entries[name]
-            self._save(entries)
+    def unregister(self, name: str) -> bool:
+        """Remove a session from the registry by name.
+
+        Operates on raw JSON so it can remove any entry, including ones
+        that ``load()`` would filter (e.g. legacy backends).
+
+        Returns True if an entry was removed, False if not found.
+        """
+        try:
+            data = json.loads(self._path.read_text())
+        except (FileNotFoundError, json.JSONDecodeError):
+            return False
+        sessions = data.get("sessions", {})
+        if name not in sessions:
+            return False
+        del sessions[name]
+        data["sessions"] = sessions
+        self._write_raw(data)
+        return True
 
     def get(self, name: str) -> RegistryEntry | None:
         """Get a single registry entry by name."""

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -47,6 +48,13 @@ def session_delete(
             help="Container backend (auto-detected from session if not specified).",
         ),
     ] = None,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Remove from local config without contacting the backend.",
+        ),
+    ] = False,
 ) -> None:
     """Delete a session and all its resources permanently."""
     from paude.cli.remote import _cleanup_session_git_remote, _get_session_workspace
@@ -62,6 +70,21 @@ def session_delete(
     from paude.registry import SessionRegistry
 
     registry = SessionRegistry()
+
+    if force:
+        reg_entry = registry.get(name)
+        workspace = Path(reg_entry.workspace) if reg_entry else None
+        _cleanup_remote_config_dir(reg_entry)
+        removed = registry.unregister(name)
+        if not removed:
+            typer.echo(f"Session '{name}' not found in local config.", err=True)
+            raise typer.Exit(1)
+        typer.echo(
+            f"Session '{name}' removed from local config. "
+            "Backend resources were not cleaned up.",
+        )
+        _cleanup_session_git_remote(name, workspace)
+        return
 
     # Auto-detect backend if not specified
     if backend is None:
