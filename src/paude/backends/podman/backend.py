@@ -185,7 +185,7 @@ class PodmanBackend:
     def _sync_host_config(self, cname: str, agent_name: str) -> None:
         """Copy host config files into /credentials/ via podman cp.
 
-        Delegates to ConfigSyncer which mirrors the OpenShift pattern.
+        Delegates to ConfigSyncer for file injection.
         Skipped for SSH remotes which use bind mounts instead.
         """
         from paude.backends.podman.sync import ConfigSyncer
@@ -210,7 +210,7 @@ class PodmanBackend:
             cname,
             content,
             SANDBOX_CONFIG_TARGET,
-            owner="paude:0",
+            owner="paude",
         )
 
     @staticmethod
@@ -237,7 +237,7 @@ class PodmanBackend:
         """
         from paude.backends.shared import STUB_ADC_JSON
 
-        self._runner.inject_file(cname, STUB_ADC_JSON, GCP_ADC_TARGET, owner="paude:0")
+        self._runner.inject_file(cname, STUB_ADC_JSON, GCP_ADC_TARGET, owner="paude")
 
     def _inject_codex_auth(self, cname: str, *, chatgpt_mode: bool) -> None:
         """Install the ChatGPT provider profile for Codex; else clear codex auth.
@@ -254,7 +254,7 @@ class PodmanBackend:
                 cname,
                 SYNTHETIC_CODEX_PROFILE_TOML,
                 CODEX_CHATGPT_PROFILE_TARGET,
-                owner="paude:0",
+                owner="paude",
                 mode="600",
             )
         else:
@@ -426,7 +426,7 @@ class PodmanBackend:
             "root",
             container_name,
             "chown",
-            "paude:0",
+            "paude",
             "/pvc",
             check=False,
         )

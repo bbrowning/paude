@@ -107,5 +107,4 @@ addopts = "-v --ignore=tests/integration"
 markers = [
     "integration: integration tests requiring real infrastructure",
     "podman: tests requiring real podman installation",
-    "kubernetes: tests requiring kubernetes cluster (Kind or OpenShift)",
 ]

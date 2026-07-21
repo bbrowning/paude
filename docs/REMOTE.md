@@ -20,7 +20,7 @@ Set Docker as your default backend in `~/.config/paude/defaults.json`:
 
 ## Remote Host Execution
 
-Run containers on a remote machine via SSH using the `--host` flag. This works with both `podman` and `docker` backends (not `openshift`).
+Run containers on a remote machine via SSH using the `--host` flag. This works with both `podman` and `docker` backends.
 
 ```bash
 # Basic usage
@@ -52,7 +52,6 @@ paude create my-project --host user@hostname:2222
 ### Limitations
 
 - `--host` and `--ssh-key` are CLI-only flags (not stored in user defaults)
-- Not compatible with `--backend=openshift` (use the [OpenShift backend](OPENSHIFT.md) for remote Kubernetes execution)
 
 ## Combining Remote Hosts with GPU
 

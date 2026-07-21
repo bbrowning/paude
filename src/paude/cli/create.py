@@ -79,34 +79,6 @@ def session_create(
             help="Enable verbose output (affects --dry-run display).",
         ),
     ] = False,
-    pvc_size: Annotated[
-        str | None,
-        typer.Option(
-            "--pvc-size",
-            help="PVC size for OpenShift (e.g., 10Gi).",
-        ),
-    ] = None,
-    storage_class: Annotated[
-        str | None,
-        typer.Option(
-            "--storage-class",
-            help="Storage class for OpenShift.",
-        ),
-    ] = None,
-    openshift_context: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-context",
-            help="Kubeconfig context for OpenShift.",
-        ),
-    ] = None,
-    openshift_namespace: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-namespace",
-            help="OpenShift namespace (default: current context namespace).",
-        ),
-    ] = None,
     platform: Annotated[
         str | None,
         typer.Option(
@@ -208,22 +180,23 @@ def session_create(
         cli_gpu = ""  # empty string sentinel = explicitly disabled
 
     # Resolve layered configuration
-    resolved = resolve_create_options(
-        cli_backend=backend.value if backend is not None else None,
-        cli_agent=agent,
-        cli_provider=provider,
-        cli_yolo=yolo,
-        cli_git=git,
-        cli_pvc_size=pvc_size,
-        cli_platform=platform,
-        cli_openshift_context=openshift_context,
-        cli_openshift_namespace=openshift_namespace,
-        cli_gpu=cli_gpu,
-        cli_allowed_domains=allowed_domains,
-        cli_otel_endpoint=otel_endpoint,
-        project_config=config,
-        user_defaults=user_defaults,
-    )
+    try:
+        resolved = resolve_create_options(
+            cli_backend=backend.value if backend is not None else None,
+            cli_agent=agent,
+            cli_provider=provider,
+            cli_yolo=yolo,
+            cli_git=git,
+            cli_platform=platform,
+            cli_gpu=cli_gpu,
+            cli_allowed_domains=allowed_domains,
+            cli_otel_endpoint=otel_endpoint,
+            project_config=config,
+            user_defaults=user_defaults,
+        )
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
 
     # Extract resolved values
     r_backend = BackendType(resolved.backend.value)
@@ -231,14 +204,9 @@ def session_create(
     r_provider = resolved.provider.value
     r_yolo = resolved.yolo.value
     r_git = resolved.git.value
-    r_pvc_size = resolved.pvc_size.value
     r_platform = resolved.platform.value
-    r_openshift_context = resolved.openshift_context.value
-    r_openshift_namespace = resolved.openshift_namespace.value
     # Empty string means explicitly disabled via --no-gpu
     r_gpu = resolved.gpu.value or None
-    r_openshift_resources = resolved.openshift_resources.value
-    r_openshift_build_resources = resolved.openshift_build_resources.value
     r_otel_endpoint = resolved.otel_endpoint.value
 
     # Use resolved domains, or fall back to ["default"] if nothing configured
@@ -290,14 +258,6 @@ def session_create(
         )
         raise typer.Exit()
 
-    # Validate --host
-    if host and r_backend == BackendType.openshift:
-        typer.echo(
-            "Error: --host is not supported with --backend openshift.",
-            err=True,
-        )
-        raise typer.Exit(1)
-
     if ssh_key and not host:
         typer.echo(
             "Error: --ssh-key requires --host.",
@@ -343,56 +303,28 @@ def session_create(
 
         otel_ports = otel_proxy_ports(r_otel_endpoint)
 
-    if r_backend in (BackendType.podman, BackendType.docker):
-        from paude.cli.create_podman import create_podman_session
+    from paude.cli.create_podman import create_podman_session
 
-        create_podman_session(
-            name=name,
-            workspace=workspace,
-            config=config,
-            env=env,
-            expanded_domains=expanded_domains,
-            unrestricted=unrestricted,
-            parsed_args=parsed_args,
-            yolo=r_yolo,
-            git=r_git,
-            no_clone_origin=no_clone_origin,
-            rebuild=rebuild,
-            platform=r_platform,
-            agent_name=r_agent,
-            provider_name=r_provider,
-            engine_binary=r_backend.value,
-            ssh_host=parsed_ssh_host,
-            ssh_key=ssh_key,
-            transport=ssh_transport,
-            gpu=r_gpu,
-            otel_ports=otel_ports,
-            otel_endpoint=r_otel_endpoint,
-        )
-    else:
-        from paude.cli.create_openshift import create_openshift_session
-
-        create_openshift_session(
-            name=name,
-            workspace=workspace,
-            config=config,
-            env=env,
-            expanded_domains=expanded_domains,
-            unrestricted=unrestricted,
-            parsed_args=parsed_args,
-            yolo=r_yolo,
-            git=r_git,
-            no_clone_origin=no_clone_origin,
-            rebuild=rebuild,
-            pvc_size=r_pvc_size,
-            storage_class=storage_class,
-            openshift_context=r_openshift_context,
-            openshift_namespace=r_openshift_namespace,
-            agent_name=r_agent,
-            provider_name=r_provider,
-            gpu=r_gpu,
-            resources=r_openshift_resources,
-            build_resources=r_openshift_build_resources,
-            otel_ports=otel_ports,
-            otel_endpoint=r_otel_endpoint,
-        )
+    create_podman_session(
+        name=name,
+        workspace=workspace,
+        config=config,
+        env=env,
+        expanded_domains=expanded_domains,
+        unrestricted=unrestricted,
+        parsed_args=parsed_args,
+        yolo=r_yolo,
+        git=r_git,
+        no_clone_origin=no_clone_origin,
+        rebuild=rebuild,
+        platform=r_platform,
+        agent_name=r_agent,
+        provider_name=r_provider,
+        engine_binary=r_backend.value,
+        ssh_host=parsed_ssh_host,
+        ssh_key=ssh_key,
+        transport=ssh_transport,
+        gpu=r_gpu,
+        otel_ports=otel_ports,
+        otel_endpoint=r_otel_endpoint,
+    )

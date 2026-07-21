@@ -35,20 +35,21 @@ def config_show() -> None:
         except Exception as e:
             typer.echo(f"Warning: Cannot parse {config_file}: {e}", err=True)
 
-    resolved = resolve_create_options(
-        cli_backend=None,
-        cli_agent=None,
-        cli_yolo=None,
-        cli_git=None,
-        cli_pvc_size=None,
-        cli_platform=None,
-        cli_openshift_context=None,
-        cli_openshift_namespace=None,
-        cli_gpu=None,
-        cli_allowed_domains=None,
-        project_config=project_config,
-        user_defaults=user_defaults,
-    )
+    try:
+        resolved = resolve_create_options(
+            cli_backend=None,
+            cli_agent=None,
+            cli_yolo=None,
+            cli_git=None,
+            cli_platform=None,
+            cli_gpu=None,
+            cli_allowed_domains=None,
+            project_config=project_config,
+            user_defaults=user_defaults,
+        )
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
 
     config_path = _user_config_path()
     typer.echo(f"User config: {config_path}")
@@ -69,13 +70,8 @@ def config_show() -> None:
         ("agent", resolved.agent),
         ("yolo", resolved.yolo),
         ("git", resolved.git),
-        ("pvc-size", resolved.pvc_size),
         ("platform", resolved.platform),
-        ("openshift-context", resolved.openshift_context),
-        ("openshift-namespace", resolved.openshift_namespace),
         ("otel-endpoint", resolved.otel_endpoint),
-        ("openshift-resources", resolved.openshift_resources),
-        ("openshift-build-resources", resolved.openshift_build_resources),
         ("gpu", resolved.gpu),
         ("provider", resolved.provider),
     ]
@@ -113,17 +109,10 @@ def config_init() -> None:
             "provider": None,
             "yolo": None,
             "git": None,
-            "pvc-size": None,
             "platform": None,
             "gpu": None,
             "allowed-domains": [],
             "otel-endpoint": None,
-            "openshift": {
-                "context": None,
-                "namespace": None,
-                "resources": None,
-                "build-resources": None,
-            },
         }
     }
 

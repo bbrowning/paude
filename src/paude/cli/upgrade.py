@@ -13,7 +13,6 @@ from paude.cli.app import BackendType, app
 from paude.cli.helpers import find_session_backend
 
 if TYPE_CHECKING:
-    from paude.backends.openshift import OpenShiftBackend
     from paude.backends.podman.backend import PodmanBackend
 
 
@@ -50,17 +49,6 @@ def session_upgrade(
         typer.Option(
             "--backend",
             help="Container backend (auto-detected from session if not specified).",
-        ),
-    ] = None,
-    openshift_context: Annotated[
-        str | None,
-        typer.Option("--openshift-context", help="Kubeconfig context for OpenShift."),
-    ] = None,
-    openshift_namespace: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-namespace",
-            help="OpenShift namespace (default: current context namespace).",
         ),
     ] = None,
     otel_endpoint: Annotated[
@@ -118,7 +106,6 @@ def session_upgrade(
     when only changing configuration at the same version.
     """
     from paude import __version__
-    from paude.backends.openshift import OpenShiftBackend
     from paude.backends.podman.backend import PodmanBackend
     from paude.cli.helpers import _get_backend_instance
 
@@ -145,11 +132,9 @@ def session_upgrade(
 
     # Find session backend
     if backend is not None:
-        backend_obj = _get_backend_instance(
-            backend, openshift_context, openshift_namespace
-        )
+        backend_obj = _get_backend_instance(backend)
     else:
-        result = find_session_backend(name, openshift_context, openshift_namespace)
+        result = find_session_backend(name)
         if result is None:
             typer.echo(f"Session '{name}' not found.", err=True)
             raise typer.Exit(1)
@@ -192,8 +177,6 @@ def session_upgrade(
     try:
         if isinstance(backend_obj, PodmanBackend):
             _upgrade_podman(name, backend_obj, rebuild, overrides)
-        elif isinstance(backend_obj, OpenShiftBackend):
-            _upgrade_openshift(name, backend_obj, rebuild, openshift_context, overrides)
         else:
             typer.echo("Unsupported backend for upgrade.", err=True)
             raise typer.Exit(1)
@@ -396,228 +379,3 @@ def _upgrade_podman(
 
     backend.create_session(session_config)
     backend.start_session_no_attach(name)
-
-
-def _upgrade_openshift(
-    name: str,
-    backend: OpenShiftBackend,
-    rebuild: bool,
-    openshift_context: str | None,
-    overrides: UpgradeOverrides,
-) -> None:
-    """Upgrade an OpenShift session in place."""
-    from paude import __version__
-    from paude.agents import get_agent
-    from paude.backends.shared import (
-        PAUDE_LABEL_AGENT,
-        PAUDE_LABEL_GPU,
-        PAUDE_LABEL_OTEL_ENDPOINT,
-        PAUDE_LABEL_PROVIDER,
-        PAUDE_LABEL_VERSION,
-        PAUDE_LABEL_YOLO,
-        decode_path,
-        pod_name,
-        resource_name,
-    )
-    from paude.cli.helpers import _detect_dev_script_dir
-    from paude.config.detector import detect_config
-    from paude.config.parser import parse_config
-
-    # Get StatefulSet
-    sts = backend._lookup.get_statefulset(name)
-    if sts is None:
-        typer.echo(f"StatefulSet for session '{name}' not found.", err=True)
-        raise typer.Exit(1)
-
-    metadata = sts.get("metadata", {})
-    labels = metadata.get("labels", {})
-    annotations = metadata.get("annotations", {})
-
-    agent_name = labels.get(PAUDE_LABEL_AGENT, "claude")
-    provider_name = labels.get(PAUDE_LABEL_PROVIDER)
-    workspace_encoded = annotations.get("paude.io/workspace", "")
-    workspace = decode_path(workspace_encoded) if workspace_encoded else Path.cwd()
-    otel_endpoint = annotations.get(PAUDE_LABEL_OTEL_ENDPOINT)
-    old_otel_endpoint = otel_endpoint
-
-    # Apply CLI overrides
-    if overrides.provider is not None:
-        provider_name = overrides.provider
-    if overrides.otel_endpoint is not None:
-        otel_endpoint = overrides.otel_endpoint if overrides.otel_endpoint else None
-
-    # Detect project config from workspace
-    config = None
-    config_file = detect_config(workspace)
-    if config_file:
-        config = parse_config(config_file)
-
-    # Build new image
-    script_dir = _detect_dev_script_dir()
-    typer.echo("Building image in OpenShift cluster...", err=True)
-    image = backend.ensure_image_via_build(
-        config=config,
-        workspace=workspace,
-        script_dir=script_dir,
-        force_rebuild=rebuild,
-        session_name=name,
-        agent=get_agent(agent_name, provider=provider_name),
-    )
-
-    # Patch StatefulSet with new image
-    sts_name = resource_name(name)
-    ns = backend.namespace
-    oc = backend._lifecycle._oc
-
-    import json as _json
-
-    # Build JSON patches -- always update image and version
-    patches: list[dict[str, str]] = [
-        {
-            "op": "replace",
-            "path": "/spec/template/spec/containers/0/image",
-            "value": image,
-        },
-    ]
-
-    # If overrides change env vars, we need to patch the container env.
-    # Build a map of env var overrides to apply.
-    env_overrides: dict[str, str | None] = {}
-    if overrides.otel_endpoint is not None:
-        if otel_endpoint:
-            from paude.otel import build_otel_env
-
-            env_overrides.update(build_otel_env(agent_name, otel_endpoint))
-        else:
-            # Clearing OTEL -- remove known OTEL env vars
-            from paude.otel import OTEL_ENV_KEYS
-
-            for key in OTEL_ENV_KEYS:
-                env_overrides[key] = None  # sentinel for removal
-
-    if env_overrides:
-        # Get current env list from StatefulSet spec
-        containers = (
-            sts.get("spec", {})
-            .get("template", {})
-            .get("spec", {})
-            .get("containers", [])
-        )
-        current_env = containers[0].get("env", []) if containers else []
-
-        # Apply overrides
-        new_env = [e for e in current_env if e["name"] not in env_overrides]
-        for key, value in env_overrides.items():
-            if value is not None:
-                new_env.append({"name": key, "value": value})
-
-        patches.append(
-            {
-                "op": "replace",
-                "path": "/spec/template/spec/containers/0/env",
-                "value": new_env,  # type: ignore[dict-item]
-            }
-        )
-
-    typer.echo(f"Patching StatefulSet {sts_name}...", err=True)
-    patch_json = _json.dumps(patches)
-    oc.run(
-        "patch",
-        "statefulset",
-        sts_name,
-        "-n",
-        ns,
-        "--type=json",
-        "-p",
-        patch_json,
-    )
-
-    # Update labels and annotations
-    label_updates = [f"{PAUDE_LABEL_VERSION}={__version__}"]
-    if overrides.provider is not None:
-        label_updates.append(f"{PAUDE_LABEL_PROVIDER}={provider_name or ''}")
-    if overrides.gpu is not None:
-        label_updates.append(f"{PAUDE_LABEL_GPU}={overrides.gpu}")
-    if overrides.yolo is not None:
-        label_updates.append(f"{PAUDE_LABEL_YOLO}={'1' if overrides.yolo else '0'}")
-
-    oc.run(
-        "label",
-        "statefulset",
-        sts_name,
-        "-n",
-        ns,
-        *label_updates,
-        "--overwrite",
-    )
-
-    # Update otel-endpoint annotation
-    if overrides.otel_endpoint is not None:
-        ann_value = otel_endpoint or ""
-        oc.run(
-            "annotate",
-            "statefulset",
-            sts_name,
-            "-n",
-            ns,
-            f"{PAUDE_LABEL_OTEL_ENDPOINT}={ann_value}",
-            "--overwrite",
-        )
-
-    # Scale to 1 and wait
-    typer.echo(f"Starting session '{name}'...", err=True)
-    backend._lifecycle._scale_statefulset(name, 1)
-
-    if backend._lookup.has_proxy_deployment(name):
-        from paude.backends.shared import proxy_resource_name
-
-        proxy_image: str | None = None
-        if script_dir is not None:
-            typer.echo("Building proxy image in OpenShift cluster...", err=True)
-            proxy_image = backend.ensure_proxy_image_via_build(
-                script_dir, force_rebuild=rebuild, session_name=name
-            )
-        else:
-            from paude.backends.openshift.session_lifecycle import (
-                resolve_proxy_image,
-            )
-
-            proxy_image = resolve_proxy_image(image)
-
-        # Update proxy allowed domains when OTEL endpoint changes
-        if overrides.otel_endpoint is not None:
-            from paude.otel import otel_proxy_ports, parse_otel_endpoint
-
-            current_domains = backend._proxy.get_deployment_domains(name)
-            otel_ports: list[int] = []
-
-            if otel_endpoint:
-                hostname, _ = parse_otel_endpoint(otel_endpoint)
-                if hostname not in current_domains:
-                    current_domains.append(hostname)
-                otel_ports = otel_proxy_ports(otel_endpoint)
-            else:
-                if old_otel_endpoint:
-                    old_hostname, _ = parse_otel_endpoint(old_otel_endpoint)
-                    current_domains = [d for d in current_domains if d != old_hostname]
-
-            from paude.backends.shared import gather_proxy_credentials
-
-            _upgrade_agent = get_agent(agent_name, provider=provider_name)
-            _proxy_creds = gather_proxy_credentials(_upgrade_agent.config)
-            backend._proxy.update_credentials(name, _proxy_creds)
-            backend._proxy.update_deployment_domains(
-                name,
-                current_domains,
-                otel_ports=otel_ports,
-                image=proxy_image,
-            )
-        elif proxy_image is not None:
-            backend._proxy.update_deployment_image(name, proxy_image)
-
-        backend._lifecycle._scale_deployment(proxy_resource_name(name), 1)
-        backend._proxy.wait_for_ready(name)
-
-    pname = pod_name(name)
-    typer.echo(f"Waiting for pod {pname} to be ready...", err=True)
-    backend._pod_waiter.wait_for_ready(pname)

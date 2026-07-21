@@ -28,7 +28,7 @@ persist_config_dir() {
         if [[ ! -e "$home_dir" ]]; then
             ln -sf "$pvc_dir" "$home_dir"
         else
-            # Overlay FS may block removal of image-layer dirs on OpenShift.
+            # Overlay filesystems may block removal of image-layer directories.
             echo "persist_config_dir: cannot replace $home_dir with symlink; using PVC copy at $pvc_dir" >&2
         fi
     fi

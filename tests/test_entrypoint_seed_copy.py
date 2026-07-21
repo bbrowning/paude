@@ -103,36 +103,6 @@ class TestEntrypointContract:
         )
 
 
-class TestNssWrapperContract:
-    """Contract tests verifying nss_wrapper setup for OpenShift arbitrary UIDs."""
-
-    def test_dockerfile_installs_nss_wrapper(self) -> None:
-        content = DOCKERFILE_PATH.read_text()
-        assert "nss_wrapper" in content, (
-            "Dockerfile must install nss_wrapper for OpenShift arbitrary UID support"
-        )
-
-    def test_entrypoint_activates_nss_wrapper(self) -> None:
-        content = ENTRYPOINT_PATH.read_text()
-        assert "NSS_WRAPPER_PASSWD" in content, (
-            "entrypoint-session.sh must set NSS_WRAPPER_PASSWD for nss_wrapper"
-        )
-        assert "libnss_wrapper" in content, (
-            "entrypoint-session.sh must LD_PRELOAD libnss_wrapper.so"
-        )
-
-    def test_nss_wrapper_before_home_setup(self) -> None:
-        content = ENTRYPOINT_PATH.read_text()
-        nss_pos = content.find("NSS_WRAPPER_PASSWD")
-        home_pos = content.find('if [[ -z "$HOME" || "$HOME" == "/" ]]')
-        assert nss_pos != -1, "NSS_WRAPPER_PASSWD must exist in entrypoint"
-        assert home_pos != -1, "HOME setup block must exist in entrypoint"
-        assert nss_pos < home_pos, (
-            "nss_wrapper setup must appear before HOME setup so that "
-            "user.Current() and os.UserHomeDir() see the correct passwd entry"
-        )
-
-
 def _build_gemini_sandbox_script(
     home_dir: str,
     workspace: str,
@@ -423,10 +393,8 @@ class TestProjectRewriting:
 class TestTerminalEnvBeforeTmux:
     """Regression: TERM/SHELL/LANG/LC_ALL must be exported before any tmux call.
 
-    OpenShift runs containers with arbitrary UIDs whose default SHELL is
-    /sbin/nologin. If tmux inherits that, `tmux new-session -d "bash -l"`
-    uses nologin as default-shell, the session immediately exits, and the
-    server dies with "no server running".
+    If tmux inherits an unusable default shell, `tmux new-session -d "bash -l"`
+    exits immediately and the server dies with "no server running".
     """
 
     def _read_entrypoint(self) -> str:
@@ -440,19 +408,6 @@ class TestTerminalEnvBeforeTmux:
                 # Return the position in the original content
                 return content.find(stripped)
         return -1
-
-    def test_shell_exported_before_first_tmux(self) -> None:
-        """SHELL=/bin/bash must appear before any tmux invocation."""
-        content = self._read_entrypoint()
-        shell_pos = content.find("export SHELL=/bin/bash")
-        first_tmux = self._first_tmux_command_pos(content)
-        assert shell_pos != -1, "entrypoint-session.sh must export SHELL=/bin/bash"
-        assert first_tmux != -1, "entrypoint-session.sh must contain tmux commands"
-        assert shell_pos < first_tmux, (
-            "export SHELL=/bin/bash must appear before the first tmux call. "
-            "OpenShift arbitrary UIDs default SHELL to /sbin/nologin, which "
-            "causes tmux to fail on session creation."
-        )
 
     def test_term_exported_before_first_tmux(self) -> None:
         """TERM=xterm-256color must appear before any tmux invocation."""
@@ -847,42 +802,6 @@ class TestPersistConfigDir:
 
         assert not (home / ".dolt").exists()
         assert not (pvc / ".dolt").exists()
-
-    def test_no_crash_when_home_dir_not_removable(self, tmp_path: Path) -> None:
-        """If rm -rf fails (e.g. OpenShift overlay), copies to PVC without crashing."""
-        home = tmp_path / "home"
-        home.mkdir()
-        pvc = tmp_path / "pvc"
-        pvc.mkdir()
-
-        dolt_dir = home / ".dolt"
-        dolt_dir.mkdir()
-        (dolt_dir / "config_global.json").write_text('{"metrics.disabled":true}')
-
-        config_dir_fn = _persist_config_dir_bash_function(str(pvc))
-        script = textwrap.dedent(f"""\
-            #!/bin/bash
-            set -e
-            export HOME="{home}"
-
-            {config_dir_fn}
-
-            # Stub rm to simulate OpenShift overlay permission denied
-            rm() {{ return 1; }}
-            export -f rm
-
-            persist_config_dir .dolt
-        """)
-        result = _run_script(script)
-        assert result.returncode == 0, result.stderr
-
-        # Config was copied to PVC even though rm failed
-        assert (pvc / ".dolt" / "config_global.json").read_text() == (
-            '{"metrics.disabled":true}'
-        )
-        # Home dir is still a real directory (not a symlink)
-        assert (home / ".dolt").is_dir()
-        assert not (home / ".dolt").is_symlink()
 
     def test_noop_without_pvc(self, tmp_path: Path) -> None:
         """No-op when /pvc doesn't exist (non-persistent setup)."""

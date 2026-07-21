@@ -44,7 +44,7 @@ def generate_pip_install_dockerfile(
     Args:
         config: Parsed paude configuration.
         include_claude_install: If True, include Claude Code installation.
-            Used for OpenShift remote builds where the base image doesn't have Claude.
+            Used when the base image does not already contain the agent.
 
     Returns:
         Generated Dockerfile content.
@@ -108,7 +108,7 @@ def generate_workspace_dockerfile(
     if config.packages:
         lines.extend(_package_install_lines(config.packages))
 
-    # Standard paude requirements (including tmux for OpenShift session persistence)
+    # Standard paude requirements
     lines.append("")
     lines.append("""# Install required system packages
 RUN if command -v apt-get >/dev/null 2>&1; then \\
@@ -181,12 +181,7 @@ RUN if ! command -v tini >/dev/null 2>&1; then \\
     lines.append("ENV LC_ALL=en_US.UTF-8")
 
     lines.append("")
-    lines.append(
-        "# Create paude user with root group (GID 0) for OpenShift compatibility"
-    )
-    lines.append(
-        "# OpenShift runs containers with arbitrary UIDs but GID 0, so home must be group-writable"
-    )
+    lines.append("# Create the fixed non-root runtime user")
     if agent is None:
         from paude.agents import get_agent
 
@@ -194,10 +189,10 @@ RUN if ! command -v tini >/dev/null 2>&1; then \\
 
     config_dir = agent.config.config_dir_name
     lines.append(
-        "RUN (id paude >/dev/null 2>&1 || useradd -M -d /home/paude -s /bin/bash -g 0 paude 2>/dev/null || adduser -D -s /bin/bash -G root paude) && "
+        "RUN (id paude >/dev/null 2>&1 || (groupadd paude 2>/dev/null && useradd -M -d /home/paude -s /bin/bash -g paude paude 2>/dev/null) || adduser -D -s /bin/bash paude) && "
         "umask 0002 && "
         f"mkdir -p {CONTAINER_HOME}/{config_dir} {CONTAINER_HOME}/.config {CONTAINER_HOME}/.paude && "
-        f"chown -R paude:0 {CONTAINER_HOME}"
+        f"chown -R paude {CONTAINER_HOME}"
     )
 
     # Copy patch script before agent install lines (agents may RUN it)

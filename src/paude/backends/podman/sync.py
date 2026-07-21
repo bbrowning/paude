@@ -73,7 +73,7 @@ class ConfigSyncer(BaseConfigSyncer):
             "root",
             t,
             "chown",
-            "paude:0",
+            "paude",
             CONFIG_PATH,
             context="set credentials directory ownership",
         )
@@ -87,7 +87,7 @@ class ConfigSyncer(BaseConfigSyncer):
             t,
             "chown",
             "-R",
-            "paude:0",
+            "paude",
             CONFIG_PATH,
             context="set credentials ownership recursively",
         )

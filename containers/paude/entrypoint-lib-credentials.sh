@@ -30,9 +30,9 @@ wait_for_path() {
     echo "${label^} ready." >&2
 }
 
-# Wait for credentials to be synced by the host (via oc cp)
+# Wait for credentials to be synchronized by the host.
 wait_for_credentials() {
-    # Only wait if /credentials exists (OpenShift with tmpfs-based credentials)
+    # Only wait when the engine created a credentials directory.
     if [[ ! -d /credentials ]]; then
         return 0
     fi
@@ -40,8 +40,7 @@ wait_for_credentials() {
 }
 
 # Wait for git repository to be pushed (when PAUDE_WAIT_FOR_GIT=1)
-# On OpenShift, git push happens after the pod starts. The agent captures
-# git metadata at conversation init, so we must wait for .git before launching.
+# Wait for a requested git push before launching the agent.
 wait_for_git() {
     if [[ "${PAUDE_WAIT_FOR_GIT:-}" != "1" ]]; then
         return 0
@@ -67,8 +66,7 @@ _find_sys_ca_bundle() {
 
 # Build custom CA bundle with paude-proxy CA cert if injected.
 # Concatenates the system CA bundle with the proxy CA cert into a
-# writable /tmp path — no root or update-ca-trust needed (works with
-# OpenShift arbitrary UIDs and non-CentOS base images like Debian).
+# writable /tmp path, without requiring update-ca-trust.
 setup_ca_trust() {
     local ca_cert="/etc/pki/ca-trust/source/anchors/paude-proxy-ca.crt"
     local custom_bundle="/tmp/paude-ca-bundle.pem"
@@ -86,7 +84,7 @@ setup_ca_trust() {
 setup_credentials() {
     local config_path="/credentials"
 
-    # Only set up if /credentials exists (OpenShift with tmpfs volume)
+    # Only set up if synchronized credentials exist.
     if [[ ! -d "$config_path" ]]; then
         return 0
     fi

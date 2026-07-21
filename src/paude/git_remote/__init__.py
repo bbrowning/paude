@@ -19,11 +19,9 @@ from paude.git_remote.container_ops import (
 )
 from paude.git_remote.exec_cmd import (
     ExecCmdBuilder,
-    openshift_exec_builder,
     podman_exec_builder,
 )
 from paude.git_remote.utils import (
-    build_openshift_remote_url,
     build_podman_remote_url,
     build_ssh_remote_url,
     count_local_only_commits,
@@ -40,7 +38,6 @@ from paude.git_remote.utils import (
     is_container_running_podman,
     is_ext_protocol_allowed,
     is_git_repository,
-    is_pod_running_openshift,
     list_paude_remotes,
     resolve_origin_cmd,
     ssh_url_to_https,
@@ -54,7 +51,6 @@ __all__ = [
     "_build_workspace_init_cmd",
     "_exec_in_container",
     "_run_cmd",
-    "build_openshift_remote_url",
     "build_podman_remote_url",
     "build_ssh_remote_url",
     "clone_from_origin",
@@ -73,9 +69,7 @@ __all__ = [
     "is_container_running_podman",
     "is_ext_protocol_allowed",
     "is_git_repository",
-    "is_pod_running_openshift",
     "list_paude_remotes",
-    "openshift_exec_builder",
     "podman_exec_builder",
     "resolve_origin_cmd",
     "set_base_ref_in_container",

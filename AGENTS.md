@@ -25,7 +25,7 @@ make clean && make run # Rebuild after container changes
 
 ## Project Layout
 
-- `src/paude/` -- Python package. Key areas: `agents/` (agent definitions), `backends/` (podman and openshift), `cli/` (typer CLI), `config/` (configuration), `container/` (container management), `transport/` (local/SSH execution).
+- `src/paude/` -- Python package. Key areas: `agents/` (agent definitions), `backends/` (Podman/Docker), `cli/` (typer CLI), `config/` (configuration), `container/` (container management), `transport/` (local/SSH execution).
 - `containers/paude/` -- Main container Dockerfile and entrypoints.
 - `containers/proxy/` -- Network filtering proxy container.
 - `tests/` -- Pytest test suite.
@@ -36,6 +36,5 @@ make clean && make run # Rebuild after container changes
 - [Security Model](docs/SECURITY.md) -- mount restrictions, credential handling, attack vectors
 - [Configuration](docs/CONFIGURATION.md) -- config file format and resolution
 - [Remote Sessions](docs/REMOTE.md) -- SSH-based remote execution
-- [OpenShift Backend](docs/OPENSHIFT.md) -- Kubernetes deployment
 - [Orchestration](docs/ORCHESTRATION.md) -- multi-agent workflows
 - [Sessions](docs/SESSIONS.md) -- session lifecycle

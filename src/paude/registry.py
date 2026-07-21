@@ -22,12 +22,10 @@ class RegistryEntry:
 
     Attributes:
         name: Session name.
-        backend_type: Backend type ("podman", "docker", or "openshift").
+        backend_type: Container engine ("podman" or "docker").
         workspace: Resolved absolute path as string.
         agent: Agent name (e.g. "claude", "gemini").
         created_at: ISO timestamp of session creation.
-        openshift_context: OpenShift kubeconfig context, if applicable.
-        openshift_namespace: OpenShift namespace, if applicable.
         engine: Container engine binary ("podman" or "docker").
     """
 
@@ -36,8 +34,6 @@ class RegistryEntry:
     workspace: str
     agent: str
     created_at: str
-    openshift_context: str | None = None
-    openshift_namespace: str | None = None
     engine: str = "podman"
     ssh_host: str | None = None
     ssh_key: str | None = None
@@ -80,7 +76,20 @@ class SessionRegistry:
         try:
             data = json.loads(self._path.read_text())
             sessions = data.get("sessions", {})
-            return {name: RegistryEntry(**entry) for name, entry in sessions.items()}
+            entries: dict[str, RegistryEntry] = {}
+            for name, raw_entry in sessions.items():
+                entry = dict(raw_entry)
+                if entry.get("backend_type") == "openshift":
+                    logger.warning(
+                        "Ignoring legacy OpenShift session '%s'; this backend is no "
+                        "longer supported",
+                        name,
+                    )
+                    continue
+                entry.pop("openshift_context", None)
+                entry.pop("openshift_namespace", None)
+                entries[name] = RegistryEntry(**entry)
+            return entries
         except (FileNotFoundError, json.JSONDecodeError, TypeError, KeyError):
             return {}
 
@@ -105,8 +114,6 @@ class SessionRegistry:
     def register(
         self,
         session: Session,
-        openshift_context: str | None = None,
-        openshift_namespace: str | None = None,
         ssh_host: str | None = None,
         ssh_key: str | None = None,
         remote_config_dir: str | None = None,
@@ -126,8 +133,6 @@ class SessionRegistry:
             workspace=str(session.workspace),
             agent=session.agent,
             created_at=session.created_at or datetime.now(UTC).isoformat(),
-            openshift_context=openshift_context,
-            openshift_namespace=openshift_namespace,
             engine=engine,
             ssh_host=ssh_host,
             ssh_key=ssh_key,

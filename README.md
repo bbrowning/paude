@@ -20,7 +20,7 @@ Run AI coding agents in secure containers. They make commits, you pull them back
 - **Isolated execution**: Your agent runs in a container, not on your host machine
 - **Safe autonomous mode**: Enable `--yolo` without fear — the agent can't send your code anywhere
 - **Git-based workflow**: The agent commits inside the container, you `git pull` the changes
-- **Run anywhere**: Locally with Podman or Docker, remotely via SSH, or on OpenShift
+- **Run anywhere**: Locally or over SSH with Podman or Docker
 
 ## Demo
 
@@ -32,7 +32,7 @@ Run AI coding agents in secure containers. They make commits, you pull them back
 
 ### Prerequisites
 
-**Container runtime**: [Podman](https://podman.io/getting-started/installation) or [Docker](https://docs.docker.com/get-docker/) for local use, or an [OpenShift](docs/OPENSHIFT.md) cluster for remote execution.
+**Container runtime**: [Podman](https://podman.io/getting-started/installation) or [Docker](https://docs.docker.com/get-docker/), locally or on a remote host reached over SSH.
 
 **Authentication** — set up credentials for your chosen provider:
 
@@ -202,7 +202,6 @@ Or just start the session and type your request in the agent interface.
 - [Security Model](docs/SECURITY.md) — attack vectors, `--yolo` safety, residual risks
 - [Orchestration](docs/ORCHESTRATION.md) — fire-and-forget workflow, harvest, PRs
 - [Remote Hosts & Docker](docs/REMOTE.md) — SSH remotes, Docker backend, GPU passthrough
-- [OpenShift Backend](docs/OPENSHIFT.md) — remote execution on Kubernetes
 
 ## How It Works
 
@@ -233,7 +232,6 @@ pip install -e .
 
 - Python 3.11+ (for the Python package)
 - [Podman](https://podman.io/getting-started/installation) or [Docker](https://docs.docker.com/get-docker/) (for local backend)
-- OpenShift CLI `oc` (for OpenShift backend)
 - Auth credentials for your provider (Google Cloud SDK, API key, etc.)
 
 ## Development

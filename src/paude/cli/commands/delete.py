@@ -47,20 +47,6 @@ def session_delete(
             help="Container backend (auto-detected from session if not specified).",
         ),
     ] = None,
-    openshift_context: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-context",
-            help="Kubeconfig context for OpenShift.",
-        ),
-    ] = None,
-    openshift_namespace: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-namespace",
-            help="OpenShift namespace (default: current context namespace).",
-        ),
-    ] = None,
 ) -> None:
     """Delete a session and all its resources permanently."""
     from paude.cli.remote import _cleanup_session_git_remote, _get_session_workspace
@@ -79,7 +65,7 @@ def session_delete(
 
     # Auto-detect backend if not specified
     if backend is None:
-        result = find_session_backend(name, openshift_context, openshift_namespace)
+        result = find_session_backend(name)
         if result:
             backend, backend_obj = result
             workspace = _get_session_workspace(backend_obj, name)
@@ -98,9 +84,7 @@ def session_delete(
             typer.echo(f"Session '{name}' not found.", err=True)
             raise typer.Exit(1)
 
-    backend_instance = _get_backend_instance(
-        backend, openshift_context, openshift_namespace
-    )
+    backend_instance = _get_backend_instance(backend)
     workspace = _get_session_workspace(backend_instance, name)
     try:
         reg_entry = registry.get(name)

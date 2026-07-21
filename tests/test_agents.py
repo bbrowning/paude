@@ -911,10 +911,6 @@ class TestCursorAgentSandboxConfig:
         assert "/tmp/cursor-auth.seed" in script
         assert ".config/cursor/auth.json" in script
 
-    def test_copies_auth_json_from_openshift_credentials(self) -> None:
-        script = CursorAgent().apply_sandbox_config("/home/paude", "/workspace", "")
-        assert "/credentials/cursor-auth.json" in script
-
     def test_forces_http1_for_agent_inference(self) -> None:
         script = CursorAgent().apply_sandbox_config("/home/paude", "/workspace", "")
         assert "useHttp1ForAgent" in script

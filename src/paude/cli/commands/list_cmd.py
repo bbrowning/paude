@@ -18,30 +18,13 @@ def session_list(
             help="Container backend to use (all backends if not specified).",
         ),
     ] = None,
-    openshift_context: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-context",
-            help="Kubeconfig context for OpenShift.",
-        ),
-    ] = None,
-    openshift_namespace: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-namespace",
-            help="OpenShift namespace (default: current context namespace).",
-        ),
-    ] = None,
 ) -> None:
     """List all sessions."""
     from paude.registry import SessionRegistry, merge_registry_with_live
     from paude.session_discovery import collect_all_sessions
 
     live_results, reachable_backends = collect_all_sessions(
-        openshift_context=openshift_context,
-        openshift_namespace=openshift_namespace,
-        skip_podman=backend == BackendType.openshift,
-        skip_openshift=backend == BackendType.podman,
+        backend_filter=backend.value if backend else None
     )
     live_sessions = [s for s, _b in live_results]
 

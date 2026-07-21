@@ -2,7 +2,7 @@
 
 Shared orchestration logic for copying host config files into
 /credentials/ so the entrypoint's setup_credentials() processes them.
-Subclasses provide transport-specific implementations (podman cp, oc cp/rsync).
+Subclasses provide engine-specific copy implementations.
 """
 
 from __future__ import annotations

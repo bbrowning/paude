@@ -33,9 +33,6 @@ class TestDockerBackendType:
     def test_podman_is_local_backend(self) -> None:
         assert is_local_backend("podman") is True
 
-    def test_openshift_is_not_local_backend(self) -> None:
-        assert is_local_backend("openshift") is False
-
 
 class TestDockerSecretsFallback:
     """Tests for Docker credential handling without secrets."""
@@ -253,7 +250,7 @@ class TestDockerVolumePermissions:
             "root",
             "paude-test",
             "chown",
-            "paude:0",
+            "paude",
             "/pvc",
         ]
 
@@ -319,7 +316,7 @@ class TestDockerCredentialInjection:
 
         cmd = mock_run.call_args[0][0]
         shell_cmd = cmd[-1]
-        assert "chown paude:0" in shell_cmd
+        assert "chown paude" in shell_cmd
         assert "chmod 600" in shell_cmd
 
     @patch("subprocess.run")
@@ -350,7 +347,7 @@ class TestDockerCredentialInjection:
         ]
         assert len(exec_calls) == 1
         shell_cmd = exec_calls[0][0][0][-1]
-        assert "chown paude:0" in shell_cmd
+        assert "chown paude" in shell_cmd
 
 
 class TestStubCredentialInjection:

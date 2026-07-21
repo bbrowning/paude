@@ -5,7 +5,7 @@
 Instead of typing long `paude create` commands every time, you can store defaults in configuration files. For example, this:
 
 ```bash
-paude create --backend openshift --yolo --git --allowed-domains default --allowed-domains golang
+paude create --backend docker --yolo --git --allowed-domains default --allowed-domains golang
 ```
 
 becomes simply:
@@ -40,38 +40,13 @@ Then edit it to set the values you want. Any field set to `null` or omitted uses
 ```json
 {
   "defaults": {
-    "backend": "openshift",
+    "backend": "docker",
     "agent": "claude",
     "yolo": true,
     "git": true,
-    "pvc-size": "10Gi",
     "platform": "linux/amd64",
     "gpu": "all",
-    "allowed-domains": ["default", "golang"],
-    "openshift": {
-      "context": "my-cluster",
-      "namespace": "my-ns",
-      "resources": {
-        "requests": {
-          "cpu": "250m",
-          "memory": "2Gi"
-        },
-        "limits": {
-          "cpu": "2",
-          "memory": "4Gi"
-        }
-      },
-      "build-resources": {
-        "requests": {
-          "cpu": "500m",
-          "memory": "1Gi"
-        },
-        "limits": {
-          "cpu": "1",
-          "memory": "2Gi"
-        }
-      }
-    }
+    "allowed-domains": ["default", "golang"]
   }
 }
 ```
@@ -138,18 +113,12 @@ paude create --dry-run
 | `agent` | yes | yes | `--agent` | `claude` |
 | `yolo` | yes | — | `--yolo` | `false` |
 | `git` | yes | — | `--git` | `false` |
-| `pvc-size` | yes | — | `--pvc-size` | `10Gi` |
 | `platform` | yes | — | `--platform` | (none) |
 | `allowed-domains` | yes | yes | `--allowed-domains` | `["default"]` |
 | `gpu` | yes | — | `--gpu` / `--no-gpu` | (none) |
-| `openshift.context` | yes | — | `--openshift-context` | (none) |
-| `openshift.namespace` | yes | — | `--openshift-namespace` | (none) |
-| `openshift.resources` | yes | — | — | (none) |
-| `openshift.build-resources` | yes | — | — | (none) |
 | `provider` | yes | yes | `--provider` | (none) |
-| `storage-class` | — | — | `--storage-class` | (none) |
 
-> **Backend values**: `podman` (default), `docker`, or `openshift`.
+> **Backend values**: `podman` (default) or `docker`.
 
 ## Network Domains
 
@@ -250,8 +219,7 @@ paude connect --github-token ghp_yourtoken my-project
 ```
 
 The token is injected at connect time only:
-- **Podman**: passed as `-e GH_TOKEN=...` to `podman exec` (not stored in the container definition)
-- **OpenShift**: written to `/credentials/github_token` in the pod's tmpfs
+- Passed as `-e GH_TOKEN=...` to the selected engine's `exec` command (not stored in the container definition)
 - `GH_CONFIG_DIR=/tmp/gh-config` ensures no cached host credentials are ever consulted
 
 **Security notes**:

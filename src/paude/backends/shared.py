@@ -36,7 +36,7 @@ PROXY_BLOCKED_LOG_PATH = "/tmp/paude-proxy-blocked.log"  # noqa: S108
 CA_CERT_CONTAINER_PATH = "/etc/pki/ca-trust/source/anchors/paude-proxy-ca.crt"
 
 # Custom CA bundle combining system CAs + proxy CA cert.
-# Written to /tmp so no root is needed (works with OpenShift arbitrary UIDs).
+# Written to /tmp so no root is needed.
 CA_BUNDLE_PATH = "/tmp/paude-ca-bundle.pem"  # noqa: S108
 
 # System CA bundle paths across distros (RHEL/CentOS, Debian/Ubuntu,
@@ -60,7 +60,7 @@ def derive_agent_ip(proxy_ip: str) -> str:
     return str(ipaddress.ip_address(proxy_ip) + 1)
 
 
-# CA certificate polling constants (shared by Podman and OpenShift backends).
+# CA certificate polling constants.
 CA_CERT_POLL_INTERVAL = 1
 CA_CERT_POLL_TIMEOUT = 30
 
@@ -122,7 +122,7 @@ class ProxyCredentials(Mapping[str, str]):
 
 
 # Python snippet executed inside containers to extract the OpenClaw auth token.
-# Used by both Podman and OpenShift backends via exec.
+# Used by both supported container engines via exec.
 OPENCLAW_AUTH_READER_SCRIPT = (
     "import json,sys,os\n"
     "try:\n"
@@ -192,9 +192,7 @@ def build_session_env(
 ) -> tuple[dict[str, str], list[str]]:
     """Build environment variables and args for a session.
 
-    Consolidates the duplicated env-building logic from Podman and OpenShift
-    backends: agent env, YOLO flags, agent args, backward compat, proxy env,
-    and prompt suppression.
+    Builds agent env, YOLO flags, agent args, proxy env, and prompt suppression.
 
     When a proxy is configured, all real credentials are handled by the proxy
     container and the agent only sees dummy sentinel values.
@@ -253,28 +251,6 @@ def resource_name(session_name: str) -> str:
 def proxy_resource_name(session_name: str) -> str:
     """Get the proxy resource name for a session (deployment, container, service)."""
     return f"paude-proxy-{session_name}"
-
-
-def pod_name(session_name: str) -> str:
-    """Get the pod name for a session (OpenShift StatefulSet pod)."""
-    return f"paude-{session_name}-0"
-
-
-def agent_pod_fqdn(session_name: str, namespace: str) -> str:
-    """Get the fully-qualified DNS name for the agent StatefulSet pod.
-
-    Requires a headless Service whose name matches the StatefulSet's
-    ``serviceName`` (i.e. ``resource_name(session_name)``).
-    """
-    return (
-        f"{pod_name(session_name)}.{resource_name(session_name)}"
-        f".{namespace}.svc.cluster.local"
-    )
-
-
-def pvc_name(session_name: str) -> str:
-    """Get the PVC name for a session (OpenShift workspace PVC)."""
-    return f"workspace-paude-{session_name}-0"
 
 
 def volume_name(session_name: str) -> str:

@@ -44,25 +44,10 @@ class ResolvedCreateOptions:
     git: SettingValue[bool] = field(
         default_factory=lambda: SettingValue(False, "built-in")
     )
-    pvc_size: SettingValue[str] = field(
-        default_factory=lambda: SettingValue("10Gi", "built-in")
-    )
     platform: SettingValue[str | None] = field(
         default_factory=lambda: SettingValue(None, "built-in")
     )
     gpu: SettingValue[str | None] = field(
-        default_factory=lambda: SettingValue(None, "built-in")
-    )
-    openshift_context: SettingValue[str | None] = field(
-        default_factory=lambda: SettingValue(None, "built-in")
-    )
-    openshift_namespace: SettingValue[str | None] = field(
-        default_factory=lambda: SettingValue(None, "built-in")
-    )
-    openshift_resources: SettingValue[dict[str, dict[str, str]] | None] = field(
-        default_factory=lambda: SettingValue(None, "built-in")
-    )
-    openshift_build_resources: SettingValue[dict[str, dict[str, str]] | None] = field(
         default_factory=lambda: SettingValue(None, "built-in")
     )
     provider: SettingValue[str | None] = field(
@@ -84,10 +69,7 @@ def resolve_create_options(
     cli_provider: str | None = None,
     cli_yolo: bool | None,
     cli_git: bool | None,
-    cli_pvc_size: str | None,
     cli_platform: str | None,
-    cli_openshift_context: str | None,
-    cli_openshift_namespace: str | None,
     cli_gpu: str | None,
     cli_allowed_domains: list[str] | None,
     cli_otel_endpoint: str | None = None,
@@ -106,6 +88,12 @@ def resolve_create_options(
     unless CLI --allowed-domains was explicitly provided.
     """
     result = ResolvedCreateOptions()
+
+    if user_defaults.backend not in (None, "podman", "docker"):
+        raise ValueError(
+            f"Unsupported backend '{user_defaults.backend}' in user defaults. "
+            "Supported backends are: podman, docker."
+        )
 
     # --- Scalar settings: CLI > project > user > built-in ---
     result.backend = _resolve_scalar(
@@ -150,13 +138,6 @@ def resolve_create_options(
         builtin=False,
     )
 
-    result.pvc_size = _resolve_scalar(
-        cli=cli_pvc_size,
-        project=None,
-        user=user_defaults.pvc_size,
-        builtin="10Gi",
-    )
-
     result.platform = _resolve_scalar(
         cli=cli_platform,
         project=None,
@@ -168,34 +149,6 @@ def resolve_create_options(
         cli=cli_gpu,
         project=None,
         user=user_defaults.gpu,
-        builtin=None,
-    )
-
-    result.openshift_context = _resolve_scalar(
-        cli=cli_openshift_context,
-        project=None,
-        user=user_defaults.openshift.context,
-        builtin=None,
-    )
-
-    result.openshift_namespace = _resolve_scalar(
-        cli=cli_openshift_namespace,
-        project=None,
-        user=user_defaults.openshift.namespace,
-        builtin=None,
-    )
-
-    result.openshift_resources = _resolve_scalar(
-        cli=None,  # not exposed via CLI or project config
-        project=None,
-        user=user_defaults.openshift.resources,
-        builtin=None,
-    )
-
-    result.openshift_build_resources = _resolve_scalar(
-        cli=None,  # not exposed via CLI or project config
-        project=None,
-        user=user_defaults.openshift.build_resources,
         builtin=None,
     )
 

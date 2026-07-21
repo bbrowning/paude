@@ -8,36 +8,29 @@ import typer
 
 from paude.backends import PodmanBackend
 from paude.backends.base import Backend, Session
-from paude.backends.openshift import OpenShiftBackend, OpenShiftConfig
 from paude.cli.app import BackendType
 from paude.config.models import PaudeConfig
 from paude.container.engine import ContainerEngine
 from paude.session_discovery import (
     collect_all_sessions,
-    create_openshift_backend,
     find_workspace_session,
 )
 
 
 def find_session_backend(
     session_name: str,
-    openshift_context: str | None = None,
-    openshift_namespace: str | None = None,
     connect_timeout: int | None = None,
 ) -> tuple[BackendType, Backend] | None:
     """Find which backend contains the given session.
 
     Checks the local registry first for SSH sessions, then probes
-    local and OpenShift backends.
+    local Podman and Docker engines.
 
     Args:
         session_name: Name of the session to find.
-        openshift_context: Optional OpenShift context.
-        openshift_namespace: Optional OpenShift namespace.
-
     Returns:
         Tuple of (backend_type, backend_instance) if found, None otherwise.
-        The backend_instance is either PodmanBackend or OpenShiftBackend.
+        The backend instance uses either Podman or Docker.
     """
     # Check registry for SSH sessions first
     from paude.registry import SessionRegistry
@@ -65,15 +58,6 @@ def find_session_backend(
     except Exception:  # noqa: S110 - Docker may not be available
         pass
 
-    # Try OpenShift
-    os_backend = create_openshift_backend(openshift_context, openshift_namespace)
-    if os_backend is not None:
-        try:
-            if os_backend.get_session(session_name) is not None:
-                return (BackendType.openshift, os_backend)
-        except Exception:  # noqa: S110
-            pass
-
     return None
 
 
@@ -89,8 +73,6 @@ def _build_ssh_backend(
 
 def _get_backend_instance(
     backend: BackendType,
-    openshift_context: str | None = None,
-    openshift_namespace: str | None = None,
     ssh_host: str | None = None,
     ssh_key: str | None = None,
 ) -> Backend:
@@ -98,33 +80,23 @@ def _get_backend_instance(
 
     Args:
         backend: The backend type to create.
-        openshift_context: Optional OpenShift context.
-        openshift_namespace: Optional OpenShift namespace.
         ssh_host: Optional SSH host for remote execution.
         ssh_key: Optional SSH key path.
 
     Returns:
-        Backend instance (PodmanBackend or OpenShiftBackend).
+        Backend instance configured for Podman or Docker.
     """
-    if backend in (BackendType.podman, BackendType.docker):
-        transport = None
-        if ssh_host:
-            from paude.transport.ssh import SshTransport, parse_ssh_host
+    transport = None
+    if ssh_host:
+        from paude.transport.ssh import SshTransport, parse_ssh_host
 
-            host, port = parse_ssh_host(ssh_host)
-            transport = SshTransport(host, key=ssh_key, port=port)
-        engine = ContainerEngine(backend.value, transport=transport)
-        return PodmanBackend(engine=engine)
-    openshift_config = OpenShiftConfig(
-        context=openshift_context,
-        namespace=openshift_namespace,
-    )
-    return OpenShiftBackend(config=openshift_config)
+        host, port = parse_ssh_host(ssh_host)
+        transport = SshTransport(host, key=ssh_key, port=port)
+    engine = ContainerEngine(backend.value, transport=transport)
+    return PodmanBackend(engine=engine)
 
 
 def _auto_select_session(
-    openshift_context: str | None,
-    openshift_namespace: str | None,
     *,
     status_filter: str | None = None,
     no_sessions_hints: list[str],
@@ -136,8 +108,6 @@ def _auto_select_session(
     code 1 if no sessions found or multiple sessions found.
 
     Args:
-        openshift_context: Optional OpenShift context.
-        openshift_namespace: Optional OpenShift namespace.
         status_filter: Optional status filter (e.g. "running").
         no_sessions_hints: Messages to show when no sessions found.
         multi_hint_format: Format string for each session in multi-session
@@ -147,15 +117,11 @@ def _auto_select_session(
     Returns:
         Tuple of (session, backend) for the selected session.
     """
-    workspace_match = find_workspace_session(
-        openshift_context, openshift_namespace, status_filter=status_filter
-    )
+    workspace_match = find_workspace_session(status_filter=status_filter)
     if workspace_match:
         return workspace_match
 
-    all_sessions, _reachable = collect_all_sessions(
-        openshift_context, openshift_namespace, status_filter=status_filter
-    )
+    all_sessions, _reachable = collect_all_sessions(status_filter=status_filter)
     if not all_sessions:
         for hint in no_sessions_hints:
             typer.echo(hint, err=True)
@@ -326,8 +292,6 @@ def _finalize_session_create(
     expanded_domains: list[str],
     yolo: bool,
     git: bool,
-    openshift_context: str | None = None,
-    openshift_namespace: str | None = None,
     no_clone_origin: bool = False,
     ssh_host: str | None = None,
     ssh_key: str | None = None,
@@ -341,8 +305,6 @@ def _finalize_session_create(
 
     SessionRegistry().register(
         session,
-        openshift_context,
-        openshift_namespace,
         ssh_host=ssh_host,
         ssh_key=ssh_key,
         remote_config_dir=remote_config_dir,
@@ -363,8 +325,6 @@ def _finalize_session_create(
         _setup_git_after_create(
             session_name=session.name,
             backend_type=bt,
-            openshift_context=openshift_context,
-            openshift_namespace=openshift_namespace,
             no_clone_origin=no_clone_origin,
             ssh_host=ssh_host,
             ssh_key=ssh_key,

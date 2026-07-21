@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# Entrypoint for persistent sessions (Podman and OpenShift)
+# Entrypoint for persistent sessions
 # Handles: HOME setup, credentials from tmpfs, agent startup
 # All agent-specific behavior is driven by PAUDE_AGENT_* env vars.
 
@@ -25,48 +25,7 @@ if [[ -f /usr/local/bin/entrypoint-lib-openclaw.sh ]]; then
     source /usr/local/bin/entrypoint-lib-openclaw.sh
 fi
 
-# OpenShift CRI-O injects home=/ for arbitrary UIDs. Fix /etc/passwd directly
-# (made group-writable in Dockerfile) so all programs — including statically
-# linked Go binaries that bypass NSS — see the correct home directory.
-# nss_wrapper is kept as a fallback for environments where /etc/passwd is
-# read-only (e.g. older base images).
-_PAUDE_HOME="/home/paude"
-_CURRENT_UID=$(id -u)
-_PASSWD_HOME=$(getent passwd "$_CURRENT_UID" 2>/dev/null | cut -d: -f6)
-if [[ "$_PASSWD_HOME" != "$_PAUDE_HOME" ]]; then
-    if [[ -n "$_PASSWD_HOME" ]]; then
-        # UID exists with wrong home (CRI-O injected home=/) — fix it
-        _SED_EXPR="s|^\([^:]*:[^:]*:${_CURRENT_UID}:[^:]*:[^:]*:\)[^:]*:\(.*\)$|\1${_PAUDE_HOME}:\2|"
-        if sed -i "$_SED_EXPR" /etc/passwd 2>/dev/null; then
-            : # /etc/passwd updated in place
-        else
-            # Read-only /etc/passwd — fall back to nss_wrapper overlay
-            sed "$_SED_EXPR" /etc/passwd > /tmp/nss_wrapper_passwd
-            export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD} }/usr/lib64/libnss_wrapper.so"
-            export NSS_WRAPPER_PASSWD="/tmp/nss_wrapper_passwd"
-            export NSS_WRAPPER_GROUP=/etc/group
-        fi
-        unset _SED_EXPR
-    else
-        # UID not in /etc/passwd at all — append directly or via nss_wrapper
-        _ENTRY="paude:x:${_CURRENT_UID}:0:paude:${_PAUDE_HOME}:/bin/bash"
-        if echo "$_ENTRY" >> /etc/passwd 2>/dev/null; then
-            : # appended to /etc/passwd
-        else
-            cp /etc/passwd /tmp/nss_wrapper_passwd
-            echo "$_ENTRY" >> /tmp/nss_wrapper_passwd
-            export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD} }/usr/lib64/libnss_wrapper.so"
-            export NSS_WRAPPER_PASSWD="/tmp/nss_wrapper_passwd"
-            export NSS_WRAPPER_GROUP=/etc/group
-        fi
-        unset _ENTRY
-    fi
-fi
-unset _PAUDE_HOME _CURRENT_UID _PASSWD_HOME
-
-# Ensure HOME is set correctly for OpenShift arbitrary UID
-# OpenShift runs containers with random UIDs that don't exist in /etc/passwd
-# HOME may be unset, empty, or set to "/" which is not writable
+# Ensure HOME points to a writable runtime directory.
 if [[ -z "$HOME" || "$HOME" == "/" ]]; then
     export HOME="/home/paude"
 fi
@@ -85,15 +44,6 @@ if [[ "$AGENT_NAME" == "codex" ]] && [[ -f "$HOME/.codex/paude-chatgpt-http.conf
     AGENT_ARGS="--profile paude-chatgpt-http ${AGENT_ARGS}"
 fi
 
-# Ensure all home directories are group-writable for OpenShift arbitrary UID
-chmod -R g+rwX "$HOME" 2>/dev/null || true
-
-# Make PVC mount group-writable for OpenShift (PVC mounted at /pvc)
-# The paude user is in group 0, so g+rwX allows write access
-if [[ -d /pvc ]]; then
-    chmod g+rwX /pvc 2>/dev/null || true
-fi
-
 # Update CA trust early (before any HTTPS calls like agent install)
 # The CA cert is injected by the host after the container starts.
 setup_ca_trust
@@ -108,8 +58,8 @@ persist_agent_config
 persist_config_dir .dolt
 wait_for_git
 
-# Fix git "dubious ownership" error when running as arbitrary UID (OpenShift restricted SCC)
-# Runs after setup_credentials so it writes to the final (writable) gitconfig.
+# Avoid git ownership warnings for engine-managed volumes.
+# This runs after setup_credentials so it writes to the final gitconfig.
 # Guard against duplicates: gitconfig is PVC-persistent so --add would accumulate entries.
 if ! git config --global --get safe.directory '^\*$' &>/dev/null; then
     git config --global --add safe.directory '*' 2>/dev/null || true
@@ -119,14 +69,14 @@ fi
 # Also keep home .local/bin for tools installed during image build
 export PATH="/pvc/.local/bin:$HOME/.local/bin:$PATH"
 
-# Set up GitHub token from credentials file if available (OpenShift path)
+# Set up GitHub token from the synced credentials file if available.
 if [[ -f /credentials/github_token ]]; then
     GH_TOKEN=$(<"/credentials/github_token")
     export GH_TOKEN
     export GH_CONFIG_DIR="/tmp/gh-config"
     mkdir -p "$GH_CONFIG_DIR" 2>/dev/null || true
 fi
-# Load secret environment variables from credentials tmpfs (OpenShift)
+# Load secret environment variables from synchronized credentials.
 if [[ -d /credentials/env ]]; then
     for f in /credentials/env/*; do
         [[ -f "$f" ]] || continue
@@ -147,8 +97,7 @@ if [[ -z "${PAUDE_SKIP_AGENT_INSTALL:-}" ]] && [[ -z "${PAUDE_SKIP_CLAUDE_INSTAL
 fi
 
 # Set up terminal environment for tmux
-# Must be set before any tmux calls — OpenShift arbitrary UIDs default
-# SHELL to /sbin/nologin, which causes tmux to fail on session creation.
+# Set terminal defaults before any tmux calls.
 export TERM=xterm-256color
 export LANG="${LANG:-C.UTF-8}"
 export LC_ALL="${LC_ALL:-C.UTF-8}"

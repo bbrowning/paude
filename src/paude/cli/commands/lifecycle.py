@@ -30,20 +30,6 @@ def session_start(
             help="Container backend (auto-detected from session if not specified).",
         ),
     ] = None,
-    openshift_context: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-context",
-            help="Kubeconfig context for OpenShift.",
-        ),
-    ] = None,
-    openshift_namespace: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-namespace",
-            help="OpenShift namespace (default: current context namespace).",
-        ),
-    ] = None,
     github_token: Annotated[
         str | None,
         typer.Option(
@@ -63,7 +49,7 @@ def session_start(
 
     # Auto-detect backend if name is provided but backend is not
     if name and backend is None:
-        result = find_session_backend(name, openshift_context, openshift_namespace)
+        result = find_session_backend(name)
         if result:
             backend, backend_obj = result
             try:
@@ -79,8 +65,6 @@ def session_start(
     # If no name and no backend specified, search all backends
     if not name and backend is None:
         session, backend_obj = _auto_select_session(
-            openshift_context,
-            openshift_namespace,
             no_sessions_hints=[
                 "No sessions found.",
                 "",
@@ -94,11 +78,7 @@ def session_start(
         raise typer.Exit(exit_code)
 
     # Backend specified explicitly
-    backend_instance = _get_backend_instance(
-        backend,  # type: ignore[arg-type]
-        openshift_context,
-        openshift_namespace,
-    )
+    backend_instance = _get_backend_instance(backend)  # type: ignore[arg-type]
     if not name:
         name = resolve_session_for_backend(backend_instance)
         if not name:
@@ -128,25 +108,11 @@ def session_stop(
             help="Container backend (auto-detected from session if not specified).",
         ),
     ] = None,
-    openshift_context: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-context",
-            help="Kubeconfig context for OpenShift.",
-        ),
-    ] = None,
-    openshift_namespace: Annotated[
-        str | None,
-        typer.Option(
-            "--openshift-namespace",
-            help="OpenShift namespace (default: current context namespace).",
-        ),
-    ] = None,
 ) -> None:
     """Stop a session (preserves data)."""
     # Auto-detect backend if name is provided but backend is not
     if name and backend is None:
-        result = find_session_backend(name, openshift_context, openshift_namespace)
+        result = find_session_backend(name)
         if result:
             backend, backend_obj = result
             try:
@@ -163,8 +129,6 @@ def session_stop(
     # If no name and no backend specified, search all backends
     if not name and backend is None:
         session, backend_obj = _auto_select_session(
-            openshift_context,
-            openshift_namespace,
             status_filter="running",
             no_sessions_hints=["No running sessions to stop."],
             multi_hint_format="  paude stop {name}  # {backend_type}",
@@ -175,11 +139,7 @@ def session_stop(
         return
 
     # Backend specified explicitly
-    backend_instance = _get_backend_instance(
-        backend,  # type: ignore[arg-type]
-        openshift_context,
-        openshift_namespace,
-    )
+    backend_instance = _get_backend_instance(backend)  # type: ignore[arg-type]
     if not name:
         name = resolve_session_for_backend(backend_instance, status_filter="running")
         if not name:

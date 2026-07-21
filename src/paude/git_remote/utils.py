@@ -14,20 +14,6 @@ from paude.constants import CONTAINER_WORKSPACE, DEFAULT_BRANCHES
 from paude.git_remote.container_ops import _build_set_origin_cmd, _run_cmd
 
 
-def build_openshift_remote_url(
-    pod_name: str,
-    namespace: str,
-    context: str | None = None,
-    workspace_path: str = CONTAINER_WORKSPACE,
-) -> str:
-    """Build a git ext:: remote URL for an OpenShift pod."""
-    if context:
-        cmd = f"oc --context {context} exec -i {pod_name} -n {namespace}"
-    else:
-        cmd = f"oc exec -i {pod_name} -n {namespace}"
-    return f"ext::{cmd} -- %S {workspace_path}"
-
-
 def build_podman_remote_url(
     container_name: str,
     workspace_path: str = CONTAINER_WORKSPACE,
@@ -314,27 +300,4 @@ def is_container_running_podman(
     result = _run_cmd(cmd, transport=transport)
     if result.returncode == 0:
         return result.stdout.strip().lower() == "true"
-    return False
-
-
-def is_pod_running_openshift(
-    pod_name: str,
-    namespace: str,
-    context: str | None = None,
-) -> bool:
-    """Check if an OpenShift pod is running."""
-    oc_cmd = ["oc"]
-    if context:
-        oc_cmd.extend(["--context", context])
-    oc_cmd.extend(
-        ["get", "pod", pod_name, "-n", namespace, "-o", "jsonpath={.status.phase}"]
-    )
-
-    result = subprocess.run(
-        oc_cmd,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0:
-        return result.stdout.strip().lower() == "running"
     return False

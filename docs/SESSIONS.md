@@ -70,13 +70,7 @@ paude delete my-project --confirm
 # Explicit backend selection
 paude create my-project --backend=podman
 paude create my-project --backend=docker
-paude create my-project --backend=openshift
 paude list --backend=podman
-
-# Backend-specific options
-paude create my-project --backend=openshift \
-  --pvc-size=50Gi \
-  --storage-class=fast-ssd
 ```
 
 ## Code Synchronization

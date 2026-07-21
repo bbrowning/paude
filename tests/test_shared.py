@@ -13,9 +13,7 @@ from paude.backends.shared import (
     build_session_env,
     gather_proxy_credentials,
     network_name,
-    pod_name,
     proxy_resource_name,
-    pvc_name,
     resource_name,
     volume_name,
 )
@@ -182,12 +180,6 @@ class TestNamingHelpers:
 
     def test_proxy_resource_name(self) -> None:
         assert proxy_resource_name("my-session") == "paude-proxy-my-session"
-
-    def test_pod_name(self) -> None:
-        assert pod_name("my-session") == "paude-my-session-0"
-
-    def test_pvc_name(self) -> None:
-        assert pvc_name("my-session") == "workspace-paude-my-session-0"
 
     def test_volume_name(self) -> None:
         assert volume_name("my-session") == "paude-my-session-workspace"

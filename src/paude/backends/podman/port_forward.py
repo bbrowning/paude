@@ -2,7 +2,7 @@
 
 Uses a background TCP proxy process that tunnels connections through
 ``podman exec`` + ``socat``, so the container sees every connection
-from 127.0.0.1 (matching ``oc port-forward`` behaviour on OpenShift).
+from 127.0.0.1.
 """
 
 from __future__ import annotations

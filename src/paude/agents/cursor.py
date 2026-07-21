@@ -88,7 +88,7 @@ if [ -f /tmp/cursor-auth.seed ]; then
     cp /tmp/cursor-auth.seed "{home}/.config/cursor/auth.json"
     chmod g+rw "{home}/.config/cursor/auth.json" 2>/dev/null || true
 fi
-# OpenShift path: synced to /credentials/ by sync.py
+# Synced credential path used by the container entrypoint.
 if [ -f /credentials/cursor-auth.json ]; then
     cp /credentials/cursor-auth.json "{home}/.config/cursor/auth.json"
     chmod g+rw "{home}/.config/cursor/auth.json" 2>/dev/null || true

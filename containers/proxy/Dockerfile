@@ -30,10 +30,10 @@ RUN ARCH=$(uname -m) && \
 COPY --from=builder /paude-proxy /usr/local/bin/paude-proxy
 COPY --chmod=755 entrypoint.sh /usr/local/bin/paude-entrypoint.sh
 
-# Writable directories for OpenShift arbitrary UIDs
-RUN mkdir -p /data/ca /tmp && chmod 777 /data/ca /tmp
+# Writable runtime directories
+RUN mkdir -p /data/ca /tmp
 # dnsmasq needs writable pid directory
-RUN mkdir -p /run/dnsmasq && chmod 777 /run/dnsmasq
+RUN mkdir -p /run/dnsmasq
 
 EXPOSE 3128
 

@@ -103,26 +103,11 @@ paude/
 │   │   │   ├── exceptions.py  # Podman-specific exceptions
 │   │   │   ├── helpers.py     # Helper functions
 │   │   │   └── proxy.py       # Proxy management
-│   │   └── openshift/         # OpenShift backend
-│   │       ├── backend.py     # OpenShiftBackend implementation
-│   │       ├── build.py       # Image building on OpenShift
-│   │       ├── config.py      # OpenShift configuration
-│   │       ├── exceptions.py  # OpenShift-specific exceptions
-│   │       ├── oc.py          # oc CLI wrapper
-│   │       ├── pods.py        # Pod query helpers
-│   │       ├── proxy.py       # Proxy pod management
-│   │       ├── resources.py   # K8s resource builders
-│   │       ├── session_connection.py  # Session connection management
-│   │       ├── session_domains.py     # Domain management
-│   │       ├── session_lifecycle.py   # Session create/delete/start/stop
-│   │       ├── session_lookup.py      # Session queries and discovery
-│   │       └── sync.py        # File synchronization
 │   ├── cli/                   # CLI implementation
 │   │   ├── app.py             # Typer app definition
 │   │   ├── commands.py        # Session commands (delete, start, stop, etc.)
 │   │   ├── config_cmd.py      # Configuration commands
 │   │   ├── create.py          # Session create command
-│   │   ├── create_openshift.py # OpenShift-specific create options
 │   │   ├── create_podman.py   # Podman-specific create options
 │   │   ├── domains.py         # Domain CLI helpers
 │   │   ├── helpers.py         # Shared CLI helpers
@@ -335,4 +320,3 @@ This project enforces strict code quality standards to maintain long-term mainta
 - **No duplication:** Extract repeated code to shared utilities
 
 For detailed standards including abstraction patterns, refactoring triggers, and testability requirements, see `.claude/CLAUDE.md`.
-
