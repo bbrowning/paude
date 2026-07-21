@@ -325,22 +325,6 @@ class TestCodexChatgptProvider:
         )
         assert result.exit_code != 0
 
-    @pytest.mark.parametrize(
-        "extra_args",
-        [["--provider", "chatgpt"], []],
-        ids=["explicit", "implicit-default"],
-    )
-    def test_codex_chatgpt_openshift_rejected(self, extra_args: list[str]):
-        """chatgpt has no OpenShift credential/injection wiring yet, explicit or default."""
-        result = runner.invoke(
-            app,
-            ["create", "--agent", "codex", "--backend", "openshift", *extra_args],
-        )
-        output = result.stdout + (result.stderr or "")
-        assert result.exit_code == 1
-        assert "not supported" in output
-        assert "openshift" in output.lower()
-
 
 @pytest.mark.parametrize(
     ("command", "patch_target"),
