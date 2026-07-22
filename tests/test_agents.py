@@ -1258,7 +1258,7 @@ class TestOpenCodeAgentDockerfile:
     def test_sets_path(self) -> None:
         lines = OpenCodeAgent().dockerfile_install_lines("/home/paude")
         text = "\n".join(lines)
-        assert "/home/paude/.local/bin" in text
+        assert "/home/paude/.opencode/bin" in text
 
     def test_uses_container_home(self) -> None:
         lines = OpenCodeAgent().dockerfile_install_lines("/custom/home")
@@ -1273,7 +1273,7 @@ class TestOpenCodeAgentDockerfile:
     def test_binary_verification(self) -> None:
         lines = OpenCodeAgent().dockerfile_install_lines("/home/paude")
         text = "\n".join(lines)
-        assert "test -x /home/paude/.local/bin/opencode" in text
+        assert "test -x /home/paude/.opencode/bin/opencode" in text
 
     def test_shell_reset(self) -> None:
         lines = OpenCodeAgent().dockerfile_install_lines("/home/paude")

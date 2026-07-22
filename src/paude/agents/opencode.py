@@ -23,7 +23,7 @@ class OpenCodeAgent:
             process_name="opencode",
             session_name="opencode",
             install_script="curl -fsSL https://opencode.ai/install | bash",
-            install_dir=".local/bin",
+            install_dir=".opencode/bin",
             env_vars={"OPENCODE_DISABLE_AUTOUPDATE": "true", **creds.extra_env_vars},
             passthrough_env_vars=creds.passthrough_env_vars,
             secret_env_vars=creds.secret_env_vars,
