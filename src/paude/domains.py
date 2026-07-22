@@ -72,6 +72,10 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
     "openai": [
         ".openai.com",
     ],
+    "opencode": [
+        "opencode.ai",
+        ".opencode.ai",
+    ],
     "openclaw": [
         ".anthropic.com",
         ".openai.com",

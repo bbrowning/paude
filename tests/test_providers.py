@@ -91,6 +91,25 @@ class TestAgentProviderResolution:
         provider, _ = resolve_agent_provider("claude")
         assert provider.name == "vertex"
 
+    def test_resolve_opencode_anthropic(self) -> None:
+        provider, agent_cfg = resolve_agent_provider("opencode", "anthropic")
+        assert provider.name == "anthropic"
+        assert isinstance(agent_cfg, AgentProviderConfig)
+
+    def test_resolve_opencode_openai(self) -> None:
+        provider, agent_cfg = resolve_agent_provider("opencode", "openai")
+        assert provider.name == "openai"
+        assert isinstance(agent_cfg, AgentProviderConfig)
+
+    def test_resolve_opencode_vertex(self) -> None:
+        provider, agent_cfg = resolve_agent_provider("opencode", "vertex")
+        assert provider.name == "vertex"
+        assert isinstance(agent_cfg, AgentProviderConfig)
+
+    def test_resolve_opencode_default(self) -> None:
+        provider, _ = resolve_agent_provider("opencode")
+        assert provider.name == "anthropic"
+
     def test_resolve_openclaw_vertex(self) -> None:
         _, agent_cfg = resolve_agent_provider("openclaw", "vertex")
         assert agent_cfg.model_config["primary"] == "anthropic-vertex/claude-sonnet-4-6"
@@ -157,6 +176,9 @@ class TestDefaultProviders:
     def test_claude_default_is_vertex(self) -> None:
         assert DEFAULT_PROVIDER["claude"] == "vertex"
 
+    def test_opencode_default_is_anthropic(self) -> None:
+        assert DEFAULT_PROVIDER["opencode"] == "anthropic"
+
     def test_openclaw_default_is_vertex(self) -> None:
         assert DEFAULT_PROVIDER["openclaw"] == "vertex"
 
@@ -189,6 +211,12 @@ class TestSupportedProviders:
         providers = supported_providers("claude")
         assert "vertex" in providers
         assert "anthropic" in providers
+
+    def test_opencode_providers(self) -> None:
+        providers = supported_providers("opencode")
+        assert "anthropic" in providers
+        assert "openai" in providers
+        assert "vertex" in providers
 
     def test_openclaw_providers(self) -> None:
         providers = supported_providers("openclaw")

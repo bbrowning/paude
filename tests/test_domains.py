@@ -629,6 +629,32 @@ class TestExpandDomainsWithExtraAliases:
             assert domain in result
 
 
+class TestOpenCodeAlias:
+    """Tests for the 'opencode' domain alias."""
+
+    def test_opencode_alias_exists(self):
+        """'opencode' alias exists in DOMAIN_ALIASES."""
+        assert "opencode" in DOMAIN_ALIASES
+
+    def test_opencode_not_in_defaults(self):
+        """'opencode' is NOT in DEFAULT_ALIASES (opt-in only)."""
+        assert "opencode" not in DEFAULT_ALIASES
+
+    def test_opencode_expands_to_correct_domains(self):
+        """'opencode' expands to opencode.ai domains."""
+        result = expand_domains(["opencode"])
+        assert result is not None
+        assert "opencode.ai" in result
+        assert ".opencode.ai" in result
+
+    def test_opencode_in_format_display(self):
+        """format_domains_for_display recognizes opencode alias."""
+        domains = expand_domains(["opencode"])
+        assert domains is not None
+        result = format_domains_for_display(domains)
+        assert "opencode" in result
+
+
 class TestMessagingDomainAliases:
     """Tests for messaging platform domain aliases."""
 
