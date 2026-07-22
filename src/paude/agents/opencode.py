@@ -90,10 +90,16 @@ fi
         return build_environment_from_config(self._config)
 
 
-_PROVIDER_CONFIGS: dict[str, tuple[str, str | None]] = {
-    "anthropic": ("anthropic", "ANTHROPIC_API_KEY"),
-    "openai": ("openai", "OPENAI_API_KEY"),
-    "vertex": ("google-vertex", None),
+_PROVIDER_CONFIGS: dict[str, tuple[str, dict[str, str]]] = {
+    "anthropic": ("anthropic", {"apiKey": "{env:ANTHROPIC_API_KEY}"}),
+    "openai": ("openai", {"apiKey": "{env:OPENAI_API_KEY}"}),
+    "vertex": (
+        "google-vertex",
+        {
+            "project": "{env:GOOGLE_CLOUD_PROJECT}",
+            "location": "{env:VERTEX_LOCATION}",
+        },
+    ),
 }
 
 
@@ -102,9 +108,11 @@ def _provider_config_json(provider: str) -> str:
     entry = _PROVIDER_CONFIGS.get(provider)
     if entry is None:
         return ""
-    name, api_key_var = entry
-    if api_key_var:
-        options = f'\n        "apiKey": "{{env:{api_key_var}}}"\n      '
+    name, option_env_vars = entry
+    if option_env_vars:
+        lines = [f'"{k}": "{v}"' for k, v in option_env_vars.items()]
+        inner = ",\n        ".join(lines)
+        options = f"\n        {inner}\n      "
     else:
         options = ""
     return f"""\

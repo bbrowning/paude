@@ -255,6 +255,7 @@ class TestClaudeAgentBuildEnvironment:
             env = ClaudeAgent().build_environment()
             assert env == {
                 "ANTHROPIC_VERTEX_PROJECT_ID": "proj-1",
+                "GOOGLE_CLOUD_PROJECT": "proj-1",
                 "CLAUDE_CODE_USE_VERTEX": "1",
                 "NODE_USE_ENV_PROXY": "1",
             }
@@ -1107,6 +1108,95 @@ class TestBuildEnvironmentFromConfig:
             assert env == {"CLOUD_ML_REGION": "us-central1"}
             assert "GOOGLE_CLOUD_LOCATION" not in env
 
+    def test_syncs_google_cloud_location_to_vertex_location(self) -> None:
+        config = AgentConfig(
+            name="test",
+            display_name="Test",
+            process_name="test",
+            session_name="test",
+            install_script="echo hi",
+            passthrough_env_vars=["GOOGLE_CLOUD_LOCATION", "VERTEX_LOCATION"],
+        )
+        with patch.dict(
+            "os.environ", {"GOOGLE_CLOUD_LOCATION": "us-east1"}, clear=True
+        ):
+            env = build_environment_from_config(config)
+            assert env["GOOGLE_CLOUD_LOCATION"] == "us-east1"
+            assert env["VERTEX_LOCATION"] == "us-east1"
+
+    def test_syncs_vertex_location_to_google_cloud_location(self) -> None:
+        config = AgentConfig(
+            name="test",
+            display_name="Test",
+            process_name="test",
+            session_name="test",
+            install_script="echo hi",
+            passthrough_env_vars=["GOOGLE_CLOUD_LOCATION", "VERTEX_LOCATION"],
+        )
+        with patch.dict("os.environ", {"VERTEX_LOCATION": "europe-west4"}, clear=True):
+            env = build_environment_from_config(config)
+            assert env["VERTEX_LOCATION"] == "europe-west4"
+            assert env["GOOGLE_CLOUD_LOCATION"] == "europe-west4"
+
+    def test_syncs_cloud_ml_region_chains_to_vertex_location(self) -> None:
+        config = AgentConfig(
+            name="test",
+            display_name="Test",
+            process_name="test",
+            session_name="test",
+            install_script="echo hi",
+            passthrough_env_vars=[
+                "GOOGLE_CLOUD_LOCATION",
+                "CLOUD_ML_REGION",
+                "VERTEX_LOCATION",
+            ],
+        )
+        with patch.dict("os.environ", {"CLOUD_ML_REGION": "us-central1"}, clear=True):
+            env = build_environment_from_config(config)
+            assert env["CLOUD_ML_REGION"] == "us-central1"
+            assert env["GOOGLE_CLOUD_LOCATION"] == "us-central1"
+            assert env["VERTEX_LOCATION"] == "us-central1"
+
+    def test_syncs_google_cloud_project_to_anthropic_vertex_project_id(self) -> None:
+        config = AgentConfig(
+            name="test",
+            display_name="Test",
+            process_name="test",
+            session_name="test",
+            install_script="echo hi",
+            passthrough_env_vars=[
+                "GOOGLE_CLOUD_PROJECT",
+                "ANTHROPIC_VERTEX_PROJECT_ID",
+            ],
+        )
+        with patch.dict(
+            "os.environ", {"GOOGLE_CLOUD_PROJECT": "my-project"}, clear=True
+        ):
+            env = build_environment_from_config(config)
+            assert env["GOOGLE_CLOUD_PROJECT"] == "my-project"
+            assert env["ANTHROPIC_VERTEX_PROJECT_ID"] == "my-project"
+
+    def test_syncs_anthropic_vertex_project_id_to_google_cloud_project(self) -> None:
+        config = AgentConfig(
+            name="test",
+            display_name="Test",
+            process_name="test",
+            session_name="test",
+            install_script="echo hi",
+            passthrough_env_vars=[
+                "GOOGLE_CLOUD_PROJECT",
+                "ANTHROPIC_VERTEX_PROJECT_ID",
+            ],
+        )
+        with patch.dict(
+            "os.environ",
+            {"ANTHROPIC_VERTEX_PROJECT_ID": "vertex-proj"},
+            clear=True,
+        ):
+            env = build_environment_from_config(config)
+            assert env["ANTHROPIC_VERTEX_PROJECT_ID"] == "vertex-proj"
+            assert env["GOOGLE_CLOUD_PROJECT"] == "vertex-proj"
+
 
 class TestBuildSecretEnvironmentFromConfig:
     """Tests for the build_secret_environment_from_config helper."""
@@ -1228,6 +1318,7 @@ class TestOpenCodeAgentConfig:
         cfg = OpenCodeAgent(provider="vertex").config
         assert "ANTHROPIC_VERTEX_PROJECT_ID" in cfg.passthrough_env_vars
         assert "GOOGLE_CLOUD_PROJECT" in cfg.passthrough_env_vars
+        assert "VERTEX_LOCATION" in cfg.passthrough_env_vars
 
     def test_passthrough_prefixes_vertex(self) -> None:
         cfg = OpenCodeAgent(provider="vertex").config
@@ -1426,6 +1517,8 @@ class TestOpenCodeAgentSandboxConfig:
             "/home/paude", "/workspace", ""
         )
         assert "google-vertex" in script
+        assert '"project": "{env:GOOGLE_CLOUD_PROJECT}"' in script
+        assert '"location": "{env:VERTEX_LOCATION}"' in script
 
     def test_chatgpt_sandbox_config_no_provider_block(self) -> None:
         script = OpenCodeAgent(provider="chatgpt").apply_sandbox_config(

@@ -105,6 +105,7 @@ class TestAgentProviderResolution:
         provider, agent_cfg = resolve_agent_provider("opencode", "vertex")
         assert provider.name == "vertex"
         assert isinstance(agent_cfg, AgentProviderConfig)
+        assert "VERTEX_LOCATION" in agent_cfg.extra_passthrough_env_vars
 
     def test_resolve_opencode_chatgpt(self) -> None:
         provider, agent_cfg = resolve_agent_provider("opencode", "chatgpt")

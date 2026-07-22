@@ -40,7 +40,9 @@ AGENT_PROVIDERS: dict[str, dict[str, AgentProviderConfig]] = {
         "anthropic": AgentProviderConfig(),
         "chatgpt": AgentProviderConfig(),
         "openai": AgentProviderConfig(),
-        "vertex": AgentProviderConfig(),
+        "vertex": AgentProviderConfig(
+            extra_passthrough_env_vars=["VERTEX_LOCATION"],
+        ),
     },
     "openclaw": {
         "vertex": AgentProviderConfig(

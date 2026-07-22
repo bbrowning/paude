@@ -137,6 +137,8 @@ def build_environment_from_config(config: AgentConfig) -> dict[str, str]:
 
 _EQUIVALENT_PAIRS: list[tuple[str, str]] = [
     ("GOOGLE_CLOUD_LOCATION", "CLOUD_ML_REGION"),
+    ("GOOGLE_CLOUD_LOCATION", "VERTEX_LOCATION"),
+    ("GOOGLE_CLOUD_PROJECT", "ANTHROPIC_VERTEX_PROJECT_ID"),
 ]
 
 
