@@ -72,6 +72,11 @@ class ProviderCredentials:
     resolved_provider_name: str = ""
     model_config: dict[str, str] = field(default_factory=dict)
 
+    @property
+    def chatgpt_domain_aliases(self) -> list[str]:
+        """Domain aliases needed when using the ChatGPT OAuth provider."""
+        return ["chatgpt"] if self.resolved_provider_name == "chatgpt" else []
+
 
 def build_provider_credentials(
     agent_name: str, provider: str | None

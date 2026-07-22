@@ -52,8 +52,6 @@ class CodexAgent:
 
     def __init__(self, provider: str | None = None) -> None:
         creds = build_provider_credentials("codex", provider)
-        is_chatgpt = creds.resolved_provider_name == "chatgpt"
-        chatgpt_domain_aliases = ["codex"] if is_chatgpt else []
         self._config = AgentConfig(
             name="codex",
             display_name="Codex CLI",
@@ -70,8 +68,8 @@ class CodexAgent:
             activity_files=[],
             yolo_flag="--dangerously-bypass-approvals-and-sandbox",
             clear_command=None,
-            extra_domain_aliases=chatgpt_domain_aliases,
-            required_domain_aliases=chatgpt_domain_aliases,
+            extra_domain_aliases=creds.chatgpt_domain_aliases,
+            required_domain_aliases=creds.chatgpt_domain_aliases,
             provider=creds.resolved_provider_name,
         )
 

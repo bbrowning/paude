@@ -38,6 +38,7 @@ AGENT_PROVIDERS: dict[str, dict[str, AgentProviderConfig]] = {
     },
     "opencode": {
         "anthropic": AgentProviderConfig(),
+        "chatgpt": AgentProviderConfig(),
         "openai": AgentProviderConfig(),
         "vertex": AgentProviderConfig(),
     },

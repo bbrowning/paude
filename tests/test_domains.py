@@ -465,6 +465,13 @@ class TestCodexAlias:
         """'codex' is NOT in DEFAULT_ALIASES (opt-in only via extra_domain_aliases)."""
         assert "codex" not in DEFAULT_ALIASES
 
+    def test_chatgpt_has_oauth_domains(self):
+        """'chatgpt' expands to include ChatGPT and OAuth domains."""
+        result = expand_domains(["chatgpt"])
+        assert "chatgpt.com" in result
+        assert ".chatgpt.com" in result
+        assert "auth.openai.com" in result
+
     def test_codex_has_chatgpt(self):
         """'codex' expands to include ChatGPT and OAuth domains."""
         result = expand_domains(["codex"])
@@ -478,10 +485,10 @@ class TestCodexAlias:
         assert ".openai.com" not in result
 
     def test_codex_in_format_display(self):
-        """format_domains_for_display recognizes codex alias."""
+        """format_domains_for_display recognizes codex alias (shows as chatgpt)."""
         domains = expand_domains(["codex"])
         result = format_domains_for_display(domains)
-        assert "codex" in result
+        assert "chatgpt" in result
 
 
 class TestGithubAlias:

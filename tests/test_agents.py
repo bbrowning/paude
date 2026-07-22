@@ -364,8 +364,8 @@ class TestCodexAgentConfig:
     def test_extra_domain_aliases_chatgpt(self, kwargs: dict[str, str]) -> None:
         """Default and explicit chatgpt provider both need chatgpt.com allowlisted."""
         cfg = CodexAgent(**kwargs).config
-        assert cfg.extra_domain_aliases == ["codex"]
-        assert cfg.required_domain_aliases == ["codex"]
+        assert cfg.extra_domain_aliases == ["chatgpt"]
+        assert cfg.required_domain_aliases == ["chatgpt"]
 
     def test_chatgpt_provider_is_resolved_provider(self) -> None:
         assert CodexAgent(provider="chatgpt").config.provider == "chatgpt"
@@ -1184,6 +1184,16 @@ class TestOpenCodeAgentConfig:
     def test_extra_domain_aliases(self) -> None:
         assert OpenCodeAgent().config.extra_domain_aliases == ["opencode"]
 
+    def test_extra_domain_aliases_chatgpt(self) -> None:
+        cfg = OpenCodeAgent(provider="chatgpt").config
+        assert "chatgpt" in cfg.extra_domain_aliases
+        assert "opencode" in cfg.extra_domain_aliases
+        assert cfg.required_domain_aliases == ["chatgpt"]
+
+    def test_extra_domain_aliases_non_chatgpt_no_required(self) -> None:
+        assert OpenCodeAgent().config.required_domain_aliases == []
+        assert OpenCodeAgent(provider="openai").config.required_domain_aliases == []
+
     def test_env_vars(self) -> None:
         assert OpenCodeAgent().config.env_vars == {
             "OPENCODE_DISABLE_AUTOUPDATE": "true",
@@ -1205,6 +1215,10 @@ class TestOpenCodeAgentConfig:
     def test_secret_env_vars_openai(self) -> None:
         cfg = OpenCodeAgent(provider="openai").config
         assert "OPENAI_API_KEY" in cfg.secret_env_vars
+
+    def test_secret_env_vars_chatgpt_empty(self) -> None:
+        cfg = OpenCodeAgent(provider="chatgpt").config
+        assert cfg.secret_env_vars == []
 
     def test_secret_env_vars_vertex_empty(self) -> None:
         cfg = OpenCodeAgent(provider="vertex").config
@@ -1412,6 +1426,12 @@ class TestOpenCodeAgentSandboxConfig:
             "/home/paude", "/workspace", ""
         )
         assert "google-vertex" in script
+
+    def test_chatgpt_sandbox_config_no_provider_block(self) -> None:
+        script = OpenCodeAgent(provider="chatgpt").apply_sandbox_config(
+            "/home/paude", "/workspace", ""
+        )
+        assert '"provider"' not in script
 
 
 class TestOpenClawAgentConfig:

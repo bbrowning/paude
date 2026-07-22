@@ -33,7 +33,8 @@ class OpenCodeAgent:
             activity_files=[],
             yolo_flag="--auto",
             clear_command=None,
-            extra_domain_aliases=["opencode"],
+            extra_domain_aliases=["opencode"] + creds.chatgpt_domain_aliases,
+            required_domain_aliases=creds.chatgpt_domain_aliases,
             provider=creds.resolved_provider_name,
         )
 

@@ -106,6 +106,11 @@ class TestAgentProviderResolution:
         assert provider.name == "vertex"
         assert isinstance(agent_cfg, AgentProviderConfig)
 
+    def test_resolve_opencode_chatgpt(self) -> None:
+        provider, agent_cfg = resolve_agent_provider("opencode", "chatgpt")
+        assert provider.name == "chatgpt"
+        assert isinstance(agent_cfg, AgentProviderConfig)
+
     def test_resolve_opencode_default(self) -> None:
         provider, _ = resolve_agent_provider("opencode")
         assert provider.name == "anthropic"
@@ -215,6 +220,7 @@ class TestSupportedProviders:
     def test_opencode_providers(self) -> None:
         providers = supported_providers("opencode")
         assert "anthropic" in providers
+        assert "chatgpt" in providers
         assert "openai" in providers
         assert "vertex" in providers
 

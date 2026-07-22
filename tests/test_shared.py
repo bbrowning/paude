@@ -165,8 +165,16 @@ class TestGatherProxyCredentials:
 
         assert creds.chatgpt_oauth_mode is False
 
-    def test_chatgpt_mode_flag_false_for_non_codex_agent(self) -> None:
-        """chatgpt_oauth_mode is False for agents other than codex."""
+    def test_chatgpt_mode_flag_set_for_opencode_chatgpt_provider(self) -> None:
+        """chatgpt_oauth_mode is True for an opencode agent using the chatgpt provider."""
+        from paude.agents.opencode import OpenCodeAgent
+
+        creds = gather_proxy_credentials(OpenCodeAgent(provider="chatgpt").config)
+
+        assert creds.chatgpt_oauth_mode is True
+
+    def test_chatgpt_mode_flag_false_for_non_chatgpt_provider(self) -> None:
+        """chatgpt_oauth_mode is False for agents not using the chatgpt provider."""
         creds = gather_proxy_credentials(ClaudeAgent().config)
 
         assert creds.chatgpt_oauth_mode is False

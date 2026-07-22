@@ -305,7 +305,7 @@ class TestAgentSpecificDomainExpansion:
         )
         assert result.exit_code == 0
         output = _extract_domains_display(result.stdout)
-        assert ("codex" in output) is expect_codex_alias
+        assert ("chatgpt" in output) is expect_codex_alias
 
 
 class TestCodexChatgptProvider:
