@@ -12,6 +12,7 @@ Run AI coding agents in secure containers. They make commits, you pull them back
 | [Gas City](https://github.com/gastownhall/gascity) | `--agent gascity` | Supported |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `--agent gemini` | Supported |
 | [OpenClaw](https://github.com/openclaw/openclaw) | `--agent openclaw` | Supported |
+| [OpenCode](https://opencode.ai) | `--agent opencode` | Supported |
 
 > Agents are installed automatically inside the container — no local agent installation needed. You just need authentication credentials for your chosen provider.
 
@@ -37,7 +38,7 @@ Run AI coding agents in secure containers. They make commits, you pull them back
 **Authentication** — set up credentials for your chosen provider:
 
 <details>
-<summary><strong>Google Cloud / Vertex AI</strong> (Claude Code, Gemini CLI, OpenClaw)</summary>
+<summary><strong>Google Cloud / Vertex AI</strong> (Claude Code, Gemini CLI, OpenClaw, OpenCode)</summary>
 
 Install the [Google Cloud SDK](https://cloud.google.com/sdk/docs/install), then:
 
@@ -55,18 +56,22 @@ export GOOGLE_CLOUD_PROJECT=your-project-id
 
 # Gemini CLI / OpenClaw via Vertex
 export GOOGLE_CLOUD_PROJECT=your-project-id
+
+# OpenCode via Vertex
+export GOOGLE_CLOUD_PROJECT=your-project-id
+export VERTEX_LOCATION=us-east5
 ```
 
 </details>
 
 <details>
-<summary><strong>Anthropic API key</strong> (Claude Code, OpenClaw)</summary>
+<summary><strong>Anthropic API key</strong> (Claude Code, OpenClaw, OpenCode)</summary>
 
 ```bash
 export ANTHROPIC_API_KEY=your-api-key
 ```
 
-For OpenClaw, also pass `--provider anthropic`:
+This is the default provider for OpenCode. For Claude Code and OpenClaw, also pass `--provider anthropic`:
 
 ```bash
 paude create --agent openclaw --provider anthropic ...
@@ -75,11 +80,12 @@ paude create --agent openclaw --provider anthropic ...
 </details>
 
 <details>
-<summary><strong>OpenAI API key</strong> (Codex CLI, OpenClaw)</summary>
+<summary><strong>OpenAI API key</strong> (Codex CLI, OpenClaw, OpenCode)</summary>
 
 ```bash
 export OPENAI_API_KEY=your-api-key
 paude create --agent openclaw --provider openai ...
+paude create --agent opencode --provider openai ...
 ```
 
 </details>
@@ -158,6 +164,9 @@ paude create --agent cursor --yolo --git my-project
 
 # Gemini CLI
 paude create --agent gemini --yolo --git my-project
+
+# OpenCode
+paude create --agent opencode --yolo --git my-project
 
 # Connect to a CLI agent's running session
 paude connect my-project

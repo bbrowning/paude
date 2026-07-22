@@ -90,7 +90,10 @@ def session_create(
         str | None,
         typer.Option(
             "--agent",
-            help="Agent to use: claude (default), cursor, gascity, gemini, openclaw.",
+            help=(
+                "Agent to use: claude (default), codex, cursor, gascity, "
+                "gemini, openclaw, opencode."
+            ),
         ),
     ] = None,
     provider: Annotated[

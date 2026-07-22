@@ -158,6 +158,7 @@ Agent-specific defaults are added automatically:
 - **Codex CLI** (default `chatgpt` provider, local Podman/Docker backend only; not added for `--provider openai`): `chatgpt.com`, `.chatgpt.com`, `auth.openai.com`
 - **Cursor CLI**: `.cursor.com`, `.cursor.sh`, `.cursor-cdn.com`, `.cursorapi.com` (HTTP/1.1 mode is automatically enabled for proxy compatibility)
 - **Gemini CLI**: `cloudcode-pa.googleapis.com`, `play.googleapis.com`, plus the `nodejs` alias
+- **OpenCode**: `opencode.ai`, `.opencode.ai` (plus `chatgpt.com`, `.chatgpt.com`, `auth.openai.com` when using the `chatgpt` provider)
 
 Opt-in language ecosystem aliases:
 - **golang**: Go modules (`go.dev`, `proxy.golang.org`, `sum.golang.org`, `dl.google.com`, `storage.googleapis.com`)
