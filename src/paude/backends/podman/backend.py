@@ -239,15 +239,22 @@ class PodmanBackend:
 
         agent = self._setup.start_session_containers(name, cname, self._proxy)
 
+        return self._attach_with_port_forward(name, cname, agent)
+
+    def _attach_with_port_forward(self, name: str, cname: str, agent: Agent) -> int:
+        """Start port forwarding, attach to container, and clean up on exit."""
         ports = agent.config.exposed_ports
         if ports:
             self._port_forward.start(name, cname, ports)
         self._setup.print_port_urls(name, agent)
-        exit_code = self._runner.attach_container(
-            cname,
-            entrypoint=CONTAINER_ENTRYPOINT,
-            extra_env=self._setup.build_attach_env(agent),
-        )
+        try:
+            exit_code = self._runner.attach_container(
+                cname,
+                entrypoint=CONTAINER_ENTRYPOINT,
+                extra_env=self._setup.build_attach_env(agent),
+            )
+        finally:
+            self._port_forward.stop(name)
         self._setup.print_port_urls(name, agent)
         return exit_code
 
@@ -310,21 +317,8 @@ class PodmanBackend:
         self._setup.sync_host_config(cname, agent.config.name)
         self._setup.sync_sandbox_config(cname, name)
 
-        ports = agent.config.exposed_ports
-        if ports:
-            self._port_forward.start(name, cname, ports)
         print(f"Connecting to session '{name}'...", file=sys.stderr)
-        self._setup.print_port_urls(name, agent)
-        try:
-            exit_code = self._runner.attach_container(
-                cname,
-                entrypoint=CONTAINER_ENTRYPOINT,
-                extra_env=self._setup.build_attach_env(agent),
-            )
-        finally:
-            self._port_forward.stop(name)
-        self._setup.print_port_urls(name, agent)
-        return exit_code
+        return self._attach_with_port_forward(name, cname, agent)
 
     def list_sessions(self) -> list[Session]:
         """List all sessions."""
