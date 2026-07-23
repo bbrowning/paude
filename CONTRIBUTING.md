@@ -93,8 +93,12 @@ paude/
 │   ├── agents/                # Agent definitions
 │   │   ├── base.py            # Agent protocol and AgentConfig
 │   │   ├── claude.py          # Claude Code agent
+│   │   ├── codex.py           # Codex CLI agent
 │   │   ├── cursor.py          # Cursor CLI agent
-│   │   └── gemini.py          # Gemini CLI agent
+│   │   ├── gascity.py         # Gas City agent
+│   │   ├── gemini.py          # Gemini CLI agent
+│   │   ├── openclaw.py        # OpenClaw agent
+│   │   └── opencode.py        # OpenCode agent
 │   ├── backends/              # Backend implementations
 │   │   ├── base.py            # Backend protocol
 │   │   ├── shared.py          # Shared backend utilities

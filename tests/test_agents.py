@@ -26,6 +26,7 @@ from paude.agents.cursor import CursorAgent
 from paude.agents.gascity import GascityAgent
 from paude.agents.gemini import GeminiAgent
 from paude.agents.openclaw import OpenClawAgent
+from paude.agents.opencode import OpenCodeAgent
 
 
 class TestRegistry:
@@ -60,6 +61,10 @@ class TestRegistry:
         agent = get_agent("gascity")
         assert isinstance(agent, GascityAgent)
 
+    def test_get_agent_opencode(self) -> None:
+        agent = get_agent("opencode")
+        assert isinstance(agent, OpenCodeAgent)
+
     def test_get_agent_openclaw(self) -> None:
         agent = get_agent("openclaw")
         assert isinstance(agent, OpenClawAgent)
@@ -67,7 +72,7 @@ class TestRegistry:
     def test_get_agent_error_lists_available(self) -> None:
         with pytest.raises(
             ValueError,
-            match="Available: claude, codex, cursor, gascity, gemini, openclaw",
+            match="Available: claude, codex, cursor, gascity, gemini, openclaw, opencode",
         ):
             get_agent("bad")
 
@@ -78,6 +83,7 @@ class TestRegistry:
         assert "cursor" in agents
         assert "gascity" in agents
         assert "gemini" in agents
+        assert "opencode" in agents
         assert "openclaw" in agents
         assert agents == sorted(agents)
 
@@ -249,6 +255,7 @@ class TestClaudeAgentBuildEnvironment:
             env = ClaudeAgent().build_environment()
             assert env == {
                 "ANTHROPIC_VERTEX_PROJECT_ID": "proj-1",
+                "GOOGLE_CLOUD_PROJECT": "proj-1",
                 "CLAUDE_CODE_USE_VERTEX": "1",
                 "NODE_USE_ENV_PROXY": "1",
             }
@@ -358,8 +365,8 @@ class TestCodexAgentConfig:
     def test_extra_domain_aliases_chatgpt(self, kwargs: dict[str, str]) -> None:
         """Default and explicit chatgpt provider both need chatgpt.com allowlisted."""
         cfg = CodexAgent(**kwargs).config
-        assert cfg.extra_domain_aliases == ["codex"]
-        assert cfg.required_domain_aliases == ["codex"]
+        assert cfg.extra_domain_aliases == ["chatgpt"]
+        assert cfg.required_domain_aliases == ["chatgpt"]
 
     def test_chatgpt_provider_is_resolved_provider(self) -> None:
         assert CodexAgent(provider="chatgpt").config.provider == "chatgpt"
@@ -1101,6 +1108,95 @@ class TestBuildEnvironmentFromConfig:
             assert env == {"CLOUD_ML_REGION": "us-central1"}
             assert "GOOGLE_CLOUD_LOCATION" not in env
 
+    def test_syncs_google_cloud_location_to_vertex_location(self) -> None:
+        config = AgentConfig(
+            name="test",
+            display_name="Test",
+            process_name="test",
+            session_name="test",
+            install_script="echo hi",
+            passthrough_env_vars=["GOOGLE_CLOUD_LOCATION", "VERTEX_LOCATION"],
+        )
+        with patch.dict(
+            "os.environ", {"GOOGLE_CLOUD_LOCATION": "us-east1"}, clear=True
+        ):
+            env = build_environment_from_config(config)
+            assert env["GOOGLE_CLOUD_LOCATION"] == "us-east1"
+            assert env["VERTEX_LOCATION"] == "us-east1"
+
+    def test_syncs_vertex_location_to_google_cloud_location(self) -> None:
+        config = AgentConfig(
+            name="test",
+            display_name="Test",
+            process_name="test",
+            session_name="test",
+            install_script="echo hi",
+            passthrough_env_vars=["GOOGLE_CLOUD_LOCATION", "VERTEX_LOCATION"],
+        )
+        with patch.dict("os.environ", {"VERTEX_LOCATION": "europe-west4"}, clear=True):
+            env = build_environment_from_config(config)
+            assert env["VERTEX_LOCATION"] == "europe-west4"
+            assert env["GOOGLE_CLOUD_LOCATION"] == "europe-west4"
+
+    def test_syncs_cloud_ml_region_chains_to_vertex_location(self) -> None:
+        config = AgentConfig(
+            name="test",
+            display_name="Test",
+            process_name="test",
+            session_name="test",
+            install_script="echo hi",
+            passthrough_env_vars=[
+                "GOOGLE_CLOUD_LOCATION",
+                "CLOUD_ML_REGION",
+                "VERTEX_LOCATION",
+            ],
+        )
+        with patch.dict("os.environ", {"CLOUD_ML_REGION": "us-central1"}, clear=True):
+            env = build_environment_from_config(config)
+            assert env["CLOUD_ML_REGION"] == "us-central1"
+            assert env["GOOGLE_CLOUD_LOCATION"] == "us-central1"
+            assert env["VERTEX_LOCATION"] == "us-central1"
+
+    def test_syncs_google_cloud_project_to_anthropic_vertex_project_id(self) -> None:
+        config = AgentConfig(
+            name="test",
+            display_name="Test",
+            process_name="test",
+            session_name="test",
+            install_script="echo hi",
+            passthrough_env_vars=[
+                "GOOGLE_CLOUD_PROJECT",
+                "ANTHROPIC_VERTEX_PROJECT_ID",
+            ],
+        )
+        with patch.dict(
+            "os.environ", {"GOOGLE_CLOUD_PROJECT": "my-project"}, clear=True
+        ):
+            env = build_environment_from_config(config)
+            assert env["GOOGLE_CLOUD_PROJECT"] == "my-project"
+            assert env["ANTHROPIC_VERTEX_PROJECT_ID"] == "my-project"
+
+    def test_syncs_anthropic_vertex_project_id_to_google_cloud_project(self) -> None:
+        config = AgentConfig(
+            name="test",
+            display_name="Test",
+            process_name="test",
+            session_name="test",
+            install_script="echo hi",
+            passthrough_env_vars=[
+                "GOOGLE_CLOUD_PROJECT",
+                "ANTHROPIC_VERTEX_PROJECT_ID",
+            ],
+        )
+        with patch.dict(
+            "os.environ",
+            {"ANTHROPIC_VERTEX_PROJECT_ID": "vertex-proj"},
+            clear=True,
+        ):
+            env = build_environment_from_config(config)
+            assert env["ANTHROPIC_VERTEX_PROJECT_ID"] == "vertex-proj"
+            assert env["GOOGLE_CLOUD_PROJECT"] == "vertex-proj"
+
 
 class TestBuildSecretEnvironmentFromConfig:
     """Tests for the build_secret_environment_from_config helper."""
@@ -1142,6 +1238,293 @@ class TestBuildSecretEnvironmentFromConfig:
         with patch.dict("os.environ", {"SOME_VAR": "x"}, clear=True):
             env = build_secret_environment_from_config(config)
             assert env == {}
+
+
+class TestOpenCodeAgentConfig:
+    """Tests for OpenCodeAgent configuration values."""
+
+    def test_name(self) -> None:
+        assert OpenCodeAgent().config.name == "opencode"
+
+    def test_display_name(self) -> None:
+        assert OpenCodeAgent().config.display_name == "OpenCode"
+
+    def test_process_name(self) -> None:
+        assert OpenCodeAgent().config.process_name == "opencode"
+
+    def test_session_name(self) -> None:
+        assert OpenCodeAgent().config.session_name == "opencode"
+
+    def test_install_script(self) -> None:
+        cfg = OpenCodeAgent().config
+        assert "opencode.ai/install" in cfg.install_script
+
+    def test_config_dir_name(self) -> None:
+        assert OpenCodeAgent().config.config_dir_name == ".config/opencode"
+
+    def test_config_file_name_is_none(self) -> None:
+        assert OpenCodeAgent().config.config_file_name is None
+
+    def test_yolo_flag(self) -> None:
+        assert OpenCodeAgent().config.yolo_flag == "--auto"
+
+    def test_clear_command_is_none(self) -> None:
+        assert OpenCodeAgent().config.clear_command is None
+
+    def test_extra_domain_aliases(self) -> None:
+        assert OpenCodeAgent().config.extra_domain_aliases == ["opencode"]
+
+    def test_extra_domain_aliases_chatgpt(self) -> None:
+        cfg = OpenCodeAgent(provider="chatgpt").config
+        assert "chatgpt" in cfg.extra_domain_aliases
+        assert "opencode" in cfg.extra_domain_aliases
+        assert cfg.required_domain_aliases == ["chatgpt"]
+
+    def test_extra_domain_aliases_non_chatgpt_no_required(self) -> None:
+        assert OpenCodeAgent().config.required_domain_aliases == []
+        assert OpenCodeAgent(provider="openai").config.required_domain_aliases == []
+
+    def test_env_vars(self) -> None:
+        assert OpenCodeAgent().config.env_vars == {
+            "OPENCODE_DISABLE_AUTOUPDATE": "true",
+        }
+
+    def test_activity_files_empty(self) -> None:
+        assert OpenCodeAgent().config.activity_files == []
+
+    def test_exposed_ports_empty(self) -> None:
+        assert OpenCodeAgent().config.exposed_ports == []
+
+    def test_default_base_image_is_none(self) -> None:
+        assert OpenCodeAgent().config.default_base_image is None
+
+    def test_secret_env_vars_anthropic_default(self) -> None:
+        cfg = OpenCodeAgent().config
+        assert "ANTHROPIC_API_KEY" in cfg.secret_env_vars
+
+    def test_secret_env_vars_openai(self) -> None:
+        cfg = OpenCodeAgent(provider="openai").config
+        assert "OPENAI_API_KEY" in cfg.secret_env_vars
+
+    def test_secret_env_vars_chatgpt_empty(self) -> None:
+        cfg = OpenCodeAgent(provider="chatgpt").config
+        assert cfg.secret_env_vars == []
+
+    def test_secret_env_vars_vertex_empty(self) -> None:
+        cfg = OpenCodeAgent(provider="vertex").config
+        assert cfg.secret_env_vars == []
+
+    def test_passthrough_vars_vertex(self) -> None:
+        cfg = OpenCodeAgent(provider="vertex").config
+        assert "ANTHROPIC_VERTEX_PROJECT_ID" in cfg.passthrough_env_vars
+        assert "GOOGLE_CLOUD_PROJECT" in cfg.passthrough_env_vars
+        assert "VERTEX_LOCATION" in cfg.passthrough_env_vars
+
+    def test_passthrough_prefixes_vertex(self) -> None:
+        cfg = OpenCodeAgent(provider="vertex").config
+        assert "CLOUDSDK_AUTH_" in cfg.passthrough_env_prefixes
+
+    def test_passthrough_vars_anthropic_empty(self) -> None:
+        cfg = OpenCodeAgent().config
+        assert cfg.passthrough_env_vars == []
+
+    def test_passthrough_prefixes_anthropic_empty(self) -> None:
+        cfg = OpenCodeAgent().config
+        assert cfg.passthrough_env_prefixes == []
+
+
+class TestOpenCodeAgentDockerfile:
+    """Tests for OpenCodeAgent.dockerfile_install_lines."""
+
+    def test_returns_list(self) -> None:
+        lines = OpenCodeAgent().dockerfile_install_lines("/home/paude")
+        assert isinstance(lines, list)
+        assert len(lines) > 0
+
+    def test_contains_install_url(self) -> None:
+        lines = OpenCodeAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "opencode.ai/install" in text
+
+    def test_sets_path(self) -> None:
+        lines = OpenCodeAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "/home/paude/.opencode/bin" in text
+
+    def test_uses_container_home(self) -> None:
+        lines = OpenCodeAgent().dockerfile_install_lines("/custom/home")
+        text = "\n".join(lines)
+        assert "/custom/home" in text
+
+    def test_pipefail_shell(self) -> None:
+        lines = OpenCodeAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "pipefail" in text
+
+    def test_binary_verification(self) -> None:
+        lines = OpenCodeAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "test -x /home/paude/.opencode/bin/opencode" in text
+
+    def test_shell_reset(self) -> None:
+        lines = OpenCodeAgent().dockerfile_install_lines("/home/paude")
+        assert 'SHELL ["/bin/sh", "-c"]' in lines
+
+    def test_error_message(self) -> None:
+        lines = OpenCodeAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "ERROR" in text
+        assert "installation failed" in text
+
+    def test_contains_umask(self) -> None:
+        lines = OpenCodeAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "umask 0002" in text
+
+
+class TestOpenCodeAgentLaunchCommand:
+    """Tests for OpenCodeAgent.launch_command."""
+
+    def test_no_args(self) -> None:
+        assert OpenCodeAgent().launch_command("") == "opencode"
+
+    def test_with_args(self) -> None:
+        assert OpenCodeAgent().launch_command("--flag") == "opencode --flag"
+
+
+class TestOpenCodeAgentHostConfigMounts:
+    """Tests for OpenCodeAgent.host_config_mounts."""
+
+    def test_empty_when_no_config(self, tmp_path: Path) -> None:
+        mounts = OpenCodeAgent().host_config_mounts(tmp_path)
+        assert mounts == []
+
+
+class TestOpenCodeAgentBuildEnvironment:
+    """Tests for OpenCodeAgent.build_environment."""
+
+    def test_includes_static_env_vars_when_no_host_vars_set(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            env = OpenCodeAgent().build_environment()
+            assert env == {"OPENCODE_DISABLE_AUTOUPDATE": "true"}
+
+    def test_does_not_include_secret_vars(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"ANTHROPIC_API_KEY": "sk-test", "UNRELATED": "x"},
+            clear=True,
+        ):
+            env = OpenCodeAgent().build_environment()
+            assert "ANTHROPIC_API_KEY" not in env
+
+    def test_secret_env_collects_anthropic_key(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"ANTHROPIC_API_KEY": "sk-test", "UNRELATED": "x"},
+            clear=True,
+        ):
+            env = build_secret_environment_from_config(OpenCodeAgent().config)
+            assert env == {"ANTHROPIC_API_KEY": "sk-test"}
+
+    def test_secret_env_collects_openai_key(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"OPENAI_API_KEY": "sk-test", "UNRELATED": "x"},
+            clear=True,
+        ):
+            env = build_secret_environment_from_config(
+                OpenCodeAgent(provider="openai").config
+            )
+            assert env == {"OPENAI_API_KEY": "sk-test"}
+
+    def test_passes_through_vertex_vars(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"ANTHROPIC_VERTEX_PROJECT_ID": "proj-1", "UNRELATED": "x"},
+            clear=True,
+        ):
+            env = OpenCodeAgent(provider="vertex").build_environment()
+            assert "ANTHROPIC_VERTEX_PROJECT_ID" in env
+
+
+class TestOpenCodeAgentSandboxConfig:
+    """Tests for OpenCodeAgent.apply_sandbox_config."""
+
+    def test_returns_bash_script(self) -> None:
+        script = OpenCodeAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert script.startswith("#!/bin/bash")
+
+    def test_creates_config_dirs(self) -> None:
+        script = OpenCodeAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert ".config/opencode" in script
+        assert ".local/share/opencode" in script
+
+    def test_contains_opencode_json(self) -> None:
+        script = OpenCodeAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert "opencode.json" in script
+
+    def test_contains_schema(self) -> None:
+        script = OpenCodeAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert "opencode.ai/config.json" in script
+
+    def test_contains_autoupdate_false(self) -> None:
+        script = OpenCodeAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert '"autoupdate": false' in script
+
+    def test_contains_share_disabled(self) -> None:
+        script = OpenCodeAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert '"share": "disabled"' in script
+
+    def test_home_path_parameterized(self) -> None:
+        script = OpenCodeAgent().apply_sandbox_config("/custom/home", "/workspace", "")
+        assert "/custom/home/.config/opencode" in script
+
+    def test_workspace_path_parameterized(self) -> None:
+        script = OpenCodeAgent().apply_sandbox_config(
+            "/home/paude", "/pvc/workspace", ""
+        )
+        assert "/pvc/workspace/opencode.json" in script
+
+    def test_does_not_overwrite_existing_config(self) -> None:
+        script = OpenCodeAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert '! -f "$config_file"' in script
+
+    def test_yolo_sets_permission_allow_all(self) -> None:
+        script = OpenCodeAgent().apply_sandbox_config(
+            "/home/paude", "/workspace", "", yolo=True
+        )
+        assert '"permission"' in script
+        assert '"*": "allow"' in script
+
+    def test_no_yolo_no_permission_block(self) -> None:
+        script = OpenCodeAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert '"permission"' not in script
+
+    def test_anthropic_provider_config(self) -> None:
+        script = OpenCodeAgent().apply_sandbox_config("/home/paude", "/workspace", "")
+        assert "anthropic" in script
+        assert "ANTHROPIC_API_KEY" in script
+
+    def test_openai_provider_config(self) -> None:
+        script = OpenCodeAgent(provider="openai").apply_sandbox_config(
+            "/home/paude", "/workspace", ""
+        )
+        assert "openai" in script
+        assert "OPENAI_API_KEY" in script
+
+    def test_vertex_provider_config(self) -> None:
+        script = OpenCodeAgent(provider="vertex").apply_sandbox_config(
+            "/home/paude", "/workspace", ""
+        )
+        assert "google-vertex" in script
+        assert '"project": "{env:GOOGLE_CLOUD_PROJECT}"' in script
+        assert '"location": "{env:VERTEX_LOCATION}"' in script
+
+    def test_chatgpt_sandbox_config_no_provider_block(self) -> None:
+        script = OpenCodeAgent(provider="chatgpt").apply_sandbox_config(
+            "/home/paude", "/workspace", ""
+        )
+        assert '"provider"' not in script
 
 
 class TestOpenClawAgentConfig:

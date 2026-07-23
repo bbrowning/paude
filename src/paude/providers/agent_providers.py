@@ -36,6 +36,14 @@ AGENT_PROVIDERS: dict[str, dict[str, AgentProviderConfig]] = {
         "openai": AgentProviderConfig(),
         "chatgpt": AgentProviderConfig(),
     },
+    "opencode": {
+        "anthropic": AgentProviderConfig(),
+        "chatgpt": AgentProviderConfig(),
+        "openai": AgentProviderConfig(),
+        "vertex": AgentProviderConfig(
+            extra_passthrough_env_vars=["VERTEX_LOCATION"],
+        ),
+    },
     "openclaw": {
         "vertex": AgentProviderConfig(
             model_config={"primary": "anthropic-vertex/claude-sonnet-4-6"},
@@ -68,6 +76,7 @@ DEFAULT_PROVIDER: dict[str, str] = {
     "claude": "vertex",
     "codex": "chatgpt",
     "gascity": "vertex",
+    "opencode": "anthropic",
     "openclaw": "vertex",
     "cursor": "cursor",
     "gemini": "google",

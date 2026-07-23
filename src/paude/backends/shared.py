@@ -321,9 +321,7 @@ def gather_proxy_credentials(
     if gcp_adc_path is not None:
         creds[PROXY_GCP_ADC_ENV] = gcp_adc_path.read_text()
 
-    chatgpt_oauth_mode = (
-        agent_config.name == "codex" and agent_config.provider == "chatgpt"
-    )
+    chatgpt_oauth_mode = agent_config.provider == "chatgpt"
 
     return ProxyCredentials(environment=creds, chatgpt_oauth_mode=chatgpt_oauth_mode)
 

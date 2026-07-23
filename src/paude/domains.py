@@ -24,7 +24,7 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
         ".claude.ai",
         ".anthropic.com",
     ],
-    "codex": [
+    "chatgpt": [
         "chatgpt.com",
         ".chatgpt.com",
         "auth.openai.com",
@@ -72,6 +72,10 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
     "openai": [
         ".openai.com",
     ],
+    "opencode": [
+        "opencode.ai",
+        ".opencode.ai",
+    ],
     "openclaw": [
         ".anthropic.com",
         ".openai.com",
@@ -101,8 +105,9 @@ DOMAIN_ALIASES: dict[str, list[str]] = {
     ],
 }
 
-# Backward-compatible alias: pypi -> python
+# Backward-compatible aliases
 DOMAIN_ALIASES["pypi"] = DOMAIN_ALIASES["python"]
+DOMAIN_ALIASES["codex"] = DOMAIN_ALIASES["chatgpt"]
 
 # Base aliases shared across all agents
 BASE_ALIASES = ["vertexai", "python", "github"]

@@ -41,6 +41,7 @@ class TestBuildEnvironment:
         """Missing passthrough env vars are not included, but static env vars are."""
         monkeypatch.delenv("CLAUDE_CODE_USE_VERTEX", raising=False)
         monkeypatch.delenv("ANTHROPIC_VERTEX_PROJECT_ID", raising=False)
+        monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
         env = build_environment()
         # CLAUDE_CODE_USE_VERTEX is a static env_var, always present
         assert env["CLAUDE_CODE_USE_VERTEX"] == "1"
