@@ -18,6 +18,7 @@ from paude.backends.podman.helpers import (
     build_session_from_container,
     find_container_by_session_name,
 )
+from paude.backends.podman.session_setup import SessionSetup
 from paude.backends.shared import (
     PAUDE_LABEL_AGENT,
     PAUDE_LABEL_APP,
@@ -83,6 +84,12 @@ def _make_backend(
     # create their own PodmanProxyManager with proper mocks.
     backend._proxy.distribute_ca_cert = MagicMock()  # type: ignore[method-assign]
     backend._proxy._redistribute_ca_if_needed = MagicMock()  # type: ignore[method-assign]
+    # Rebuild SessionSetup with the mocked runner/engine
+    from paude.backends.podman.session_setup import SessionSetup
+
+    engine = mock_runner.engine if mock_runner is not None else backend._engine
+    backend._setup = SessionSetup(runner, engine)
+    backend._port_forward = MagicMock()
     return backend
 
 
@@ -149,7 +156,7 @@ def _make_create_session_backend(
     don't need proxy_image or real credentials.
     """
     backend = _make_backend(mock_runner, MagicMock(), mock_volume)
-    backend._gather_proxy_credentials = MagicMock(return_value={})  # type: ignore[method-assign]
+    backend._setup.gather_proxy_credentials = MagicMock(return_value={})  # type: ignore[method-assign]
     backend._proxy.create_proxy = MagicMock(  # type: ignore[method-assign]
         return_value=("paude-net-test", "10.89.0.2")
     )
@@ -506,7 +513,7 @@ class TestPodmanBackendDeleteSession:
 class TestPodmanBackendStartSession:
     """Tests for PodmanBackend.start_session."""
 
-    @patch.object(PodmanBackend, "_sync_host_config")
+    @patch.object(SessionSetup, "sync_host_config")
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_starts_stopped_container(
         self, mock_runner_class: MagicMock, mock_sync: MagicMock
@@ -529,7 +536,7 @@ class TestPodmanBackendStartSession:
         mock_runner.attach_container.assert_called_once()
         assert exit_code == 0
 
-    @patch.object(PodmanBackend, "_sync_host_config")
+    @patch.object(SessionSetup, "sync_host_config")
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_connects_if_already_running(
         self, mock_runner_class: MagicMock, mock_sync: MagicMock
@@ -651,8 +658,9 @@ class TestPodmanBackendConnectSession:
         backend = PodmanBackend()
         backend._runner = mock_runner
         backend._proxy._runner = mock_runner
+        backend._port_forward = MagicMock()
 
-        with patch.object(backend, "_sync_host_config"):
+        with patch.object(backend._setup, "sync_host_config"):
             exit_code = backend.connect_session("my-session")
 
         mock_runner.attach_container.assert_called_once()
@@ -676,7 +684,7 @@ class TestPodmanBackendConnectSession:
 
         backend = _make_backend(mock_runner)
 
-        with patch.object(backend, "_sync_host_config"):
+        with patch.object(backend._setup, "sync_host_config"):
             exit_code = backend.connect_session("my-session")
 
         assert exit_code == 0
@@ -1096,7 +1104,7 @@ class TestPodmanBackendCreateSessionWithProxy:
 class TestPodmanBackendStartSessionWithProxy:
     """Tests for start_session proxy lifecycle."""
 
-    @patch.object(PodmanBackend, "_sync_host_config")
+    @patch.object(SessionSetup, "sync_host_config")
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_starts_proxy_before_main(
         self, mock_runner_class: MagicMock, mock_sync: MagicMock
@@ -1119,7 +1127,7 @@ class TestPodmanBackendStartSessionWithProxy:
         assert any("start" in c for c in engine_calls)
         mock_runner.start_container.assert_called_once_with("paude-my-session")
 
-    @patch.object(PodmanBackend, "_sync_host_config")
+    @patch.object(SessionSetup, "sync_host_config")
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_skips_proxy_when_absent(
         self, mock_runner_class: MagicMock, mock_sync: MagicMock
@@ -1346,7 +1354,7 @@ class TestProxyHealthCheck:
 class TestProxyRecreation:
     """Tests for proxy recreation when proxy is missing but expected."""
 
-    @patch.object(PodmanBackend, "_sync_host_config")
+    @patch.object(SessionSetup, "sync_host_config")
     @patch("paude.backends.podman.proxy.get_podman_machine_dns")
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_recreates_missing_proxy(
@@ -1384,7 +1392,7 @@ class TestProxyRecreation:
         assert any("create" in c for c in engine_calls)
         assert any("start" in c for c in engine_calls)
 
-    @patch.object(PodmanBackend, "_sync_host_config")
+    @patch.object(SessionSetup, "sync_host_config")
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_skips_recreate_without_labels(
         self, mock_runner_class: MagicMock, mock_sync: MagicMock
@@ -1415,7 +1423,7 @@ class TestProxyRecreation:
         mock_runner.create_session_proxy.assert_not_called()
         mock_runner.start_session_proxy.assert_not_called()
 
-    @patch.object(PodmanBackend, "_sync_host_config")
+    @patch.object(SessionSetup, "sync_host_config")
     @patch("paude.backends.podman.proxy.get_podman_machine_dns")
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_connect_session_recreates_missing_proxy(
@@ -1594,7 +1602,7 @@ class TestPodmanBackendSyncHostConfig:
             claude_dir.mkdir()
             (claude_dir / "settings.json").write_text("{}")
 
-            backend._sync_host_config("paude-test", "claude")
+            backend._setup.sync_host_config("paude-test", "claude")
 
         # Should NOT have cp calls for agent config dir
         cp_calls = [
@@ -1620,7 +1628,7 @@ class TestPodmanBackendSyncHostConfig:
         with patch("paude.backends.sync_base.Path.home", return_value=tmp_path):
             (tmp_path / ".gitconfig").write_text("[user]\n  name = Test\n")
 
-            backend._sync_host_config("paude-test", "claude")
+            backend._setup.sync_host_config("paude-test", "claude")
 
         # Should have called podman cp for gitconfig
         cp_calls = [
@@ -1644,7 +1652,7 @@ class TestPodmanBackendSyncHostConfig:
         backend._engine = mock_runner.engine
 
         with patch("paude.backends.sync_base.Path.home", return_value=tmp_path):
-            backend._sync_host_config("paude-test", "claude")
+            backend._setup.sync_host_config("paude-test", "claude")
 
         # Should have called exec touch /credentials/.ready
         exec_calls = [
@@ -1674,7 +1682,7 @@ class TestPodmanBackendSyncHostConfig:
             (tmp_path / ".claude").mkdir()
             (tmp_path / ".gitconfig").write_text("[user]\n  name = Test\n")
 
-            backend._sync_host_config("paude-test", "claude")
+            backend._setup.sync_host_config("paude-test", "claude")
 
         # Should NOT have called any podman commands
         mock_runner.engine.run.assert_not_called()
@@ -1705,7 +1713,7 @@ class TestPodmanBackendSyncHostConfig:
         backend._engine = mock_runner.engine
 
         with patch("paude.backends.sync_base.Path.home", return_value=tmp_path):
-            backend._sync_host_config("paude-test", "claude")
+            backend._setup.sync_host_config("paude-test", "claude")
 
         captured = capsys.readouterr()
         assert (
@@ -1736,7 +1744,7 @@ class TestPodmanBackendSyncHostConfig:
         backend._engine.supports_secrets = True
         backend._engine.run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch.object(backend, "_sync_host_config") as mock_sync:
+        with patch.object(backend._setup, "sync_host_config") as mock_sync:
             backend.start_session("my-session")
             mock_sync.assert_called_once()
 
@@ -1763,7 +1771,7 @@ class TestPodmanBackendSyncHostConfig:
         backend._engine.is_remote = False
         backend._engine.run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch.object(backend, "_sync_host_config") as mock_sync:
+        with patch.object(backend._setup, "sync_host_config") as mock_sync:
             backend.connect_session("my-session")
             mock_sync.assert_called_once()
 
@@ -1786,7 +1794,7 @@ class TestPodmanPortUrls:
 
         mock_agent = MagicMock()
         mock_agent.config.exposed_ports = [(18789, 18789)]
-        urls = backend._get_port_urls(mock_agent)
+        urls = backend._setup.get_port_urls(mock_agent)
 
         assert urls == ["http://localhost:18789"]
 
@@ -1805,7 +1813,7 @@ class TestPodmanPortUrls:
 
         mock_agent = MagicMock()
         mock_agent.config.exposed_ports = []
-        urls = backend._get_port_urls(mock_agent)
+        urls = backend._setup.get_port_urls(mock_agent)
 
         assert urls == []
 
@@ -1825,7 +1833,7 @@ class TestPodmanPortUrls:
         mock_agent = MagicMock()
         mock_agent.config.exposed_ports = [(18789, 18789)]
         mock_agent.config.secret_env_vars = []
-        env = backend._build_attach_env(mock_agent)
+        env = backend._setup.build_attach_env(mock_agent)
 
         assert env is not None
         assert "PAUDE_PORT_URLS" in env

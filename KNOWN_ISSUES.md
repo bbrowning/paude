@@ -8,22 +8,22 @@ Technical debt identified during codebase analysis. Address these before adding 
 
 ### REFACTOR-003: Oversized files, methods, and classes
 
-**Status**: Open
+**Status**: Partially resolved
 **Priority**: Medium (address before adding significant new functionality to affected files)
 **Discovered**: 2026-03-24 during v0.13.0 pre-release audit
 
-**Files exceeding 400-line limit:**
+**Resolved (2026-07-23):**
+- `backends/podman/backend.py` — decomposed from 729 lines / 38 methods to 402 lines / 20 public methods (+ 3 small private helpers). Extracted `SessionSetup` (session_setup.py), `CACertDistributor` (ca_cert.py), `ProxyCredentialManager` (proxy_credentials.py). Validation helpers moved to helpers.py.
+- `backends/podman/proxy.py` — reduced from 641 lines to 400 lines. Deleted dead code, extracted collaborator classes.
+- `backends/podman/backend.py` — `create_session()` reduced from 143 lines to ~37 lines.
+
+**Still open — files exceeding 400-line limit:**
 - `cli/commands.py` — 580 lines
-- `backends/podman/backend.py` — 504 lines
 - `workflow.py` — 467 lines
 
-**Methods exceeding 50-line limit:**
+**Still open — methods exceeding 50-line limit:**
 - `workflow.py` — `harvest_session()` (~102 lines), `status_sessions()` (~84), `reset_session()` (~72)
 - `cli/commands.py` — `session_cp()` (~75 lines)
-- `backends/podman/backend.py` — `create_session()` (~95 lines)
-
-**Classes exceeding 20-method limit:**
-- `PodmanBackend` in `backends/podman/backend.py` — 26 methods
 
 ### REFACTOR-004: Duplicated Dockerfile between static file and generated code
 

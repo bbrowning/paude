@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import secrets
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from paude.backends.base import Session
+from paude.backends.podman.exceptions import SessionNotFoundError
 from paude.backends.shared import (
     PAUDE_LABEL_AGENT,
     PAUDE_LABEL_APP,
@@ -26,6 +27,9 @@ from paude.backends.shared import (
     volume_name,
 )
 from paude.container.runner import ContainerRunner
+
+if TYPE_CHECKING:
+    from paude.agents.base import Agent
 
 
 def _get_container_status(container: dict[str, Any]) -> str:
@@ -94,6 +98,16 @@ __all__ = [
     "volume_name",
     "network_name",
 ]
+
+
+def ca_volume_name(session_name: str) -> str:
+    """Get the CA certificate volume name for a session."""
+    return f"paude-ca-{session_name}"
+
+
+def auth_volume_name(session_name: str) -> str:
+    """Get the proxy-only OAuth state volume for a session."""
+    return f"paude-auth-{session_name}"
 
 
 def proxy_secret_prefix(session_name: str) -> str:
@@ -209,3 +223,37 @@ def _check_proxy_health(
         return "degraded"
 
     return status
+
+
+def require_session(runner: ContainerRunner, name: str) -> str:
+    """Validate session exists and return its container name."""
+    cname = container_name(name)
+    if not runner.container_exists(cname):
+        raise SessionNotFoundError(f"Session '{name}' not found")
+    return cname
+
+
+def require_running_session(runner: ContainerRunner, name: str) -> str:
+    """Validate session exists and is running, return its container name."""
+    cname = require_session(runner, name)
+    if not runner.container_running(cname):
+        raise ValueError(
+            f"Session '{name}' is not running. Use 'paude start {name}' to start it."
+        )
+    return cname
+
+
+def get_session_labels(runner: ContainerRunner, session_name: str) -> dict[str, str]:
+    """Look up container labels for a session."""
+    container = find_container_by_session_name(runner, session_name)
+    return (container.get("Labels", {}) or {}) if container else {}
+
+
+def get_session_agent(runner: ContainerRunner, session_name: str) -> Agent:
+    """Get the agent instance for a session from its container labels."""
+    from paude.agents import get_agent
+
+    labels = get_session_labels(runner, session_name)
+    agent_name = str(labels.get(PAUDE_LABEL_AGENT, "claude"))
+    provider = labels.get(PAUDE_LABEL_PROVIDER) or None
+    return get_agent(agent_name, provider=provider)

@@ -437,7 +437,7 @@ class TestDistributeCaCert:
         mock_network = MagicMock()
 
         manager = PodmanProxyManager(mock_runner, mock_network)
-        with patch("paude.backends.podman.proxy.CA_CERT_POLL_TIMEOUT", 0):
+        with patch("paude.backends.podman.ca_cert.CA_CERT_POLL_TIMEOUT", 0):
             manager.distribute_ca_cert("test-session")
 
         captured = capsys.readouterr()
@@ -869,7 +869,7 @@ class TestUpdateDomainsCaResilience:
         mock_network.get_network_gateway.return_value = "10.89.0.1"
 
         manager = PodmanProxyManager(mock_runner, mock_network)
-        with patch("paude.backends.podman.proxy.CA_CERT_POLL_TIMEOUT", 0):
+        with patch("paude.backends.podman.ca_cert.CA_CERT_POLL_TIMEOUT", 0):
             manager.update_domains(
                 session_name="test-session",
                 domains=[".googleapis.com"],

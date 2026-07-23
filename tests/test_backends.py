@@ -87,6 +87,7 @@ class TestPodmanExecInSession:
         backend = PodmanBackend()
         backend._runner = mock_runner
         backend._proxy._runner = mock_runner
+        backend._setup._runner = mock_runner
         return backend, mock_runner
 
     def test_exec_in_session_success(self) -> None:
