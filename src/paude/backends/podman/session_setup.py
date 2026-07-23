@@ -265,7 +265,6 @@ class SessionSetup:
         config: SessionConfig,
         session_name: str,
         agent: Agent,
-        vname: str,
     ) -> tuple[str | None, str | None, ProxyCredentials]:
         """Create and start proxy sidecar for the session.
 

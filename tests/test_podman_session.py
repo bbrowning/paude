@@ -84,9 +84,6 @@ def _make_backend(
     # create their own PodmanProxyManager with proper mocks.
     backend._proxy.distribute_ca_cert = MagicMock()  # type: ignore[method-assign]
     backend._proxy._redistribute_ca_if_needed = MagicMock()  # type: ignore[method-assign]
-    # Rebuild SessionSetup with the mocked runner/engine
-    from paude.backends.podman.session_setup import SessionSetup
-
     engine = mock_runner.engine if mock_runner is not None else backend._engine
     backend._setup = SessionSetup(runner, engine)
     backend._port_forward = MagicMock()

@@ -8,9 +8,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from paude.backends.base import Session, SessionConfig
-
-if TYPE_CHECKING:
-    from paude.agents.base import Agent
 from paude.backends.podman.exceptions import (
     SessionExistsError,
     SessionNotFoundError,
@@ -42,6 +39,9 @@ from paude.container.engine import ContainerEngine
 from paude.container.network import NetworkManager
 from paude.container.runner import ContainerRunner
 from paude.container.volume import VolumeManager
+
+if TYPE_CHECKING:
+    from paude.agents.base import Agent
 
 
 class PodmanBackend:
@@ -138,7 +138,7 @@ class PodmanBackend:
             return None, None
         try:
             network, proxy_ip, _creds = self._setup.setup_proxy_for_session(
-                self._proxy, config, session_name, agent, vname
+                self._proxy, config, session_name, agent
             )
         except Exception:
             if not config.reuse_volume:
