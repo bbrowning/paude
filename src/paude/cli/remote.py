@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Annotated
 
 import typer
 
-from paude.backends.shared import (
+from paude.backends.naming import (
     engine_binary_for_backend,
     resource_name,
 )

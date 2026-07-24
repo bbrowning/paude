@@ -66,7 +66,7 @@ def _build_ssh_backend(
     connect_timeout: int | None = None,
 ) -> PodmanBackend | None:
     """Reconstruct a PodmanBackend with SSH transport from a registry entry."""
-    from paude.backends.shared import build_ssh_backend
+    from paude.backends.ssh import build_ssh_backend
 
     return build_ssh_backend(entry, connect_timeout=connect_timeout)
 
@@ -311,7 +311,7 @@ def _finalize_session_create(
         paude_version=paude_version,
     )
 
-    from paude.backends.shared import is_local_backend
+    from paude.backends.naming import is_local_backend
 
     bt = session.backend_type
     status_msg = "created and running" if is_local_backend(bt) else "created"

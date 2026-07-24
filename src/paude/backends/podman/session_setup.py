@@ -10,15 +10,7 @@ from paude.agents.codex import (
     CODEX_CHATGPT_PROFILE_TARGET,
     SYNTHETIC_CODEX_PROFILE_TOML,
 )
-from paude.backends.podman.helpers import (
-    container_name,
-    get_session_agent,
-    get_session_labels,
-    proxy_container_name,
-    volume_name,
-)
-from paude.backends.shared import (
-    CODEX_AUTH_TARGET,
+from paude.backends.labels import (
     PAUDE_LABEL_AGENT,
     PAUDE_LABEL_CREATED,
     PAUDE_LABEL_DOMAINS,
@@ -31,9 +23,21 @@ from paude.backends.shared import (
     PAUDE_LABEL_VERSION,
     PAUDE_LABEL_WORKSPACE,
     PAUDE_LABEL_YOLO,
+)
+from paude.backends.podman.helpers import (
+    container_name,
+    get_session_agent,
+    get_session_labels,
+    proxy_container_name,
+    volume_name,
+)
+from paude.backends.proxy_config import (
+    CODEX_AUTH_TARGET,
     ProxyCredentials,
-    build_session_env,
     derive_agent_ip,
+)
+from paude.backends.session_env import (
+    build_session_env,
     encode_path,
     generate_sandbox_config_script,
 )
@@ -65,7 +69,7 @@ class SessionSetup:
 
     def read_openclaw_token(self, cname: str) -> str | None:
         """Read the OpenClaw auth token from the container's config file."""
-        from paude.backends.shared import OPENCLAW_AUTH_READER_SCRIPT
+        from paude.backends.proxy_config import OPENCLAW_AUTH_READER_SCRIPT
 
         result = self._runner.exec_in_container(
             cname, ["python3", "-c", OPENCLAW_AUTH_READER_SCRIPT], check=False
@@ -77,7 +81,7 @@ class SessionSetup:
 
     def print_port_urls(self, session_name: str, agent: Agent) -> None:
         """Print access URLs for any exposed ports."""
-        from paude.backends.shared import enrich_port_url
+        from paude.backends.session_env import enrich_port_url
 
         token = None
         if agent.config.name == "openclaw":
@@ -129,13 +133,13 @@ class SessionSetup:
     @staticmethod
     def local_adc_path() -> Path | None:
         """Return the local GCP ADC file path, or None if it doesn't exist."""
-        from paude.backends.shared import local_gcp_adc_path
+        from paude.backends.proxy_config import local_gcp_adc_path
 
         return local_gcp_adc_path()
 
     def gather_proxy_credentials(self, agent: Agent) -> ProxyCredentials:
         """Gather real credentials from host environment for the proxy container."""
-        from paude.backends.shared import gather_proxy_credentials
+        from paude.backends.proxy_config import gather_proxy_credentials
 
         return gather_proxy_credentials(
             agent.config,
@@ -144,7 +148,7 @@ class SessionSetup:
 
     def inject_stub_credentials(self, cname: str) -> None:
         """Inject stub GCP ADC into a running container."""
-        from paude.backends.shared import STUB_ADC_JSON
+        from paude.backends.proxy_config import STUB_ADC_JSON
 
         self._runner.inject_file(cname, STUB_ADC_JSON, GCP_ADC_TARGET, owner="paude")
 

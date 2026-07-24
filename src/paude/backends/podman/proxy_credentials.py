@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from paude.backends.podman.helpers import proxy_secret_name, proxy_secret_prefix
-from paude.backends.shared import (
+from paude.backends.proxy_config import (
     PROXY_CHATGPT_AUTH_STATE_ENV,
     ProxyCredentials,
 )

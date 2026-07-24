@@ -6,7 +6,7 @@ import sys
 import time
 
 from paude.backends.podman.helpers import container_name, proxy_container_name
-from paude.backends.shared import (
+from paude.backends.proxy_config import (
     CA_BUNDLE_PATH,
     CA_CERT_CONTAINER_PATH,
     CA_CERT_POLL_INTERVAL,

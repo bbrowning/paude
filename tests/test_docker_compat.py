@@ -8,8 +8,8 @@ from paude.agents.codex import (
     CODEX_CHATGPT_PROFILE_TARGET,
     SYNTHETIC_CODEX_PROFILE_TOML,
 )
+from paude.backends.naming import is_local_backend
 from paude.backends.podman import PodmanBackend
-from paude.backends.shared import is_local_backend
 from paude.container.engine import ContainerEngine
 from paude.container.proxy_runner import ProxyRunner
 from paude.container.runner import ContainerRunner
@@ -270,7 +270,7 @@ class TestDockerCredentialInjection:
         self, mock_run: MagicMock
     ) -> None:
         """_inject_stub_credentials should inject stub ADC via exec."""
-        from paude.backends.shared import STUB_ADC_JSON
+        from paude.backends.proxy_config import STUB_ADC_JSON
         from paude.constants import GCP_ADC_TARGET
 
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -356,7 +356,7 @@ class TestStubCredentialInjection:
     @patch("subprocess.run")
     def test_inject_stub_credentials_podman(self, mock_run: MagicMock) -> None:
         """Podman injects stub ADC via exec."""
-        from paude.backends.shared import STUB_ADC_JSON
+        from paude.backends.proxy_config import STUB_ADC_JSON
 
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 

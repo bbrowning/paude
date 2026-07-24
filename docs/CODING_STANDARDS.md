@@ -24,7 +24,11 @@ When splitting, create a package directory with `__init__.py` that preserves the
 ## Shared Utility Locations
 
 - Cross-cutting constants: `src/paude/constants.py`
-- Shared backend logic: `src/paude/backends/shared.py`
+- Container labels: `src/paude/backends/labels.py`
+- Backend naming / type helpers: `src/paude/backends/naming.py`
+- Proxy and CA configuration: `src/paude/backends/proxy_config.py`
+- Session environment building: `src/paude/backends/session_env.py`
+- SSH backend construction: `src/paude/backends/ssh.py`
 
 ## Testability
 

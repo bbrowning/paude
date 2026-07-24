@@ -10,8 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from paude.backends.base import Session
-from paude.backends.podman.exceptions import SessionNotFoundError
-from paude.backends.shared import (
+from paude.backends.labels import (
     PAUDE_LABEL_AGENT,
     PAUDE_LABEL_APP,
     PAUDE_LABEL_CREATED,
@@ -20,12 +19,15 @@ from paude.backends.shared import (
     PAUDE_LABEL_SESSION,
     PAUDE_LABEL_VERSION,
     PAUDE_LABEL_WORKSPACE,
-    decode_path,
+)
+from paude.backends.naming import (
     network_name,
     proxy_resource_name,
     resource_name,
     volume_name,
 )
+from paude.backends.podman.exceptions import SessionNotFoundError
+from paude.backends.session_env import decode_path
 from paude.container.runner import ContainerRunner
 
 if TYPE_CHECKING:

@@ -209,13 +209,7 @@ def _upgrade_podman(
 ) -> None:
     """Upgrade a Podman/Docker session in place."""
     from paude.agents import get_agent
-    from paude.backends.podman.helpers import (
-        container_name,
-        find_container_by_session_name,
-        network_name,
-        proxy_container_name,
-    )
-    from paude.backends.shared import (
+    from paude.backends.labels import (
         PAUDE_LABEL_AGENT,
         PAUDE_LABEL_DOMAINS,
         PAUDE_LABEL_GPU,
@@ -224,8 +218,14 @@ def _upgrade_podman(
         PAUDE_LABEL_PROXY_IMAGE,
         PAUDE_LABEL_WORKSPACE,
         PAUDE_LABEL_YOLO,
-        decode_path,
     )
+    from paude.backends.podman.helpers import (
+        container_name,
+        find_container_by_session_name,
+        network_name,
+        proxy_container_name,
+    )
+    from paude.backends.session_env import decode_path
     from paude.cli.helpers import (
         _detect_dev_script_dir,
         _prepare_session_create,

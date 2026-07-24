@@ -8,6 +8,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from paude.backends.base import Session, SessionConfig
+from paude.backends.labels import (
+    PAUDE_LABEL_APP,
+    PAUDE_LABEL_SESSION,
+)
 from paude.backends.podman.exceptions import (
     SessionExistsError,
     SessionNotFoundError,
@@ -27,10 +31,6 @@ from paude.backends.podman.helpers import (
 from paude.backends.podman.port_forward import PodmanPortForwardManager
 from paude.backends.podman.proxy import PodmanProxyManager
 from paude.backends.podman.session_setup import SessionSetup
-from paude.backends.shared import (
-    PAUDE_LABEL_APP,
-    PAUDE_LABEL_SESSION,
-)
 from paude.constants import (
     CONTAINER_ENTRYPOINT,
     GCP_ADC_SECRET_NAME,

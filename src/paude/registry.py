@@ -123,7 +123,7 @@ class SessionRegistry:
         paude_version: str | None = None,
     ) -> None:
         """Add or update a session in the registry."""
-        from paude.backends.shared import is_local_backend
+        from paude.backends.naming import is_local_backend
 
         entries = self.load()
         # For local backends, engine == backend_type

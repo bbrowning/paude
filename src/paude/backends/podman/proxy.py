@@ -5,6 +5,11 @@ from __future__ import annotations
 import sys
 from collections.abc import Mapping
 
+from paude.backends.labels import (
+    PAUDE_LABEL_DOMAINS,
+    PAUDE_LABEL_OTEL_PORTS,
+    PAUDE_LABEL_PROXY_IMAGE,
+)
 from paude.backends.podman.ca_cert import _BUILD_CA_BUNDLE_CMD as _BUILD_CA_BUNDLE_CMD
 from paude.backends.podman.ca_cert import CACertDistributor
 from paude.backends.podman.helpers import auth_volume_name as auth_volume_name
@@ -15,11 +20,8 @@ from paude.backends.podman.helpers import (
     proxy_container_name,
 )
 from paude.backends.podman.proxy_credentials import ProxyCredentialManager
-from paude.backends.shared import CA_CERT_CONTAINER_PATH as CA_CERT_CONTAINER_PATH
-from paude.backends.shared import (
-    PAUDE_LABEL_DOMAINS,
-    PAUDE_LABEL_OTEL_PORTS,
-    PAUDE_LABEL_PROXY_IMAGE,
+from paude.backends.proxy_config import CA_CERT_CONTAINER_PATH as CA_CERT_CONTAINER_PATH
+from paude.backends.proxy_config import (
     PROXY_BLOCKED_LOG_PATH,
     ProxyCredentials,
     derive_agent_ip,

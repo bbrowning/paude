@@ -36,7 +36,7 @@ def build_proxy_environment(proxy_name: str) -> dict[str, str]:
     Returns:
         Dictionary of proxy environment variables.
     """
-    from paude.backends.shared import CA_BUNDLE_PATH, CA_CERT_CONTAINER_PATH
+    from paude.backends.proxy_config import CA_BUNDLE_PATH, CA_CERT_CONTAINER_PATH
 
     proxy_url = f"http://{proxy_name}:3128"
     return {
