@@ -10,13 +10,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from paude.backends.base import SessionConfig
-from paude.backends.podman import PodmanBackend
-from paude.backends.shared import (
+from paude.backends.labels import (
     PAUDE_LABEL_AGENT,
     PAUDE_LABEL_DOMAINS,
     PAUDE_LABEL_VERSION,
     PAUDE_LABEL_YOLO,
 )
+from paude.backends.podman import PodmanBackend
 from paude.cli.upgrade import UpgradeOverrides
 
 from .conftest import cleanup_session

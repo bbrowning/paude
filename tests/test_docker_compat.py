@@ -8,8 +8,8 @@ from paude.agents.codex import (
     CODEX_CHATGPT_PROFILE_TARGET,
     SYNTHETIC_CODEX_PROFILE_TOML,
 )
+from paude.backends.naming import is_local_backend
 from paude.backends.podman import PodmanBackend
-from paude.backends.shared import is_local_backend
 from paude.container.engine import ContainerEngine
 from paude.container.proxy_runner import ProxyRunner
 from paude.container.runner import ContainerRunner
@@ -238,7 +238,7 @@ class TestDockerVolumePermissions:
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         engine = ContainerEngine("docker")
         backend = PodmanBackend(engine=engine)
-        backend._fix_volume_permissions("paude-test")
+        backend._setup.fix_volume_permissions("paude-test")
         # Find the chown call
         chown_calls = [c for c in mock_run.call_args_list if "chown" in c[0][0]]
         assert len(chown_calls) == 1
@@ -259,7 +259,7 @@ class TestDockerVolumePermissions:
         engine = ContainerEngine("podman")
         backend = PodmanBackend(engine=engine)
         # Should be a no-op, no subprocess call needed
-        backend._fix_volume_permissions("paude-test")
+        backend._setup.fix_volume_permissions("paude-test")
 
 
 class TestDockerCredentialInjection:
@@ -270,14 +270,14 @@ class TestDockerCredentialInjection:
         self, mock_run: MagicMock
     ) -> None:
         """_inject_stub_credentials should inject stub ADC via exec."""
-        from paude.backends.shared import STUB_ADC_JSON
+        from paude.backends.proxy_config import STUB_ADC_JSON
         from paude.constants import GCP_ADC_TARGET
 
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         engine = ContainerEngine("docker")
         backend = PodmanBackend(engine=engine)
-        backend._inject_stub_credentials("paude-test")
+        backend._setup.inject_stub_credentials("paude-test")
 
         exec_calls = [
             c
@@ -338,7 +338,7 @@ class TestDockerCredentialInjection:
 
         engine = ContainerEngine("docker")
         backend = PodmanBackend(engine=engine)
-        backend._inject_stub_credentials("paude-test")
+        backend._setup.inject_stub_credentials("paude-test")
 
         exec_calls = [
             c
@@ -356,13 +356,13 @@ class TestStubCredentialInjection:
     @patch("subprocess.run")
     def test_inject_stub_credentials_podman(self, mock_run: MagicMock) -> None:
         """Podman injects stub ADC via exec."""
-        from paude.backends.shared import STUB_ADC_JSON
+        from paude.backends.proxy_config import STUB_ADC_JSON
 
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         engine = ContainerEngine("podman")
         backend = PodmanBackend(engine=engine)
-        backend._inject_stub_credentials("paude-test")
+        backend._setup.inject_stub_credentials("paude-test")
 
         exec_calls = [
             c
@@ -382,7 +382,7 @@ class TestCodexSyntheticAuth:
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         backend = PodmanBackend(engine=ContainerEngine("podman"))
 
-        backend._inject_codex_auth("paude-test", chatgpt_mode=True)
+        backend._setup.inject_codex_auth("paude-test", chatgpt_mode=True)
 
         injections = [
             c for c in mock_run.call_args_list if c[1].get("input") is not None
@@ -396,7 +396,7 @@ class TestCodexSyntheticAuth:
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         backend = PodmanBackend(engine=ContainerEngine("podman"))
 
-        backend._inject_codex_auth("paude-test", chatgpt_mode=False)
+        backend._setup.inject_codex_auth("paude-test", chatgpt_mode=False)
 
         exec_args = [c[0][0] for c in mock_run.call_args_list if "exec" in c[0][0]]
         assert any(

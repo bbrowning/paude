@@ -3,26 +3,26 @@
 from __future__ import annotations
 
 import sys
-import time
 from collections.abc import Mapping
 
+from paude.backends.labels import (
+    PAUDE_LABEL_DOMAINS,
+    PAUDE_LABEL_OTEL_PORTS,
+    PAUDE_LABEL_PROXY_IMAGE,
+)
+from paude.backends.podman.ca_cert import _BUILD_CA_BUNDLE_CMD as _BUILD_CA_BUNDLE_CMD
+from paude.backends.podman.ca_cert import CACertDistributor
+from paude.backends.podman.helpers import auth_volume_name as auth_volume_name
+from paude.backends.podman.helpers import ca_volume_name as ca_volume_name
 from paude.backends.podman.helpers import (
     find_container_by_session_name,
     network_name,
     proxy_container_name,
-    proxy_secret_name,
 )
-from paude.backends.shared import (
-    CA_BUNDLE_PATH,
-    CA_CERT_CONTAINER_PATH,
-    CA_CERT_POLL_INTERVAL,
-    CA_CERT_POLL_TIMEOUT,
-    PAUDE_LABEL_DOMAINS,
-    PAUDE_LABEL_OTEL_PORTS,
-    PAUDE_LABEL_PROXY_IMAGE,
+from paude.backends.podman.proxy_credentials import ProxyCredentialManager
+from paude.backends.proxy_config import CA_CERT_CONTAINER_PATH as CA_CERT_CONTAINER_PATH
+from paude.backends.proxy_config import (
     PROXY_BLOCKED_LOG_PATH,
-    PROXY_CHATGPT_AUTH_STATE_ENV,
-    SYS_CA_BUNDLE_PATHS,
     ProxyCredentials,
     derive_agent_ip,
 )
@@ -31,16 +31,6 @@ from paude.container.network import NetworkManager
 from paude.container.proxy_runner import ProxyRunner
 from paude.container.runner import ContainerRunner
 from paude.platform import get_podman_machine_dns, is_macos
-
-# Shell command to find the system CA bundle across distros and build a
-# custom bundle (system CAs + proxy CA cert).
-_BUILD_CA_BUNDLE_CMD = (
-    "SYS_BUNDLE=''; "
-    f"for p in {' '.join(SYS_CA_BUNDLE_PATHS)}; do "
-    '[ -f "$p" ] && SYS_BUNDLE="$p" && break; done; '
-    f'[ -n "$SYS_BUNDLE" ] && cat "$SYS_BUNDLE" '
-    f"{CA_CERT_CONTAINER_PATH} > {CA_BUNDLE_PATH}"
-)
 
 
 def _get_host_dns(engine: ContainerEngine) -> str | None:
@@ -88,16 +78,6 @@ def _read_resolv_conf(engine: ContainerEngine) -> str | None:
     return None
 
 
-def ca_volume_name(session_name: str) -> str:
-    """Get the CA certificate volume name for a session."""
-    return f"paude-ca-{session_name}"
-
-
-def auth_volume_name(session_name: str) -> str:
-    """Get the proxy-only OAuth state volume for a session."""
-    return f"paude-auth-{session_name}"
-
-
 class PodmanProxyManager:
     """Manages proxy containers for Podman sessions."""
 
@@ -109,57 +89,27 @@ class PodmanProxyManager:
         self._runner = runner
         self._network_manager = network_manager
         self._proxy_runner = ProxyRunner(runner)
+        self._ca_cert = CACertDistributor(runner)
+        self._credentials = ProxyCredentialManager(runner)
 
     def _create_credential_secrets(
         self,
         session_name: str,
         credentials: ProxyCredentials | Mapping[str, str] | None,
     ) -> list[str]:
-        """Create podman secrets for proxy credentials.
-
-        Each credential is stored as a separate podman secret scoped to
-        the session.  The returned list contains ``--secret`` flag values
-        using ``type=env`` so the secret is injected as an environment
-        variable inside the container without appearing in inspect output.
-
-        Returns an empty list when the engine does not support secrets
-        (Docker), causing the caller to fall back to ``-e`` env vars.
-        """
-        if credentials is None:
-            return []
-        if not isinstance(credentials, ProxyCredentials):
-            credentials = ProxyCredentials(environment=dict(credentials))
-        if not self._runner.engine.supports_secrets:
-            return []
-
-        secret_refs: list[str] = []
-        for key, value in credentials.items():
-            sname = proxy_secret_name(session_name, key)
-            self._runner.create_secret_from_value(sname, value)
-            secret_refs.append(f"{sname},type=env,target={key}")
-        return secret_refs
+        """Create podman secrets for proxy credentials."""
+        return self._credentials.create_secrets(session_name, credentials)
 
     def _credential_env(
         self,
         credentials: ProxyCredentials | Mapping[str, str] | None,
     ) -> dict[str, str]:
-        """Return extra plain (non-secret) env vars derived from credential signals.
-
-        Currently only used to tell paude-proxy a session wants Codex
-        ChatGPT-OAuth mode. This is a plain env var, not a secret, so it
-        works identically on Podman and Docker.
-        """
-        if isinstance(credentials, ProxyCredentials) and credentials.chatgpt_oauth_mode:
-            return {PROXY_CHATGPT_AUTH_STATE_ENV: "/data/auth/chatgpt-auth.json"}
-        return {}
+        """Return extra plain (non-secret) env vars derived from credential signals."""
+        return self._credentials.credential_env(credentials)
 
     def remove_credential_secrets(self, session_name: str) -> None:
         """Remove all podman secrets for a session's proxy credentials."""
-        from paude.backends.podman.helpers import proxy_secret_prefix
-
-        names = self._runner.list_secrets_by_prefix(proxy_secret_prefix(session_name))
-        for sname in names:
-            self._runner.remove_secret(sname)
+        self._credentials.remove_secrets(session_name)
 
     def has_proxy(self, session_name: str) -> bool:
         """Check if a session has a proxy container."""
@@ -230,7 +180,7 @@ class PodmanProxyManager:
         )
 
         proxy_ip = self._get_proxy_ip(nname)
-        agent_ip = self._derive_agent_ip(proxy_ip) if proxy_ip else None
+        agent_ip = derive_agent_ip(proxy_ip) if proxy_ip else None
         dns = _get_host_dns(self._runner.engine)
         secret_refs = self._create_credential_secrets(session_name, credentials)
         credential_env = self._credential_env(credentials)
@@ -253,131 +203,14 @@ class PodmanProxyManager:
         )
         self._proxy_runner.start_session_proxy(pname)
 
-    def _recreate_proxy(
-        self,
-        session_name: str,
-        pname: str,
-        credentials: ProxyCredentials | Mapping[str, str] | None,
-        proxy_config: tuple[str, list[str], list[int]],
-    ) -> None:
-        """Recreate the proxy container with fresh credentials."""
-        proxy_image, domains, otel_ports = proxy_config
-        nname = network_name(session_name)
-        ca_vol = ca_volume_name(session_name)
-        auth_vol = auth_volume_name(session_name)
-
-        self._network_manager.create_internal_network(
-            nname, disable_dns=self._runner.engine.is_podman
-        )
-
-        proxy_ip = self._get_proxy_ip(nname)
-        agent_ip = self._derive_agent_ip(proxy_ip) if proxy_ip else None
-        dns = _get_host_dns(self._runner.engine)
-        secret_refs = self._create_credential_secrets(session_name, credentials)
-        credential_env = self._credential_env(credentials)
-
-        if self._runner.container_exists(pname):
-            print(f"Recreating proxy {pname}...", file=sys.stderr)
-            self._proxy_runner.recreate_session_proxy(
-                name=pname,
-                image=proxy_image,
-                network=nname,
-                dns=dns,
-                allowed_domains=domains,
-                ip=proxy_ip,
-                otel_ports=otel_ports,
-                ca_volume=ca_vol,
-                credentials=credentials,
-                allowed_clients=agent_ip,
-                secret_refs=secret_refs,
-                credential_env=credential_env,
-                auth_volume=auth_vol,
-            )
-        else:
-            print(f"Creating proxy {pname}...", file=sys.stderr)
-            self._proxy_runner.create_session_proxy(
-                name=pname,
-                image=proxy_image,
-                network=nname,
-                dns=dns,
-                allowed_domains=domains,
-                ip=proxy_ip,
-                otel_ports=otel_ports,
-                ca_volume=ca_vol,
-                credentials=credentials,
-                allowed_clients=agent_ip,
-                secret_refs=secret_refs,
-                credential_env=credential_env,
-                auth_volume=auth_vol,
-            )
-            self._proxy_runner.start_session_proxy(pname)
-
     def start_proxy(self, session_name: str) -> None:
         """Start the proxy container for a session."""
         pname = proxy_container_name(session_name)
         self._proxy_runner.start_session_proxy(pname)
 
     def distribute_ca_cert(self, session_name: str) -> None:
-        """Copy the proxy's CA certificate into the agent container.
-
-        Waits for the proxy to generate its CA cert at /data/ca/ca.crt,
-        then copies it into the agent container's trust store and runs
-        update-ca-trust.
-        """
-        from paude.backends.podman.helpers import container_name
-
-        pname = proxy_container_name(session_name)
-        cname = container_name(session_name)
-
-        if not self._runner.container_running(pname):
-            return
-        if not self._runner.container_running(cname):
-            return
-
-        # Poll for CA cert generation in proxy container
-        elapsed = 0
-        while elapsed < CA_CERT_POLL_TIMEOUT:
-            result = self._runner.exec_in_container(
-                pname, ["test", "-f", "/data/ca/ca.crt"], check=False
-            )
-            if result.returncode == 0:
-                break
-            time.sleep(CA_CERT_POLL_INTERVAL)
-            elapsed += CA_CERT_POLL_INTERVAL
-        else:
-            print(
-                "WARNING: Timed out waiting for proxy CA certificate.",
-                file=sys.stderr,
-            )
-            return
-
-        # Read CA cert from proxy container
-        result = self._runner.exec_in_container(
-            pname, ["cat", "/data/ca/ca.crt"], check=False
-        )
-        if result.returncode != 0 or not result.stdout.strip():
-            print(
-                "WARNING: Failed to read CA certificate from proxy.",
-                file=sys.stderr,
-            )
-            return
-
-        # Inject into agent container and build custom CA bundle
-        self._runner.inject_file(
-            cname,
-            result.stdout,
-            CA_CERT_CONTAINER_PATH,
-            owner="root:0",
-            mode="644",
-        )
-        bundle_result = self._runner.exec_in_container(
-            cname, ["sh", "-c", _BUILD_CA_BUNDLE_CMD], check=False
-        )
-        if bundle_result.returncode != 0:
-            print(
-                "WARNING: Failed to build custom CA bundle in agent container.",
-                file=sys.stderr,
-            )
+        """Copy the proxy's CA certificate into the agent container."""
+        self._ca_cert.distribute(session_name)
 
     def stop_if_needed(self, session_name: str) -> None:
         """Stop the proxy container for a session if one exists."""
@@ -407,11 +240,6 @@ class PodmanProxyManager:
         if not gateway:
             return None
         return NetworkManager.derive_proxy_ip(gateway)
-
-    @staticmethod
-    def _derive_agent_ip(proxy_ip: str) -> str:
-        """Derive the expected agent container IP from the proxy IP."""
-        return derive_agent_ip(proxy_ip)
 
     def create_proxy(
         self,
@@ -450,7 +278,7 @@ class PodmanProxyManager:
             auth_volume_created = True
 
         # Compute expected agent IP for source IP filtering
-        agent_ip = self._derive_agent_ip(proxy_ip) if proxy_ip else None
+        agent_ip = derive_agent_ip(proxy_ip) if proxy_ip else None
 
         pname = proxy_container_name(session_name)
         dns = _get_host_dns(self._runner.engine)
@@ -514,75 +342,8 @@ class PodmanProxyManager:
         return result.stdout
 
     def _redistribute_ca_if_needed(self, session_name: str) -> None:
-        """Verify the CA cert is still valid after a proxy recreate.
-
-        The named CA volume persists across container removal, so the
-        same cert should be reused. This method checks that the cert
-        is present in the recreated proxy and that the agent container
-        still has a matching cert. If the agent cert is missing or
-        differs, it injects the cert directly (without re-polling).
-        """
-        from paude.backends.podman.helpers import container_name
-
-        pname = proxy_container_name(session_name)
-        cname = container_name(session_name)
-
-        if not self._runner.container_running(pname):
-            return
-        if not self._runner.container_running(cname):
-            return
-
-        # Wait for CA cert to be available in the recreated proxy
-        elapsed = 0
-        while elapsed < CA_CERT_POLL_TIMEOUT:
-            result = self._runner.exec_in_container(
-                pname, ["test", "-f", "/data/ca/ca.crt"], check=False
-            )
-            if result.returncode == 0:
-                break
-            time.sleep(CA_CERT_POLL_INTERVAL)
-            elapsed += CA_CERT_POLL_INTERVAL
-        else:
-            print(
-                "WARNING: CA certificate missing after proxy recreate.",
-                file=sys.stderr,
-            )
-            return
-
-        # Read the current proxy CA cert
-        proxy_cert = self._runner.exec_in_container(
-            pname, ["cat", "/data/ca/ca.crt"], check=False
-        )
-        if proxy_cert.returncode != 0 or not proxy_cert.stdout.strip():
-            return
-
-        # Read the agent's current CA cert (may be absent on first recreate)
-        agent_cert = self._runner.exec_in_container(
-            cname, ["cat", CA_CERT_CONTAINER_PATH], check=False
-        )
-
-        # Inject directly if the agent cert is missing or differs
-        # (avoids re-polling and re-reading the proxy cert)
-        if agent_cert.returncode != 0 or agent_cert.stdout != proxy_cert.stdout:
-            print(
-                "Redistributing CA certificate after proxy recreate...",
-                file=sys.stderr,
-            )
-            self._runner.inject_file(
-                cname,
-                proxy_cert.stdout,
-                CA_CERT_CONTAINER_PATH,
-                owner="root:0",
-                mode="644",
-            )
-            bundle_result = self._runner.exec_in_container(
-                cname, ["sh", "-c", _BUILD_CA_BUNDLE_CMD], check=False
-            )
-            if bundle_result.returncode != 0:
-                print(
-                    "WARNING: Failed to build custom CA bundle in agent container.",
-                    file=sys.stderr,
-                )
+        """Verify the CA cert is still valid after a proxy recreate."""
+        self._ca_cert.redistribute_if_needed(session_name)
 
     def update_domains(
         self,
@@ -610,7 +371,7 @@ class PodmanProxyManager:
         ca_vol = ca_volume_name(session_name)
         auth_vol = auth_volume_name(session_name)
         proxy_ip = self._get_proxy_ip(nname)
-        agent_ip = self._derive_agent_ip(proxy_ip) if proxy_ip else None
+        agent_ip = derive_agent_ip(proxy_ip) if proxy_ip else None
         dns = _get_host_dns(self._runner.engine)
 
         secret_refs = self._create_credential_secrets(session_name, credentials)

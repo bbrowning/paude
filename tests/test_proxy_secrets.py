@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from paude.backends.podman.helpers import proxy_secret_name, proxy_secret_prefix
-from paude.backends.shared import ProxyCredentials
+from paude.backends.proxy_config import ProxyCredentials
 from paude.container.engine import ContainerEngine
 from paude.container.proxy_runner import ProxyRunner
 from paude.container.runner import ContainerRunner

@@ -1,4 +1,4 @@
-"""Tests for paude.backends.shared module."""
+"""Tests for shared backend utilities (naming, proxy_config, session_env)."""
 
 from __future__ import annotations
 
@@ -8,15 +8,17 @@ import pytest
 
 from paude.agents.claude import ClaudeAgent
 from paude.backends.base import SessionConfig
-from paude.backends.shared import (
-    PROXY_GCP_ADC_ENV,
-    build_session_env,
-    gather_proxy_credentials,
+from paude.backends.naming import (
     network_name,
     proxy_resource_name,
     resource_name,
     volume_name,
 )
+from paude.backends.proxy_config import (
+    PROXY_GCP_ADC_ENV,
+    gather_proxy_credentials,
+)
+from paude.backends.session_env import build_session_env
 
 
 class TestBuildSessionEnv:
@@ -54,7 +56,7 @@ class TestBuildSessionEnvProxyCredentials:
 
     def test_proxy_active_sets_dummy_api_key(self) -> None:
         """Secret env vars are set to proxy-managed sentinel when proxy active."""
-        from paude.backends.shared import PROXY_MANAGED_CREDENTIAL
+        from paude.backends.proxy_config import PROXY_MANAGED_CREDENTIAL
 
         config = SessionConfig(
             name="test",
@@ -69,7 +71,7 @@ class TestBuildSessionEnvProxyCredentials:
 
     def test_proxy_active_sets_dummy_gh_token(self) -> None:
         """GH_TOKEN is set to proxy-managed sentinel when proxy active."""
-        from paude.backends.shared import PROXY_MANAGED_CREDENTIAL
+        from paude.backends.proxy_config import PROXY_MANAGED_CREDENTIAL
 
         config = SessionConfig(
             name="test",
@@ -83,7 +85,7 @@ class TestBuildSessionEnvProxyCredentials:
 
     def test_dummy_credentials_always_set(self) -> None:
         """Secret env vars are always set since proxy is always active."""
-        from paude.backends.shared import PROXY_MANAGED_CREDENTIAL
+        from paude.backends.proxy_config import PROXY_MANAGED_CREDENTIAL
 
         config = SessionConfig(
             name="test",

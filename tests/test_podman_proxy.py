@@ -13,7 +13,7 @@ from paude.backends.podman.proxy import (
     auth_volume_name,
     ca_volume_name,
 )
-from paude.backends.shared import derive_agent_ip
+from paude.backends.proxy_config import derive_agent_ip
 
 
 def _make_mock_runner(engine_binary: str = "podman") -> MagicMock:
@@ -437,7 +437,7 @@ class TestDistributeCaCert:
         mock_network = MagicMock()
 
         manager = PodmanProxyManager(mock_runner, mock_network)
-        with patch("paude.backends.podman.proxy.CA_CERT_POLL_TIMEOUT", 0):
+        with patch("paude.backends.podman.ca_cert.CA_CERT_POLL_TIMEOUT", 0):
             manager.distribute_ca_cert("test-session")
 
         captured = capsys.readouterr()
@@ -471,7 +471,7 @@ class TestBuildCaBundleCmd:
     def test_cmd_writes_to_ca_bundle_path(self) -> None:
         """_BUILD_CA_BUNDLE_CMD must write to CA_BUNDLE_PATH."""
         from paude.backends.podman.proxy import _BUILD_CA_BUNDLE_CMD
-        from paude.backends.shared import CA_BUNDLE_PATH
+        from paude.backends.proxy_config import CA_BUNDLE_PATH
 
         assert CA_BUNDLE_PATH in _BUILD_CA_BUNDLE_CMD
 
@@ -869,7 +869,7 @@ class TestUpdateDomainsCaResilience:
         mock_network.get_network_gateway.return_value = "10.89.0.1"
 
         manager = PodmanProxyManager(mock_runner, mock_network)
-        with patch("paude.backends.podman.proxy.CA_CERT_POLL_TIMEOUT", 0):
+        with patch("paude.backends.podman.ca_cert.CA_CERT_POLL_TIMEOUT", 0):
             manager.update_domains(
                 session_name="test-session",
                 domains=[".googleapis.com"],

@@ -74,7 +74,7 @@ def _build_ssh_backend(
     connect_timeout: int | None = None,
 ) -> PodmanBackend | None:
     """Reconstruct a PodmanBackend with SSH transport from a registry entry."""
-    from paude.backends.shared import build_ssh_backend
+    from paude.backends.ssh import build_ssh_backend
 
     return build_ssh_backend(entry, connect_timeout=connect_timeout)
 

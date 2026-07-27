@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 from typer.testing import CliRunner
 
 from paude.backends.base import Session
-from paude.backends.shared import (
+from paude.backends.labels import (
     PAUDE_LABEL_AGENT,
     PAUDE_LABEL_CREATED,
     PAUDE_LABEL_DOMAINS,
@@ -19,8 +19,8 @@ from paude.backends.shared import (
     PAUDE_LABEL_SESSION,
     PAUDE_LABEL_WORKSPACE,
     PAUDE_LABEL_YOLO,
-    encode_path,
 )
+from paude.backends.session_env import encode_path
 from paude.cli import app
 from paude.cli.upgrade import UpgradeOverrides
 from paude.registry import RegistryEntry, SessionRegistry
@@ -688,7 +688,7 @@ class TestUpgradePodmanWithOverrides:
         mock_build_mounts: MagicMock,
     ) -> None:
         """Upgrade with --no-gpu (gpu='') disables GPU."""
-        from paude.backends.shared import PAUDE_LABEL_GPU
+        from paude.backends.labels import PAUDE_LABEL_GPU
 
         labels = self._make_container_labels()
         labels[PAUDE_LABEL_GPU] = "all"  # Had GPU before

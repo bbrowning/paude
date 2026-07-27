@@ -1,0 +1,17 @@
+"""Container label constants for identifying paude sessions."""
+
+from __future__ import annotations
+
+PAUDE_LABEL_APP = "app=paude"
+PAUDE_LABEL_SESSION = "paude.io/session-name"
+PAUDE_LABEL_WORKSPACE = "paude.io/workspace"
+PAUDE_LABEL_CREATED = "paude.io/created-at"
+PAUDE_LABEL_AGENT = "paude.io/agent"
+PAUDE_LABEL_DOMAINS = "paude.io/allowed-domains"
+PAUDE_LABEL_PROXY_IMAGE = "paude.io/proxy-image"
+PAUDE_LABEL_VERSION = "paude.io/version"
+PAUDE_LABEL_GPU = "paude.io/gpu"
+PAUDE_LABEL_YOLO = "paude.io/yolo"
+PAUDE_LABEL_PROVIDER = "paude.io/provider"
+PAUDE_LABEL_OTEL_PORTS = "paude.io/otel-ports"
+PAUDE_LABEL_OTEL_ENDPOINT = "paude.io/otel-endpoint"

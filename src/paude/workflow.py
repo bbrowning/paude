@@ -12,7 +12,7 @@ from pathlib import Path
 import typer
 
 from paude.backends.base import Backend, Session
-from paude.backends.shared import (
+from paude.backends.naming import (
     engine_binary_for_backend,
     resource_name,
 )

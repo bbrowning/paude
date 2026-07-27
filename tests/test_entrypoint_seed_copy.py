@@ -925,7 +925,7 @@ class TestSetupCaTrustContract:
         """Entrypoint CA paths must match SYS_CA_BUNDLE_PATHS in shared.py."""
         import re
 
-        from paude.backends.shared import SYS_CA_BUNDLE_PATHS
+        from paude.backends.proxy_config import SYS_CA_BUNDLE_PATHS
 
         content = ENTRYPOINT_LIB_CREDENTIALS_PATH.read_text()
         # Extract paths from the _find_sys_ca_bundle function
@@ -1085,34 +1085,34 @@ class TestGenerateSandboxConfigScript:
     """Tests for generate_sandbox_config_script() in shared.py."""
 
     def test_generates_claude_script(self) -> None:
-        from paude.backends.shared import generate_sandbox_config_script
+        from paude.backends.session_env import generate_sandbox_config_script
 
         script = generate_sandbox_config_script("claude", "/pvc/workspace", "")
         assert "hasCompletedOnboarding" in script
         assert "hasTrustDialogAccepted" in script
 
     def test_generates_gemini_script(self) -> None:
-        from paude.backends.shared import generate_sandbox_config_script
+        from paude.backends.session_env import generate_sandbox_config_script
 
         script = generate_sandbox_config_script("gemini", "/pvc/workspace", "")
         assert "trustedFolders.json" in script
         assert "TRUST_FOLDER" in script
 
     def test_generates_cursor_script(self) -> None:
-        from paude.backends.shared import generate_sandbox_config_script
+        from paude.backends.session_env import generate_sandbox_config_script
 
         script = generate_sandbox_config_script("cursor", "/pvc/workspace", "")
         assert "cli-config.json" in script
         assert "workspace-trusted" in script
 
     def test_claude_script_uses_container_home(self) -> None:
-        from paude.backends.shared import generate_sandbox_config_script
+        from paude.backends.session_env import generate_sandbox_config_script
 
         script = generate_sandbox_config_script("claude", "/pvc/workspace", "")
         assert "/home/paude/.claude.json" in script
 
     def test_claude_script_with_yolo_flag(self) -> None:
-        from paude.backends.shared import generate_sandbox_config_script
+        from paude.backends.session_env import generate_sandbox_config_script
 
         script = generate_sandbox_config_script(
             "claude", "/pvc/workspace", "", yolo=True
@@ -1120,7 +1120,7 @@ class TestGenerateSandboxConfigScript:
         assert "skipDangerousModePermissionPrompt" in script
 
     def test_generates_openclaw_hardened_script(self) -> None:
-        from paude.backends.shared import generate_sandbox_config_script
+        from paude.backends.session_env import generate_sandbox_config_script
 
         script = generate_sandbox_config_script("openclaw", "/pvc/workspace", "")
         assert '"host": "gateway"' in script
@@ -1129,7 +1129,7 @@ class TestGenerateSandboxConfigScript:
         assert '"workspaceOnly": true' in script
 
     def test_generates_openclaw_yolo_script(self) -> None:
-        from paude.backends.shared import generate_sandbox_config_script
+        from paude.backends.session_env import generate_sandbox_config_script
 
         script = generate_sandbox_config_script(
             "openclaw", "/pvc/workspace", "", yolo=True
