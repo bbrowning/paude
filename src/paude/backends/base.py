@@ -129,14 +129,13 @@ class Backend(Protocol):
         """
         ...
 
-    def start_session(self, name: str, github_token: str | None = None) -> int:
+    def start_session(self, name: str) -> int:
         """Start a session and connect to it.
 
         Starts the container/scales to 1 and connects.
 
         Args:
             name: Session name.
-            github_token: Optional GitHub token to inject into the session.
 
         Returns:
             Exit code from the connected session.
@@ -153,12 +152,11 @@ class Backend(Protocol):
         """
         ...
 
-    def connect_session(self, name: str, github_token: str | None = None) -> int:
+    def connect_session(self, name: str) -> int:
         """Attach to a running session.
 
         Args:
             name: Session name.
-            github_token: Optional GitHub token to inject into the session.
 
         Returns:
             Exit code from the attached session.

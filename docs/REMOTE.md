@@ -52,7 +52,6 @@ paude create my-project --host user@hostname:2222
 ### Limitations
 
 - `--host` and `--ssh-key` are CLI-only flags (not stored in user defaults)
-- [`paude harvest`](ORCHESTRATION.md#harvest-changes) assumes a local session when auto-adding its git remote; for `--host` sessions, use `--git` at create time or run `paude remote add` first
 
 ## Combining Remote Hosts with GPU
 

@@ -1,7 +1,7 @@
 """Tests for git_remote module."""
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from paude.git_remote import (
     _build_clone_from_origin_cmd,
@@ -26,6 +26,7 @@ from paude.git_remote import (
     list_paude_remotes,
     podman_exec_builder,
     resolve_origin_cmd,
+    resolve_session_remote,
     set_base_ref_in_container,
     set_origin_in_container,
     setup_precommit_in_container,
@@ -1151,6 +1152,56 @@ class TestBuildSshRemoteUrl:
             workspace_path="/custom/path",
         )
         assert url.endswith("/custom/path")
+
+
+class TestResolveSessionRemote:
+    """Tests for resolve_session_remote."""
+
+    @patch("paude.registry.SessionRegistry")
+    def test_no_registry_entry_uses_podman_url(self, mock_registry_class) -> None:
+        """No registry entry falls back to a local podman/docker URL, no transport."""
+        mock_registry_class.return_value.get.return_value = None
+
+        url, transport = resolve_session_remote(
+            "my-session", "paude-my-session", "podman"
+        )
+
+        assert url == "ext::podman exec -i paude-my-session %S /pvc/workspace"
+        assert transport is None
+
+    @patch("paude.registry.SessionRegistry")
+    def test_local_session_uses_podman_url(self, mock_registry_class) -> None:
+        """A registry entry without ssh_host is treated as local."""
+        mock_registry_class.return_value.get.return_value = MagicMock(
+            ssh_host=None, ssh_key=None
+        )
+
+        url, transport = resolve_session_remote(
+            "my-session", "paude-my-session", "docker"
+        )
+
+        assert url == "ext::docker exec -i paude-my-session %S /pvc/workspace"
+        assert transport is None
+
+    @patch("paude.registry.SessionRegistry")
+    def test_ssh_host_session_uses_ssh_url(self, mock_registry_class) -> None:
+        """A --host session builds an SSH-wrapped URL and a matching transport."""
+        mock_registry_class.return_value.get.return_value = MagicMock(
+            ssh_host="user@gpu-server:2222", ssh_key="/home/user/.ssh/id_ed25519"
+        )
+
+        url, transport = resolve_session_remote(
+            "my-session", "paude-my-session", "docker"
+        )
+
+        assert url == (
+            "ext::ssh -i /home/user/.ssh/id_ed25519 -p 2222 user@gpu-server "
+            "docker exec -i paude-my-session %S /pvc/workspace"
+        )
+        assert transport is not None
+        assert transport.host == "user@gpu-server"
+        assert transport.port == 2222
+        assert transport.key == "/home/user/.ssh/id_ed25519"
 
 
 class TestExecCmdBuilders:

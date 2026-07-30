@@ -7,7 +7,6 @@ import shlex
 import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
 import typer
 
@@ -64,21 +63,14 @@ def _find_backend_and_session(
     return backend_type, backend, session
 
 
-def _ensure_remote_exists(
-    session_name: str,
-    backend_type: str,
-    backend: Backend,
-    workspace: Path,
-) -> str:
+def _ensure_remote_exists(session_name: str, backend_type: str) -> str:
     """Ensure a paude git remote exists, auto-adding if needed."""
+    from paude.cli.remote_git_setup import _prepare_session_git_remote
     from paude.git_remote import (
-        build_podman_remote_url,
         enable_ext_protocol,
         git_remote_add,
-        initialize_container_workspace,
         is_ext_protocol_allowed,
         list_paude_remotes,
-        podman_exec_builder,
     )
 
     remote_name = resource_name(session_name)
@@ -94,12 +86,10 @@ def _ensure_remote_exists(
             typer.echo("Error: Failed to enable git ext:: protocol.", err=True)
             raise typer.Exit(1)
 
-    cname = resource_name(session_name)
-
     engine = engine_binary_for_backend(backend_type)
-    exec_builder = podman_exec_builder(cname, engine)
-    initialize_container_workspace(exec_builder)
-    remote_url = build_podman_remote_url(cname, engine=engine)
+    remote_url, _transport = _prepare_session_git_remote(
+        session_name, remote_name, engine
+    )
 
     if not git_remote_add(remote_name, remote_url):
         typer.echo(f"Error: Failed to add remote '{remote_name}'.", err=True)
@@ -145,12 +135,7 @@ def harvest_session(
         )
         raise typer.Exit(1)
 
-    remote_name = _ensure_remote_exists(
-        session_name,
-        backend_type,
-        backend,
-        workspace,
-    )
+    remote_name = _ensure_remote_exists(session_name, backend_type)
 
     container_branch = _get_container_branch(backend, session_name)
     typer.echo(f"Container is on branch '{container_branch}'.", err=True)

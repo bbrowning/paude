@@ -238,6 +238,145 @@ class TestHarvestSession:
         pr_create_args = pr_create_call[0][0]
         assert pr_create_args[:3] == ["gh", "pr", "create"]
 
+    def _setup_auto_add_mocks(
+        self,
+        mock_find: MagicMock,
+        mock_list: MagicMock,
+        mock_ext_allowed: MagicMock,
+        mock_resolve: MagicMock,
+        tmp_path: Path,
+        resolve_return: tuple[str, MagicMock | None],
+    ) -> None:
+        """Set up mocks for the harvest auto-add-remote path (no remote yet)."""
+        self._setup_mocks(mock_find, tmp_path)
+        mock_list.return_value = []
+        mock_ext_allowed.return_value = True
+        mock_resolve.return_value = resolve_return
+
+    @pytest.mark.parametrize(
+        ("remote_url", "transport"),
+        [
+            pytest.param(
+                "ext::podman exec -i paude-test %S /pvc/workspace", None, id="local"
+            ),
+            pytest.param(
+                "ext::ssh user@gpu-server docker exec -i paude-test %S /pvc/workspace",
+                MagicMock(),
+                id="ssh-host",
+            ),
+        ],
+    )
+    @patch("paude.workflow.subprocess.run")
+    @patch("paude.git_remote.git_diff_stat")
+    @patch("paude.git_remote.git_fetch_from_remote")
+    @patch("paude.git_remote.git_remote_add")
+    @patch("paude.git_remote.initialize_container_workspace")
+    @patch("paude.git_remote.is_container_running_podman")
+    @patch("paude.git_remote.resolve_session_remote")
+    @patch("paude.git_remote.is_ext_protocol_allowed")
+    @patch("paude.git_remote.list_paude_remotes")
+    @patch("paude.cli.find_session_backend")
+    def test_harvest_auto_adds_remote(
+        self,
+        mock_find: MagicMock,
+        mock_list: MagicMock,
+        mock_ext_allowed: MagicMock,
+        mock_resolve: MagicMock,
+        mock_running: MagicMock,
+        mock_init: MagicMock,
+        mock_remote_add: MagicMock,
+        mock_fetch: MagicMock,
+        mock_diff: MagicMock,
+        mock_run: MagicMock,
+        remote_url: str,
+        transport: MagicMock | None,
+        tmp_path: Path,
+    ) -> None:
+        """No existing remote: auto-add uses whatever URL resolve_session_remote returns."""
+        self._setup_auto_add_mocks(
+            mock_find,
+            mock_list,
+            mock_ext_allowed,
+            mock_resolve,
+            tmp_path,
+            (remote_url, transport),
+        )
+        mock_running.return_value = True
+        mock_init.return_value = True
+        mock_remote_add.return_value = True
+        mock_fetch.return_value = True
+        mock_diff.return_value = ""
+        mock_run.return_value = CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+
+        harvest_session("test", "my-branch")
+
+        mock_remote_add.assert_called_once_with("paude-test", remote_url)
+
+    @patch("paude.git_remote.initialize_container_workspace")
+    @patch("paude.git_remote.is_container_running_podman")
+    @patch("paude.git_remote.resolve_session_remote")
+    @patch("paude.git_remote.is_ext_protocol_allowed")
+    @patch("paude.git_remote.list_paude_remotes")
+    @patch("paude.cli.find_session_backend")
+    def test_harvest_auto_add_fails_when_container_not_running(
+        self,
+        mock_find: MagicMock,
+        mock_list: MagicMock,
+        mock_ext_allowed: MagicMock,
+        mock_resolve: MagicMock,
+        mock_running: MagicMock,
+        mock_init: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Auto-add raises instead of silently using an unreachable container."""
+        self._setup_auto_add_mocks(
+            mock_find,
+            mock_list,
+            mock_ext_allowed,
+            mock_resolve,
+            tmp_path,
+            ("ext::ssh ...", MagicMock()),
+        )
+        mock_running.return_value = False
+
+        with pytest.raises(click.exceptions.Exit):
+            harvest_session("test", "my-branch")
+
+        mock_init.assert_not_called()
+
+    @patch("paude.git_remote.initialize_container_workspace")
+    @patch("paude.git_remote.is_container_running_podman")
+    @patch("paude.git_remote.resolve_session_remote")
+    @patch("paude.git_remote.is_ext_protocol_allowed")
+    @patch("paude.git_remote.list_paude_remotes")
+    @patch("paude.cli.find_session_backend")
+    def test_harvest_auto_add_fails_when_init_workspace_fails(
+        self,
+        mock_find: MagicMock,
+        mock_list: MagicMock,
+        mock_ext_allowed: MagicMock,
+        mock_resolve: MagicMock,
+        mock_running: MagicMock,
+        mock_init: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Auto-add raises instead of silently proceeding when init fails."""
+        self._setup_auto_add_mocks(
+            mock_find,
+            mock_list,
+            mock_ext_allowed,
+            mock_resolve,
+            tmp_path,
+            ("ext::podman ...", None),
+        )
+        mock_running.return_value = True
+        mock_init.return_value = False
+
+        with pytest.raises(click.exceptions.Exit):
+            harvest_session("test", "my-branch")
+
 
 class TestStatusSessions:
     """Tests for status_sessions."""

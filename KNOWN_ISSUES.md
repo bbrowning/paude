@@ -41,6 +41,20 @@ The static `containers/paude/Dockerfile` and the programmatic Dockerfile generat
 
 This caused a bug where the new OpenClaw helper script was added to the static Dockerfile but not to generated images. Consider having a single source of truth for the list of container scripts (e.g., a constant in `build_context.py`) that all four locations reference, or generating the static Dockerfile from the same code path.
 
+### REFACTOR-005: SSH transport construction (`ssh_host` string → `SshTransport`) duplicated in three places
+
+**Status**: Open
+**Priority**: Low (small duplication, but drift-prone since all three must stay in sync)
+**Discovered**: 2026-07-30 while fixing SEC-003 (`harvest` SSH remote resolution)
+
+The same "parse a `user@host[:port]` string with `parse_ssh_host()`, then construct a matching `SshTransport`" logic is independently implemented in three places:
+
+1. `_build_transport()` in `src/paude/cli/remote_git_setup.py:57-66`
+2. Inline in `build_ssh_backend()` in `src/paude/backends/ssh.py:31-36`
+3. Inline in `resolve_session_remote()` in `src/paude/git_remote/utils.py:60-63`
+
+The third occurrence was added while fixing SEC-003 rather than reusing `_build_transport()`, because `_build_transport()` lives in `src/paude/cli/` and importing it from `src/paude/git_remote/` (a lower-level package) would invert the existing dependency direction. Consolidating all three requires first giving this logic a home that both `cli/` and `git_remote/`/`backends/` can depend on without a layering inversion (e.g. a small helper in `src/paude/transport/ssh.py` itself, alongside `parse_ssh_host()`). Until then, any change to `SshTransport`'s constructor or `parse_ssh_host()`'s contract needs to be checked against all three call sites.
+
 ## Agent Limitations
 
 Issues caused by upstream agent behavior, not paude bugs.
@@ -79,22 +93,6 @@ Deferred items from the network egress security audit (2026-03-06).
 **Discovered**: 2026-03-06 during network egress security audit
 
 GitHub's GraphQL API uses POST for ALL operations, including reads (`gh pr list`, `gh issue list`). Blocking POST/PUT at the proxy level would break read-only `gh` CLI usage. The correct mitigation is using a read-only Personal Access Token (PAT) rather than proxy-level HTTP method filtering.
-
-### SEC-002: `--github-token` CLI flag is dead code
-
-**Status**: Open
-**Severity**: Medium (documented feature has no effect)
-**Discovered**: 2026-07-30 during docs audit
-
-`paude start --github-token ...` and `paude connect --github-token ...` resolve the flag (or `PAUDE_GITHUB_TOKEN`) into `resolved_token` in `src/paude/cli/commands/lifecycle.py` and `src/paude/cli/commands/connect.py`, then pass it as `backend_obj.start_session(name, github_token=resolved_token)` / `connect_session(name, github_token=resolved_token)`. However, `PodmanBackend.start_session()` and `.connect_session()` (`src/paude/backends/podman/backend.py:225,281`) accept the `github_token` parameter but never reference it anywhere in their bodies — grepping the class turns up no other use. The only code path that actually delivers a GitHub token into a session is independent of this flag: `gather_proxy_credentials()` (`src/paude/backends/proxy_config.py:138-140`) reads `PAUDE_GITHUB_TOKEN` directly from the host environment and forwards it to the proxy sidecar as `GH_TOKEN`, at `create`/`start`/`connect` time. So `--github-token` alone (without also setting `PAUDE_GITHUB_TOKEN`) currently does nothing. Either wire the CLI-resolved value into the proxy credential path, or remove the flag.
-
-### SEC-003: `harvest` doesn't set up git remotes correctly for `--host` sessions
-
-**Status**: Open
-**Severity**: Low
-**Discovered**: 2026-07-30 during docs audit
-
-`_ensure_remote_exists()` in `src/paude/workflow.py:67-108` (used only by `paude harvest`) auto-creates a paude git remote using `build_podman_remote_url(cname, engine=engine)` unconditionally when one doesn't already exist — it never checks whether the session is SSH/`--host`-backed. Compare `_remote_add_local()` in `src/paude/cli/remote.py:266-322` (used by `paude remote add`), which correctly branches on `registry_entry.ssh_host` and calls `build_ssh_remote_url(...)` for remote-host sessions. A user who creates a `--host` session without `--git` and then runs `paude harvest` directly (without first running `paude remote add`) will get an auto-added remote pointing at a container that doesn't exist on the local machine, which fails silently downstream. Fix `_ensure_remote_exists` to mirror `_remote_add_local`'s ssh_host branching.
 
 ## Runtime Hardening Backlog
 

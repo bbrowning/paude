@@ -38,7 +38,7 @@ paude harvest my-project -b feature/auth-refactor
 
 This creates a local `feature/auth-refactor` branch with all of the agent's commits. Review the diff, run tests, and iterate as needed.
 
-Protected branches (`main`, `master`, `release`, `release-*`, `release/*`) cannot be used as harvest targets. For `--host` remote sessions, see the [Limitations](REMOTE.md#limitations) note on `harvest` — set up the git remote with `--git` at create time or `paude remote add` first.
+Protected branches (`main`, `master`, `release`, `release-*`, `release/*`) cannot be used as harvest targets.
 
 ## Open a PR
 

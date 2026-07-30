@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Annotated
 
 import typer
@@ -30,30 +29,15 @@ def session_start(
             help="Container backend (auto-detected from session if not specified).",
         ),
     ] = None,
-    github_token: Annotated[
-        str | None,
-        typer.Option(
-            "--github-token",
-            help=(
-                "GitHub personal access token for gh CLI. "
-                "Use a fine-grained read-only PAT. "
-                "Also reads PAUDE_GITHUB_TOKEN env var (this flag takes priority). "
-                "Token is injected at connect time only, never stored."
-            ),
-        ),
-    ] = None,
 ) -> None:
     """Start a session and connect to it."""
-    # Resolve token: explicit flag takes priority over env var
-    resolved_token = github_token or os.environ.get("PAUDE_GITHUB_TOKEN")
-
     # Auto-detect backend if name is provided but backend is not
     if name and backend is None:
         result = find_session_backend(name)
         if result:
             backend, backend_obj = result
             try:
-                exit_code = backend_obj.start_session(name, github_token=resolved_token)
+                exit_code = backend_obj.start_session(name)
                 raise typer.Exit(exit_code)
             except Exception as e:
                 typer.echo(f"Error starting session: {e}", err=True)
@@ -74,7 +58,7 @@ def session_start(
             multi_hint_format="  paude start {name}  # {backend_type}, {status}",
         )
         typer.echo(f"Starting '{session.name}' ({session.backend_type})...")
-        exit_code = backend_obj.start_session(session.name, github_token=resolved_token)
+        exit_code = backend_obj.start_session(session.name)
         raise typer.Exit(exit_code)
 
     # Backend specified explicitly
@@ -85,7 +69,7 @@ def session_start(
             raise typer.Exit(1)
 
     try:
-        exit_code = backend_instance.start_session(name, github_token=resolved_token)
+        exit_code = backend_instance.start_session(name)
         raise typer.Exit(exit_code)
     except SessionNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
