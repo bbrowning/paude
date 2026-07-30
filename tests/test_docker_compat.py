@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from paude.agents.codex import (
     CODEX_CHATGPT_PROFILE_TARGET,
     SYNTHETIC_CODEX_PROFILE_TOML,
@@ -100,6 +102,73 @@ class TestDockerMultiNetwork:
         proxy = ProxyRunner(runner)
         # Should be a no-op, no subprocess call
         proxy._connect_bridge_if_needed("my-proxy")
+
+
+class TestDockerAgentContainerNetworkIp:
+    """Tests for Docker vs Podman static-IP handling on the agent container."""
+
+    @patch("subprocess.run")
+    def test_podman_embeds_ip_in_network(self, mock_run: MagicMock) -> None:
+        """Podman embeds the static IP directly in --network."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="cid\n")
+        engine = ContainerEngine("podman")
+        runner = ContainerRunner(engine)
+        runner.create_container(
+            name="paude-test",
+            image="paude-workspace:latest",
+            mounts=[],
+            env={},
+            workdir="/pvc",
+            network="net",
+            network_ip="10.0.0.5",
+        )
+        cmd = mock_run.call_args[0][0]
+        assert "--ip" not in cmd
+        net_idx = cmd.index("--network")
+        assert cmd[net_idx + 1] == "net:ip=10.0.0.5"
+
+    @patch("subprocess.run")
+    def test_docker_passes_ip_flag_separately(self, mock_run: MagicMock) -> None:
+        """Docker cannot embed the IP in --network; it needs a separate --ip."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="cid\n")
+        engine = ContainerEngine("docker")
+        runner = ContainerRunner(engine)
+        runner.create_container(
+            name="paude-test",
+            image="paude-workspace:latest",
+            mounts=[],
+            env={},
+            workdir="/pvc",
+            network="net",
+            network_ip="10.0.0.5",
+        )
+        cmd = mock_run.call_args[0][0]
+        net_idx = cmd.index("--network")
+        assert cmd[net_idx + 1] == "net"
+        ip_idx = cmd.index("--ip")
+        assert cmd[ip_idx + 1] == "10.0.0.5"
+
+    @pytest.mark.parametrize("binary", ["podman", "docker"])
+    @patch("subprocess.run")
+    def test_network_without_ip_unaffected(
+        self, mock_run: MagicMock, binary: str
+    ) -> None:
+        """With no static IP, --network is unchanged for either engine."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="cid\n")
+        engine = ContainerEngine(binary)
+        runner = ContainerRunner(engine)
+        runner.create_container(
+            name="paude-test",
+            image="paude-workspace:latest",
+            mounts=[],
+            env={},
+            workdir="/pvc",
+            network="net",
+        )
+        cmd = mock_run.call_args[0][0]
+        assert "--ip" not in cmd
+        net_idx = cmd.index("--network")
+        assert cmd[net_idx + 1] == "net"
 
 
 class TestDockerContainerImage:
