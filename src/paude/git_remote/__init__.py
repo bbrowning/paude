@@ -40,6 +40,7 @@ from paude.git_remote.utils import (
     is_git_repository,
     list_paude_remotes,
     resolve_origin_cmd,
+    resolve_session_remote,
     ssh_url_to_https,
 )
 
@@ -72,6 +73,7 @@ __all__ = [
     "list_paude_remotes",
     "podman_exec_builder",
     "resolve_origin_cmd",
+    "resolve_session_remote",
     "set_base_ref_in_container",
     "set_origin_in_container",
     "setup_precommit_in_container",

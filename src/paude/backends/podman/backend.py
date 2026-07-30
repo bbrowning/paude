@@ -222,7 +222,7 @@ class PodmanBackend:
         self._volume_manager.remove_volume_verified(vname)
         self._runner.remove_secret(GCP_ADC_SECRET_NAME)
 
-    def start_session(self, name: str, github_token: str | None = None) -> int:
+    def start_session(self, name: str) -> int:
         """Start a session and connect to it."""
         cname = require_session(self._runner, name)
 
@@ -278,7 +278,7 @@ class PodmanBackend:
 
         print(f"Session '{name}' stopped.", file=sys.stderr)
 
-    def connect_session(self, name: str, github_token: str | None = None) -> int:
+    def connect_session(self, name: str) -> int:
         """Attach to a running session."""
         cname = container_name(name)
 

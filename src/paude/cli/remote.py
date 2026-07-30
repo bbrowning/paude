@@ -270,53 +270,11 @@ def _remote_add_local(
     transport: Transport | None,
 ) -> tuple[str, Transport | None]:
     """Handle local backend remote add: check container, init workspace, build URL."""
-    from paude.cli.remote_git_setup import _build_transport
-    from paude.git_remote import (
-        build_podman_remote_url,
-        build_ssh_remote_url,
-        initialize_container_workspace,
-        is_container_running_podman,
-        podman_exec_builder,
-    )
-    from paude.registry import SessionRegistry
+    from paude.cli.remote_git_setup import _prepare_session_git_remote
 
     cname = resource_name(session.name)
     engine = engine_binary_for_backend(session.backend_type)
 
-    registry_entry = SessionRegistry().get(session.name)
-    effective_transport = transport
-    if effective_transport is None and registry_entry and registry_entry.ssh_host:
-        effective_transport = _build_transport(
-            registry_entry.ssh_host, registry_entry.ssh_key
-        )
-
-    if not is_container_running_podman(
-        cname, engine=engine, transport=effective_transport
-    ):
-        typer.echo("Error: Container not running.", err=True)
-        typer.echo("Start it first:", err=True)
-        typer.echo(f"  paude start {session.name}", err=True)
-        raise typer.Exit(1)
-
-    typer.echo("Initializing git repository in container...")
-    exec_builder = podman_exec_builder(cname, engine)
-    if not initialize_container_workspace(
-        exec_builder, branch=branch, transport=effective_transport
-    ):
-        raise typer.Exit(1)
-
-    if registry_entry and registry_entry.ssh_host:
-        from paude.transport.ssh import parse_ssh_host
-
-        ssh_host_parsed, ssh_port = parse_ssh_host(registry_entry.ssh_host)
-        remote_url = build_ssh_remote_url(
-            container_name=cname,
-            ssh_host=ssh_host_parsed,
-            engine=engine,
-            ssh_key=registry_entry.ssh_key,
-            ssh_port=ssh_port,
-        )
-    else:
-        remote_url = build_podman_remote_url(container_name=cname, engine=engine)
-
-    return remote_url, effective_transport
+    return _prepare_session_git_remote(
+        session.name, cname, engine, branch=branch, transport=transport
+    )

@@ -1,4 +1,4 @@
-"""Pure git utility functions that don't exec into containers."""
+"""Git remote URL construction and related utility functions."""
 
 from __future__ import annotations
 
@@ -41,6 +41,36 @@ def build_ssh_remote_url(
 
     ssh_cmd = " ".join(ssh_parts)
     return f"ext::{ssh_cmd} {engine} exec -i {container_name} %S {workspace_path}"
+
+
+def resolve_session_remote(
+    session_name: str, container_name: str, engine: str
+) -> tuple[str, Transport | None]:
+    """Resolve the git remote URL and transport for a session's container.
+
+    SSH-host (--host) sessions get an ext::ssh-wrapped URL and a matching
+    transport; local sessions get a plain ext::<engine> exec URL and no transport.
+    """
+    from paude.registry import SessionRegistry
+
+    registry_entry = SessionRegistry().get(session_name)
+    if registry_entry and registry_entry.ssh_host:
+        from paude.transport.ssh import SshTransport, parse_ssh_host
+
+        ssh_host, ssh_port = parse_ssh_host(registry_entry.ssh_host)
+        transport: Transport | None = SshTransport(
+            ssh_host, key=registry_entry.ssh_key, port=ssh_port
+        )
+        remote_url = build_ssh_remote_url(
+            container_name=container_name,
+            ssh_host=ssh_host,
+            engine=engine,
+            ssh_key=registry_entry.ssh_key,
+            ssh_port=ssh_port,
+        )
+        return remote_url, transport
+
+    return build_podman_remote_url(container_name=container_name, engine=engine), None
 
 
 def is_ext_protocol_allowed() -> bool:

@@ -51,8 +51,8 @@ class TestBuildEnvironment:
     def test_gh_token_not_auto_propagated(self, monkeypatch: pytest.MonkeyPatch):
         """GH_TOKEN from host environment is NOT passed into the container.
 
-        Security test: GH_TOKEN must only be injected explicitly via --github-token,
-        never automatically from the host environment.
+        Security test: GH_TOKEN must only be injected explicitly via
+        PAUDE_GITHUB_TOKEN, never automatically from the host environment.
         """
         monkeypatch.setenv("GH_TOKEN", "secret123")
         env = build_environment()

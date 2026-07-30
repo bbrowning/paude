@@ -327,88 +327,24 @@ class TestCodexChatgptProvider:
 
 
 @pytest.mark.parametrize(
-    ("command", "patch_target"),
+    "args",
     [
         pytest.param(
-            "start",
-            "paude.cli.commands.lifecycle.find_session_backend",
-            id="start",
+            ["create", "--dry-run", "--github-token", "ghp_test"], id="create"
         ),
         pytest.param(
-            "connect",
-            "paude.cli.commands.connect.find_session_backend",
-            id="connect",
+            ["start", "test-session", "--github-token", "ghp_test"], id="start"
+        ),
+        pytest.param(
+            ["connect", "test-session", "--github-token", "ghp_test"], id="connect"
         ),
     ],
 )
-def test_command_accepts_github_token_flag(command, patch_target):
-    """start/connect accept --github-token flag (session not found is expected)."""
-    with patch(patch_target, return_value=None):
-        result = runner.invoke(
-            app, [command, "test-session", "--github-token", "ghp_test123"]
-        )
-    assert "No such option" not in result.output
-    assert result.exit_code == 1  # Session not found is expected
-
-
-@pytest.mark.parametrize(
-    ("command", "backend_method", "token", "patch_target"),
-    [
-        pytest.param(
-            "start",
-            "start_session",
-            "ghp_test123",
-            "paude.cli.commands.lifecycle.find_session_backend",
-            id="start",
-        ),
-        pytest.param(
-            "connect",
-            "connect_session",
-            "ghp_test456",
-            "paude.cli.commands.connect.find_session_backend",
-            id="connect",
-        ),
-    ],
-)
-def test_command_passes_github_token_to_backend(
-    command, backend_method, token, patch_target
-):
-    """start/connect pass the resolved github_token to the backend."""
-    mock_backend = MagicMock()
-    getattr(mock_backend, backend_method).return_value = 0
-    with patch(patch_target, return_value=(MagicMock(), mock_backend)):
-        runner.invoke(app, [command, "test-session", "--github-token", token])
-
-    getattr(mock_backend, backend_method).assert_called_once_with(
-        "test-session",
-        github_token=token,  # noqa: S106
-    )
-
-
-@patch("paude.cli.commands.lifecycle.find_session_backend")
-def test_start_reads_paude_github_token_env(
-    mock_find_session_backend: MagicMock,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """paude start reads PAUDE_GITHUB_TOKEN env var when --github-token not provided."""
-    monkeypatch.setenv("PAUDE_GITHUB_TOKEN", "ghp_from_env")
-    mock_backend = MagicMock()
-    mock_backend.start_session.return_value = 0
-    mock_find_session_backend.return_value = (MagicMock(), mock_backend)
-
-    runner.invoke(app, ["start", "test-session"])
-
-    mock_backend.start_session.assert_called_once_with(
-        "test-session",
-        github_token="ghp_from_env",  # noqa: S106
-    )
-
-
-def test_create_does_not_accept_github_token():
-    """paude create does NOT accept --github-token (token belongs on start/connect)."""
-    result = runner.invoke(app, ["create", "--dry-run", "--github-token", "ghp_test"])
+def test_no_command_accepts_github_token(args):
+    """No command accepts --github-token; PAUDE_GITHUB_TOKEN env var is the only mechanism."""
+    result = runner.invoke(app, args)
     assert result.exit_code != 0
-    assert "No such option" in result.output or "Error" in result.output
+    assert "No such option" in result.output
 
 
 def _strip_ansi(text: str) -> str:

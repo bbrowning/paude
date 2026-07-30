@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Annotated
 
 import typer
@@ -29,29 +28,14 @@ def session_connect(
             help="Container backend (auto-detected from session if not specified).",
         ),
     ] = None,
-    github_token: Annotated[
-        str | None,
-        typer.Option(
-            "--github-token",
-            help=(
-                "GitHub personal access token for gh CLI. "
-                "Use a fine-grained read-only PAT. "
-                "Also reads PAUDE_GITHUB_TOKEN env var (this flag takes priority). "
-                "Token is injected at connect time only, never stored."
-            ),
-        ),
-    ] = None,
 ) -> None:
     """Attach to a running session."""
-    # Resolve token: explicit flag takes priority over env var
-    resolved_token = github_token or os.environ.get("PAUDE_GITHUB_TOKEN")
-
     # Auto-detect backend if name is provided but backend is not
     if name and backend is None:
         result = find_session_backend(name)
         if result:
             backend, backend_obj = result
-            exit_code = backend_obj.connect_session(name, github_token=resolved_token)
+            exit_code = backend_obj.connect_session(name)
             raise typer.Exit(exit_code)
         else:
             typer.echo(f"Session '{name}' not found.", err=True)
@@ -73,9 +57,7 @@ def session_connect(
             multi_hint_format="  paude connect {name}  # {backend_type}, {workspace}",
         )
         typer.echo(f"Connecting to '{session.name}' ({session.backend_type})...")
-        exit_code = backend_obj.connect_session(
-            session.name, github_token=resolved_token
-        )
+        exit_code = backend_obj.connect_session(session.name)
         raise typer.Exit(exit_code)
 
     # Backend specified explicitly
@@ -85,5 +67,5 @@ def session_connect(
         if not name:
             raise typer.Exit(1)
 
-    exit_code = backend_instance.connect_session(name, github_token=resolved_token)
+    exit_code = backend_instance.connect_session(name)
     raise typer.Exit(exit_code)

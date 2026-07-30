@@ -66,6 +66,49 @@ def _build_transport(
     return SshTransport(host, key=ssh_key, port=port)
 
 
+def _prepare_session_git_remote(
+    session_name: str,
+    container_name: str,
+    engine: str,
+    *,
+    branch: str = "main",
+    transport: Transport | None = None,
+) -> tuple[str, Transport | None]:
+    """Resolve a session's remote URL/transport and prepare its container workspace.
+
+    Used by both `paude remote add` and `paude harvest` to auto-add a remote.
+    Raises typer.Exit(1) if the container isn't running or workspace init fails.
+    """
+    from paude.git_remote import (
+        initialize_container_workspace,
+        is_container_running_podman,
+        podman_exec_builder,
+        resolve_session_remote,
+    )
+
+    remote_url, resolved_transport = resolve_session_remote(
+        session_name, container_name, engine
+    )
+    effective_transport = transport if transport is not None else resolved_transport
+
+    if not is_container_running_podman(
+        container_name, engine=engine, transport=effective_transport
+    ):
+        typer.echo("Error: Container not running.", err=True)
+        typer.echo("Start it first:", err=True)
+        typer.echo(f"  paude start {session_name}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo("Initializing git repository in container...")
+    exec_builder = podman_exec_builder(container_name, engine)
+    if not initialize_container_workspace(
+        exec_builder, branch=branch, transport=effective_transport
+    ):
+        raise typer.Exit(1)
+
+    return remote_url, effective_transport
+
+
 def _setup_git_after_create(
     session_name: str,
     backend_type: str,
