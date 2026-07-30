@@ -375,7 +375,7 @@ class TestDockerCredentialInjection:
 
     @patch("subprocess.run")
     def test_inject_file_chowns_when_owner_specified(self, mock_run: MagicMock) -> None:
-        """inject_file should chown the file when owner is specified."""
+        """inject_file should chown the parent directory and the file."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         engine = ContainerEngine("docker")
         runner = ContainerRunner(engine)
@@ -385,7 +385,7 @@ class TestDockerCredentialInjection:
 
         cmd = mock_run.call_args[0][0]
         shell_cmd = cmd[-1]
-        assert "chown paude" in shell_cmd
+        assert "chown paude:0 /home/paude/.config/gcloud" in shell_cmd
         assert "chmod 600" in shell_cmd
 
     @patch("subprocess.run")

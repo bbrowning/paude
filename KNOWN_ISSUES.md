@@ -80,6 +80,18 @@ Deferred items from the network egress security audit (2026-03-06).
 
 GitHub's GraphQL API uses POST for ALL operations, including reads (`gh pr list`, `gh issue list`). Blocking POST/PUT at the proxy level would break read-only `gh` CLI usage. The correct mitigation is using a read-only Personal Access Token (PAT) rather than proxy-level HTTP method filtering.
 
+## Runtime Hardening Backlog
+
+### RUNTIME-001: persist_config_dir failures are invisible to the user
+
+**Status**: Open
+**Priority**: Low
+**Discovered**: 2026-07-30 while diagnosing a Codex sqlite "database is damaged" bug (root cause fixed for the current call sites: `ContainerRunner.inject_file()` now also chowns the immediate parent directory it creates, not just the leaf file — but only one level deep, so a future caller whose `mkdir -p` creates more than one new directory level would reproduce this bug)
+
+`persist_config_dir()` in `containers/paude/entrypoint-lib-config.sh` swallows every failure from `mkdir`, `chmod`, `chcon`, and `rm -rf` via `2>/dev/null || true`. Its only diagnostic — `"persist_config_dir: cannot replace $home_dir with symlink; using PVC copy at $pvc_dir"` — is printed to the exec session's stderr, but `entrypoint-session.sh` runs `clear` immediately before launching the agent, wiping that line from the terminal before the user ever sees it. When the self-heal fails (e.g. a pre-existing directory under `$HOME` that `paude` can't write into), the user only sees an opaque downstream error from the agent itself (in the Codex case, a cryptic sqlite `CANTOPEN` error), with zero indication that paude's own volume-persistence step failed first.
+
+Consider making this diagnostic durable — e.g. write it to a log file under `$HOME` that survives `clear`, or print it after `clear` runs, or fail loudly instead of silently falling back — so any future recurrence of this class of bug is diagnosable from the user's own terminal instead of requiring a live `podman exec` investigation.
+
 ## Documentation Gaps
 
 Found during a 2026-07-22 audit to add OpenCode support to README/docs/CLI help.
