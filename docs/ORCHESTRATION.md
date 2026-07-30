@@ -38,7 +38,7 @@ paude harvest my-project -b feature/auth-refactor
 
 This creates a local `feature/auth-refactor` branch with all of the agent's commits. Review the diff, run tests, and iterate as needed.
 
-Protected branches (`main`, `master`, `release`, `release-*`, `release/*`) cannot be used as harvest targets.
+Protected branches (`main`, `master`, `release`, `release-*`, `release/*`) cannot be used as harvest targets. For `--host` remote sessions, see the [Limitations](REMOTE.md#limitations) note on `harvest` — set up the git remote with `--git` at create time or `paude remote add` first.
 
 ## Open a PR
 
@@ -51,7 +51,7 @@ paude harvest my-project -b feature/auth-refactor --pr
 paude harvest my-project -b feature/auth-refactor --pr --pr-title "Refactor auth module"
 ```
 
-This pushes `feature/auth-refactor` to origin and runs `gh pr create`.
+This pushes `feature/auth-refactor` to origin (force-with-lease) and runs `gh pr create`. If an open PR already exists for that branch, it just prints the URL instead of creating a duplicate.
 
 ## Reset and Repeat
 
@@ -65,11 +65,11 @@ Reset fetches from origin, checks out the target branch, runs `git reset --hard`
 
 If the agent has unmerged work, reset warns you. Use `--force` to proceed anyway.
 
-Then assign the next task — connect and type your prompt, or stop and recreate with `-a`:
+Then assign the next task — connect and type your prompt, or delete and recreate with `-a`:
 
 ```bash
 paude connect my-project
 # Or, for a fully autonomous run:
-paude stop my-project
+paude delete my-project --confirm
 paude create --yolo --git my-project -a '-p "add rate limiting to the API"'
 ```

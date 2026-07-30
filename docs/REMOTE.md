@@ -2,7 +2,7 @@
 
 ## Docker Backend
 
-Paude supports Docker as an alternative to Podman for local container execution. Docker and Podman are interchangeable for all local features.
+Paude supports Docker as an alternative to Podman for local container execution. Docker and Podman are interchangeable for all local features, with one internal difference: Podman injects proxy credentials (API keys, `GH_TOKEN`) via Podman secrets, which are hidden from `podman inspect`. Docker has no non-Swarm secrets support, so the same credentials fall back to plain environment variables on the proxy sidecar, visible via `docker inspect`. Either way, credentials go only to the proxy sidecar, never the agent's own container.
 
 ```bash
 paude create my-project --backend=docker
@@ -52,6 +52,7 @@ paude create my-project --host user@hostname:2222
 ### Limitations
 
 - `--host` and `--ssh-key` are CLI-only flags (not stored in user defaults)
+- [`paude harvest`](ORCHESTRATION.md#harvest-changes) assumes a local session when auto-adding its git remote; for `--host` sessions, use `--git` at create time or run `paude remote add` first
 
 ## Combining Remote Hosts with GPU
 

@@ -21,7 +21,7 @@ paude
 | `stop` | Stops container/pod, preserves volume |
 | `connect` | Attaches to running session |
 | `cp` | Copies files between local machine and session |
-| `upgrade` | Upgrades session to current paude version (preserves data) |
+| `upgrade` | Upgrades session to current paude version; can also reconfigure options (`--otel-endpoint`, `--allowed-domains`, `--gpu`/`--no-gpu`, `--yolo`/`--no-yolo`, `--provider`) in place, preserving data |
 | `remote` | Manages git remotes for code sync |
 | `delete` | Removes all resources including volume |
 | `list` | Shows all sessions with version info |
@@ -87,10 +87,9 @@ paude connect my-project
 
 The `--git` flag:
 1. Creates the session and starts the container
-2. Adds a `paude-<name>` git remote locally
-3. Pushes the current branch and all tags to the container
-4. Sets the `origin` remote inside the container (from your local origin)
-5. Tags are available inside the container (for `git describe`)
+2. If a local `origin` remote exists (the common case), clones directly from `origin` inside the container and pushes only your local-only commits as a delta. This uses the container's own network path to your git host, so it's faster than pushing everything through your local connection.
+3. Falls back to a full push if there's no local `origin`, the branch is detached, the clone fails, or `--no-clone-origin` is passed. The fallback adds a `paude-<name>` git remote locally, pushes the current branch and all tags to the container, then sets `origin` inside the container from your local origin.
+4. Either way, tags end up available inside the container (for `git describe`)
 
 ### Manual Code Sync
 
@@ -109,4 +108,10 @@ git push paude-my-project main
 
 # After the agent makes changes, pull them locally
 git pull paude-my-project main
+
+# List all paude git remotes
+paude remote list
+
+# Remove remotes whose sessions no longer exist
+paude remote cleanup
 ```

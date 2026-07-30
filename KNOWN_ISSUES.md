@@ -80,6 +80,22 @@ Deferred items from the network egress security audit (2026-03-06).
 
 GitHub's GraphQL API uses POST for ALL operations, including reads (`gh pr list`, `gh issue list`). Blocking POST/PUT at the proxy level would break read-only `gh` CLI usage. The correct mitigation is using a read-only Personal Access Token (PAT) rather than proxy-level HTTP method filtering.
 
+### SEC-002: `--github-token` CLI flag is dead code
+
+**Status**: Open
+**Severity**: Medium (documented feature has no effect)
+**Discovered**: 2026-07-30 during docs audit
+
+`paude start --github-token ...` and `paude connect --github-token ...` resolve the flag (or `PAUDE_GITHUB_TOKEN`) into `resolved_token` in `src/paude/cli/commands/lifecycle.py` and `src/paude/cli/commands/connect.py`, then pass it as `backend_obj.start_session(name, github_token=resolved_token)` / `connect_session(name, github_token=resolved_token)`. However, `PodmanBackend.start_session()` and `.connect_session()` (`src/paude/backends/podman/backend.py:225,281`) accept the `github_token` parameter but never reference it anywhere in their bodies — grepping the class turns up no other use. The only code path that actually delivers a GitHub token into a session is independent of this flag: `gather_proxy_credentials()` (`src/paude/backends/proxy_config.py:138-140`) reads `PAUDE_GITHUB_TOKEN` directly from the host environment and forwards it to the proxy sidecar as `GH_TOKEN`, at `create`/`start`/`connect` time. So `--github-token` alone (without also setting `PAUDE_GITHUB_TOKEN`) currently does nothing. Either wire the CLI-resolved value into the proxy credential path, or remove the flag.
+
+### SEC-003: `harvest` doesn't set up git remotes correctly for `--host` sessions
+
+**Status**: Open
+**Severity**: Low
+**Discovered**: 2026-07-30 during docs audit
+
+`_ensure_remote_exists()` in `src/paude/workflow.py:67-108` (used only by `paude harvest`) auto-creates a paude git remote using `build_podman_remote_url(cname, engine=engine)` unconditionally when one doesn't already exist — it never checks whether the session is SSH/`--host`-backed. Compare `_remote_add_local()` in `src/paude/cli/remote.py:266-322` (used by `paude remote add`), which correctly branches on `registry_entry.ssh_host` and calls `build_ssh_remote_url(...)` for remote-host sessions. A user who creates a `--host` session without `--git` and then runs `paude harvest` directly (without first running `paude remote add`) will get an auto-added remote pointing at a container that doesn't exist on the local machine, which fails silently downstream. Fix `_ensure_remote_exists` to mirror `_remote_add_local`'s ssh_host branching.
+
 ## Runtime Hardening Backlog
 
 ### RUNTIME-001: persist_config_dir failures are invisible to the user
@@ -105,10 +121,12 @@ Found during a 2026-07-22 audit to add OpenCode support to README/docs/CLI help.
 
 ### DOCS-002: Gas City and OpenClaw missing from agent-specific-defaults docs
 
-**Status**: Open
+**Status**: Resolved (2026-07-30 during docs audit — added Gas City and OpenClaw bullets to `docs/CONFIGURATION.md`'s "Agent-specific defaults" list)
 **Severity**: Low
 
 `docs/CONFIGURATION.md`'s "Agent-specific defaults" list (network domain aliases) and README's "Your First Session" example list both enumerate Claude Code, Codex CLI, Cursor CLI, Gemini CLI (and now OpenCode), but omit Gas City and OpenClaw entirely. Pre-existing gap, not introduced by the OpenCode work — left alone to keep that change scoped.
+
+Note: README's agent table/examples were not re-audited as part of the 2026-07-30 pass (scope was `docs/` only) and may still need the same treatment.
 
 ### DOCS-003: `cli/__init__.py` docstring uses agent-specific language
 

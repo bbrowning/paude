@@ -42,11 +42,13 @@ Then edit it to set the values you want. Any field set to `null` or omitted uses
   "defaults": {
     "backend": "docker",
     "agent": "claude",
+    "provider": null,
     "yolo": true,
     "git": true,
     "platform": "linux/amd64",
     "gpu": "all",
-    "allowed-domains": ["default", "golang"]
+    "allowed-domains": ["default", "golang"],
+    "otel-endpoint": null
   }
 }
 ```
@@ -84,7 +86,7 @@ Projects can declare defaults in their `paude.json` or `devcontainer.json` so th
 }
 ```
 
-Only `allowed-domains`, `agent`, and `provider` are supported as project-level create hints.
+Only `allowed-domains`, `agent`, `provider`, and `otel-endpoint` are supported as project-level create hints.
 
 ### Domain Merging
 
@@ -117,6 +119,7 @@ paude create --dry-run
 | `allowed-domains` | yes | yes | `--allowed-domains` | `["default"]` |
 | `gpu` | yes | — | `--gpu` / `--no-gpu` | (none) |
 | `provider` | yes | yes | `--provider` | (none) |
+| `otel-endpoint` | yes | yes | `--otel-endpoint` | (none) |
 
 > **Backend values**: `podman` (default) or `docker`.
 
@@ -159,13 +162,15 @@ Agent-specific defaults are added automatically:
 - **Cursor CLI**: `.cursor.com`, `.cursor.sh`, `.cursor-cdn.com`, `.cursorapi.com` (HTTP/1.1 mode is automatically enabled for proxy compatibility)
 - **Gemini CLI**: `cloudcode-pa.googleapis.com`, `play.googleapis.com`, plus the `nodejs` alias
 - **OpenCode**: `opencode.ai`, `.opencode.ai` (plus `chatgpt.com`, `.chatgpt.com`, `auth.openai.com` when using the `chatgpt` provider)
+- **Gas City** (composite Claude Code + Gemini CLI orchestration agent): `.claude.ai`, `.anthropic.com`, `cloudcode-pa.googleapis.com`, `play.googleapis.com`, plus the `nodejs` alias
+- **OpenClaw**: `.anthropic.com`, `.openai.com`, `.duckduckgo.com`, `wttr.in`, `api.open-meteo.com`
 
 Opt-in language ecosystem aliases:
 - **golang**: Go modules (`go.dev`, `proxy.golang.org`, `sum.golang.org`, `dl.google.com`, `storage.googleapis.com`)
 - **nodejs**: npm/Yarn registries (`.nodejs.org`, `.npmjs.org`, `.yarnpkg.com`)
 - **rust**: Cargo/rustup (`crates.io`, `static.crates.io`, `static.rust-lang.org`)
 
-> **Note**: `pypi` is a backward-compatible alias for `python`.
+> **Note**: `pypi` is a backward-compatible alias for `python`, and `codex` is a backward-compatible alias for `chatgpt`.
 
 **Special values**: `all` (unrestricted), `default` (vertexai + python + github + agent-specific), `vertexai`, `python`, `golang`, `nodejs`, `rust`, `github`. Specifying domains without `default` replaces the allowlist entirely.
 
@@ -184,6 +189,9 @@ paude blocked-domains my-session
 #     cdn.jsdelivr.net       3 requests
 #
 #   2 unique domain(s) blocked (11 total requests).
+#
+#   Tip: To allow a domain, run:
+#     paude allowed-domains <name> --add <domain>
 
 # 2. Allow the domain you need
 paude allowed-domains my-session --add registry.npmjs.org
@@ -202,25 +210,20 @@ paude blocked-domains my-session --raw
 
 ## GitHub CLI Access
 
-Paude installs the `gh` CLI in the container and includes GitHub domains in the default network allowlist. To use `gh` for read-only operations (e.g., fetching issues, PRs, or code), set a fine-grained personal access token before connecting:
+Paude installs the `gh` CLI in the container and includes GitHub domains in the default network allowlist. To use `gh` for read-only operations (e.g., fetching issues, PRs, or code), set a fine-grained personal access token before creating or starting the session:
 
 ```bash
 # Set once in your shell profile, or export before running paude:
 export PAUDE_GITHUB_TOKEN=ghp_yourtoken
 
+paude create my-project
 paude start my-project
 # Inside the container, gh is authenticated automatically
 ```
 
-Or pass it explicitly for a single session:
-
-```bash
-paude start --github-token ghp_yourtoken my-project
-paude connect --github-token ghp_yourtoken my-project
-```
-
-The token is injected at connect time only:
-- Passed as `-e GH_TOKEN=...` to the selected engine's `exec` command (not stored in the container definition)
+The token is never handed to the agent's own container:
+- `PAUDE_GITHUB_TOKEN` is read on the host and stored only on the network-filtering proxy sidecar. See [Remote Hosts & Docker Backend](REMOTE.md) for how storage differs between the Podman and Docker backends
+- The agent container's own `GH_TOKEN` environment variable is always a non-functional placeholder; the proxy transparently attaches the real token to requests it forwards to GitHub's API
 - `GH_CONFIG_DIR=/tmp/gh-config` ensures no cached host credentials are ever consulted
 
 **Security notes**:
