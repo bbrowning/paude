@@ -1,9 +1,9 @@
 # Session Management
 
-Paude provides persistent sessions that survive container/pod restarts.
+Paude provides persistent sessions that survive container restarts.
 
 ```bash
-# Quick start: create session for current directory (uses directory name)
+# Quick start: create session for current directory (name derived from the directory)
 paude create
 paude start
 
@@ -16,9 +16,9 @@ paude
 
 | Command | What It Does |
 |---------|--------------|
-| `create` | Creates session resources (container/StatefulSet, volume/PVC) and starts them |
-| `start` | Starts container/pod and connects |
-| `stop` | Stops container/pod, preserves volume |
+| `create` | Creates session resources (container, volume) and starts them |
+| `start` | Starts the container and connects |
+| `stop` | Stops the container, preserves the volume |
 | `connect` | Attaches to running session |
 | `cp` | Copies files between local machine and session |
 | `upgrade` | Upgrades session to current paude version; can also reconfigure options (`--otel-endpoint`, `--allowed-domains`, `--gpu`/`--no-gpu`, `--yolo`/`--no-yolo`, `--provider`) in place, preserving data |

@@ -92,7 +92,7 @@ Only `allowed-domains`, `agent`, `provider`, and `otel-endpoint` are supported a
 
 Domains from user defaults and project config are **merged** (union). For example, if your user defaults specify `["default", "golang"]` and the project config specifies `["nodejs"]`, the resolved list is `["default", "golang", "nodejs"]`.
 
-However, if you pass `--allowed-domains` on the CLI, it **overrides** entirely — no merging occurs.
+However, if you pass `--allowed-domains` on the CLI, it **overrides** entirely — no merging with user/project config occurs. The one exception is provider-required domains, which are always forced onto the allowlist regardless of what you pass — see [Network Domains](#network-domains).
 
 ### Inspecting Resolved Configuration
 
@@ -158,21 +158,35 @@ The default allowlist includes:
 
 Agent-specific defaults are added automatically:
 - **Claude Code**: `.claude.ai`, `.anthropic.com`
-- **Codex CLI** (default `chatgpt` provider, local Podman/Docker backend only; not added for `--provider openai`): `chatgpt.com`, `.chatgpt.com`, `auth.openai.com`
+- **Codex CLI** (default `chatgpt` provider; not added for `--provider openai`): `chatgpt.com`, `.chatgpt.com`, `auth.openai.com`
 - **Cursor CLI**: `.cursor.com`, `.cursor.sh`, `.cursor-cdn.com`, `.cursorapi.com` (HTTP/1.1 mode is automatically enabled for proxy compatibility)
 - **Gemini CLI**: `cloudcode-pa.googleapis.com`, `play.googleapis.com`, plus the `nodejs` alias
 - **OpenCode**: `opencode.ai`, `.opencode.ai` (plus `chatgpt.com`, `.chatgpt.com`, `auth.openai.com` when using the `chatgpt` provider)
 - **Gas City** (composite Claude Code + Gemini CLI orchestration agent): `.claude.ai`, `.anthropic.com`, `cloudcode-pa.googleapis.com`, `play.googleapis.com`, plus the `nodejs` alias
 - **OpenClaw**: `.anthropic.com`, `.openai.com`, `.duckduckgo.com`, `wttr.in`, `api.open-meteo.com`
 
+The chosen inference provider (`--provider`) also contributes domains, independent of the agent:
+- `vertex` / `google`: the `vertexai` domains
+- `openai`: `.openai.com`
+- `anthropic`: the `claude` domains
+- `cursor`: the `cursor` domains
+- `chatgpt`: the `chatgpt` domains — *required*, so they're forced onto the allowlist even on top of an explicit `--allowed-domains` list. Codex uses `chatgpt` by default; OpenCode opts in via `--provider chatgpt`.
+
 Opt-in language ecosystem aliases:
 - **golang**: Go modules (`go.dev`, `proxy.golang.org`, `sum.golang.org`, `dl.google.com`, `storage.googleapis.com`)
 - **nodejs**: npm/Yarn registries (`.nodejs.org`, `.npmjs.org`, `.yarnpkg.com`)
 - **rust**: Cargo/rustup (`crates.io`, `static.crates.io`, `static.rust-lang.org`)
 
+Opt-in OpenClaw plugin aliases, for skill packages that talk to external services:
+- **clawhub**: OpenClaw skill registry (`clawhub.ai`, `.clawhub.ai`, `registry.npmjs.org`)
+- **whatsapp**: WhatsApp Web (`web.whatsapp.com`, `.whatsapp.net`)
+- **telegram**: Telegram Bot API (`api.telegram.org`)
+- **discord**: Discord bot/gateway API (`.discord.com`, `gateway.discord.gg`, `.discordapp.com`)
+- **slack**: Slack API (`.slack.com`)
+
 > **Note**: `pypi` is a backward-compatible alias for `python`, and `codex` is a backward-compatible alias for `chatgpt`.
 
-**Special values**: `all` (unrestricted), `default` (vertexai + python + github + agent-specific), `vertexai`, `python`, `golang`, `nodejs`, `rust`, `github`. Specifying domains without `default` replaces the allowlist entirely.
+**Special values**: `all` (unrestricted), `default` (vertexai + python + github + agent-specific). Any other alias name listed above, or a raw domain, can also be passed directly. Specifying domains without `default` replaces the allowlist entirely.
 
 ## Diagnosing Blocked Domains
 
