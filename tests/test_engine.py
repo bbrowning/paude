@@ -226,6 +226,30 @@ class TestContainerEngineGpuArgs:
         assert engine.gpu_args("all") == ["--device", "nvidia.com/gpu=all"]
 
 
+class TestContainerEngineNetworkArgs:
+    """Tests for ContainerEngine.network_args method."""
+
+    def test_podman_embeds_ip_in_network(self) -> None:
+        engine = ContainerEngine("podman")
+        assert engine.network_args("net", "10.0.0.5") == [
+            "--network",
+            "net:ip=10.0.0.5",
+        ]
+
+    def test_docker_passes_ip_as_separate_flag(self) -> None:
+        engine = ContainerEngine("docker")
+        assert engine.network_args("net", "10.0.0.5") == [
+            "--network",
+            "net",
+            "--ip",
+            "10.0.0.5",
+        ]
+
+    def test_network_without_ip(self) -> None:
+        assert ContainerEngine("podman").network_args("net") == ["--network", "net"]
+        assert ContainerEngine("docker").network_args("net") == ["--network", "net"]
+
+
 class TestContainerEngineImageNameFormat:
     """Tests for ContainerEngine.image_name_format property."""
 

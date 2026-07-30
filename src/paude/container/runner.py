@@ -137,8 +137,7 @@ class ContainerRunner:
             args.extend(self._engine.gpu_args(gpu))
 
         if network:
-            net_spec = f"{network}:ip={network_ip}" if network_ip else network
-            args.extend(["--network", net_spec])
+            args.extend(self._engine.network_args(network, network_ip))
 
         if dns:
             for server in dns:

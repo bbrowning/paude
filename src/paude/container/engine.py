@@ -118,6 +118,17 @@ class ContainerEngine:
             return ["--gpus", gpu_value]
         return ["--device", f"nvidia.com/gpu={gpu_value}"]
 
+    def network_args(self, network: str, network_ip: str | None = None) -> list[str]:
+        """Build ``--network`` arguments, embedding a static IP if given.
+
+        Podman embeds the IP in the ``--network`` value (``net:ip=...``);
+        Docker requires the IP as a separate ``--ip`` flag.
+        """
+        if network_ip and not self.is_podman:
+            return ["--network", network, "--ip", network_ip]
+        net_spec = f"{network}:ip={network_ip}" if network_ip else network
+        return ["--network", net_spec]
+
     @property
     def image_name_format(self) -> str:
         """Go template for extracting image name from container inspect.
