@@ -291,7 +291,7 @@ class ContainerRunner:
         quoted_target = shlex.quote(target)
         parts = [f"mkdir -p {parent}", f"cat > {quoted_target}"]
         if owner:
-            parts.append(f"chown {shlex.quote(owner)} {quoted_target}")
+            parts.append(f"chown {shlex.quote(owner)} {parent} {quoted_target}")
         parts.append(f"chmod {shlex.quote(mode)} {quoted_target}")
         self._engine.run(
             "exec",
