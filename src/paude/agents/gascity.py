@@ -13,7 +13,7 @@ from paude.agents.base import (
     pipefail_install_lines,
 )
 
-GC_VERSION = "1.3.5"
+GC_VERSION = "1.4.0"
 DOLT_VERSION = "2.1.10"
 BD_VERSION = "1.1.0"
 
@@ -36,6 +36,8 @@ class GascityAgent:
         creds.extra_env_vars["NODE_USE_ENV_PROXY"] = "1"
         creds.extra_env_vars["BD_DOLT_AUTO_COMMIT"] = "off"
         creds.extra_env_vars["BD_EXPORT_AUTO"] = "false"
+        creds.extra_env_vars["DO_NOT_TRACK"] = "1"
+        creds.extra_env_vars["GC_DISABLE_USAGE_METRICS"] = "1"
         self._config = AgentConfig(
             name="gascity",
             display_name="Gas City",

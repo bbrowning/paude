@@ -43,6 +43,8 @@ class TestGascityAgentConfig:
             "NODE_USE_ENV_PROXY": "1",
             "BD_DOLT_AUTO_COMMIT": "off",
             "BD_EXPORT_AUTO": "false",
+            "DO_NOT_TRACK": "1",
+            "GC_DISABLE_USAGE_METRICS": "1",
         }
 
     def test_passthrough_vars(self) -> None:
@@ -194,6 +196,8 @@ class TestGascityAgentBuildEnvironment:
                 "NODE_USE_ENV_PROXY": "1",
                 "BD_DOLT_AUTO_COMMIT": "off",
                 "BD_EXPORT_AUTO": "false",
+                "DO_NOT_TRACK": "1",
+                "GC_DISABLE_USAGE_METRICS": "1",
             }
 
     def test_passes_through_vertex_vars(self) -> None:
