@@ -156,3 +156,34 @@ class TestShowDryRun:
 
         captured = capsys.readouterr()
         assert "gpu:" not in captured.out
+
+    def test_shows_agents_providers_lists(self, capsys: pytest.CaptureFixture[str]):
+        """Shows agents/providers lists, provenance, and per-agent mapping."""
+        from paude.config.resolver import ResolvedCreateOptions, SettingValue
+
+        resolved = ResolvedCreateOptions(
+            agent=SettingValue("gascity", "cli"),
+            provider=SettingValue("vertex", "cli"),
+            agents=["gascity", "claude", "codex"],
+            agents_provenance=[(["gascity", "claude", "codex"], "cli")],
+            providers=["vertex", "chatgpt"],
+            providers_provenance=[(["vertex", "chatgpt"], "cli")],
+            agent_providers=[
+                ("gascity", "vertex"),
+                ("claude", "vertex"),
+                ("codex", "chatgpt"),
+            ],
+        )
+
+        with patch("paude.dry_run.Path.cwd") as mock_cwd:
+            mock_cwd.return_value = Path("/test")
+            with patch("paude.dry_run.detect_config") as mock_detect:
+                mock_detect.return_value = None
+                show_dry_run({}, resolved=resolved)
+
+        captured = capsys.readouterr()
+        assert "agents: gascity, claude, codex" in captured.out
+        assert "providers: vertex, chatgpt" in captured.out
+        assert "per-agent providers:" in captured.out
+        assert "gascity -> vertex" in captured.out
+        assert "codex -> chatgpt" in captured.out

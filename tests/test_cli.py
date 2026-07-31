@@ -370,6 +370,86 @@ class TestCodexChatgptProvider:
         assert result.exit_code != 0
 
 
+class TestAgentsProvidersLists:
+    """Tests for the list-valued --agents/--providers options."""
+
+    def test_agents_providers_dry_run(self):
+        """--agents/--providers show both lists and per-agent providers."""
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--agents",
+                "gascity,claude,codex",
+                "--providers",
+                "vertex,chatgpt",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        out = _strip_ansi(result.stdout)
+        assert "agents: gascity, claude, codex" in out
+        assert "providers: vertex, chatgpt" in out
+        # Derived per-agent providers.
+        assert "gascity -> vertex" in out
+        assert "claude -> vertex" in out
+        assert "codex -> chatgpt" in out
+
+    def test_agents_repeatable_option(self):
+        """--agents can be repeated as well as comma-separated."""
+        result = runner.invoke(
+            app,
+            ["create", "--agents", "gascity", "--agents", "claude", "--dry-run"],
+        )
+        assert result.exit_code == 0
+        assert "agents: gascity, claude" in _strip_ansi(result.stdout)
+
+    def test_singular_agent_alias_dry_run(self):
+        """--agent still resolves to a single-item agents list."""
+        result = runner.invoke(app, ["create", "--agent", "gascity", "--dry-run"])
+        assert result.exit_code == 0
+        assert "agents: gascity" in _strip_ansi(result.stdout)
+
+    def test_agents_deduplicated(self):
+        """Duplicate agents are removed, preserving order."""
+        result = runner.invoke(
+            app, ["create", "--agents", "claude,claude,codex", "--dry-run"]
+        )
+        assert result.exit_code == 0
+        assert "agents: claude, codex" in _strip_ansi(result.stdout)
+
+    def test_agent_and_agents_conflict(self):
+        """Passing both --agent and --agents fails with a clear message."""
+        result = runner.invoke(
+            app, ["create", "--agent", "claude", "--agents", "codex", "--dry-run"]
+        )
+        assert result.exit_code != 0
+        assert "not both" in _strip_ansi(result.output)
+
+    def test_provider_and_providers_conflict(self):
+        """Passing both --provider and --providers fails with a clear message."""
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--provider",
+                "vertex",
+                "--providers",
+                "chatgpt",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "not both" in _strip_ansi(result.output)
+
+    def test_unknown_agent_rejected(self):
+        """An unknown agent name in --agents is rejected."""
+        result = runner.invoke(
+            app, ["create", "--agents", "not-a-real-agent", "--dry-run"]
+        )
+        assert result.exit_code != 0
+
+
 @pytest.mark.parametrize(
     "args",
     [

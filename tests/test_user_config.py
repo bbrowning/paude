@@ -204,6 +204,140 @@ class TestResolveCreateOptions:
         assert result.forward_ports.source == "cli"
 
 
+class TestResolveAgentsAndProviders:
+    """Tests for list-valued agents/providers resolution."""
+
+    def _resolve(self, **kwargs):
+        defaults = {
+            "cli_backend": None,
+            "cli_agent": None,
+            "cli_yolo": None,
+            "cli_git": None,
+            "cli_platform": None,
+            "cli_gpu": None,
+            "cli_allowed_domains": None,
+            "project_config": None,
+            "user_defaults": UserDefaults(),
+        }
+        defaults.update(kwargs)
+        return resolve_create_options(**defaults)
+
+    def test_builtin_agents_default(self):
+        """Defaults to a single-item [claude] agents list."""
+        result = self._resolve()
+        assert result.agents == ["claude"]
+        assert result.agent.value == "claude"
+        assert result.agents_provenance == [(["claude"], "built-in")]
+
+    def test_cli_agents_list(self):
+        """--agents populates the list; first is the primary scalar."""
+        result = self._resolve(cli_agents=["gascity", "claude", "codex"])
+        assert result.agents == ["gascity", "claude", "codex"]
+        assert result.agent.value == "gascity"
+        assert result.agent.source == "cli"
+        assert result.agents_provenance == [
+            (["gascity", "claude", "codex"], "cli")
+        ]
+
+    def test_singular_agent_alias(self):
+        """--agent behaves as a single-item --agents list."""
+        result = self._resolve(cli_agent="gascity")
+        assert result.agents == ["gascity"]
+        assert result.agent.value == "gascity"
+
+    def test_agent_and_agents_conflict(self):
+        """Passing both --agent and --agents raises a clear error."""
+        with pytest.raises(ValueError, match="not both"):
+            self._resolve(cli_agent="claude", cli_agents=["codex"])
+
+    def test_provider_and_providers_conflict(self):
+        """Passing both --provider and --providers raises a clear error."""
+        with pytest.raises(ValueError, match="not both"):
+            self._resolve(cli_provider="vertex", cli_providers=["chatgpt"])
+
+    def test_agents_deduplicated_preserving_order(self):
+        """Duplicate agent names are removed, keeping first-seen order."""
+        result = self._resolve(cli_agents=["claude", "claude", "codex"])
+        assert result.agents == ["claude", "codex"]
+
+    def test_unknown_agent_rejected(self):
+        """An unknown agent name raises ValueError."""
+        with pytest.raises(ValueError, match="Unknown agent"):
+            self._resolve(cli_agents=["not-a-real-agent"])
+
+    def test_invalid_primary_provider_rejected(self):
+        """An unsupported primary agent/provider combination raises."""
+        with pytest.raises(ValueError, match="does not support provider"):
+            self._resolve(cli_agents=["codex"], cli_providers=["vertex"])
+
+    def test_per_agent_providers_derived(self):
+        """Each agent maps to its provider; primary honors --providers[0]."""
+        result = self._resolve(
+            cli_agents=["gascity", "claude", "codex"],
+            cli_providers=["vertex", "chatgpt"],
+        )
+        assert result.agent_providers == [
+            ("gascity", "vertex"),
+            ("claude", "vertex"),
+            ("codex", "chatgpt"),
+        ]
+        # The explicit pool keeps its provenance and order.
+        assert result.providers == ["vertex", "chatgpt"]
+        assert result.providers_provenance == [(["vertex", "chatgpt"], "cli")]
+
+    def test_provider_auto_added_from_default(self):
+        """A non-primary agent's default provider is auto-added to the list."""
+        result = self._resolve(
+            cli_agents=["claude", "codex"],
+            cli_providers=["vertex"],
+        )
+        # codex defaults to chatgpt, which was not in the explicit pool.
+        assert result.agent_providers == [
+            ("claude", "vertex"),
+            ("codex", "chatgpt"),
+        ]
+        assert result.providers == ["vertex", "chatgpt"]
+        sources = {source for _, source in result.providers_provenance}
+        assert sources == {"cli", "built-in"}
+
+    def test_providers_default_from_agent_defaults(self):
+        """With no --providers, each agent's default provider is derived."""
+        result = self._resolve(cli_agents=["claude"])
+        assert result.providers == ["vertex"]
+        assert result.agent_providers == [("claude", "vertex")]
+        # The scalar provider stays unset for back-compat when not given.
+        assert result.provider.value is None
+
+    def test_agents_from_user_defaults(self):
+        """Agents resolve from user defaults when no CLI value is given."""
+        user = UserDefaults(agents=["gemini", "codex"])
+        result = self._resolve(user_defaults=user)
+        assert result.agents == ["gemini", "codex"]
+        assert result.agents_provenance == [(["gemini", "codex"], "user defaults")]
+
+    def test_cli_agents_override_user_defaults(self):
+        """CLI --agents overrides user-default agents."""
+        user = UserDefaults(agents=["gemini"])
+        result = self._resolve(cli_agents=["claude"], user_defaults=user)
+        assert result.agents == ["claude"]
+        assert result.agents_provenance == [(["claude"], "cli")]
+
+    def test_project_agents_override_user(self):
+        """Project config agents override user defaults."""
+        user = UserDefaults(agents=["gemini"])
+        project = PaudeConfig(create_agents=["claude", "codex"])
+        result = self._resolve(user_defaults=user, project_config=project)
+        assert result.agents == ["claude", "codex"]
+        assert result.agents_provenance == [(["claude", "codex"], "paude.json")]
+
+    def test_project_singular_agent_alias(self):
+        """Project singular create_agent acts as a one-item list."""
+        project = PaudeConfig(create_agent="cursor")
+        result = self._resolve(project_config=project)
+        assert result.agents == ["cursor"]
+        assert result.agents_provenance == [(["cursor"], "paude.json")]
+
+
 class TestUserDefaultsGpu:
     """Tests for GPU field in user defaults."""
 
@@ -282,3 +416,39 @@ class TestUserDefaultsForwardPorts:
 
         result = load_user_defaults(config)
         assert result.forward_ports == []
+
+
+class TestUserDefaultsAgentsProviders:
+    """Tests for agents/providers lists in user defaults."""
+
+    def test_agents_list_loads_from_json(self, tmp_path: Path):
+        """agents/providers lists load from JSON config."""
+        config = tmp_path / "defaults.json"
+        config.write_text(
+            json.dumps(
+                {"defaults": {"agents": ["gascity", "claude"], "providers": ["vertex"]}}
+            )
+        )
+
+        result = load_user_defaults(config)
+        assert result.agents == ["gascity", "claude"]
+        assert result.providers == ["vertex"]
+
+    def test_agents_default_to_empty(self, tmp_path: Path):
+        """agents/providers default to empty lists when not in config."""
+        config = tmp_path / "defaults.json"
+        config.write_text(json.dumps({"defaults": {"backend": "podman"}}))
+
+        result = load_user_defaults(config)
+        assert result.agents == []
+        assert result.providers == []
+
+    def test_agents_non_strings_dropped(self, tmp_path: Path):
+        """Non-string entries in agents/providers are dropped."""
+        config = tmp_path / "defaults.json"
+        config.write_text(
+            json.dumps({"defaults": {"agents": ["claude", 42, None, "codex"]}})
+        )
+
+        result = load_user_defaults(config)
+        assert result.agents == ["claude", "codex"]

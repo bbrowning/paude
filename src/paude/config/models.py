@@ -54,6 +54,8 @@ class PaudeConfig:
     create_allowed_domains: list[str] = field(default_factory=list)
     create_agent: str | None = None
     create_provider: str | None = None
+    create_agents: list[str] = field(default_factory=list)
+    create_providers: list[str] = field(default_factory=list)
     create_otel_endpoint: str | None = None
     create_forward_ports: list[str] = field(default_factory=list)
 

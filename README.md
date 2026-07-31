@@ -16,6 +16,17 @@ Run AI coding agents in secure containers. They make commits, you pull them back
 
 > Agents are installed automatically inside the container — no local agent installation needed. You just need authentication credentials for your chosen provider.
 
+Use `--agents` (and `--providers`) to select more than one at once — values are
+comma-separated and/or repeatable, and the first agent is the primary:
+
+```bash
+paude create --agents gascity,claude,codex --providers vertex,chatgpt my-project
+```
+
+The singular `--agent`/`--provider` flags remain as aliases for a single agent.
+Each agent uses its own default provider unless overridden; the primary agent
+honors the first `--providers` value.
+
 ## Why Paude?
 
 - **Isolated execution**: Your agent runs in a container, not on your host machine

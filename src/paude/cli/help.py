@@ -169,7 +169,15 @@ _SECTIONS: tuple[HelpSection, ...] = (
             ("--agent gemini", "Gemini CLI"),
             ("--agent opencode", "OpenCode"),
             ("--agent openclaw", "OpenClaw (web UI on port 18789)"),
+            (
+                "--agents a,b,c",
+                "Multiple agents (comma-separated/repeatable; first is primary)",
+            ),
             ("", ""),
+            (
+                "--providers x,y",
+                "Providers per agent (comma-separated/repeatable)",
+            ),
             ("--provider vertex", "Vertex AI (default for claude, openclaw)"),
             ("--provider anthropic", "Anthropic API"),
             ("--provider chatgpt", "Codex ChatGPT-plan OAuth, HTTP/SSE (default)"),

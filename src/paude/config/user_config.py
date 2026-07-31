@@ -21,6 +21,8 @@ class UserDefaults:
     backend: str | None = None
     agent: str | None = None
     provider: str | None = None
+    agents: list[str] = field(default_factory=list)
+    providers: list[str] = field(default_factory=list)
     yolo: bool | None = None
     git: bool | None = None
     platform: str | None = None
@@ -35,6 +37,8 @@ _KNOWN_KEYS = {
     "backend",
     "agent",
     "provider",
+    "agents",
+    "providers",
     "yolo",
     "git",
     "platform",
@@ -111,10 +115,6 @@ def _warn_unknown_keys(
 
 def _parse_defaults(data: dict[str, Any], path: Path) -> UserDefaults:
     """Parse the 'defaults' object into a UserDefaults dataclass."""
-    allowed_domains = data.get("allowed-domains", [])
-    if not isinstance(allowed_domains, list):
-        allowed_domains = []
-
     forward_ports = data.get("forward-ports", [])
     if not isinstance(forward_ports, list):
         forward_ports = []
@@ -125,11 +125,20 @@ def _parse_defaults(data: dict[str, Any], path: Path) -> UserDefaults:
         backend=data.get("backend"),
         agent=data.get("agent"),
         provider=data.get("provider"),
+        agents=_string_list(data.get("agents", [])),
+        providers=_string_list(data.get("providers", [])),
         yolo=data.get("yolo"),
         git=data.get("git"),
         platform=data.get("platform"),
         gpu=data.get("gpu"),
-        allowed_domains=allowed_domains,
+        allowed_domains=_string_list(data.get("allowed-domains", [])),
         otel_endpoint=data.get("otel-endpoint"),
         forward_ports=forward_ports,
     )
+
+
+def _string_list(value: Any) -> list[str]:
+    """Coerce a JSON value into a list of strings, dropping non-strings."""
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
