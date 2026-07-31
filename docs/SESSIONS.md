@@ -62,6 +62,10 @@ paude upgrade my-project           # Rebuilds image, preserves all data
 
 # Delete session completely
 paude delete my-project --confirm
+
+# Remove a session's local config entry without contacting the backend
+# (useful for orphaned or legacy sessions)
+paude delete my-project --confirm --force
 ```
 
 ## Backend Selection
@@ -111,6 +115,9 @@ git pull paude-my-project main
 
 # List all paude git remotes
 paude remote list
+
+# Remove the remote for a specific session
+paude remote remove my-project
 
 # Remove remotes whose sessions no longer exist
 paude remote cleanup

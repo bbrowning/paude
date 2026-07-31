@@ -5,7 +5,7 @@ The container intentionally restricts certain operations:
 | Resource | Access | Purpose |
 |----------|--------|---------|
 | Network | proxy-filtered (Vertex AI, PyPI, GitHub, agent-specific) | Prevents data exfiltration |
-| Proxy source IP | only the paired agent container's IP is accepted | Prevents other containers/hosts from riding the proxy's egress allowlist |
+| Proxy source IP | when the proxy has a fixed network IP (as on Podman), only the paired agent container's IP is accepted | Defense-in-depth: prevents other containers/hosts from riding the proxy's egress allowlist |
 | Host working directory | not mounted | Code lives in a separate named volume, synced via git (see [Code Synchronization](SESSIONS.md#code-synchronization)) — the agent never touches host files directly |
 | gcloud credentials | never enter the agent's container; a non-functional stub ADC file is injected instead | Real credentials live only on the network-filtering proxy sidecar, which signs Vertex AI requests on the container's behalf |
 | Agent config | copied in, not mounted | Prevents host config poisoning |

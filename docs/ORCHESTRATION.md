@@ -23,10 +23,16 @@ paude status
 
 ```
 SESSION              PROJECT         BACKEND    ACTIVITY   STATE      SUMMARY
-my-project           your-project    podman     2m ago     Active     Refactoring auth module
+my-project           your-project    podman     1m ago     Active     Refactoring auth module (+3)
 ```
 
-The `STATE` column shows `Active` when the agent is working or `Idle` when waiting.
+The `SUMMARY` column shows the latest commit subject with a `(+N)` count of commits ahead of the base branch (a non-default branch name is prefixed too). The `STATE` column shows `Active` when the agent has been active within the last 2 minutes or `Idle` otherwise; sessions that aren't running show their container status instead (e.g. `stopped`, `created`).
+
+To check a single session, pass its name:
+
+```bash
+paude status my-project
+```
 
 ## Harvest Changes
 
