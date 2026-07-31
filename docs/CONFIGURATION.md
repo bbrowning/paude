@@ -205,7 +205,7 @@ paude blocked-domains my-session
 #   2 unique domain(s) blocked (11 total requests).
 #
 #   Tip: To allow a domain, run:
-#     paude allowed-domains <name> --add <domain>
+#     paude allowed-domains my-session --add <domain>
 
 # 2. Allow the domain you need
 paude allowed-domains my-session --add registry.npmjs.org
@@ -220,6 +220,16 @@ Use `--raw` to see the full proxy log with timestamps:
 
 ```bash
 paude blocked-domains my-session --raw
+```
+
+`allowed-domains` also supports removing or wholesale-replacing a session's allowlist. `--add`, `--remove`, and `--replace` are mutually exclusive; running `allowed-domains` with no flag lists the current domains:
+
+```bash
+# Remove a domain
+paude allowed-domains my-session --remove registry.npmjs.org
+
+# Replace the entire allowlist
+paude allowed-domains my-session --replace default,pypi
 ```
 
 ## GitHub CLI Access

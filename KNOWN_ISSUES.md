@@ -140,3 +140,19 @@ Note: README's agent table/examples were not re-audited as part of the 2026-07-3
 
 `src/paude/agents/__init__.py`'s `_REGISTRY` dict is the single source of truth for supported agents, and `list_agents()` returns them dynamically — but `src/paude/cli/help.py`'s "Agents & Providers" panel and `src/paude/cli/create.py`'s `--agent` option help string both hardcode the same agent list as free text. This diff had to hand-patch `create.py`'s copy because it had already drifted (missing `codex` and `opencode`). Consider generating both help strings from `list_agents()` so they can't drift again.
 
+### DOCS-005: `create` docstrings claim "does not start it" but the command auto-starts the container
+
+**Status**: Open
+**Severity**: Low
+**Discovered**: 2026-07-31 during docs/ audit (`docs/SESSIONS.md`, `docs/ORCHESTRATION.md`)
+
+`src/paude/cli/create.py:160` (`"""Create a new persistent session (does not start it)."""`) and the backend `create_session` docstrings (`src/paude/backends/base.py:106`, `src/paude/backends/podman/backend.py:83`, both "Create a new session (does not start it).") contradict actual runtime behavior: the CLI `create` path calls `start_session_no_attach` (`src/paude/cli/create_podman.py:122-123`), which starts the containers and agent, and `_finalize_session_create` prints "created and running" for local backends. The user-facing docs (`docs/SESSIONS.md` line 19, `docs/ORCHESTRATION.md`) correctly say `create` starts the container; only these code docstrings are stale. Update the three docstrings to reflect that local `create` also starts the session.
+
+### DOCS-006: Gas City agent adds a bogus `"gascity"` domain alias with no matching alias definition
+
+**Status**: Open (needs verification)
+**Severity**: Low
+**Discovered**: 2026-07-31 during docs/ audit (`docs/CONFIGURATION.md`)
+
+`src/paude/agents/gascity.py:55-60` lists `"gascity"` in `extra_domain_aliases`, but there is no `"gascity"` key in `DOMAIN_ALIASES` (`src/paude/domains.py`). `expand_domains` (`src/paude/domains.py:167-171`) therefore treats it as a literal domain string, so the session allowlist ends up containing a meaningless entry `gascity` rather than an expanded set of real domains. Verify whether Gas City needs a real domain-alias definition (add a `"gascity"` entry to `DOMAIN_ALIASES`) or whether the literal was unintended and should be removed from `extra_domain_aliases`. `docs/CONFIGURATION.md` correctly omits it, so no doc change is warranted until the code intent is confirmed.
+
