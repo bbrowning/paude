@@ -185,6 +185,74 @@ paude create --otel-endpoint http://collector:4318 my-project
 
 The endpoint hostname is automatically added to the proxy allowlist and non-standard ports (like 4318) are opened in the proxy. Supported agents: Claude Code, Gemini CLI, OpenClaw. Set `otel-endpoint` in `~/.config/paude/defaults.json` to apply globally.
 
+### Port Forwarding
+
+Some agents run a service inside the container that you want to reach from your host — for example a web dashboard. Forwarding is **opt-in**: by default no container ports are exposed. Use `--forward-port` to forward one or more ports:
+
+```bash
+# Forward container port 8372 to host port 8372
+paude create --forward-port 8372 my-project
+
+# Different host port than container port (HOST:CONTAINER)
+paude create --forward-port 9000:8372 my-project
+
+# Bind a non-loopback host interface (HOST_IP:HOST:CONTAINER)
+paude create --forward-port 0.0.0.0:8372:8372 my-project
+
+# Repeat the flag to forward multiple ports
+paude create --forward-port 8372 --forward-port 5173 my-project
+```
+
+`--forward-port` accepts three forms:
+
+- `PORT` — same port on host and container (binds `127.0.0.1`)
+- `HOST:CONTAINER` — map a different host port (binds `127.0.0.1`)
+- `HOST_IP:HOST:CONTAINER` — bind a specific host interface (e.g. `0.0.0.0` to expose on your LAN)
+
+Forwarding starts when you `paude start`/`paude connect` and stops when you disconnect. It works on both the Podman and Docker backends.
+
+**Loopback binding:** the forwarder reaches the service over `127.0.0.1` *inside* the container, so the in-container service must listen on `127.0.0.1` (or `0.0.0.0`) rather than a container-external interface. Every connection appears to the service as coming from `127.0.0.1`, which satisfies services that only accept loopback traffic.
+
+You can also set `forward-ports` in a project's `paude.json` `create` section or in `~/.config/paude/defaults.json`:
+
+```json
+{
+  "create": {
+    "forward-ports": ["8372"]
+  }
+}
+```
+
+Resolution follows the usual precedence — CLI `--forward-port` overrides `paude.json`, which overrides user defaults (the highest layer that sets any ports wins; layers are not merged).
+
+#### Worked example: Gas City dashboard
+
+The Gas City agent serves a dashboard inside the container on `127.0.0.1:8372`. To reach it from your host:
+
+```bash
+# Create a Gas City session that forwards the dashboard port
+paude create --agent gascity --forward-port 8372 my-project
+paude connect my-project
+```
+
+While connected, paude prints `Port-forward active: http://127.0.0.1:8372`. Open <http://localhost:8372> in your host browser to view the dashboard.
+
+**Remote hosts (SSH):** the forwarder runs on your local machine even when the container runs on a remote host, tunnelling each connection through `ssh … podman exec`. So the same flag works transparently over SSH — no manual tunnel required:
+
+```bash
+paude create --agent gascity --forward-port 8372 --host user@remote my-project
+paude connect my-project
+# Dashboard is reachable at http://localhost:8372 on your LOCAL machine
+```
+
+If you prefer to forward without paude (e.g. for a session created without `--forward-port`), the equivalent manual SSH tunnel is:
+
+```bash
+ssh -L 8372:127.0.0.1:8372 user@remote
+```
+
+Note that a plain `ssh -L` reaches the remote *host's* loopback, so the container service must additionally be published to the remote host; paude's `--forward-port` avoids that by exec'ing directly into the container.
+
 ### Passing a Task
 
 ```bash

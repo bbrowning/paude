@@ -55,6 +55,7 @@ class PaudeConfig:
     create_agent: str | None = None
     create_provider: str | None = None
     create_otel_endpoint: str | None = None
+    create_forward_ports: list[str] = field(default_factory=list)
 
     @property
     def has_customizations(self) -> bool:

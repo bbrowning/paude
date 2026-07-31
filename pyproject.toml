@@ -85,6 +85,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = [
     "S101",  # assert in tests is expected
+    "S104",  # "0.0.0.0" appears in port-forward test data, not a real bind
     "S108",  # hardcoded tmp paths are fine in tests
     "E501",  # long lines in test signatures are acceptable
 ]

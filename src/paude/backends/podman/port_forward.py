@@ -33,7 +33,7 @@ class PodmanPortForwardManager:
         self,
         session_name: str,
         container_name: str,
-        ports: list[tuple[int, int]],
+        ports: list[tuple[str, int, int]],
     ) -> None:
         """Start port-forwarding for a session (idempotent).
 
@@ -42,7 +42,7 @@ class PodmanPortForwardManager:
         Args:
             session_name: Paude session name.
             container_name: Container name to exec into.
-            ports: List of (host_port, container_port) tuples.
+            ports: List of (host_ip, host_port, container_port) tuples.
         """
         if not ports:
             return
@@ -57,9 +57,10 @@ class PodmanPortForwardManager:
             "--parent-pid",
             str(os.getpid()),
         ]
-        for host_port, container_port in ports:
+        for host_ip, host_port, container_port in ports:
             exec_cmd = self._build_exec_cmd(container_name, container_port)
-            proxy_cmd.extend(["--forward", str(host_port), shlex.join(exec_cmd)])
+            listen = f"{host_ip}:{host_port}"
+            proxy_cmd.extend(["--forward", listen, shlex.join(exec_cmd)])
 
         proc = subprocess.Popen(  # noqa: S603
             proxy_cmd,
@@ -71,9 +72,9 @@ class PodmanPortForwardManager:
 
         pid_file(session_name).write_text(str(proc.pid))
 
-        for host_port, _container_port in ports:
+        for host_ip, host_port, _container_port in ports:
             print(
-                f"Port-forward active: http://localhost:{host_port}",
+                f"Port-forward active: http://{host_ip}:{host_port}",
                 file=sys.stderr,
             )
 

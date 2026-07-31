@@ -22,6 +22,7 @@ from paude.backends.podman.helpers import (
     container_name,
     find_container_by_session_name,
     get_session_agent,
+    get_session_forward_ports,
     network_name,
     proxy_container_name,
     require_running_session,
@@ -243,7 +244,7 @@ class PodmanBackend:
 
     def _attach_with_port_forward(self, name: str, cname: str, agent: Agent) -> int:
         """Start port forwarding, attach to container, and clean up on exit."""
-        ports = agent.config.exposed_ports
+        ports = self._collect_forward_ports(name, agent)
         if ports:
             self._port_forward.start(name, cname, ports)
         self._setup.print_port_urls(name, agent)
@@ -257,6 +258,35 @@ class PodmanBackend:
             self._port_forward.stop(name)
         self._setup.print_port_urls(name, agent)
         return exit_code
+
+    def _collect_forward_ports(
+        self, name: str, agent: Agent
+    ) -> list[tuple[str, int, int]]:
+        """Merge agent-declared ports and user opt-in forwards for a session.
+
+        Agent ``exposed_ports`` are bound on loopback; user ``--forward-port``
+        specs (persisted as a container label) may bind other interfaces.
+        Entries are de-duplicated by ``(host_ip, host_port)``, with the
+        user's forwards taking precedence on a conflict.
+        """
+        merged: list[tuple[str, int, int]] = []
+        seen: set[tuple[str, int]] = set()
+
+        for host_ip, host_port, container_port in get_session_forward_ports(
+            self._runner, name
+        ):
+            key = (host_ip, host_port)
+            if key not in seen:
+                seen.add(key)
+                merged.append((host_ip, host_port, container_port))
+
+        for host_port, container_port in agent.config.exposed_ports:
+            key = ("127.0.0.1", host_port)
+            if key not in seen:
+                seen.add(key)
+                merged.append(("127.0.0.1", host_port, container_port))
+
+        return merged
 
     def stop_session(self, name: str) -> None:
         """Stop a session (preserves volume)."""

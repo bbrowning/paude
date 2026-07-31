@@ -13,6 +13,7 @@ from paude.backends.labels import (
     PAUDE_LABEL_APP,
     PAUDE_LABEL_CREATED,
     PAUDE_LABEL_DOMAINS,
+    PAUDE_LABEL_FORWARD_PORTS,
     PAUDE_LABEL_PROXY_IMAGE,
     PAUDE_LABEL_SESSION,
     PAUDE_LABEL_WORKSPACE,
@@ -26,6 +27,7 @@ from paude.backends.podman import (
 from paude.backends.podman.helpers import (
     build_session_from_container,
     find_container_by_session_name,
+    get_session_forward_ports,
 )
 from paude.backends.podman.session_setup import SessionSetup
 from paude.backends.session_env import decode_path as _decode_path_raw
@@ -1835,3 +1837,69 @@ class TestPodmanPortUrls:
         assert env is not None
         assert "PAUDE_PORT_URLS" in env
         assert env["PAUDE_PORT_URLS"] == "http://localhost:18789"
+
+
+class TestForwardPortsPersistence:
+    """Tests for user opt-in forwarded-port label persistence and merging."""
+
+    def test_build_session_labels_includes_forward_ports(self) -> None:
+        """Forward ports are encoded into a container label when set."""
+        config = SessionConfig(
+            name="s",
+            workspace=Path("/tmp/ws"),
+            image="img",
+            forward_ports=[("127.0.0.1", 8372, 8372), ("0.0.0.0", 8080, 80)],
+        )
+        labels = SessionSetup.build_session_labels(config, "s", "2026-01-01")
+        assert (
+            labels[PAUDE_LABEL_FORWARD_PORTS]
+            == "127.0.0.1:8372:8372,0.0.0.0:8080:80"
+        )
+
+    def test_build_session_labels_omits_forward_ports_when_empty(self) -> None:
+        """No forward-ports label is written when none are configured."""
+        config = SessionConfig(name="s", workspace=Path("/tmp/ws"), image="img")
+        labels = SessionSetup.build_session_labels(config, "s", "2026-01-01")
+        assert PAUDE_LABEL_FORWARD_PORTS not in labels
+
+    def test_get_session_forward_ports_decodes_label(self) -> None:
+        """get_session_forward_ports decodes the persisted label."""
+        runner = MagicMock()
+        runner.list_containers.return_value = [
+            {
+                "Labels": {
+                    PAUDE_LABEL_SESSION: "s",
+                    PAUDE_LABEL_FORWARD_PORTS: "127.0.0.1:8372:8372",
+                }
+            }
+        ]
+        assert get_session_forward_ports(runner, "s") == [("127.0.0.1", 8372, 8372)]
+
+    def test_get_session_forward_ports_empty_without_label(self) -> None:
+        """No label yields an empty list."""
+        runner = MagicMock()
+        runner.list_containers.return_value = [
+            {"Labels": {PAUDE_LABEL_SESSION: "s"}}
+        ]
+        assert get_session_forward_ports(runner, "s") == []
+
+    def test_collect_forward_ports_merges_and_dedups(self) -> None:
+        """User forwards take precedence over agent ports on host-bind conflict."""
+        runner = MagicMock()
+        backend = _make_backend(mock_runner=runner)
+        agent = MagicMock()
+        agent.config.exposed_ports = [(18789, 18789), (8372, 8372)]
+
+        with patch(
+            "paude.backends.podman.backend.get_session_forward_ports",
+            return_value=[("0.0.0.0", 8080, 80), ("127.0.0.1", 8372, 9999)],
+        ):
+            ports = backend._collect_forward_ports("s", agent)
+
+        # User forwards first; agent's loopback 8372 is deduped (user owns it),
+        # agent's 18789 is appended.
+        assert ports == [
+            ("0.0.0.0", 8080, 80),
+            ("127.0.0.1", 8372, 9999),
+            ("127.0.0.1", 18789, 18789),
+        ]

@@ -1,4 +1,4 @@
-"""Shared utilities for port-forward PID file management."""
+"""Shared utilities for port-forward PID file management and spec parsing."""
 
 from __future__ import annotations
 
@@ -6,6 +6,128 @@ import os
 import signal
 from functools import lru_cache
 from pathlib import Path
+
+# Default host interface to bind forwarded ports to. Loopback keeps a
+# forwarded port private to the machine running the paude CLI unless the
+# user explicitly opts into a different bind address via HOST_IP:HOST:CONTAINER.
+DEFAULT_BIND_IP = "127.0.0.1"
+
+# A single forwarded port, normalized as (host_ip, host_port, container_port).
+ForwardPort = tuple[str, int, int]
+
+
+def _parse_port(value: str, spec: str) -> int:
+    """Parse a single TCP port, validating the 1-65535 range."""
+    text = value.strip()
+    try:
+        port = int(text)
+    except ValueError:
+        raise ValueError(
+            f"invalid port spec '{spec}': '{text}' is not an integer"
+        ) from None
+    if not 1 <= port <= 65535:
+        raise ValueError(
+            f"invalid port spec '{spec}': port {port} is out of range 1-65535"
+        )
+    return port
+
+
+def parse_forward_port_spec(spec: str) -> ForwardPort:
+    """Parse a single ``--forward-port`` spec into a normalized tuple.
+
+    Accepted forms:
+
+    * ``PORT`` -> ``(127.0.0.1, PORT, PORT)`` (same port on both sides)
+    * ``HOST:CONTAINER`` -> ``(127.0.0.1, HOST, CONTAINER)``
+    * ``HOST_IP:HOST:CONTAINER`` -> ``(HOST_IP, HOST, CONTAINER)``
+
+    Args:
+        spec: The raw spec string.
+
+    Returns:
+        A ``(host_ip, host_port, container_port)`` tuple.
+
+    Raises:
+        ValueError: If the spec is empty, malformed, or has out-of-range ports.
+    """
+    raw = spec.strip()
+    if not raw:
+        raise ValueError("invalid port spec: empty value")
+
+    parts = raw.split(":")
+    if len(parts) == 1:
+        host_ip = DEFAULT_BIND_IP
+        host_raw = container_raw = parts[0]
+    elif len(parts) == 2:  # noqa: PLR2004 - HOST:CONTAINER
+        host_ip = DEFAULT_BIND_IP
+        host_raw, container_raw = parts
+    elif len(parts) == 3:  # noqa: PLR2004 - HOST_IP:HOST:CONTAINER
+        host_ip, host_raw, container_raw = parts
+        host_ip = host_ip.strip()
+        if not host_ip:
+            raise ValueError(f"invalid port spec '{spec}': empty host IP")
+    else:
+        raise ValueError(
+            f"invalid port spec '{spec}': expected PORT, HOST:CONTAINER, "
+            "or HOST_IP:HOST:CONTAINER"
+        )
+
+    return (host_ip, _parse_port(host_raw, spec), _parse_port(container_raw, spec))
+
+
+def parse_forward_port_specs(specs: list[str]) -> list[ForwardPort]:
+    """Parse and de-duplicate a list of ``--forward-port`` specs.
+
+    Exact duplicate binds are collapsed silently. Two specs that bind the same
+    ``host_ip:host_port`` to different container ports are a conflict and raise.
+
+    Args:
+        specs: Raw spec strings.
+
+    Returns:
+        Normalized ``(host_ip, host_port, container_port)`` tuples, in order.
+
+    Raises:
+        ValueError: If a spec is malformed or two specs conflict on a host bind.
+    """
+    result: list[ForwardPort] = []
+    seen: dict[tuple[str, int], int] = {}
+    for spec in specs:
+        host_ip, host_port, container_port = parse_forward_port_spec(spec)
+        key = (host_ip, host_port)
+        if key in seen:
+            if seen[key] != container_port:
+                raise ValueError(
+                    f"conflicting port forwards for {host_ip}:{host_port} "
+                    f"(-> {seen[key]} and -> {container_port})"
+                )
+            continue
+        seen[key] = container_port
+        result.append((host_ip, host_port, container_port))
+    return result
+
+
+def encode_forward_ports(ports: list[ForwardPort]) -> str:
+    """Serialize forward ports for storage in a container label."""
+    return ",".join(f"{ip}:{hp}:{cp}" for ip, hp, cp in ports)
+
+
+def decode_forward_ports(value: str) -> list[ForwardPort]:
+    """Parse forward ports previously stored with :func:`encode_forward_ports`.
+
+    Malformed entries are skipped so a corrupt label never breaks attach.
+    """
+    result: list[ForwardPort] = []
+    for item in value.split(","):
+        text = item.strip()
+        if not text:
+            continue
+        try:
+            ip, host_raw, container_raw = text.rsplit(":", 2)
+            result.append((ip, int(host_raw), int(container_raw)))
+        except ValueError:
+            continue
+    return result
 
 
 @lru_cache(maxsize=1)

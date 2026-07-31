@@ -60,6 +60,9 @@ class ResolvedCreateOptions:
     allowed_domains_provenance: list[tuple[list[str], Source]] = field(
         default_factory=list
     )
+    forward_ports: SettingValue[list[str]] = field(
+        default_factory=lambda: SettingValue([], "built-in")
+    )
 
 
 def resolve_create_options(
@@ -73,6 +76,7 @@ def resolve_create_options(
     cli_gpu: str | None,
     cli_allowed_domains: list[str] | None,
     cli_otel_endpoint: str | None = None,
+    cli_forward_ports: list[str] | None = None,
     project_config: PaudeConfig | None,
     user_defaults: UserDefaults,
 ) -> ResolvedCreateOptions:
@@ -160,6 +164,13 @@ def resolve_create_options(
         user_defaults=user_defaults,
     )
 
+    # --- Forward ports: first non-empty layer wins (no merge) ---
+    result.forward_ports = _resolve_list(
+        cli=cli_forward_ports,
+        project=project_config.create_forward_ports if project_config else None,
+        user=user_defaults.forward_ports,
+    )
+
     return result
 
 
@@ -178,6 +189,27 @@ def _resolve_scalar(
     if user is not None:
         return SettingValue(user, "user defaults")
     return SettingValue(builtin, "built-in")
+
+
+def _resolve_list(
+    *,
+    cli: list[str] | None,
+    project: list[str] | None,
+    user: list[str] | None,
+) -> SettingValue[list[str]]:
+    """Resolve a list setting: first non-empty layer wins, no merge.
+
+    Unlike allowed-domains (which merges), forward ports are taken wholesale
+    from the highest-precedence layer that provides any, so a project or user
+    can fully override the layer below it.
+    """
+    if cli:
+        return SettingValue(list(cli), "cli")
+    if project:
+        return SettingValue(list(project), "paude.json")
+    if user:
+        return SettingValue(list(user), "user defaults")
+    return SettingValue([], "built-in")
 
 
 def _resolve_domains(

@@ -15,6 +15,7 @@ from paude.backends.labels import (
     PAUDE_LABEL_APP,
     PAUDE_LABEL_CREATED,
     PAUDE_LABEL_DOMAINS,
+    PAUDE_LABEL_FORWARD_PORTS,
     PAUDE_LABEL_PROVIDER,
     PAUDE_LABEL_SESSION,
     PAUDE_LABEL_VERSION,
@@ -259,3 +260,18 @@ def get_session_agent(runner: ContainerRunner, session_name: str) -> Agent:
     agent_name = str(labels.get(PAUDE_LABEL_AGENT, "claude"))
     provider = labels.get(PAUDE_LABEL_PROVIDER) or None
     return get_agent(agent_name, provider=provider)
+
+
+def get_session_forward_ports(
+    runner: ContainerRunner, session_name: str
+) -> list[tuple[str, int, int]]:
+    """Read the user opt-in forwarded ports persisted on a session's container.
+
+    Returns a list of ``(host_ip, host_port, container_port)`` tuples, empty if
+    the session was created without ``--forward-port``.
+    """
+    from paude.backends.port_forward_utils import decode_forward_ports
+
+    labels = get_session_labels(runner, session_name)
+    raw = labels.get(PAUDE_LABEL_FORWARD_PORTS, "")
+    return decode_forward_ports(raw) if raw else []
