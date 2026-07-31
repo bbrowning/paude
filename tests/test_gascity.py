@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+from paude.agents import get_agents
+from paude.agents.base import compose_dockerfile_install_lines
 from paude.agents.gascity import BD_VERSION, DOLT_VERSION, GC_VERSION, GascityAgent
 
 
@@ -76,6 +78,9 @@ class TestGascityAgentConfig:
         cfg = GascityAgent().config
         assert "pre-installed" in cfg.install_script
 
+    def test_bundled_agents(self) -> None:
+        assert GascityAgent().config.bundled_agents == ["claude", "gemini"]
+
 
 class TestGascityAgentDockerfile:
     """Tests for GascityAgent.dockerfile_install_lines."""
@@ -93,22 +98,15 @@ class TestGascityAgentDockerfile:
         text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
         assert "npm" in text
 
-    def test_contains_gemini_cli(self) -> None:
+    def test_core_excludes_gemini_cli(self) -> None:
+        # Gemini install moved out to the bundled GeminiAgent.
         text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
-        assert "@google/gemini-cli" in text
+        assert "@google/gemini-cli" not in text
 
-    def test_contains_gemini_otel_patch(self) -> None:
+    def test_core_excludes_claude_install(self) -> None:
+        # Claude Code install moved out to the bundled ClaudeAgent.
         text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
-        assert "patch-gemini-otel-proxy.sh" in text
-
-    def test_contains_claude_install(self) -> None:
-        text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
-        assert "claude.ai/install.sh" in text
-
-    def test_contains_claude_binary_check(self) -> None:
-        text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
-        assert "test -x" in text
-        assert "claude" in text
+        assert "claude.ai/install.sh" not in text
 
     def test_contains_dolt(self) -> None:
         text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
@@ -152,10 +150,6 @@ class TestGascityAgentDockerfile:
         assert "uname -m" in text
         assert "amd64" in text
         assert "arm64" in text
-
-    def test_pipefail_shell(self) -> None:
-        text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
-        assert "pipefail" in text
 
     def test_sets_path(self) -> None:
         text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
@@ -255,3 +249,68 @@ class TestGascityAgentSandboxConfig:
         script = GascityAgent().apply_sandbox_config("/custom/home", "/workspace", "")
         assert "/custom/home/.claude.json" in script
         assert "/custom/home/.gemini" in script
+
+
+class TestGascityComposedInstall:
+    """The composed --agent gascity install must still equal today's toolchain.
+
+    gascity's own Dockerfile lines now cover only the Gas City core (gc/dolt/bd
+    + Node prereq); Claude Code and Gemini CLI are contributed by the bundled
+    agents and stitched back in by compose_dockerfile_install_lines(). These
+    tests pin the composed result so the install set stays identical to the
+    pre-refactor hardcoded lines.
+    """
+
+    def _composed(self, home: str = "/home/paude") -> str:
+        composition = get_agents(["gascity"])
+        return "\n".join(
+            compose_dockerfile_install_lines(composition.agents, home)
+        )
+
+    def test_install_set_is_gascity_claude_gemini(self) -> None:
+        assert get_agents(["gascity"]).names == ["gascity", "claude", "gemini"]
+
+    def test_primary_is_gascity(self) -> None:
+        assert get_agents(["gascity"]).primary.config.name == "gascity"
+
+    def test_contains_gc_dolt_bd(self) -> None:
+        text = self._composed()
+        assert "gastownhall/gascity" in text
+        assert GC_VERSION in text
+        assert "dolthub/dolt" in text
+        assert DOLT_VERSION in text
+        assert "gastownhall/beads" in text
+        assert BD_VERSION in text
+
+    def test_contains_claude(self) -> None:
+        text = self._composed()
+        assert "claude.ai/install.sh" in text
+        assert "pipefail" in text  # from Claude's verified install
+
+    def test_contains_gemini(self) -> None:
+        text = self._composed()
+        assert "@google/gemini-cli" in text
+        assert "patch-gemini-otel-proxy.sh" in text
+
+    def test_contains_node_and_flock(self) -> None:
+        text = self._composed()
+        assert "nodejs" in text
+        assert "util-linux" in text
+        assert "lsof" in text
+
+    def test_node_prereq_installed_once(self) -> None:
+        # gascity core and the bundled Gemini agent both need Node.js; the
+        # composer must collapse the shared package install to a single layer.
+        lines = compose_dockerfile_install_lines(
+            get_agents(["gascity"]).agents, "/home/paude"
+        )
+        node_installs = [
+            line for line in lines if "dnf install -y nodejs npm" in line
+        ]
+        assert len(node_installs) == 1
+
+    def test_ends_with_canonical_layout(self) -> None:
+        lines = compose_dockerfile_install_lines(
+            get_agents(["gascity"]).agents, "/home/paude"
+        )
+        assert lines[-2:] == ["USER paude", "WORKDIR /home/paude"]

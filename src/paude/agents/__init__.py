@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from paude.agents.base import Agent, AgentConfig
+from paude.agents.base import Agent, AgentComposition, AgentConfig
 from paude.agents.claude import ClaudeAgent
 from paude.agents.codex import CodexAgent
 from paude.agents.cursor import CursorAgent
@@ -13,6 +13,7 @@ from paude.agents.opencode import OpenCodeAgent
 
 __all__ = [
     "Agent",
+    "AgentComposition",
     "AgentConfig",
     "ClaudeAgent",
     "CodexAgent",
@@ -22,6 +23,7 @@ __all__ = [
     "OpenCodeAgent",
     "OpenClawAgent",
     "get_agent",
+    "get_agents",
     "list_agents",
 ]
 
@@ -55,6 +57,54 @@ def get_agent(name: str, provider: str | None = None) -> Agent:
         available = ", ".join(sorted(_REGISTRY.keys()))
         raise ValueError(f"Unknown agent '{name}'. Available: {available}")
     return cls(provider=provider)  # type: ignore[no-any-return]
+
+
+def get_agents(
+    names: list[str],
+    providers: dict[str, str] | None = None,
+) -> AgentComposition:
+    """Expand requested agent names into a composed install set.
+
+    Each requested agent is expanded into itself plus its bundled agents
+    (recursively), deduplicated by name while preserving first-seen order. The
+    primary agent is the one named first in ``names``.
+
+    Each agent instance is built with its own default provider unless an
+    override is supplied for it in ``providers``.
+
+    Args:
+        names: Requested agent names, most important first. ``names[0]`` becomes
+            the primary agent.
+        providers: Optional mapping of agent name -> provider override. Agents
+            not present in the mapping use their own default provider.
+
+    Returns:
+        An AgentComposition holding the primary agent and the ordered,
+        deduplicated install set.
+
+    Raises:
+        ValueError: If ``names`` is empty or any agent name is unknown.
+    """
+    if not names:
+        raise ValueError("get_agents requires at least one agent name")
+
+    provider_overrides = providers or {}
+    ordered: list[Agent] = []
+    seen: set[str] = set()
+
+    def expand(name: str) -> None:
+        if name in seen:
+            return
+        seen.add(name)
+        agent = get_agent(name, provider=provider_overrides.get(name))
+        ordered.append(agent)
+        for bundled in agent.config.bundled_agents:
+            expand(bundled)
+
+    for name in names:
+        expand(name)
+
+    return AgentComposition(primary=ordered[0], agents=ordered)
 
 
 def list_agents() -> list[str]:

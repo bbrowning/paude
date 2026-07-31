@@ -9,6 +9,7 @@ from paude.agents.base import (
     build_environment_from_config,
     build_provider_credentials,
     gemini_trust_script,
+    nodejs_prereq_install_lines,
 )
 
 
@@ -48,8 +49,7 @@ class GeminiAgent:
         lines = [
             "",
             "# Install Node.js for Gemini CLI",
-            "USER root",
-            "RUN dnf install -y nodejs npm && dnf clean all",
+            *nodejs_prereq_install_lines(),
             "",
             "# Install Gemini CLI and patch OTEL proxy",
             "RUN npm install -g @google/gemini-cli@0.35.3"

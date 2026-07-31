@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -35,6 +36,10 @@ class AgentConfig:
             Empty for CLI agents; used by web-based agents like OpenClaw.
         default_base_image: Default container base image for this agent, or None
             to use paude's standard base image.
+        bundled_agents: Names of other agent toolchains implied by this agent.
+            When this agent is requested, each bundled agent is also expanded
+            into the composed install set (e.g. gascity bundles claude and
+            gemini).
     """
 
     name: str
@@ -59,6 +64,7 @@ class AgentConfig:
     exposed_ports: list[tuple[int, int]] = field(default_factory=list)
     default_base_image: str | None = None
     provider: str | None = None
+    bundled_agents: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -182,6 +188,19 @@ def pipefail_install_lines(config: AgentConfig, container_home: str) -> list[str
     ]
 
 
+def nodejs_prereq_install_lines() -> list[str]:
+    """Return canonical Dockerfile lines to install the Node.js runtime as root.
+
+    Emitted verbatim by every agent that needs Node.js (e.g. Gemini CLI, the
+    Gas City core) so that compose_dockerfile_install_lines() can collapse the
+    repeated install down to a single layer.
+    """
+    return [
+        "USER root",
+        "RUN dnf install -y nodejs npm && dnf clean all",
+    ]
+
+
 def claude_trust_script(home: str, workspace: str) -> str:
     """Generate shell snippet to suppress Claude Code trust/onboarding prompts."""
     return f"""\
@@ -283,3 +302,94 @@ class Agent(Protocol):
             Dictionary of environment variables to pass to the container.
         """
         ...
+
+
+@dataclass(frozen=True)
+class AgentComposition:
+    """An ordered, deduplicated set of agents to install into one image.
+
+    Attributes:
+        primary: The primary agent — the first requested name. Drives launch
+            behaviour, sandbox config, and the container's default agent.
+        agents: The full install set in stable order — the primary plus every
+            requested/bundled toolchain, deduplicated by name. The primary is
+            always the first element.
+    """
+
+    primary: Agent
+    agents: list[Agent]
+
+    @property
+    def names(self) -> list[str]:
+        """Return the install-set agent names, in install order."""
+        return [agent.config.name for agent in self.agents]
+
+
+_PREREQ_INSTALL_MARKERS = (
+    "dnf install",
+    "yum install",
+    "apt-get install",
+    "apk add",
+)
+
+
+def _is_dedupable_prereq(line: str) -> bool:
+    """Return True for OS-package install lines that are safe to deduplicate.
+
+    Only ``RUN`` lines that invoke a package manager qualify. Tool installs
+    (curl|bash, npm install of a specific CLI, tarball downloads) are never
+    treated as shared prerequisites and are always preserved.
+    """
+    stripped = line.strip()
+    if not stripped.startswith("RUN "):
+        return False
+    return any(marker in stripped for marker in _PREREQ_INSTALL_MARKERS)
+
+
+def _strip_trailing_layout(lines: list[str]) -> list[str]:
+    """Drop trailing blank/USER/WORKDIR lines so a canonical pair can be appended."""
+    result = list(lines)
+    while result:
+        last = result[-1].strip()
+        if last == "" or last.startswith("USER ") or last.startswith("WORKDIR "):
+            result.pop()
+        else:
+            break
+    return result
+
+
+def compose_dockerfile_install_lines(
+    agents: Sequence[Agent], container_home: str
+) -> list[str]:
+    """Concatenate multiple agents' Dockerfile install lines into one layer set.
+
+    Agents are laid out in the given order. Shared prerequisite install lines
+    (e.g. the Node.js/npm package install) emitted by more than one agent are
+    deduplicated — the first occurrence wins and later identical package-install
+    lines are dropped. The result always ends with a consistent
+    ``USER paude`` / ``WORKDIR {container_home}`` pair, regardless of how each
+    agent terminates its own lines.
+
+    Args:
+        agents: Agents to install, in the desired build order.
+        container_home: Home directory path inside the container.
+
+    Returns:
+        Combined, deduplicated list of Dockerfile instruction lines.
+    """
+    combined: list[str] = []
+    seen_prereqs: set[str] = set()
+    for agent in agents:
+        for line in agent.dockerfile_install_lines(container_home):
+            if _is_dedupable_prereq(line):
+                key = line.strip()
+                if key in seen_prereqs:
+                    continue
+                seen_prereqs.add(key)
+            combined.append(line)
+
+    combined = _strip_trailing_layout(combined)
+    combined.append("")
+    combined.append("USER paude")
+    combined.append(f"WORKDIR {container_home}")
+    return combined

@@ -8,11 +8,14 @@ from unittest.mock import patch
 
 import pytest
 
-from paude.agents import get_agent, list_agents
+from paude.agents import get_agent, get_agents, list_agents
 from paude.agents.base import (
+    AgentComposition,
     AgentConfig,
     build_environment_from_config,
     build_secret_environment_from_config,
+    compose_dockerfile_install_lines,
+    nodejs_prereq_install_lines,
     pipefail_install_lines,
 )
 from paude.agents.claude import ClaudeAgent
@@ -86,6 +89,130 @@ class TestRegistry:
         assert "opencode" in agents
         assert "openclaw" in agents
         assert agents == sorted(agents)
+
+
+class TestGetAgents:
+    """Tests for get_agents() composition, expansion, dedup, and ordering."""
+
+    def test_single_agent_returns_itself(self) -> None:
+        composition = get_agents(["claude"])
+        assert isinstance(composition, AgentComposition)
+        assert composition.names == ["claude"]
+
+    def test_primary_is_first_requested(self) -> None:
+        composition = get_agents(["gascity", "codex"])
+        assert composition.primary.config.name == "gascity"
+
+    def test_primary_is_first_element_of_install_set(self) -> None:
+        composition = get_agents(["codex", "gascity"])
+        assert composition.primary is composition.agents[0]
+        assert composition.primary.config.name == "codex"
+
+    def test_expands_bundled_agents(self) -> None:
+        # gascity bundles claude + gemini.
+        composition = get_agents(["gascity"])
+        assert composition.names == ["gascity", "claude", "gemini"]
+
+    def test_acceptance_gascity_plus_codex(self) -> None:
+        composition = get_agents(["gascity", "codex"])
+        assert composition.names == ["gascity", "claude", "gemini", "codex"]
+        assert composition.primary.config.name == "gascity"
+
+    def test_dedups_explicitly_requested_bundled_agent(self) -> None:
+        # claude is both explicitly requested and bundled by gascity.
+        composition = get_agents(["gascity", "claude"])
+        assert composition.names == ["gascity", "claude", "gemini"]
+
+    def test_dedup_preserves_first_seen_order(self) -> None:
+        composition = get_agents(["claude", "gascity"])
+        # claude first (explicit), then gascity, then gascity's remaining
+        # bundled agent (gemini); claude is not repeated.
+        assert composition.names == ["claude", "gascity", "gemini"]
+
+    def test_agents_are_instances(self) -> None:
+        composition = get_agents(["gascity"])
+        assert isinstance(composition.agents[0], GascityAgent)
+        assert isinstance(composition.agents[1], ClaudeAgent)
+        assert isinstance(composition.agents[2], GeminiAgent)
+
+    def test_each_agent_gets_its_own_default_provider(self) -> None:
+        composition = get_agents(["gascity"])
+        providers = {a.config.name: a.config.provider for a in composition.agents}
+        assert providers["gascity"] == "vertex"
+        assert providers["claude"] == "vertex"
+        assert providers["gemini"] == "google"
+
+    def test_provider_override_applies_per_agent(self) -> None:
+        composition = get_agents(["codex", "gemini"], providers={"codex": "openai"})
+        providers = {a.config.name: a.config.provider for a in composition.agents}
+        assert providers["codex"] == "openai"
+        # gemini keeps its own default, unaffected by the codex override.
+        assert providers["gemini"] == "google"
+
+    def test_empty_names_raises(self) -> None:
+        with pytest.raises(ValueError, match="at least one agent name"):
+            get_agents([])
+
+    def test_unknown_name_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unknown agent 'bogus'"):
+            get_agents(["bogus"])
+
+
+class TestComposeDockerfileInstallLines:
+    """Tests for compose_dockerfile_install_lines() ordering and dedup."""
+
+    def test_concatenates_in_order(self) -> None:
+        agents = [get_agent("codex"), get_agent("claude")]
+        lines = compose_dockerfile_install_lines(agents, "/home/paude")
+        text = "\n".join(lines)
+        assert "Codex CLI" in text
+        assert "claude.ai/install.sh" in text
+        # codex comes before claude in the requested order
+        assert text.index("Codex CLI") < text.index("claude.ai/install.sh")
+
+    def test_dedups_shared_node_prereq(self) -> None:
+        agents = [get_agent("gemini"), get_agent("gascity")]
+        lines = compose_dockerfile_install_lines(agents, "/home/paude")
+        node_installs = [
+            line for line in lines if "dnf install -y nodejs npm" in line
+        ]
+        assert len(node_installs) == 1
+
+    def test_preserves_distinct_tool_installs(self) -> None:
+        # Non-prereq installs (npm of a specific CLI) are never deduped.
+        agents = [get_agent("gemini"), get_agent("gemini")]
+        lines = compose_dockerfile_install_lines(agents, "/home/paude")
+        gemini_installs = [
+            line for line in lines if "@google/gemini-cli" in line
+        ]
+        assert len(gemini_installs) == 2
+
+    def test_ends_with_canonical_user_workdir(self) -> None:
+        agents = [get_agent("claude")]
+        lines = compose_dockerfile_install_lines(agents, "/custom/home")
+        assert lines[-2:] == ["USER paude", "WORKDIR /custom/home"]
+
+    def test_no_trailing_duplicate_workdir(self) -> None:
+        # gemini ends with its own USER/WORKDIR; the composer should not leave
+        # two WORKDIR lines back-to-back at the end.
+        agents = [get_agent("gemini")]
+        lines = compose_dockerfile_install_lines(agents, "/home/paude")
+        workdir_lines = [i for i, line in enumerate(lines) if "WORKDIR" in line]
+        assert workdir_lines == [len(lines) - 1]
+
+
+class TestNodejsPrereqInstallLines:
+    """Tests for the shared Node.js prerequisite helper."""
+
+    def test_installs_node_as_root(self) -> None:
+        lines = nodejs_prereq_install_lines()
+        assert lines[0] == "USER root"
+        assert "nodejs" in lines[1]
+        assert "npm" in lines[1]
+
+    def test_identical_across_calls(self) -> None:
+        # Dedup relies on byte-identical output.
+        assert nodejs_prereq_install_lines() == nodejs_prereq_install_lines()
 
 
 class TestAgentConfig:
