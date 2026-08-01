@@ -262,31 +262,11 @@ class PodmanBackend:
     def _collect_forward_ports(
         self, name: str, agent: Agent
     ) -> list[tuple[str, int, int]]:
-        """Merge agent-declared ports and user opt-in forwards for a session.
+        """Merge agent-declared ports and user opt-in forwards for a session."""
+        from paude.backends.port_forward_utils import merge_forward_ports
 
-        Agent ``exposed_ports`` are bound on loopback; user ``--forward-port``
-        specs (persisted as a container label) may bind other interfaces.
-        Entries are de-duplicated by ``(host_ip, host_port)``, with the
-        user's forwards taking precedence on a conflict.
-        """
-        merged: list[tuple[str, int, int]] = []
-        seen: set[tuple[str, int]] = set()
-
-        for host_ip, host_port, container_port in get_session_forward_ports(
-            self._runner, name
-        ):
-            key = (host_ip, host_port)
-            if key not in seen:
-                seen.add(key)
-                merged.append((host_ip, host_port, container_port))
-
-        for host_port, container_port in agent.config.exposed_ports:
-            key = ("127.0.0.1", host_port)
-            if key not in seen:
-                seen.add(key)
-                merged.append(("127.0.0.1", host_port, container_port))
-
-        return merged
+        user_ports = get_session_forward_ports(self._runner, name)
+        return merge_forward_ports(user_ports, agent.config.exposed_ports)
 
     def stop_session(self, name: str) -> None:
         """Stop a session (preserves volume)."""

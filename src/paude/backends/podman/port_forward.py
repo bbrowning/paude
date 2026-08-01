@@ -73,8 +73,10 @@ class PodmanPortForwardManager:
         pid_file(session_name).write_text(str(proc.pid))
 
         for host_ip, host_port, _container_port in ports:
+            # "0.0.0.0" isn't a navigable URL host; show localhost instead.
+            display_host = "localhost" if host_ip == "0.0.0.0" else host_ip  # noqa: S104
             print(
-                f"Port-forward active: http://{host_ip}:{host_port}",
+                f"Port-forward active: http://{display_host}:{host_port}",
                 file=sys.stderr,
             )
 

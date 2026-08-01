@@ -50,6 +50,25 @@ class TestPodmanPortForwardManagerStart:
 
     @patch("paude.backends.podman.port_forward.subprocess.Popen")
     @patch("paude.backends.port_forward_utils.pid_dir")
+    def test_wildcard_bind_prints_localhost_not_0000(
+        self, mock_pid_dir, mock_popen, tmp_path, capsys
+    ) -> None:
+        """A 0.0.0.0 bind prints a navigable localhost URL, not the wildcard address."""
+        mock_pid_dir.return_value = tmp_path
+        mock_proc = MagicMock()
+        mock_proc.pid = 33333
+        mock_popen.return_value = mock_proc
+
+        engine = _make_engine()
+        mgr = PodmanPortForwardManager(engine)
+        mgr.start("my-session", "paude-my-session", [("0.0.0.0", 8080, 80)])
+
+        captured = capsys.readouterr()
+        assert "http://localhost:8080" in captured.err
+        assert "http://0.0.0.0:8080" not in captured.err
+
+    @patch("paude.backends.podman.port_forward.subprocess.Popen")
+    @patch("paude.backends.port_forward_utils.pid_dir")
     def test_starts_port_forward(self, mock_pid_dir, mock_popen, tmp_path) -> None:
         mock_pid_dir.return_value = tmp_path
         mock_proc = MagicMock()

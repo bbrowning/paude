@@ -86,13 +86,17 @@ Projects can declare defaults in their `paude.json` or `devcontainer.json` so th
 }
 ```
 
-Only `allowed-domains`, `agent`, `provider`, and `otel-endpoint` are supported as project-level create hints.
+Only `allowed-domains`, `agent`, `provider`, `otel-endpoint`, and `forward-ports` are supported as project-level create hints.
 
 ### Domain Merging
 
 Domains from user defaults and project config are **merged** (union). For example, if your user defaults specify `["default", "golang"]` and the project config specifies `["nodejs"]`, the resolved list is `["default", "golang", "nodejs"]`.
 
 However, if you pass `--allowed-domains` on the CLI, it **overrides** entirely — no merging with user/project config occurs. The one exception is provider-required domains, which are always forced onto the allowlist regardless of what you pass — see [Network Domains](#network-domains).
+
+### Forward-Port Resolution
+
+Unlike domains, `forward-ports` don't merge across layers: the highest-precedence layer that sets any ports (CLI > project > user defaults) wins outright, replacing lower layers entirely.
 
 ### Inspecting Resolved Configuration
 
@@ -120,6 +124,7 @@ paude create --dry-run
 | `gpu` | yes | — | `--gpu` / `--no-gpu` | (none) |
 | `provider` | yes | yes | `--provider` | (none) |
 | `otel-endpoint` | yes | yes | `--otel-endpoint` | (none) |
+| `forward-ports` | yes | yes | `--forward-port` | (none) |
 
 > **Backend values**: `podman` (default) or `docker`.
 

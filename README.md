@@ -211,6 +211,8 @@ paude create --forward-port 8372 --forward-port 5173 my-project
 
 Forwarding starts when you `paude start`/`paude connect` and stops when you disconnect. It works on both the Podman and Docker backends.
 
+**macOS (podman machine):** Podman runs containers in a VM on macOS, but the forwarder's listener runs on your Mac host directly — it never binds inside the VM. Reaching the container uses the same `podman exec` path `paude connect` already relies on, so `--forward-port` behaves the same as on Linux; no extra `podman machine` port-publishing is needed.
+
 **Loopback binding:** the forwarder reaches the service over `127.0.0.1` *inside* the container, so the in-container service must listen on `127.0.0.1` (or `0.0.0.0`) rather than a container-external interface. Every connection appears to the service as coming from `127.0.0.1`, which satisfies services that only accept loopback traffic.
 
 You can also set `forward-ports` in a project's `paude.json` `create` section or in `~/.config/paude/defaults.json`:

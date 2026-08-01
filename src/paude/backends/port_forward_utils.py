@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import signal
 from functools import lru_cache
@@ -30,6 +31,16 @@ def _parse_port(value: str, spec: str) -> int:
             f"invalid port spec '{spec}': port {port} is out of range 1-65535"
         )
     return port
+
+
+def _validate_host_ip(host_ip: str, spec: str) -> None:
+    """Validate that host_ip is a literal IP address, not a hostname."""
+    try:
+        ipaddress.ip_address(host_ip)
+    except ValueError:
+        raise ValueError(
+            f"invalid port spec '{spec}': '{host_ip}' is not a valid IP address"
+        ) from None
 
 
 def parse_forward_port_spec(spec: str) -> ForwardPort:
@@ -66,6 +77,7 @@ def parse_forward_port_spec(spec: str) -> ForwardPort:
         host_ip = host_ip.strip()
         if not host_ip:
             raise ValueError(f"invalid port spec '{spec}': empty host IP")
+        _validate_host_ip(host_ip, spec)
     else:
         raise ValueError(
             f"invalid port spec '{spec}': expected PORT, HOST:CONTAINER, "
@@ -105,6 +117,33 @@ def parse_forward_port_specs(specs: list[str]) -> list[ForwardPort]:
         seen[key] = container_port
         result.append((host_ip, host_port, container_port))
     return result
+
+
+def merge_forward_ports(
+    user_ports: list[ForwardPort],
+    agent_ports: list[tuple[int, int]],
+) -> list[ForwardPort]:
+    """Merge user opt-in forwards with agent-declared exposed ports.
+
+    Agent ports are assumed to bind loopback. User forwards win on a
+    ``(host_ip, host_port)`` conflict; agent ports fill in anything left over.
+    """
+    merged: list[ForwardPort] = []
+    seen: set[tuple[str, int]] = set()
+
+    for host_ip, host_port, container_port in user_ports:
+        key = (host_ip, host_port)
+        if key not in seen:
+            seen.add(key)
+            merged.append((host_ip, host_port, container_port))
+
+    for host_port, container_port in agent_ports:
+        key = (DEFAULT_BIND_IP, host_port)
+        if key not in seen:
+            seen.add(key)
+            merged.append((DEFAULT_BIND_IP, host_port, container_port))
+
+    return merged
 
 
 def encode_forward_ports(ports: list[ForwardPort]) -> str:
