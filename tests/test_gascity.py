@@ -314,3 +314,60 @@ class TestGascityComposedInstall:
             get_agents(["gascity"]).agents, "/home/paude"
         )
         assert lines[-2:] == ["USER paude", "WORKDIR /home/paude"]
+
+
+class TestGascityBuildPathInstall:
+    """The real image build path for --agent gascity must install every toolchain.
+
+    The composed install set (TestGascityComposedInstall) is only the correct
+    image if the production Dockerfile generators actually route through
+    get_agents() + compose_dockerfile_install_lines(). These tests pin the
+    generators themselves — the artifact the product really builds — so a
+    refactor that leaves the composer without production callers is caught:
+    they fail if a bundled toolchain is dropped from the built gascity image.
+    """
+
+    def test_claude_layer_dockerfile_installs_bundled_toolchains(self) -> None:
+        # generate_claude_layer_dockerfile is the path --agent gascity uses via
+        # ImageManager._ensure_runtime_image.
+        from paude.agents import get_agent
+        from paude.config.claude_layer import generate_claude_layer_dockerfile
+
+        dockerfile = generate_claude_layer_dockerfile(agent=get_agent("gascity"))
+        assert "claude.ai/install.sh" in dockerfile  # Claude Code
+        assert "@google/gemini-cli" in dockerfile  # Gemini CLI
+        assert "gastownhall/gascity" in dockerfile  # Gas City core
+
+    def test_workspace_dockerfile_installs_bundled_toolchains(self) -> None:
+        from paude.agents import get_agent
+        from paude.config.dockerfile import generate_workspace_dockerfile
+        from paude.config.models import PaudeConfig
+
+        dockerfile = generate_workspace_dockerfile(
+            PaudeConfig(), agent=get_agent("gascity")
+        )
+        assert "claude.ai/install.sh" in dockerfile
+        assert "@google/gemini-cli" in dockerfile
+        assert "gastownhall/gascity" in dockerfile
+
+    def test_pip_install_dockerfile_installs_bundled_toolchains(self) -> None:
+        from paude.agents import get_agent
+        from paude.config.dockerfile import generate_pip_install_dockerfile
+        from paude.config.models import PaudeConfig
+
+        dockerfile = generate_pip_install_dockerfile(
+            PaudeConfig(), include_claude_install=True, agent=get_agent("gascity")
+        )
+        assert "claude.ai/install.sh" in dockerfile
+        assert "@google/gemini-cli" in dockerfile
+        assert "gastownhall/gascity" in dockerfile
+
+    def test_claude_only_image_excludes_gemini(self) -> None:
+        # Guard the negative: a single-agent image must not pull in bundled CLIs
+        # it never requested, so the composer expansion stays scoped.
+        from paude.agents import get_agent
+        from paude.config.claude_layer import generate_claude_layer_dockerfile
+
+        dockerfile = generate_claude_layer_dockerfile(agent=get_agent("claude"))
+        assert "claude.ai/install.sh" in dockerfile
+        assert "@google/gemini-cli" not in dockerfile

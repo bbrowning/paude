@@ -23,9 +23,11 @@ class GascityAgent:
 
     Gas City bundles the Claude Code and Gemini CLI toolchains (see
     ``bundled_agents``); those installs are contributed by ClaudeAgent and
-    GeminiAgent and composed into the image via get_agents() +
-    compose_dockerfile_install_lines(). This agent's own Dockerfile lines cover
-    only the Gas City core: gc, dolt, bd, and the Node.js prerequisite.
+    GeminiAgent. The image build path (the Dockerfile generators in
+    ``paude.config``) calls ``composed_dockerfile_install_lines()``, which
+    stitches every bundled toolchain into the image, so this agent's own
+    Dockerfile lines cover only the Gas City core: gc, dolt, bd, and the Node.js
+    prerequisite.
     """
 
     def __init__(self, provider: str | None = None) -> None:

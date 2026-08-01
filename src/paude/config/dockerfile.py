@@ -69,11 +69,16 @@ def generate_pip_install_dockerfile(
 
             agent = get_agent("claude")
 
-        lines.extend(agent.dockerfile_install_lines(CONTAINER_HOME))
+        from paude.agents import composed_dockerfile_install_lines
 
-    lines.append("")
-    lines.append("USER paude")
-    lines.append(f"WORKDIR {CONTAINER_HOME}")
+        # Install the agent plus any bundled toolchains, so composite agents
+        # like gascity ship every bundled CLI. The composer emits the trailing
+        # USER paude / WORKDIR footer.
+        lines.extend(composed_dockerfile_install_lines(agent, CONTAINER_HOME))
+    else:
+        lines.append("")
+        lines.append("USER paude")
+        lines.append(f"WORKDIR {CONTAINER_HOME}")
 
     return "\n".join(lines)
 
@@ -208,7 +213,11 @@ RUN if ! command -v tini >/dev/null 2>&1; then \\
         " /usr/local/bin/patch-openclaw-otel-logs.sh"
     )
 
-    lines.extend(agent.dockerfile_install_lines(CONTAINER_HOME))
+    from paude.agents import composed_dockerfile_install_lines
+
+    # Install the agent plus any bundled toolchains, so composite agents like
+    # gascity ship every bundled CLI.
+    lines.extend(composed_dockerfile_install_lines(agent, CONTAINER_HOME))
 
     lines.append("")
     lines.append("# Copy entrypoints and tmux config (requires root)")
