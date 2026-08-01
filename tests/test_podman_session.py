@@ -1929,6 +1929,8 @@ class TestForwardPortsPersistence:
 
         assert labels[PAUDE_LABEL_AGENT_PROVIDERS]
         assert labels[PAUDE_LABEL_PROVIDERS]
+        assert '"' not in labels[PAUDE_LABEL_AGENT_PROVIDERS]
+        assert '"' not in labels[PAUDE_LABEL_PROVIDERS]
         assert composition.names == ["gascity", "claude", "codex"]
         assert [item.config.provider for item in composition.agents] == [
             "vertex",
@@ -1954,6 +1956,29 @@ class TestForwardPortsPersistence:
         runner = MagicMock()
         runner.list_containers.return_value = [{"Labels": labels}]
 
+        assert get_session_credential_providers(runner, "s") == [
+            "anthropic",
+            "openai",
+        ]
+
+    def test_legacy_json_composition_labels_still_parse(self) -> None:
+        config = SessionConfig(
+            name="s",
+            workspace=Path("/tmp/ws"),
+            image="img",
+            agent="claude",
+        )
+        labels = SessionSetup.build_session_labels(config, "s", "2026-01-01")
+        labels[PAUDE_LABEL_AGENT_PROVIDERS] = (
+            '[["claude","anthropic"],["codex","openai"]]'
+        )
+        labels[PAUDE_LABEL_PROVIDERS] = '["anthropic","openai"]'
+        runner = MagicMock()
+        runner.list_containers.return_value = [{"Labels": labels}]
+
+        composition = get_session_composition(runner, "s")
+
+        assert composition.names == ["claude", "codex"]
         assert get_session_credential_providers(runner, "s") == [
             "anthropic",
             "openai",

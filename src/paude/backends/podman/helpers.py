@@ -5,6 +5,8 @@ Free functions and naming helpers extracted from PodmanBackend.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import secrets
 from pathlib import Path
@@ -286,12 +288,12 @@ def get_session_composition(
 
 def encode_agent_providers(specs: list[tuple[str, str]]) -> str:
     """Encode ordered agent/provider pairs for a container label."""
-    return json.dumps(specs, separators=(",", ":"))
+    return _encode_json_label(specs)
 
 
 def encode_providers(providers: list[str]) -> str:
     """Encode a credential-provider set for a container label."""
-    return json.dumps(providers, separators=(",", ":"))
+    return _encode_json_label(providers)
 
 
 def get_session_credential_providers(
@@ -315,10 +317,7 @@ def _parse_providers(raw: str | None) -> list[str]:
     """Parse a credential-provider label, returning empty when invalid."""
     if not raw:
         return []
-    try:
-        value = json.loads(raw)
-    except (TypeError, ValueError):
-        return []
+    value = _decode_json_label(raw)
     if not isinstance(value, list):
         return []
     return list(dict.fromkeys(item for item in value if isinstance(item, str)))
@@ -328,10 +327,7 @@ def _parse_agent_providers(raw: str | None) -> list[tuple[str, str]]:
     """Parse a composition label, returning an empty list when invalid."""
     if not raw:
         return []
-    try:
-        value = json.loads(raw)
-    except (TypeError, ValueError):
-        return []
+    value = _decode_json_label(raw)
     if not isinstance(value, list):
         return []
     specs: list[tuple[str, str]] = []
@@ -344,6 +340,24 @@ def _parse_agent_providers(raw: str | None) -> list[tuple[str, str]]:
         ):
             specs.append((item[0], item[1]))
     return specs
+
+
+def _encode_json_label(value: Any) -> str:
+    """Encode JSON as URL-safe base64 for use as a Podman label value."""
+    payload = json.dumps(value, separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(payload).decode()
+
+
+def _decode_json_label(raw: str) -> Any | None:
+    """Decode a structured label, accepting the original raw-JSON format."""
+    try:
+        decoded = base64.urlsafe_b64decode(raw.encode("ascii"))
+        return json.loads(decoded)
+    except (binascii.Error, UnicodeError, json.JSONDecodeError, ValueError):
+        try:
+            return json.loads(raw)
+        except (TypeError, ValueError):
+            return None
 
 
 def get_session_forward_ports(
