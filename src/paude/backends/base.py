@@ -44,6 +44,8 @@ class Session:
     volume_name: str | None = None
     agent: str = "claude"
     provider: str | None = None
+    agent_providers: list[tuple[str, str]] = field(default_factory=list)
+    credential_providers: list[str] = field(default_factory=list)
     version: str | None = None
 
 
@@ -81,6 +83,8 @@ class SessionConfig:
     wait_for_ready: bool = True
     agent: str = "claude"
     provider: str | None = None
+    agent_providers: list[tuple[str, str]] = field(default_factory=list)
+    credential_providers: list[str] = field(default_factory=list)
     gpu: str | None = None
     reuse_volume: bool = False
     ports: list[tuple[int, int]] = field(default_factory=list)

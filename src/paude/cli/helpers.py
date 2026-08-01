@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 
@@ -15,6 +17,9 @@ from paude.session_discovery import (
     collect_all_sessions,
     find_workspace_session,
 )
+
+if TYPE_CHECKING:
+    from paude.agents.base import AgentComposition
 
 
 def find_session_backend(
@@ -193,12 +198,33 @@ def _split_list_option(values: list[str] | None) -> list[str] | None:
     if values is None:
         return None
     items = [
-        entry.strip()
-        for value in values
-        for entry in value.split(",")
-        if entry.strip()
+        entry.strip() for value in values for entry in value.split(",") if entry.strip()
     ]
     return items or None
+
+
+def _parse_agent_provider_options(
+    values: list[str] | None,
+) -> dict[str, str] | None:
+    """Parse repeatable/comma-separated ``AGENT=PROVIDER`` mappings."""
+    items = _split_list_option(values)
+    if items is None:
+        return None
+    mappings: dict[str, str] = {}
+    for item in items:
+        if item.count("=") != 1:
+            raise ValueError(
+                f"Invalid agent-provider mapping '{item}'; expected AGENT=PROVIDER."
+            )
+        agent, provider = (part.strip() for part in item.split("=", 1))
+        if not agent or not provider:
+            raise ValueError(
+                f"Invalid agent-provider mapping '{item}'; expected AGENT=PROVIDER."
+            )
+        if agent in mappings:
+            raise ValueError(f"Duplicate provider mapping for agent '{agent}'.")
+        mappings[agent] = provider
+    return mappings
 
 
 def _get_provider_aliases(
@@ -258,6 +284,8 @@ def _prepare_session_create(
     agent_name: str = "claude",
     provider_name: str | None = None,
     otel_endpoint: str | None = None,
+    composition: AgentComposition | None = None,
+    credential_providers: list[str] | None = None,
 ) -> tuple[list[str], list[str], dict[str, str], bool]:
     """Shared pre-create logic for both backends.
 
@@ -269,16 +297,57 @@ def _prepare_session_create(
 
     parsed_args = _parse_agent_args(claude_args)
 
-    agent_instance = get_agent(agent_name, provider=provider_name)
-    env = agent_instance.build_environment()
+    if composition is None:
+        agent_instance = get_agent(agent_name, provider=provider_name)
+        agents = [agent_instance]
+    else:
+        agent_instance = composition.primary
+        agents = composition.agents
+
+    # Shared environments are merged with the primary agent taking
+    # precedence when two toolchains define the same variable.
+    env: dict[str, str] = {}
+    for agent in reversed(agents):
+        env.update(agent.build_environment())
+
+    from paude.providers import get_provider
+
+    for provider_name in credential_providers or []:
+        provider_config = get_provider(provider_name)
+        for var in provider_config.passthrough_env_vars:
+            if var in os.environ:
+                env.setdefault(var, os.environ[var])
+        for prefix in provider_config.passthrough_env_prefixes:
+            for key, value in os.environ.items():
+                if key.startswith(prefix):
+                    env.setdefault(key, value)
     if config_obj and config_obj.container_env:
         env.update(config_obj.container_env)
 
+    extra_aliases: list[str] = []
+    required_aliases: list[str] = []
+    provider_aliases: list[str] = []
+    for agent in agents:
+        for alias in agent.config.extra_domain_aliases:
+            if alias not in extra_aliases:
+                extra_aliases.append(alias)
+        for alias in agent.config.required_domain_aliases:
+            if alias not in required_aliases:
+                required_aliases.append(alias)
+        aliases = _get_provider_aliases(agent.config.provider, agent.config.name)
+        for alias in aliases or []:
+            if alias not in provider_aliases:
+                provider_aliases.append(alias)
+    for provider_name in credential_providers or []:
+        for alias in get_provider(provider_name).domain_aliases:
+            if alias not in provider_aliases:
+                provider_aliases.append(alias)
+
     expanded_domains = _expand_allowed_domains(
         allowed_domains,
-        extra_aliases=agent_instance.config.extra_domain_aliases,
-        provider_aliases=_get_provider_aliases(provider_name, agent_name),
-        required_aliases=agent_instance.config.required_domain_aliases,
+        extra_aliases=extra_aliases,
+        provider_aliases=provider_aliases,
+        required_aliases=required_aliases,
     )
 
     # Inject OTEL env vars and auto-add endpoint hostname to allowed domains

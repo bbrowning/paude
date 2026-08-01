@@ -62,6 +62,30 @@ class TestLoadUserDefaults:
         captured = capsys.readouterr()
         assert "not an object" in captured.err
 
+    def test_loads_agent_provider_mapping(self, tmp_path: Path):
+        config = tmp_path / "defaults.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "defaults": {
+                        "agents": ["claude", "codex"],
+                        "providers": ["anthropic", "openai"],
+                        "agent-providers": {
+                            "claude": "anthropic",
+                            "codex": "openai",
+                        },
+                    }
+                }
+            )
+        )
+
+        result = load_user_defaults(config)
+
+        assert result.agent_providers == {
+            "claude": "anthropic",
+            "codex": "openai",
+        }
+
 
 class TestResolveCreateOptions:
     """Tests for resolve_create_options."""
@@ -248,15 +272,18 @@ class TestResolveAgentsAndProviders:
         with pytest.raises(ValueError, match="not both"):
             self._resolve(cli_agent="claude", cli_agents=["codex"])
 
-    def test_provider_and_providers_conflict(self):
-        """Passing both --provider and --providers raises a clear error."""
-        with pytest.raises(ValueError, match="not both"):
-            self._resolve(cli_provider="vertex", cli_providers=["chatgpt"])
+    def test_provider_and_providers_are_independent(self):
+        """Singular provider maps primary while plural enables credentials."""
+        result = self._resolve(
+            cli_provider="vertex", cli_providers=["vertex", "openai"]
+        )
+        assert result.agent_providers == [("claude", "vertex")]
+        assert result.providers == ["vertex", "openai"]
 
-    def test_agents_deduplicated_preserving_order(self):
-        """Duplicate agent names are removed, keeping first-seen order."""
-        result = self._resolve(cli_agents=["claude", "claude", "codex"])
-        assert result.agents == ["claude", "codex"]
+    def test_duplicate_agents_rejected(self):
+        """Duplicate installed agents are rejected instead of shifted."""
+        with pytest.raises(ValueError, match="Duplicate agent"):
+            self._resolve(cli_agents=["claude", "claude", "codex"])
 
     def test_unknown_agent_rejected(self):
         """An unknown agent name raises ValueError."""
@@ -266,13 +293,14 @@ class TestResolveAgentsAndProviders:
     def test_invalid_primary_provider_rejected(self):
         """An unsupported primary agent/provider combination raises."""
         with pytest.raises(ValueError, match="does not support provider"):
-            self._resolve(cli_agents=["codex"], cli_providers=["vertex"])
+            self._resolve(cli_agents=["codex"], cli_provider="vertex")
 
     def test_per_agent_providers_derived(self):
-        """Each agent maps to its provider; primary honors --providers[0]."""
+        """Named mappings configure agents independently of credentials."""
         result = self._resolve(
             cli_agents=["gascity", "claude", "codex"],
             cli_providers=["vertex", "chatgpt"],
+            cli_agent_providers={"codex": "chatgpt"},
         )
         assert result.agent_providers == [
             ("gascity", "vertex"),
@@ -283,28 +311,25 @@ class TestResolveAgentsAndProviders:
         assert result.providers == ["vertex", "chatgpt"]
         assert result.providers_provenance == [(["vertex", "chatgpt"], "cli")]
 
-    def test_provider_auto_added_from_default(self):
-        """A non-primary agent's default provider is auto-added to the list."""
+    def test_provider_credentials_are_deduplicated(self):
+        """Credential providers are an unordered deduplicated set."""
         result = self._resolve(
             cli_agents=["claude", "codex"],
-            cli_providers=["vertex"],
+            cli_providers=["vertex", "vertex", "chatgpt"],
         )
-        # codex defaults to chatgpt, which was not in the explicit pool.
-        assert result.agent_providers == [
-            ("claude", "vertex"),
-            ("codex", "chatgpt"),
-        ]
         assert result.providers == ["vertex", "chatgpt"]
-        sources = {source for _, source in result.providers_provenance}
-        assert sources == {"cli", "built-in"}
+
+    def test_explicit_credentials_must_cover_defaults(self):
+        """An exact credential set must cover default mappings too."""
+        with pytest.raises(ValueError, match="missing: chatgpt"):
+            self._resolve(cli_agents=["claude", "codex"], cli_providers=["vertex"])
 
     def test_providers_default_from_agent_defaults(self):
         """With no --providers, each agent's default provider is derived."""
         result = self._resolve(cli_agents=["claude"])
         assert result.providers == ["vertex"]
         assert result.agent_providers == [("claude", "vertex")]
-        # The scalar provider stays unset for back-compat when not given.
-        assert result.provider.value is None
+        assert result.provider.value == "vertex"
 
     def test_agents_from_user_defaults(self):
         """Agents resolve from user defaults when no CLI value is given."""
@@ -346,31 +371,56 @@ class TestResolveAgentsAndProviders:
         with pytest.raises(ValueError, match="Agent name cannot be empty"):
             self._resolve(user_defaults=user)
 
-    def test_unused_explicit_provider_excluded(self):
-        """A --providers entry never assigned to any agent is not listed."""
+    def test_extra_credential_providers_are_retained(self):
+        """Credential providers need not be used by an agent mapping."""
         result = self._resolve(
             cli_agents=["claude", "codex"],
-            cli_providers=["anthropic", "openai"],
+            cli_providers=["vertex", "chatgpt", "openai"],
         )
-        # codex isn't the primary, so it falls back to its own default
-        # (chatgpt) rather than the explicit "openai" — which should not
-        # appear anywhere in the resolved providers.
         assert result.agent_providers == [
-            ("claude", "anthropic"),
+            ("claude", "vertex"),
             ("codex", "chatgpt"),
         ]
-        assert result.providers == ["anthropic", "chatgpt"]
-        assert "openai" not in result.providers
-        all_listed = {p for values, _ in result.providers_provenance for p in values}
-        assert "openai" not in all_listed
+        assert result.providers == ["vertex", "chatgpt", "openai"]
 
-    def test_unused_explicit_provider_recorded_as_dropped(self):
-        """A --providers entry never assigned to any agent is recorded as dropped."""
-        result = self._resolve(
-            cli_agents=["claude", "codex"],
-            cli_providers=["anthropic", "openai"],
+    def test_invalid_secondary_provider_rejected(self):
+        """An unsupported named mapping fails for a secondary agent."""
+        with pytest.raises(ValueError, match="does not support provider"):
+            self._resolve(
+                cli_agents=["claude", "codex"],
+                cli_agent_providers={"codex": "anthropic"},
+            )
+
+    def test_mapping_for_uninstalled_agent_rejected(self):
+        with pytest.raises(ValueError, match="not installed"):
+            self._resolve(
+                cli_agents=["claude"], cli_agent_providers={"codex": "openai"}
+            )
+
+    def test_mapping_highest_layer_replaces_lower_mapping(self):
+        user = UserDefaults(
+            agents=["claude", "codex"],
+            agent_providers={"claude": "anthropic", "codex": "openai"},
         )
-        assert result.dropped_providers == ["openai"]
+        project = PaudeConfig(
+            create_agents=["claude", "codex"],
+            create_agent_providers={"codex": "chatgpt"},
+        )
+
+        result = self._resolve(user_defaults=user, project_config=project)
+
+        assert result.agent_providers == [
+            ("claude", "vertex"),
+            ("codex", "chatgpt"),
+        ]
+
+    def test_singular_and_mapping_conflict_in_project(self):
+        project = PaudeConfig(
+            create_provider="vertex",
+            create_agent_providers={"claude": "anthropic"},
+        )
+        with pytest.raises(ValueError, match="not both"):
+            self._resolve(project_config=project)
 
     def test_empty_provider_rejected_cleanly(self):
         """An explicit empty-string --provider raises ValueError, not a silent default."""

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from paude.agents import get_agents
 from paude.agents.claude import ClaudeAgent
 from paude.backends.base import SessionConfig
 from paude.backends.naming import (
@@ -16,6 +17,7 @@ from paude.backends.naming import (
 )
 from paude.backends.proxy_config import (
     PROXY_GCP_ADC_ENV,
+    PROXY_MANAGED_CREDENTIAL,
     gather_proxy_credentials,
 )
 from paude.backends.session_env import build_session_env
@@ -49,6 +51,50 @@ class TestBuildSessionEnv:
         env, _args = build_session_env(config, agent, proxy_name="proxy-test")
 
         assert env["PAUDE_SUPPRESS_PROMPTS"] == "1"
+
+    def test_composition_exports_all_runtime_metadata(self) -> None:
+        composition = get_agents(
+            ["gascity", "claude", "codex"],
+            providers={"gascity": "vertex", "claude": "vertex", "codex": "chatgpt"},
+            include_bundled=False,
+        )
+        config = SessionConfig(
+            name="test",
+            workspace=Path("/home/user/project"),
+            image="test-image",
+            agent="gascity",
+            agent_providers=[
+                ("gascity", "vertex"),
+                ("claude", "vertex"),
+                ("codex", "chatgpt"),
+            ],
+            env={"CLAUDE_CODE_USE_VERTEX": "1", "CODEX_HOME": "/home/paude/.codex"},
+        )
+
+        env, _args = build_session_env(config, composition, proxy_name="proxy-test")
+
+        assert env["PAUDE_AGENT_CONFIG_DIRS"] == ".gascity .claude .codex"
+        assert env["PAUDE_AGENT_CONFIG_FILES"] == ".claude.json"
+        assert env["PAUDE_AGENT_PROVIDERS"] == (
+            "gascity=vertex,claude=vertex,codex=chatgpt"
+        )
+        assert env["PAUDE_CODEX_CHATGPT_MODE"] == "1"
+        assert env["CLAUDE_CODE_USE_VERTEX"] == "1"
+        assert env["CODEX_HOME"] == "/home/paude/.codex"
+
+    def test_extra_credential_provider_adds_proxy_placeholder(self) -> None:
+        composition = get_agents(["claude"], include_bundled=False)
+        config = SessionConfig(
+            name="test",
+            workspace=Path("/tmp/workspace"),
+            image="image",
+            credential_providers=["vertex", "openai"],
+        )
+
+        env, _args = build_session_env(config, composition, proxy_name="proxy")
+
+        assert env["PAUDE_PROVIDERS"] == "vertex,openai"
+        assert env["OPENAI_API_KEY"] == PROXY_MANAGED_CREDENTIAL
 
 
 class TestBuildSessionEnvProxyCredentials:
@@ -159,6 +205,17 @@ class TestGatherProxyCredentials:
 
         assert creds.chatgpt_oauth_mode is True
 
+    def test_chatgpt_mode_flag_set_for_composed_codex(self) -> None:
+        composition = get_agents(
+            ["gascity", "claude", "codex"],
+            providers={"gascity": "vertex", "claude": "vertex", "codex": "chatgpt"},
+            include_bundled=False,
+        )
+
+        creds = gather_proxy_credentials(composition)
+
+        assert creds.chatgpt_oauth_mode is True
+
     def test_chatgpt_mode_flag_false_for_codex_openai_provider(self) -> None:
         """chatgpt_oauth_mode is False for a codex agent using the openai provider."""
         from paude.agents.codex import CodexAgent
@@ -180,6 +237,29 @@ class TestGatherProxyCredentials:
         creds = gather_proxy_credentials(ClaudeAgent().config)
 
         assert creds.chatgpt_oauth_mode is False
+
+    def test_extra_credential_provider_collects_its_secret(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "extra-provider-key")
+        composition = get_agents(["claude"], include_bundled=False)
+
+        creds = gather_proxy_credentials(
+            composition, credential_providers=["vertex", "openai"]
+        )
+
+        assert creds["OPENAI_API_KEY"] == "extra-provider-key"
+
+    def test_chatgpt_mode_follows_credential_set(self) -> None:
+        composition = get_agents(
+            ["codex"], providers={"codex": "openai"}, include_bundled=False
+        )
+
+        creds = gather_proxy_credentials(
+            composition, credential_providers=["openai", "chatgpt"]
+        )
+
+        assert creds.chatgpt_oauth_mode is True
 
 
 class TestNamingHelpers:

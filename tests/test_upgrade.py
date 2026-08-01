@@ -121,6 +121,40 @@ class TestUpgradeCommand:
         assert result.exit_code == 0
         mock_backend.stop_session.assert_called_once_with("test-session")
 
+    @patch("paude.cli.upgrade._upgrade_podman")
+    @patch("paude.cli.upgrade.find_session_backend")
+    def test_upgrade_passes_credential_and_mapping_overrides(
+        self, mock_find: MagicMock, mock_upgrade_podman: MagicMock
+    ) -> None:
+        mock_backend = MagicMock()
+        mock_backend.get_session.return_value = _make_session(
+            "test-session", version="0.1.0"
+        )
+        from paude.backends.podman.backend import PodmanBackend
+
+        mock_backend.__class__ = PodmanBackend
+        mock_find.return_value = ("podman", mock_backend)
+
+        result = runner.invoke(
+            app,
+            [
+                "upgrade",
+                "test-session",
+                "--providers",
+                "anthropic,openai",
+                "--agent-provider",
+                "claude=anthropic,codex=openai",
+            ],
+        )
+
+        assert result.exit_code == 0
+        overrides = mock_upgrade_podman.call_args.args[3]
+        assert overrides.providers == ["anthropic", "openai"]
+        assert overrides.agent_providers == {
+            "claude": "anthropic",
+            "codex": "openai",
+        }
+
 
 class TestUpgradePodman:
     """Tests for _upgrade_podman internal function."""

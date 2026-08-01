@@ -55,26 +55,6 @@ The same "parse a `user@host[:port]` string with `parse_ssh_host()`, then constr
 
 The third occurrence was added while fixing SEC-003 rather than reusing `_build_transport()`, because `_build_transport()` lives in `src/paude/cli/` and importing it from `src/paude/git_remote/` (a lower-level package) would invert the existing dependency direction. Consolidating all three requires first giving this logic a home that both `cli/` and `git_remote/`/`backends/` can depend on without a layering inversion (e.g. a small helper in `src/paude/transport/ssh.py` itself, alongside `parse_ssh_host()`). Until then, any change to `SshTransport`'s constructor or `parse_ssh_host()`'s contract needs to be checked against all three call sites.
 
-### REFACTOR-006: `get_agents()` multi-agent composition has no production caller
-
-**Status**: Open
-**Priority**: Low (scaffolding, not a bug — nothing currently calls it)
-**Discovered**: 2026-08-01 while rebasing/cleaning up the `bundled_agents` composite-agent PR
-
-`get_agents(names, providers)` and `AgentComposition` in `src/paude/agents/__init__.py` expand a list of explicitly requested agent names (plus each one's `bundled_agents`) into a deduplicated, ordered install set with a primary agent — but nothing in production calls it yet. The already-wired composition path (`get_agent_composition()` / `dockerfile_install_lines_for_agent()`) only expands a *single* primary agent's own bundled agents (e.g. gascity → claude+gemini); it doesn't handle a user explicitly requesting multiple independent agents.
-
-The intended end state (per product decision 2026-08-01): `--agents gascity,codex` should install every requested + bundled agent into the image, while only the primary (first) agent drives session launch, network access, and credentials. `src/paude/config/resolver.py`'s `ResolvedCreateOptions` already resolves `agents`/`agent_providers` lists from `--agents`/`--providers` (added in #223/#225), but `src/paude/cli/create.py` explicitly warns and drops everything but the primary on a real (non-dry-run) create.
-
-Wiring this up for real is bigger than swapping in a `get_agents()` call in `cli/create.py`. Every one of these currently re-resolves a *single* agent name/provider and would need to become multi-agent-aware:
-
-- `src/paude/container/image.py` (`ImageManager`) — Dockerfile generation and image cache-key hashing. `ensure_custom_image()`'s cache key currently derives `agent_name` from the primary agent only; installing extra agents without extending that key would serve a stale cached image missing the extra agents.
-- `src/paude/config/claude_layer.py`, `src/paude/config/dockerfile.py`, `src/paude/container/build_context.py` — Dockerfile generators take a single `Agent`, not an install list.
-- `src/paude/backends/base.py` (`SessionConfig.agent`), `src/paude/backends/session_env.py`, `src/paude/backends/proxy_config.py`, `src/paude/backends/podman/session_setup.py`, `src/paude/backends/podman/backend.py` — all re-resolve `get_agent(config.agent, provider=config.provider)` from one stored name/provider to derive secret env vars, exposed ports, sandbox config, and proxy credential injection.
-- `src/paude/mounts.py` (`build_mounts`) — only mounts host config for one agent.
-- `src/paude/cli/helpers.py` (`_prepare_session_create`) — builds env vars and allowed-domains from one agent's `extra_domain_aliases`/`secret_env_vars`.
-
-Until this is done, `get_agents()` remains dead code from the product's perspective (fully unit-tested, but unreachable from any CLI path).
-
 ## Agent Limitations
 
 Issues caused by upstream agent behavior, not paude bugs.
@@ -186,9 +166,8 @@ Note: README's agent table/examples were not re-audited as part of the 2026-07-3
 
 ### DOCS-006: Gas City agent adds a bogus `"gascity"` domain alias with no matching alias definition
 
-**Status**: Open (needs verification)
+**Status**: Resolved (2026-08-01)
 **Severity**: Low
 **Discovered**: 2026-07-31 during docs/ audit (`docs/CONFIGURATION.md`)
 
-`src/paude/agents/gascity.py:55-60` lists `"gascity"` in `extra_domain_aliases`, but there is no `"gascity"` key in `DOMAIN_ALIASES` (`src/paude/domains.py`). `expand_domains` (`src/paude/domains.py:167-171`) therefore treats it as a literal domain string, so the session allowlist ends up containing a meaningless entry `gascity` rather than an expanded set of real domains. Verify whether Gas City needs a real domain-alias definition (add a `"gascity"` entry to `DOMAIN_ALIASES`) or whether the literal was unintended and should be removed from `extra_domain_aliases`. `docs/CONFIGURATION.md` correctly omits it, so no doc change is warranted until the code intent is confirmed.
-
+Gas City no longer contributes a standalone alias. Its resolved child-agent composition contributes the Claude/Gemini domains when those children are installed.

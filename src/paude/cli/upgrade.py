@@ -25,6 +25,8 @@ class UpgradeOverrides:
     gpu: str | None = None  # "" means explicitly disabled
     yolo: bool | None = None
     provider: str | None = None
+    providers: list[str] | None = None
+    agent_providers: dict[str, str] | None = None
 
     def has_changes(self) -> bool:
         """Return True if any override was specified."""
@@ -34,6 +36,8 @@ class UpgradeOverrides:
             or self.gpu is not None
             or self.yolo is not None
             or self.provider is not None
+            or self.providers is not None
+            or self.agent_providers is not None
         )
 
 
@@ -98,6 +102,20 @@ def session_upgrade(
             help="Change inference provider (e.g., vertex, openai).",
         ),
     ] = None,
+    providers: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--providers",
+            help="Replace credential providers (comma-separated/repeatable).",
+        ),
+    ] = None,
+    agent_provider: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--agent-provider",
+            help="Replace mappings using AGENT=PROVIDER entries.",
+        ),
+    ] = None,
 ) -> None:
     """Upgrade a session to the current paude version.
 
@@ -121,13 +139,28 @@ def session_upgrade(
     elif no_yolo:
         cli_yolo = False
 
-    # Build overrides dict (only non-None values)
+    from paude.cli.helpers import (
+        _parse_agent_provider_options,
+        _split_list_option,
+    )
+
+    try:
+        cli_agent_providers = _parse_agent_provider_options(agent_provider)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+    if provider is not None and cli_agent_providers is not None:
+        typer.echo("Error: Specify --provider or --agent-provider, not both.", err=True)
+        raise typer.Exit(1)
+
     overrides = UpgradeOverrides(
         otel_endpoint=otel_endpoint,
         allowed_domains=allowed_domains,
         gpu=cli_gpu,
         yolo=cli_yolo,
         provider=provider,
+        providers=_split_list_option(providers),
+        agent_providers=cli_agent_providers,
     )
 
     # Find session backend
@@ -195,6 +228,11 @@ def session_upgrade(
     registry = SessionRegistry()
     entries = registry.load()
     if name in entries:
+        refreshed = backend_obj.get_session(name)
+        if refreshed is not None:
+            entries[name].agent = refreshed.agent
+            entries[name].agent_providers = refreshed.agent_providers
+            entries[name].credential_providers = refreshed.credential_providers
         entries[name].paude_version = __version__
         registry._save(entries)
 
@@ -208,7 +246,7 @@ def _upgrade_podman(
     overrides: UpgradeOverrides,
 ) -> None:
     """Upgrade a Podman/Docker session in place."""
-    from paude.agents import get_agent
+    from paude.agents import get_agents
     from paude.backends.labels import (
         PAUDE_LABEL_AGENT,
         PAUDE_LABEL_DOMAINS,
@@ -222,6 +260,8 @@ def _upgrade_podman(
     from paude.backends.podman.helpers import (
         container_name,
         find_container_by_session_name,
+        get_session_composition,
+        get_session_credential_providers,
         network_name,
         proxy_container_name,
     )
@@ -245,6 +285,8 @@ def _upgrade_podman(
 
     agent_name = labels.get(PAUDE_LABEL_AGENT, "claude")
     provider_name = labels.get(PAUDE_LABEL_PROVIDER)
+    composition = get_session_composition(backend._runner, name)
+    credential_providers = get_session_credential_providers(backend._runner, name)
     workspace_encoded = labels.get(PAUDE_LABEL_WORKSPACE, "")
     workspace = (
         decode_path(workspace_encoded, url_safe=True)
@@ -268,6 +310,58 @@ def _upgrade_podman(
     # Apply CLI overrides
     if overrides.provider is not None:
         provider_name = overrides.provider
+        specs = [
+            (item.config.name, item.config.provider or "")
+            for item in composition.agents
+        ]
+        specs[0] = (specs[0][0], provider_name)
+        composition = get_agents(
+            [agent for agent, _provider in specs],
+            providers={agent: provider for agent, provider in specs if provider},
+            include_bundled=False,
+        )
+    elif overrides.agent_providers is not None:
+        installed = [item.config.name for item in composition.agents]
+        unknown = [name for name in overrides.agent_providers if name not in installed]
+        if unknown:
+            raise ValueError(
+                "Provider mappings reference agents that are not installed: "
+                + ", ".join(unknown)
+            )
+        composition = get_agents(
+            installed,
+            providers=overrides.agent_providers,
+            include_bundled=False,
+        )
+    mappings_changed = (
+        overrides.provider is not None or overrides.agent_providers is not None
+    )
+    mapped_providers = list(
+        dict.fromkeys(
+            item.config.provider or ""
+            for item in composition.agents
+            if item.config.provider
+        )
+    )
+    if overrides.providers is not None:
+        from paude.providers import get_provider
+
+        credential_providers = list(dict.fromkeys(overrides.providers))
+        for provider in credential_providers:
+            get_provider(provider)
+        missing = [
+            provider
+            for provider in mapped_providers
+            if provider not in credential_providers
+        ]
+        if missing:
+            raise ValueError(
+                "Credential providers must include every mapped provider; missing: "
+                + ", ".join(missing)
+            )
+    elif mappings_changed:
+        credential_providers = mapped_providers
+    provider_name = composition.primary.config.provider
     if overrides.gpu is not None:
         gpu = overrides.gpu if overrides.gpu != "" else None
     if overrides.yolo is not None:
@@ -286,10 +380,14 @@ def _upgrade_podman(
 
     # Build new image
     engine = backend._engine
-    agent_instance = get_agent(agent_name, provider=provider_name)
+    agent_instance = composition.primary
+    agent_specs = [
+        (item.config.name, item.config.provider or "") for item in composition.agents
+    ]
     image_manager = ImageManager(
         script_dir=_detect_dev_script_dir(),
         agent=agent_instance,
+        composition=composition,
         engine=engine,
     )
 
@@ -329,23 +427,21 @@ def _upgrade_podman(
 
     # Build mounts and env
     home = Path.home()
-    mounts = build_mounts(home, agent_instance, include_config=engine.is_remote)
-
-    # Build environment (passthrough vars like CLAUDE_CODE_USE_VERTEX)
-    env = agent_instance.build_environment()
-    if config and config.container_env:
-        env.update(config.container_env)
+    mounts = build_mounts(home, composition, include_config=engine.is_remote)
 
     # Expand domains — all sessions get a proxy.
     # allowed_domains=None (old sessions without proxy) is passed as-is to
     # _prepare_session_create, which defaults to ["default"].
-    expanded_domains, parsed_args, _env, unrestricted = _prepare_session_create(
+    expanded_domains, parsed_args, env, unrestricted = _prepare_session_create(
         allowed_domains,
         yolo,
         None,
         config,
         agent_name=agent_name,
+        provider_name=provider_name,
         otel_endpoint=otel_endpoint,
+        composition=composition,
+        credential_providers=credential_providers,
     )
     session_domains = expanded_domains
 
@@ -370,9 +466,11 @@ def _upgrade_podman(
         proxy_image=proxy_image or proxy_image_label,
         agent=agent_name,
         provider=provider_name,
+        agent_providers=agent_specs,
+        credential_providers=credential_providers,
         gpu=gpu,
         reuse_volume=True,
-        ports=agent_instance.config.exposed_ports,
+        ports=composition.exposed_ports,
         otel_ports=otel_ports,
         otel_endpoint=otel_endpoint,
     )

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from paude.config.models import FeatureSpec, PaudeConfig
 
 if TYPE_CHECKING:
-    from paude.agents.base import Agent
+    from paude.agents.base import Agent, AgentComposition
 
 
 def resolve_entrypoint(script_dir: Path | None) -> Path:
@@ -98,17 +98,33 @@ def generate_dockerfile_content(
     using_default_paude_image: bool,
     include_claude_install: bool = False,
     agent: Agent | None = None,
+    composition: AgentComposition | None = None,
 ) -> str:
     """Generate Dockerfile content with features injected."""
     if using_default_paude_image:
         from paude.config.dockerfile import generate_pip_install_dockerfile
 
-        content = generate_pip_install_dockerfile(
-            config, include_claude_install=include_claude_install, agent=agent
-        )
+        if composition is None:
+            content = generate_pip_install_dockerfile(
+                config,
+                include_claude_install=include_claude_install,
+                agent=agent,
+            )
+        else:
+            content = generate_pip_install_dockerfile(
+                config,
+                include_claude_install=include_claude_install,
+                agent=agent,
+                composition=composition,
+            )
     else:
         from paude.config.dockerfile import generate_workspace_dockerfile
 
-        content = generate_workspace_dockerfile(config, agent=agent)
+        if composition is None:
+            content = generate_workspace_dockerfile(config, agent=agent)
+        else:
+            content = generate_workspace_dockerfile(
+                config, agent=agent, composition=composition
+            )
 
     return inject_features(content, config.features)

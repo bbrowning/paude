@@ -102,6 +102,23 @@ class TestEntrypointContract:
             "chcon must use --reference=/pvc to inherit PVC SELinux context"
         )
 
+    def test_entrypoint_persists_composed_agent_configs(self) -> None:
+        """Every configured agent directory/file is persisted to the PVC."""
+        content = ENTRYPOINT_PATH.read_text()
+        assert "for _config_dir in $AGENT_CONFIG_DIRS" in content
+        assert "for _config_file in $AGENT_CONFIG_FILES" in content
+        assert (
+            'AGENT_CONFIG_DIRS="${PAUDE_AGENT_CONFIG_DIRS:-$AGENT_CONFIG_DIR}"'
+            in content
+        )
+
+    def test_entrypoint_wraps_child_codex_for_chatgpt_http(self) -> None:
+        """Gas City child Codex processes inherit the ChatGPT HTTP profile."""
+        content = ENTRYPOINT_PATH.read_text()
+        assert "PAUDE_CODEX_CHATGPT_MODE" in content
+        assert r'exec "$_real_codex" --profile paude-chatgpt-http "\$@"' in content
+        assert 'export PATH="/tmp/paude-bin:$PATH"' in content
+
 
 def _build_gemini_sandbox_script(
     home_dir: str,

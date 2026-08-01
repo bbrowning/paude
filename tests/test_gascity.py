@@ -60,10 +60,8 @@ class TestGascityAgentConfig:
 
     def test_extra_domain_aliases(self) -> None:
         cfg = GascityAgent().config
-        assert "gascity" in cfg.extra_domain_aliases
-        assert "claude" in cfg.extra_domain_aliases
-        assert "gemini" in cfg.extra_domain_aliases
-        assert "nodejs" in cfg.extra_domain_aliases
+        # Child-agent domains are contributed by the resolved composition.
+        assert cfg.extra_domain_aliases == []
 
     def test_exposed_ports_empty(self) -> None:
         assert GascityAgent().config.exposed_ports == []
@@ -222,21 +220,11 @@ class TestGascityAgentSandboxConfig:
         script = GascityAgent().apply_sandbox_config("/home/paude", "/workspace", "")
         assert script.startswith("#!/bin/bash")
 
-    def test_contains_claude_trust(self) -> None:
+    def test_core_only_contains_dolt_identity(self) -> None:
         script = GascityAgent().apply_sandbox_config("/home/paude", "/workspace", "")
-        assert "hasCompletedOnboarding" in script
-        assert "hasTrustDialogAccepted" in script
-
-    def test_contains_gemini_trust(self) -> None:
-        script = GascityAgent().apply_sandbox_config("/home/paude", "/workspace", "")
-        assert "trustedFolders.json" in script
-        assert "TRUST_FOLDER" in script
-
-    def test_contains_workspace(self) -> None:
-        script = GascityAgent().apply_sandbox_config(
-            "/home/paude", "/pvc/workspace", ""
-        )
-        assert "/pvc/workspace" in script
+        assert "dolt config --global --set user.name" in script
+        assert "hasCompletedOnboarding" not in script
+        assert "trustedFolders.json" not in script
 
     def test_contains_dolt_identity_from_gitconfig(self) -> None:
         script = GascityAgent().apply_sandbox_config("/home/paude", "/workspace", "")
@@ -245,10 +233,17 @@ class TestGascityAgentSandboxConfig:
         assert "dolt config --global --set user.name" in script
         assert "dolt config --global --set user.email" in script
 
-    def test_home_path_parameterized(self) -> None:
-        script = GascityAgent().apply_sandbox_config("/custom/home", "/workspace", "")
-        assert "/custom/home/.claude.json" in script
-        assert "/custom/home/.gemini" in script
+    def test_composed_sandbox_includes_child_agent_configs(self) -> None:
+        from paude.backends.session_env import generate_sandbox_config_script
+
+        script = generate_sandbox_config_script(
+            get_agents(["gascity"]), "/pvc/workspace", ""
+        )
+        assert "/pvc/workspace" in script
+        assert "hasCompletedOnboarding" in script
+        assert "trustedFolders.json" in script
+        assert "/home/paude/.claude.json" in script
+        assert "/home/paude/.gemini" in script
 
 
 class TestGascityComposedInstall:
@@ -263,12 +258,14 @@ class TestGascityComposedInstall:
 
     def _composed(self, home: str = "/home/paude") -> str:
         composition = get_agents(["gascity"])
-        return "\n".join(
-            compose_dockerfile_install_lines(composition.agents, home)
-        )
+        return "\n".join(compose_dockerfile_install_lines(composition.agents, home))
 
     def test_install_set_is_gascity_claude_gemini(self) -> None:
         assert get_agents(["gascity"]).names == ["gascity", "claude", "gemini"]
+
+    def test_explicit_install_set_excludes_implicit_gemini(self) -> None:
+        composition = get_agents(["gascity", "claude", "codex"], include_bundled=False)
+        assert composition.names == ["gascity", "claude", "codex"]
 
     def test_primary_is_gascity(self) -> None:
         assert get_agents(["gascity"]).primary.config.name == "gascity"
@@ -304,9 +301,7 @@ class TestGascityComposedInstall:
         lines = compose_dockerfile_install_lines(
             get_agents(["gascity"]).agents, "/home/paude"
         )
-        node_installs = [
-            line for line in lines if "dnf install -y nodejs npm" in line
-        ]
+        node_installs = [line for line in lines if "dnf install -y nodejs npm" in line]
         assert len(node_installs) == 1
 
     def test_ends_with_canonical_layout(self) -> None:
@@ -371,3 +366,16 @@ class TestGascityBuildPathInstall:
         dockerfile = generate_claude_layer_dockerfile(agent=get_agent("claude"))
         assert "claude.ai/install.sh" in dockerfile
         assert "@google/gemini-cli" not in dockerfile
+
+    def test_explicit_composition_image_excludes_gemini(self) -> None:
+        from paude.config.claude_layer import generate_claude_layer_dockerfile
+
+        composition = get_agents(["gascity", "claude", "codex"], include_bundled=False)
+        dockerfile = generate_claude_layer_dockerfile(composition=composition)
+        assert "gastownhall/gascity" in dockerfile
+        assert "claude.ai/install.sh" in dockerfile
+        assert "openai/codex" in dockerfile
+        assert "@google/gemini-cli" not in dockerfile
+        assert "/home/paude/.gascity" in dockerfile
+        assert "/home/paude/.claude" in dockerfile
+        assert "/home/paude/.codex" in dockerfile

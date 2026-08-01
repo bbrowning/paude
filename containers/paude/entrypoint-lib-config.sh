@@ -34,6 +34,30 @@ persist_config_dir() {
     fi
 }
 
+# Persist a config file from $HOME to /pvc and replace it with a symlink.
+persist_config_file() {
+    local file_name="$1"
+    local pvc_config_file="/pvc/$file_name"
+    local home_config_file="$HOME/$file_name"
+
+    if [[ -f "$home_config_file" ]] && [[ ! -L "$home_config_file" ]]; then
+        if [[ ! -f "$pvc_config_file" ]]; then
+            cp -dR --preserve=mode,timestamps "$home_config_file" "$pvc_config_file" 2>/dev/null || true
+        fi
+        rm -f "$home_config_file" 2>/dev/null || true
+    fi
+
+    if [[ ! -f "$pvc_config_file" ]]; then
+        echo '{}' > "$pvc_config_file" 2>/dev/null || true
+    fi
+    chmod g+rw "$pvc_config_file" 2>/dev/null || true
+    chcon --reference=/pvc "$pvc_config_file" 2>/dev/null || true
+
+    if [[ ! -e "$home_config_file" ]]; then
+        ln -sf "$pvc_config_file" "$home_config_file"
+    fi
+}
+
 # Persist agent config on the PVC volume so it survives container recreation.
 # Creates symlinks: $HOME/$AGENT_CONFIG_DIR -> /pvc/$AGENT_CONFIG_DIR
 #                    $HOME/$AGENT_CONFIG_FILE -> /pvc/$AGENT_CONFIG_FILE
@@ -49,24 +73,6 @@ persist_agent_config() {
 
     # Config file (e.g., .claude.json) — symlink to PVC
     if [[ -n "$AGENT_CONFIG_FILE" ]]; then
-        local pvc_config_file="/pvc/$AGENT_CONFIG_FILE"
-        local home_config_file="$HOME/$AGENT_CONFIG_FILE"
-
-        if [[ -f "$home_config_file" ]] && [[ ! -L "$home_config_file" ]]; then
-            if [[ ! -f "$pvc_config_file" ]]; then
-                cp -dR --preserve=mode,timestamps "$home_config_file" "$pvc_config_file" 2>/dev/null || true
-            fi
-            rm -f "$home_config_file" 2>/dev/null || true
-        fi
-
-        if [[ ! -f "$pvc_config_file" ]]; then
-            echo '{}' > "$pvc_config_file" 2>/dev/null || true
-        fi
-        chmod g+rw "$pvc_config_file" 2>/dev/null || true
-        chcon --reference=/pvc "$pvc_config_file" 2>/dev/null || true
-
-        if [[ ! -e "$home_config_file" ]]; then
-            ln -sf "$pvc_config_file" "$home_config_file"
-        fi
+        persist_config_file "$AGENT_CONFIG_FILE"
     fi
 }

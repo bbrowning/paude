@@ -28,6 +28,7 @@ __all__ = [
     "OpenCodeAgent",
     "OpenClawAgent",
     "dockerfile_install_lines_for_agent",
+    "dockerfile_install_lines_for_composition",
     "get_agent",
     "get_agent_composition",
     "get_agents",
@@ -69,6 +70,8 @@ def get_agent(name: str, provider: str | None = None) -> Agent:
 def get_agents(
     names: list[str],
     providers: dict[str, str] | None = None,
+    *,
+    include_bundled: bool = True,
 ) -> AgentComposition:
     """Expand requested agent names into a composed install set.
 
@@ -84,6 +87,10 @@ def get_agents(
             the primary agent.
         providers: Optional mapping of agent name -> provider override. Agents
             not present in the mapping use their own default provider.
+        include_bundled: Whether each requested agent should expand its
+            declared bundled toolchains. Single-agent callers retain the
+            historical default; multi-agent CLI requests pass ``False`` so
+            the explicit list is the exact install set.
 
     Returns:
         An AgentComposition holding the primary agent and the ordered,
@@ -105,8 +112,9 @@ def get_agents(
         seen.add(name)
         agent = get_agent(name, provider=provider_overrides.get(name))
         ordered.append(agent)
-        for bundled in agent.config.bundled_agents:
-            expand(bundled)
+        if include_bundled:
+            for bundled in agent.config.bundled_agents:
+                expand(bundled)
 
     for name in names:
         expand(name)
@@ -167,6 +175,18 @@ def dockerfile_install_lines_for_agent(agent: Agent, container_home: str) -> lis
         the canonical ``USER paude`` / ``WORKDIR`` footer.
     """
     composition = get_agent_composition(agent)
+    return compose_dockerfile_install_lines(composition.agents, container_home)
+
+
+def dockerfile_install_lines_for_composition(
+    composition: AgentComposition, container_home: str
+) -> list[str]:
+    """Return Dockerfile install lines for an explicit composition.
+
+    Unlike :func:`dockerfile_install_lines_for_agent`, this function does not
+    expand bundled agents. The composition is already the resolved install
+    set, which lets an explicit multi-agent request control the image exactly.
+    """
     return compose_dockerfile_install_lines(composition.agents, container_home)
 
 

@@ -183,8 +183,8 @@ class TestShowDryRun:
 
         captured = capsys.readouterr()
         assert "agents: gascity, claude, codex" in captured.out
-        assert "providers: vertex, chatgpt" in captured.out
-        assert "per-agent providers:" in captured.out
+        assert "credential providers: vertex, chatgpt" in captured.out
+        assert "agent-provider mappings:" in captured.out
         assert "gascity -> vertex" in captured.out
         assert "codex -> chatgpt" in captured.out
 

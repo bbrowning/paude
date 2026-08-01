@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from paude.agents.base import AgentConfig
+    from paude.agents.base import Agent, AgentComposition, AgentConfig
 
 PROXY_BLOCKED_LOG_PATH = "/tmp/paude-proxy-blocked.log"  # noqa: S108
 
@@ -114,8 +114,9 @@ def local_gcp_adc_path() -> Path | None:
 
 
 def gather_proxy_credentials(
-    agent_config: AgentConfig,
+    agent_config: AgentConfig | AgentComposition | Agent,
     *,
+    credential_providers: list[str] | None = None,
     gcp_adc_path: Path | None = None,
 ) -> ProxyCredentials:
     """Gather real credentials from the host for the proxy container.
@@ -132,16 +133,39 @@ def gather_proxy_credentials(
         Dict of environment variables for the proxy container.
     """
     from paude.agents.base import build_secret_environment_from_config
+    from paude.providers import get_provider
 
-    creds = build_secret_environment_from_config(agent_config)
+    if hasattr(agent_config, "agents"):
+        configs = [agent.config for agent in agent_config.agents]
+    elif hasattr(agent_config, "config"):
+        configs = [agent_config.config]
+    else:
+        configs = [agent_config]
+
+    creds: dict[str, str] = {}
+    for config in configs:
+        for key, value in build_secret_environment_from_config(config).items():
+            creds.setdefault(key, value)
+
+    effective_providers = credential_providers or list(
+        dict.fromkeys(config.provider for config in configs if config.provider)
+    )
+    for provider_name in effective_providers:
+        provider = get_provider(provider_name)
+        for key in provider.secret_env_vars:
+            env_value = os.environ.get(key)
+            if env_value:
+                creds.setdefault(key, env_value)
 
     gh_token = os.environ.get("PAUDE_GITHUB_TOKEN")
     if gh_token:
         creds["GH_TOKEN"] = gh_token
 
-    if gcp_adc_path is not None:
+    if gcp_adc_path is not None and any(
+        provider in {"vertex", "google"} for provider in effective_providers
+    ):
         creds[PROXY_GCP_ADC_ENV] = gcp_adc_path.read_text()
 
-    chatgpt_oauth_mode = agent_config.provider == "chatgpt"
+    chatgpt_oauth_mode = "chatgpt" in effective_providers
 
     return ProxyCredentials(environment=creds, chatgpt_oauth_mode=chatgpt_oauth_mode)
