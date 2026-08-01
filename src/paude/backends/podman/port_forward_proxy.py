@@ -10,6 +10,9 @@ Usage::
 
     python -m paude.backends.podman.port_forward_proxy \
         --forward 18789 'podman exec -i mycontainer socat STDIO TCP:127.0.0.1:18789'
+
+The listen spec may be a bare ``PORT`` (binds 127.0.0.1) or ``IP:PORT`` to bind
+a specific host interface.
 """
 
 from __future__ import annotations
@@ -102,10 +105,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         nargs=2,
         action="append",
         required=True,
-        metavar=("PORT", "CMD"),
+        metavar=("LISTEN", "CMD"),
         help=(
-            "Port and exec command: --forward <listen_port> '<shell-quoted cmd>'. "
-            "May be repeated for multiple ports."
+            "Listen spec and exec command: --forward <[ip:]port> "
+            "'<shell-quoted cmd>'. May be repeated for multiple ports."
         ),
     )
     parser.add_argument(
@@ -117,11 +120,22 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _run_server(listen_port: int, exec_cmd: list[str]) -> socket.socket:
+def _parse_listen_spec(spec: str) -> tuple[str, int]:
+    """Parse a ``[ip:]port`` listen spec into ``(bind_ip, port)``.
+
+    A bare port binds loopback (127.0.0.1) for backward compatibility.
+    """
+    if ":" in spec:
+        bind_ip, port_str = spec.rsplit(":", 1)
+        return bind_ip or "127.0.0.1", int(port_str)
+    return "127.0.0.1", int(spec)
+
+
+def _run_server(bind_ip: str, listen_port: int) -> socket.socket:
     """Create and bind a server socket, returning it."""
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(("127.0.0.1", listen_port))
+    server.bind((bind_ip, listen_port))
     server.listen(5)
     return server
 
@@ -159,9 +173,9 @@ def main(argv: list[str] | None = None) -> NoReturn:
     shutdown_event = threading.Event()
 
     for forward_args in args.forward:
-        listen_port = int(forward_args[0])
+        bind_ip, listen_port = _parse_listen_spec(forward_args[0])
         exec_cmd = shlex.split(forward_args[1])
-        server = _run_server(listen_port, exec_cmd)
+        server = _run_server(bind_ip, listen_port)
         servers.append(server)
 
         threading.Thread(

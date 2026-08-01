@@ -63,6 +63,8 @@ class SessionConfig:
         yolo: Enable YOLO mode.
         network: Podman network name for proxy setup.
         ports: Ports to expose as (host_port, container_port) tuples.
+        forward_ports: User opt-in container->host forwards as
+            (host_ip, host_port, container_port) tuples.
     """
 
     name: str | None
@@ -82,6 +84,7 @@ class SessionConfig:
     gpu: str | None = None
     reuse_volume: bool = False
     ports: list[tuple[int, int]] = field(default_factory=list)
+    forward_ports: list[tuple[str, int, int]] = field(default_factory=list)
     otel_ports: list[int] = field(default_factory=list)
     otel_endpoint: str | None = None
 

@@ -117,6 +117,50 @@ def test_dry_run_no_gpu_hides_gpu():
     assert "gpu:" not in result.stdout
 
 
+def test_dry_run_shows_forward_ports():
+    """--dry-run shows forward-ports with cli provenance when specified."""
+    result = runner.invoke(
+        app, ["create", "--forward-port", "8372", "--dry-run"]
+    )
+    assert result.exit_code == 0
+    assert "forward-ports: 8372  (cli)" in result.stdout
+
+
+def test_dry_run_forward_ports_repeatable():
+    """--forward-port can be repeated and all values are shown."""
+    result = runner.invoke(
+        app,
+        [
+            "create",
+            "--forward-port",
+            "8372",
+            "--forward-port",
+            "9090:90",
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "forward-ports: 8372, 9090:90" in result.stdout
+
+
+def test_dry_run_hides_forward_ports_when_unset():
+    """--dry-run omits forward-ports when the flag is not given."""
+    result = runner.invoke(app, ["create", "--dry-run"])
+    assert result.exit_code == 0
+    assert "forward-ports:" not in result.stdout
+
+
+def test_forward_port_invalid_spec_errors():
+    """An invalid --forward-port spec fails with a clear error."""
+    result = runner.invoke(
+        app, ["create", "--forward-port", "not-a-port", "--dry-run"]
+    )
+    assert result.exit_code == 1
+    # Error goes to stderr, which typer may redirect to stdout
+    output = result.stdout + (result.stderr or "")
+    assert "invalid port spec" in output
+
+
 @pytest.mark.parametrize(
     ("flag", "name"),
     [

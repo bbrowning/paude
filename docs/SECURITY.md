@@ -59,6 +59,7 @@ These risks are accepted by design:
 1. **Workspace destruction**: The agent can delete files (including `.git`) in the container's own copy of the code. Mitigation: push to remote before autonomous sessions, so a destroyed container's copy is always recoverable.
 2. **Secrets readable**: Any `.env` file synced into the container — via `--git` or `paude cp` — is readable there. Mitigation: network filtering prevents exfiltration; avoid `--allowed-domains all` with sensitive workspaces, and don't sync in `.gitignore`d secrets.
 3. **No audit logging**: Commands executed aren't logged. This is a forensics gap, not a security breach vector.
+4. **Port-forward exposure**: `--forward-port HOST_IP:HOST:CONTAINER` with a non-loopback `HOST_IP` (e.g. `0.0.0.0`) exposes the forwarded container port to your LAN with no additional authentication — anyone who can reach that host/port gets the same access a local loopback connection would. Mitigation: only bind non-loopback addresses on trusted networks; the default forms (bare `PORT` / `HOST:CONTAINER`) bind loopback only.
 
 ## Unsupported devcontainer Properties (Security)
 

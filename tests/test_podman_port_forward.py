@@ -30,6 +30,45 @@ class TestPodmanPortForwardManagerStart:
 
     @patch("paude.backends.podman.port_forward.subprocess.Popen")
     @patch("paude.backends.port_forward_utils.pid_dir")
+    def test_custom_host_ip_binds_listen_spec(
+        self, mock_pid_dir, mock_popen, tmp_path
+    ) -> None:
+        mock_pid_dir.return_value = tmp_path
+        mock_proc = MagicMock()
+        mock_proc.pid = 22222
+        mock_popen.return_value = mock_proc
+
+        engine = _make_engine()
+        mgr = PodmanPortForwardManager(engine)
+        mgr.start("my-session", "paude-my-session", [("0.0.0.0", 8080, 80)])
+
+        cmd = mock_popen.call_args[0][0]
+        # The listen spec passed to --forward includes the bind IP
+        assert "0.0.0.0:8080" in cmd
+        cmd_str = " ".join(cmd)
+        assert "TCP:127.0.0.1:80" in cmd_str
+
+    @patch("paude.backends.podman.port_forward.subprocess.Popen")
+    @patch("paude.backends.port_forward_utils.pid_dir")
+    def test_wildcard_bind_prints_localhost_not_0000(
+        self, mock_pid_dir, mock_popen, tmp_path, capsys
+    ) -> None:
+        """A 0.0.0.0 bind prints a navigable localhost URL, not the wildcard address."""
+        mock_pid_dir.return_value = tmp_path
+        mock_proc = MagicMock()
+        mock_proc.pid = 33333
+        mock_popen.return_value = mock_proc
+
+        engine = _make_engine()
+        mgr = PodmanPortForwardManager(engine)
+        mgr.start("my-session", "paude-my-session", [("0.0.0.0", 8080, 80)])
+
+        captured = capsys.readouterr()
+        assert "http://localhost:8080" in captured.err
+        assert "http://0.0.0.0:8080" not in captured.err
+
+    @patch("paude.backends.podman.port_forward.subprocess.Popen")
+    @patch("paude.backends.port_forward_utils.pid_dir")
     def test_starts_port_forward(self, mock_pid_dir, mock_popen, tmp_path) -> None:
         mock_pid_dir.return_value = tmp_path
         mock_proc = MagicMock()
@@ -38,7 +77,7 @@ class TestPodmanPortForwardManagerStart:
 
         engine = _make_engine()
         mgr = PodmanPortForwardManager(engine)
-        mgr.start("my-session", "paude-my-session", [(18789, 18789)])
+        mgr.start("my-session", "paude-my-session", [("127.0.0.1", 18789, 18789)])
 
         mock_popen.assert_called_once()
         cmd = mock_popen.call_args[0][0]
@@ -48,7 +87,7 @@ class TestPodmanPortForwardManagerStart:
         assert "paude.backends.podman.port_forward_proxy" in cmd
         assert "--parent-pid" in cmd
         assert "--forward" in cmd
-        assert "18789" in cmd
+        assert "127.0.0.1:18789" in cmd
         # The exec command is shell-quoted into a single string argument
         cmd_str = " ".join(cmd)
         assert "podman" in cmd_str
@@ -73,15 +112,19 @@ class TestPodmanPortForwardManagerStart:
 
         engine = _make_engine()
         mgr = PodmanPortForwardManager(engine)
-        mgr.start("my-session", "paude-my-session", [(8080, 8080), (9090, 9090)])
+        mgr.start(
+            "my-session",
+            "paude-my-session",
+            [("127.0.0.1", 8080, 8080), ("127.0.0.1", 9090, 9090)],
+        )
 
         mock_popen.assert_called_once()
         cmd = mock_popen.call_args[0][0]
         cmd_str = " ".join(cmd)
         assert "--forward" in cmd_str
-        assert "8080" in cmd_str
+        assert "127.0.0.1:8080" in cmd_str
         assert "TCP:127.0.0.1:8080" in cmd_str
-        assert "9090" in cmd_str
+        assert "127.0.0.1:9090" in cmd_str
         assert "TCP:127.0.0.1:9090" in cmd_str
 
     @patch("paude.backends.port_forward_utils.is_process_running")
@@ -98,7 +141,7 @@ class TestPodmanPortForwardManagerStart:
 
         engine = _make_engine()
         mgr = PodmanPortForwardManager(engine)
-        mgr.start("my-session", "paude-my-session", [(18789, 18789)])
+        mgr.start("my-session", "paude-my-session", [("127.0.0.1", 18789, 18789)])
 
         mock_popen.assert_not_called()
 
@@ -117,7 +160,7 @@ class TestPodmanPortForwardManagerStart:
 
         engine = _make_engine()
         mgr = PodmanPortForwardManager(engine)
-        mgr.start("my-session", "paude-my-session", [(18789, 18789)])
+        mgr.start("my-session", "paude-my-session", [("127.0.0.1", 18789, 18789)])
 
         mock_popen.assert_called_once()
         assert pid_f.read_text() == "11111"

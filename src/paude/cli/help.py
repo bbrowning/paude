@@ -122,6 +122,10 @@ _SECTIONS: tuple[HelpSection, ...] = (
                 "paude create --otel-endpoint http://collector:4318",
                 "Export agent telemetry to OTLP collector",
             ),
+            (
+                "paude create --forward-port 8372",
+                "Forward a container port to the host (opt-in)",
+            ),
         ),
     ),
     HelpSection(
@@ -137,7 +141,7 @@ _SECTIONS: tuple[HelpSection, ...] = (
             "User defaults: ~/.config/paude/defaults.json"
             " (backend, yolo, git, domains, etc.)\n"
             'Project hints: paude.json "create" section'
-            " (allowed-domains, agent, provider)"
+            " (allowed-domains, agent, provider, forward-ports)"
         ),
     ),
     HelpSection(

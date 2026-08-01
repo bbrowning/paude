@@ -112,6 +112,12 @@ def _show_resolved_flags(
     if resolved.otel_endpoint.value:
         typer.echo(format_setting("otel-endpoint", resolved.otel_endpoint))
 
+    if resolved.forward_ports.value:
+        ports_display = ", ".join(resolved.forward_ports.value)
+        typer.echo(
+            f"  forward-ports: {ports_display}  ({resolved.forward_ports.source})"
+        )
+
     if resolved.platform.value is not None:
         typer.echo(format_setting("platform", resolved.platform))
 

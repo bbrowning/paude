@@ -22,6 +22,7 @@ from paude.backends.podman.helpers import (
     container_name,
     find_container_by_session_name,
     get_session_agent,
+    get_session_forward_ports,
     network_name,
     proxy_container_name,
     require_running_session,
@@ -243,7 +244,7 @@ class PodmanBackend:
 
     def _attach_with_port_forward(self, name: str, cname: str, agent: Agent) -> int:
         """Start port forwarding, attach to container, and clean up on exit."""
-        ports = agent.config.exposed_ports
+        ports = self._collect_forward_ports(name, agent)
         if ports:
             self._port_forward.start(name, cname, ports)
         self._setup.print_port_urls(name, agent)
@@ -257,6 +258,15 @@ class PodmanBackend:
             self._port_forward.stop(name)
         self._setup.print_port_urls(name, agent)
         return exit_code
+
+    def _collect_forward_ports(
+        self, name: str, agent: Agent
+    ) -> list[tuple[str, int, int]]:
+        """Merge agent-declared ports and user opt-in forwards for a session."""
+        from paude.backends.port_forward_utils import merge_forward_ports
+
+        user_ports = get_session_forward_ports(self._runner, name)
+        return merge_forward_ports(user_ports, agent.config.exposed_ports)
 
     def stop_session(self, name: str) -> None:
         """Stop a session (preserves volume)."""

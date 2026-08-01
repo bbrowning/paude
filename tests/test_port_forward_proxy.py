@@ -49,8 +49,60 @@ def _cleanup_proxy(proc: subprocess.Popen[bytes]) -> None:
         proc.wait(timeout=3)
 
 
+class TestParseListenSpec:
+    """Unit tests for the [ip:]port listen-spec parser."""
+
+    def test_bare_port_binds_loopback(self) -> None:
+        from paude.backends.podman.port_forward_proxy import _parse_listen_spec
+
+        assert _parse_listen_spec("18789") == ("127.0.0.1", 18789)
+
+    def test_ip_and_port(self) -> None:
+        from paude.backends.podman.port_forward_proxy import _parse_listen_spec
+
+        assert _parse_listen_spec("0.0.0.0:8080") == ("0.0.0.0", 8080)
+
+    def test_empty_ip_defaults_loopback(self) -> None:
+        from paude.backends.podman.port_forward_proxy import _parse_listen_spec
+
+        assert _parse_listen_spec(":8080") == ("127.0.0.1", 8080)
+
+
 class TestPortForwardProxy:
     """Integration tests for the proxy script."""
+
+    def test_proxy_forwards_data_with_ip_listen_spec(self) -> None:
+        """Data flows through the proxy when given an explicit IP:PORT spec."""
+        listen_port = _find_free_port()
+
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "paude.backends.podman.port_forward_proxy",
+                "--forward",
+                f"127.0.0.1:{listen_port}",
+                "cat",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+        try:
+            _wait_for_port(listen_port)
+            with socket.create_connection(("127.0.0.1", listen_port)) as sock:
+                sock.sendall(b"ping")
+                sock.shutdown(socket.SHUT_WR)
+                response = b""
+                while True:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    response += chunk
+            assert response == b"ping"
+        finally:
+            _cleanup_proxy(proc)
 
     def test_proxy_forwards_data(self) -> None:
         """Test that data flows through the proxy to a real echo-like command."""

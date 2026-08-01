@@ -128,9 +128,13 @@ def _parse_devcontainer(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
 
     # Parse create hints from customizations.paude.create
     create_section = data.get("customizations", {}).get("paude", {}).get("create", {})
-    create_allowed_domains, create_agent, create_provider, create_otel_endpoint = (
-        _parse_create_section(create_section)
-    )
+    (
+        create_allowed_domains,
+        create_agent,
+        create_provider,
+        create_otel_endpoint,
+        create_forward_ports,
+    ) = _parse_create_section(create_section)
 
     return PaudeConfig(
         config_file=config_file,
@@ -146,6 +150,7 @@ def _parse_devcontainer(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
         create_agent=create_agent,
         create_provider=create_provider,
         create_otel_endpoint=create_otel_endpoint,
+        create_forward_ports=create_forward_ports,
     )
 
 
@@ -179,9 +184,13 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
         )
 
     # Parse "create" section for create hints
-    create_allowed_domains, create_agent, create_provider, create_otel_endpoint = (
-        _parse_create_section(data.get("create", {}))
-    )
+    (
+        create_allowed_domains,
+        create_agent,
+        create_provider,
+        create_otel_endpoint,
+        create_forward_ports,
+    ) = _parse_create_section(data.get("create", {}))
 
     return PaudeConfig(
         config_file=config_file,
@@ -196,25 +205,32 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
         create_agent=create_agent,
         create_provider=create_provider,
         create_otel_endpoint=create_otel_endpoint,
+        create_forward_ports=create_forward_ports,
     )
 
 
-_KNOWN_CREATE_KEYS = {"allowed-domains", "agent", "provider", "otel-endpoint"}
+_KNOWN_CREATE_KEYS = {
+    "allowed-domains",
+    "agent",
+    "provider",
+    "otel-endpoint",
+    "forward-ports",
+}
 
 
 def _parse_create_section(
     create_data: dict[str, Any],
-) -> tuple[list[str], str | None, str | None, str | None]:
+) -> tuple[list[str], str | None, str | None, str | None, list[str]]:
     """Parse the 'create' section from project config.
 
     Args:
         create_data: The parsed "create" object (may be empty).
 
     Returns:
-        Tuple of (allowed_domains, agent, provider, otel_endpoint).
+        Tuple of (allowed_domains, agent, provider, otel_endpoint, forward_ports).
     """
     if not isinstance(create_data, dict):
-        return [], None, None, None
+        return [], None, None, None, []
 
     _warn_unknown_keys(create_data, _KNOWN_CREATE_KEYS, "create section")
 
@@ -234,7 +250,13 @@ def _parse_create_section(
     if otel_endpoint is not None and not isinstance(otel_endpoint, str):
         otel_endpoint = None
 
-    return allowed_domains, agent, provider, otel_endpoint
+    forward_ports = create_data.get("forward-ports", [])
+    if not isinstance(forward_ports, list):
+        forward_ports = []
+    else:
+        forward_ports = [str(p) for p in forward_ports]
+
+    return allowed_domains, agent, provider, otel_endpoint, forward_ports
 
 
 def _warn_unsupported_properties(data: dict[str, Any]) -> None:
