@@ -141,7 +141,8 @@ _SECTIONS: tuple[HelpSection, ...] = (
             "User defaults: ~/.config/paude/defaults.json"
             " (backend, yolo, git, domains, etc.)\n"
             'Project hints: paude.json "create" section'
-            " (allowed-domains, agent, provider, forward-ports)"
+            " (allowed-domains, agent, provider, agents, providers,"
+            " forward-ports)"
         ),
     ),
     HelpSection(
@@ -177,7 +178,8 @@ _SECTIONS: tuple[HelpSection, ...] = (
             ("", ""),
             (
                 "--providers x,y",
-                "Providers per agent (comma-separated/repeatable)",
+                "Provider pool (comma-separated/repeatable); only the "
+                "primary agent's default is overridden",
             ),
             ("--provider vertex", "Vertex AI (default for claude, openclaw)"),
             ("--provider anthropic", "Anthropic API"),

@@ -294,21 +294,21 @@ def _resolve_agents_and_providers(
     # A singular flag/hint contributes a one-element list at its layer.
     agents, agents_source = _resolve_option_list(
         cli=cli_agents if cli_agents is not None else _as_list(cli_agent),
-        project=_project_list(
-            project_config, "create_agents", "create_agent"
-        ),
+        project=_project_list(project_config, "create_agents", "create_agent"),
         user=user_defaults.agents or _as_list(user_defaults.agent),
         builtin=["claude"],
     )
+    if not agents:
+        raise ValueError(
+            "Agent name cannot be empty. Specify a non-empty --agent/--agents value."
+        )
     result.agents = agents
     result.agents_provenance = [(agents, agents_source)]
     result.agent = SettingValue(agents[0], agents_source)
 
     provider_pool, providers_source = _resolve_option_list(
         cli=cli_providers if cli_providers is not None else _as_list(cli_provider),
-        project=_project_list(
-            project_config, "create_providers", "create_provider"
-        ),
+        project=_project_list(project_config, "create_providers", "create_provider"),
         user=user_defaults.providers or _as_list(user_defaults.provider),
         builtin=[],
     )
@@ -326,14 +326,17 @@ def _resolve_agents_and_providers(
     # agent uses its own default provider.
     result.agent_providers = _derive_agent_providers(agents, primary_provider)
 
-    # Each agent's resolved provider must appear in the providers list; append
-    # any that a per-agent default contributed beyond the explicit pool.
-    derived = [provider for _, provider in result.agent_providers]
-    auto_added = [p for p in _dedupe(derived) if p not in provider_pool]
-    result.providers = _dedupe(provider_pool + derived)
+    # Only list providers that are actually assigned to some agent: an
+    # explicit --providers entry beyond what the primary agent consumes is
+    # never applied to any agent, so including it here would misleadingly
+    # suggest it's in effect.
+    used = _dedupe(provider for _, provider in result.agent_providers)
+    used_explicit = [p for p in provider_pool if p in used]
+    auto_added = [p for p in used if p not in provider_pool]
+    result.providers = used
     result.providers_provenance = []
-    if provider_pool:
-        result.providers_provenance.append((provider_pool, providers_source))
+    if used_explicit:
+        result.providers_provenance.append((used_explicit, providers_source))
     if auto_added:
         result.providers_provenance.append((auto_added, "built-in"))
 

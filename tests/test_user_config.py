@@ -235,9 +235,7 @@ class TestResolveAgentsAndProviders:
         assert result.agents == ["gascity", "claude", "codex"]
         assert result.agent.value == "gascity"
         assert result.agent.source == "cli"
-        assert result.agents_provenance == [
-            (["gascity", "claude", "codex"], "cli")
-        ]
+        assert result.agents_provenance == [(["gascity", "claude", "codex"], "cli")]
 
     def test_singular_agent_alias(self):
         """--agent behaves as a single-item --agents list."""
@@ -336,6 +334,35 @@ class TestResolveAgentsAndProviders:
         result = self._resolve(project_config=project)
         assert result.agents == ["cursor"]
         assert result.agents_provenance == [(["cursor"], "paude.json")]
+
+    def test_empty_agent_rejected_cleanly(self):
+        """An explicit empty-string --agent raises ValueError, not IndexError."""
+        with pytest.raises(ValueError, match="Agent name cannot be empty"):
+            self._resolve(cli_agent="")
+
+    def test_empty_agent_from_user_defaults_rejected_cleanly(self):
+        """An explicit empty-string agent in user defaults raises ValueError."""
+        user = UserDefaults(agent="")
+        with pytest.raises(ValueError, match="Agent name cannot be empty"):
+            self._resolve(user_defaults=user)
+
+    def test_unused_explicit_provider_excluded(self):
+        """A --providers entry never assigned to any agent is not listed."""
+        result = self._resolve(
+            cli_agents=["claude", "codex"],
+            cli_providers=["anthropic", "openai"],
+        )
+        # codex isn't the primary, so it falls back to its own default
+        # (chatgpt) rather than the explicit "openai" — which should not
+        # appear anywhere in the resolved providers.
+        assert result.agent_providers == [
+            ("claude", "anthropic"),
+            ("codex", "chatgpt"),
+        ]
+        assert result.providers == ["anthropic", "chatgpt"]
+        assert "openai" not in result.providers
+        all_listed = {p for values, _ in result.providers_provenance for p in values}
+        assert "openai" not in all_listed
 
 
 class TestUserDefaultsGpu:

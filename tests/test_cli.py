@@ -119,9 +119,7 @@ def test_dry_run_no_gpu_hides_gpu():
 
 def test_dry_run_shows_forward_ports():
     """--dry-run shows forward-ports with cli provenance when specified."""
-    result = runner.invoke(
-        app, ["create", "--forward-port", "8372", "--dry-run"]
-    )
+    result = runner.invoke(app, ["create", "--forward-port", "8372", "--dry-run"])
     assert result.exit_code == 0
     assert "forward-ports: 8372  (cli)" in result.stdout
 
@@ -152,9 +150,7 @@ def test_dry_run_hides_forward_ports_when_unset():
 
 def test_forward_port_invalid_spec_errors():
     """An invalid --forward-port spec fails with a clear error."""
-    result = runner.invoke(
-        app, ["create", "--forward-port", "not-a-port", "--dry-run"]
-    )
+    result = runner.invoke(app, ["create", "--forward-port", "not-a-port", "--dry-run"])
     assert result.exit_code == 1
     # Error goes to stderr, which typer may redirect to stdout
     output = result.stdout + (result.stderr or "")
@@ -454,9 +450,7 @@ class TestAgentsProvidersLists:
     def test_multi_agent_real_create_warns(self, mock_prepare, mock_create):
         """A real (non-dry-run) create with >1 agent warns and drops extras."""
         mock_prepare.return_value = ([], [], {}, False)
-        result = runner.invoke(
-            app, ["create", "--agents", "claude,codex,gascity"]
-        )
+        result = runner.invoke(app, ["create", "--agents", "claude,codex,gascity"])
         assert result.exit_code == 0
         out = _strip_ansi(result.output)
         assert "multi-agent creation is not yet supported" in out
@@ -476,6 +470,32 @@ class TestAgentsProvidersLists:
             result.output
         )
         mock_create.assert_called_once()
+
+    def test_empty_agent_rejected_cleanly(self):
+        """An explicit empty --agent fails with a clean error, not a traceback."""
+        result = runner.invoke(app, ["create", "--agent", "", "--dry-run"])
+        assert result.exit_code != 0
+        assert result.exception is None or not isinstance(result.exception, IndexError)
+        assert "Agent name cannot be empty" in _strip_ansi(result.output)
+
+    def test_unused_explicit_provider_not_shown_in_dry_run(self):
+        """A --providers entry unused by any agent doesn't appear in the preview."""
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--agents",
+                "claude,codex",
+                "--providers",
+                "anthropic,openai",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        out = _strip_ansi(result.stdout)
+        assert "providers: anthropic, chatgpt" in out
+        assert "openai" not in out
+        assert "codex -> chatgpt" in out
 
 
 @pytest.mark.parametrize(

@@ -86,7 +86,7 @@ Projects can declare defaults in their `paude.json` or `devcontainer.json` so th
 }
 ```
 
-Only `allowed-domains`, `agent`, `provider`, `otel-endpoint`, and `forward-ports` are supported as project-level create hints.
+Only `allowed-domains`, `agent`, `provider`, `agents`, `providers`, `otel-endpoint`, and `forward-ports` are supported as project-level create hints.
 
 ### Domain Merging
 
@@ -123,6 +123,8 @@ paude create --dry-run
 | `allowed-domains` | yes | yes | `--allowed-domains` | `["default"]` |
 | `gpu` | yes | — | `--gpu` / `--no-gpu` | (none) |
 | `provider` | yes | yes | `--provider` | (none) |
+| `agents` | yes | yes | `--agents` | `["claude"]` |
+| `providers` | yes | yes | `--providers` | (none) |
 | `otel-endpoint` | yes | yes | `--otel-endpoint` | (none) |
 | `forward-ports` | yes | yes | `--forward-port` | (none) |
 
