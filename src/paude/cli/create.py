@@ -317,6 +317,14 @@ def session_create(
             err=True,
         )
 
+    if resolved.dropped_providers:
+        dropped_providers = ", ".join(resolved.dropped_providers)
+        typer.echo(
+            "Warning: some --providers entries are not used by any agent; "
+            f"ignoring: {dropped_providers}.",
+            err=True,
+        )
+
     if ssh_key and not host:
         typer.echo(
             "Error: --ssh-key requires --host.",

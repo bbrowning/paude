@@ -187,3 +187,24 @@ class TestShowDryRun:
         assert "per-agent providers:" in captured.out
         assert "gascity -> vertex" in captured.out
         assert "codex -> chatgpt" in captured.out
+
+    def test_provider_scalar_matches_agent_default_when_unset(
+        self, capsys: pytest.CaptureFixture[str]
+    ):
+        """Legacy provider scalar mirrors the derived default, not '(not set)'."""
+        from paude.config.resolver import ResolvedCreateOptions
+
+        resolved = ResolvedCreateOptions(
+            agents=["claude"],
+            agent_providers=[("claude", "vertex")],
+        )
+
+        with patch("paude.dry_run.Path.cwd") as mock_cwd:
+            mock_cwd.return_value = Path("/test")
+            with patch("paude.dry_run.detect_config") as mock_detect:
+                mock_detect.return_value = None
+                show_dry_run({}, resolved=resolved)
+
+        captured = capsys.readouterr()
+        assert "provider: vertex" in captured.out
+        assert "provider: (not set)" not in captured.out
