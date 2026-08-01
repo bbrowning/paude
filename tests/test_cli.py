@@ -449,6 +449,34 @@ class TestAgentsProvidersLists:
         )
         assert result.exit_code != 0
 
+    @patch("paude.cli.create_podman.create_podman_session")
+    @patch("paude.cli.create._prepare_session_create")
+    def test_multi_agent_real_create_warns(self, mock_prepare, mock_create):
+        """A real (non-dry-run) create with >1 agent warns and drops extras."""
+        mock_prepare.return_value = ([], [], {}, False)
+        result = runner.invoke(
+            app, ["create", "--agents", "claude,codex,gascity"]
+        )
+        assert result.exit_code == 0
+        out = _strip_ansi(result.output)
+        assert "multi-agent creation is not yet supported" in out
+        assert "codex, gascity" in out
+        # Only the primary agent is actually created.
+        mock_create.assert_called_once()
+        assert mock_create.call_args.kwargs["agent_name"] == "claude"
+
+    @patch("paude.cli.create_podman.create_podman_session")
+    @patch("paude.cli.create._prepare_session_create")
+    def test_single_agent_real_create_no_warning(self, mock_prepare, mock_create):
+        """A real create with a single agent emits no multi-agent warning."""
+        mock_prepare.return_value = ([], [], {}, False)
+        result = runner.invoke(app, ["create", "--agents", "claude"])
+        assert result.exit_code == 0
+        assert "multi-agent creation is not yet supported" not in _strip_ansi(
+            result.output
+        )
+        mock_create.assert_called_once()
+
 
 @pytest.mark.parametrize(
     "args",

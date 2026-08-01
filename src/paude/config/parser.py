@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from paude.config.models import FeatureSpec, PaudeConfig
-from paude.config.user_config import _warn_unknown_keys
+from paude.config.user_config import _string_list, _warn_unknown_keys
 
 
 class ConfigError(Exception):
@@ -271,13 +271,6 @@ def _parse_create_section(create_data: dict[str, Any]) -> CreateHints:
         otel_endpoint=otel_endpoint,
         forward_ports=forward_ports,
     )
-
-
-def _string_list(value: Any) -> list[str]:
-    """Coerce a JSON value into a list of strings, dropping non-strings."""
-    if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, str)]
 
 
 def _warn_unsupported_properties(data: dict[str, Any]) -> None:

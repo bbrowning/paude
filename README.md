@@ -16,16 +16,19 @@ Run AI coding agents in secure containers. They make commits, you pull them back
 
 > Agents are installed automatically inside the container — no local agent installation needed. You just need authentication credentials for your chosen provider.
 
-Use `--agents` (and `--providers`) to select more than one at once — values are
-comma-separated and/or repeatable, and the first agent is the primary:
+Use `--agents` (and `--providers`) to parse, resolve, and preview more than one
+at once — values are comma-separated and/or repeatable, and the first agent is
+the primary. Creating multiple agents in a single session is not yet supported,
+so pair the lists with `--dry-run` to preview the full resolution:
 
 ```bash
-paude create --agents gascity,claude,codex --providers vertex,chatgpt my-project
+paude create --agents gascity,claude,codex --providers vertex,chatgpt --dry-run my-project
 ```
 
-The singular `--agent`/`--provider` flags remain as aliases for a single agent.
-Each agent uses its own default provider unless overridden; the primary agent
-honors the first `--providers` value.
+A real (non-`--dry-run`) create launches only the primary agent and warns that
+the extra agents were ignored. The singular `--agent`/`--provider` flags remain
+as aliases for a single agent. Each agent uses its own default provider unless
+overridden; the primary agent honors the first `--providers` value.
 
 ## Why Paude?
 

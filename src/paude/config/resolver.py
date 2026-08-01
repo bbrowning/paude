@@ -38,6 +38,11 @@ class ResolvedCreateOptions:
     resolved provider. The ``agents``/``providers`` lists hold the full
     resolved sets, and ``agent_providers`` maps each agent to the provider it
     will use (first = primary).
+
+    Note: session creation currently uses only the primary agent/provider
+    scalars; the ``agents``/``providers``/``agent_providers`` lists are consumed
+    by the ``--dry-run`` preview only. Multi-agent creation is not yet
+    implemented, so a real create ignores all but the primary agent.
     """
 
     backend: SettingValue[str] = field(

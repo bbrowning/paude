@@ -106,6 +106,22 @@ GitHub's GraphQL API uses POST for ALL operations, including reads (`gh pr list`
 
 Consider making this diagnostic durable — e.g. write it to a log file under `$HOME` that survives `clear`, or print it after `clear` runs, or fail loudly instead of silently falling back — so any future recurrence of this class of bug is diagnosable from the user's own terminal instead of requiring a live `podman exec` investigation.
 
+## Test Suite
+
+### TEST-001: `test_proxy_shuts_down_on_sigterm` is flaky under full-suite load
+
+**Status**: Open
+**Priority**: Low
+**Discovered**: 2026-08-01 during a review-fix pass on the `--agents/--providers` branch
+
+`tests/test_port_forward_proxy.py::TestPortForwardProxy::test_proxy_shuts_down_on_sigterm`
+intermittently fails when run as part of the full `make test` suite but passes
+reliably in isolation (`uv run pytest tests/test_port_forward_proxy.py::TestPortForwardProxy::test_proxy_shuts_down_on_sigterm`).
+The failure is timing/resource-contention related (SIGTERM delivery and socket
+teardown racing under concurrent full-suite load), not a product defect. Consider
+adding an explicit wait/retry on the shutdown assertion or isolating the test's
+port/socket allocation so it is deterministic under load.
+
 ## Documentation Gaps
 
 Found during a 2026-07-22 audit to add OpenCode support to README/docs/CLI help.

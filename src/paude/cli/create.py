@@ -305,6 +305,18 @@ def session_create(
         )
         raise typer.Exit()
 
+    # Multi-agent creation is not yet supported: a real (non-dry-run) create
+    # launches only the primary agent. Warn so extra agents aren't dropped
+    # silently -- use --dry-run to preview the full multi-agent resolution.
+    if len(resolved.agents) > 1:
+        dropped = ", ".join(resolved.agents[1:])
+        typer.echo(
+            "Warning: multi-agent creation is not yet supported; creating only "
+            f"the primary agent '{r_agent}'. Ignoring: {dropped}. "
+            "Use --dry-run to preview the full multi-agent resolution.",
+            err=True,
+        )
+
     if ssh_key and not host:
         typer.echo(
             "Error: --ssh-key requires --host.",

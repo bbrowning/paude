@@ -171,7 +171,8 @@ _SECTIONS: tuple[HelpSection, ...] = (
             ("--agent openclaw", "OpenClaw (web UI on port 18789)"),
             (
                 "--agents a,b,c",
-                "Multiple agents (comma-separated/repeatable; first is primary)",
+                "Preview multiple agents with --dry-run; a real create uses "
+                "only the primary (first)",
             ),
             ("", ""),
             (
