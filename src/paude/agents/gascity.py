@@ -8,8 +8,6 @@ from paude.agents.base import (
     AgentConfig,
     build_environment_from_config,
     build_provider_credentials,
-    claude_trust_script,
-    gemini_trust_script,
     nodejs_prereq_install_lines,
 )
 
@@ -51,12 +49,9 @@ class GascityAgent:
             config_file_name=None,
             yolo_flag=None,
             clear_command=None,
-            extra_domain_aliases=[
-                "gascity",
-                "claude",
-                "gemini",
-                "nodejs",
-            ],
+            # Child-agent domains are contributed by the resolved
+            # composition. Gas City itself has no runtime domain alias.
+            extra_domain_aliases=[],
             provider=creds.resolved_provider_name,
             bundled_agents=["claude", "gemini"],
         )
@@ -114,12 +109,7 @@ class GascityAgent:
     def apply_sandbox_config(
         self, home: str, workspace: str, args: str, *, yolo: bool = False
     ) -> str:
-        return (
-            "#!/bin/bash\n"
-            + claude_trust_script(home, workspace)
-            + gemini_trust_script(home, workspace)
-            + self._dolt_identity_script()
-        )
+        return "#!/bin/bash\n" + self._dolt_identity_script()
 
     @staticmethod
     def _dolt_identity_script() -> str:

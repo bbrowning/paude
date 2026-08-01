@@ -357,6 +357,10 @@ class TestParseConfig:
                     "create": {
                         "agents": ["gascity", "claude"],
                         "providers": ["vertex", "chatgpt"],
+                        "agent-providers": {
+                            "gascity": "vertex",
+                            "claude": "anthropic",
+                        },
                     },
                 }
             )
@@ -365,6 +369,10 @@ class TestParseConfig:
         config = parse_config(config_file)
         assert config.create_agents == ["gascity", "claude"]
         assert config.create_providers == ["vertex", "chatgpt"]
+        assert config.create_agent_providers == {
+            "gascity": "vertex",
+            "claude": "anthropic",
+        }
 
     def test_create_agents_default_to_empty(self, tmp_path: Path):
         """create agents/providers default to empty lists when not present."""
@@ -374,6 +382,7 @@ class TestParseConfig:
         config = parse_config(config_file)
         assert config.create_agents == []
         assert config.create_providers == []
+        assert config.create_agent_providers == {}
 
     def test_parses_devcontainer_create_section(self, tmp_path: Path):
         """parse_config extracts create hints from devcontainer customizations."""

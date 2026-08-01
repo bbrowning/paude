@@ -43,6 +43,9 @@ Then edit it to set the values you want. Any field set to `null` or omitted uses
     "backend": "docker",
     "agent": "claude",
     "provider": null,
+    "agents": [],
+    "providers": [],
+    "agent-providers": {},
     "yolo": true,
     "git": true,
     "platform": "linux/amd64",
@@ -86,7 +89,30 @@ Projects can declare defaults in their `paude.json` or `devcontainer.json` so th
 }
 ```
 
-Only `allowed-domains`, `agent`, `provider`, `agents`, `providers`, `otel-endpoint`, and `forward-ports` are supported as project-level create hints.
+Only `allowed-domains`, `agent`, `provider`, `agents`, `providers`,
+`agent-providers`, `otel-endpoint`, and `forward-ports` are supported as
+project-level create hints.
+
+`agents` is the exact install set; the first entry is primary and launches.
+`providers` is the credential set configured in the proxy and container, not a
+positional mapping. `agent-providers` maps installed agents by name, and
+unmapped agents use their defaults:
+
+```json
+{
+  "agents": ["gascity", "claude", "codex"],
+  "providers": ["vertex", "chatgpt"],
+  "agent-providers": {
+    "gascity": "vertex",
+    "claude": "vertex",
+    "codex": "chatgpt"
+  }
+}
+```
+
+When `providers` is omitted it is derived from the effective mappings. An
+explicit list must cover every mapping and may include extra credentials.
+Gas City does not implicitly install child CLIs.
 
 ### Domain Merging
 
@@ -125,6 +151,7 @@ paude create --dry-run
 | `provider` | yes | yes | `--provider` | (none) |
 | `agents` | yes | yes | `--agents` | `["claude"]` |
 | `providers` | yes | yes | `--providers` | (none) |
+| `agent-providers` | yes | yes | `--agent-provider` | agent defaults |
 | `otel-endpoint` | yes | yes | `--otel-endpoint` | (none) |
 | `forward-ports` | yes | yes | `--forward-port` | (none) |
 
@@ -169,15 +196,18 @@ Agent-specific defaults are added automatically:
 - **Cursor CLI**: `.cursor.com`, `.cursor.sh`, `.cursor-cdn.com`, `.cursorapi.com` (HTTP/1.1 mode is automatically enabled for proxy compatibility)
 - **Gemini CLI**: `cloudcode-pa.googleapis.com`, `play.googleapis.com`, plus the `nodejs` alias
 - **OpenCode**: `opencode.ai`, `.opencode.ai` (plus `chatgpt.com`, `.chatgpt.com`, `auth.openai.com` when using the `chatgpt` provider)
-- **Gas City** (composite Claude Code + Gemini CLI orchestration agent): `.claude.ai`, `.anthropic.com`, `cloudcode-pa.googleapis.com`, `play.googleapis.com`, plus the `nodejs` alias
+- **Gas City** (orchestration agent): contributes no child-agent domains itself. List each child CLI explicitly so its domains are included.
 - **OpenClaw**: `.anthropic.com`, `.openai.com`, `.duckduckgo.com`, `wttr.in`, `api.open-meteo.com`
 
-The chosen inference provider (`--provider`) also contributes domains, independent of the agent:
+Credential providers (`--providers`) contribute domains independently of the
+agent mappings. When the credential set is derived, the effective mapped
+providers contribute the same domains:
 - `vertex` / `google`: the `vertexai` domains
 - `openai`: `.openai.com`
 - `anthropic`: the `claude` domains
 - `cursor`: the `cursor` domains
-- `chatgpt`: the `chatgpt` domains — *required*, so they're forced onto the allowlist even on top of an explicit `--allowed-domains` list. Codex uses `chatgpt` by default; OpenCode opts in via `--provider chatgpt`.
+- `chatgpt`: the `chatgpt` domains. An agent mapped to ChatGPT also marks these
+  domains as required, so they remain available with an explicit allowlist.
 
 Opt-in language ecosystem aliases:
 - **golang**: Go modules (`go.dev`, `proxy.golang.org`, `sum.golang.org`, `dl.google.com`, `storage.googleapis.com`)

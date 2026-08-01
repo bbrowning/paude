@@ -43,3 +43,21 @@ class TestImageManagerPlatform:
     def test_default_platform_auto_detects(self, mock_detect: object) -> None:
         mgr = ImageManager()
         assert mgr.platform == "linux/arm64"
+
+
+class TestImageManagerComposition:
+    """Tests for composition-aware image identity."""
+
+    def test_cache_fingerprint_includes_all_agents_and_providers(self) -> None:
+        from paude.agents import get_agents
+
+        composition = get_agents(
+            ["gascity", "claude", "codex"],
+            providers={"gascity": "vertex", "claude": "vertex", "codex": "chatgpt"},
+            include_bundled=False,
+        )
+        manager = ImageManager(composition=composition)
+
+        assert manager._composition_fingerprint() == (
+            "gascity:vertex,claude:vertex,codex:chatgpt"
+        )

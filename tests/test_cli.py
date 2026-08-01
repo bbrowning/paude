@@ -379,13 +379,15 @@ class TestAgentsProvidersLists:
                 "gascity,claude,codex",
                 "--providers",
                 "vertex,chatgpt",
+                "--agent-provider",
+                "codex=chatgpt",
                 "--dry-run",
             ],
         )
         assert result.exit_code == 0
         out = _strip_ansi(result.stdout)
         assert "agents: gascity, claude, codex" in out
-        assert "providers: vertex, chatgpt" in out
+        assert "credential providers: vertex, chatgpt" in out
         # Derived per-agent providers.
         assert "gascity -> vertex" in out
         assert "claude -> vertex" in out
@@ -406,13 +408,21 @@ class TestAgentsProvidersLists:
         assert result.exit_code == 0
         assert "agents: gascity" in _strip_ansi(result.stdout)
 
-    def test_agents_deduplicated(self):
-        """Duplicate agents are removed, preserving order."""
+    @patch("paude.dry_run.show_dry_run")
+    def test_single_gascity_install_is_exact(self, mock_show: MagicMock):
+        """Gas City no longer expands implicit child CLIs during creation."""
+        result = runner.invoke(app, ["create", "--agent", "gascity", "--dry-run"])
+
+        assert result.exit_code == 0
+        assert mock_show.call_args.kwargs["composition"].names == ["gascity"]
+
+    def test_duplicate_agents_rejected(self):
+        """Duplicate installed agents fail clearly."""
         result = runner.invoke(
             app, ["create", "--agents", "claude,claude,codex", "--dry-run"]
         )
-        assert result.exit_code == 0
-        assert "agents: claude, codex" in _strip_ansi(result.stdout)
+        assert result.exit_code != 0
+        assert "Duplicate agent" in _strip_ansi(result.output)
 
     def test_agent_and_agents_conflict(self):
         """Passing both --agent and --agents fails with a clear message."""
@@ -422,8 +432,8 @@ class TestAgentsProvidersLists:
         assert result.exit_code != 0
         assert "not both" in _strip_ansi(result.output)
 
-    def test_provider_and_providers_conflict(self):
-        """Passing both --provider and --providers fails with a clear message."""
+    def test_provider_and_providers_are_independent(self):
+        """Primary mapping shorthand can use an explicit credential set."""
         result = runner.invoke(
             app,
             [
@@ -431,12 +441,56 @@ class TestAgentsProvidersLists:
                 "--provider",
                 "vertex",
                 "--providers",
-                "chatgpt",
+                "vertex,openai",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        out = _strip_ansi(result.output)
+        assert "credential providers: vertex, openai" in out
+        assert "claude -> vertex" in out
+
+    def test_provider_and_agent_provider_conflict(self):
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--provider",
+                "vertex",
+                "--agent-provider",
+                "claude=anthropic",
                 "--dry-run",
             ],
         )
         assert result.exit_code != 0
         assert "not both" in _strip_ansi(result.output)
+
+    @pytest.mark.parametrize(
+        "mapping",
+        ["codex", "=openai", "codex=", "codex=openai=extra"],
+    )
+    def test_malformed_agent_provider_rejected(self, mapping: str):
+        result = runner.invoke(
+            app,
+            ["create", "--agent-provider", mapping, "--dry-run"],
+        )
+        assert result.exit_code != 0
+        assert "expected AGENT=PROVIDER" in _strip_ansi(result.output)
+
+    def test_duplicate_agent_provider_mapping_rejected(self):
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--agents",
+                "claude,codex",
+                "--agent-provider",
+                "codex=openai,codex=chatgpt",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "Duplicate provider mapping" in _strip_ansi(result.output)
 
     def test_unknown_agent_rejected(self):
         """An unknown agent name in --agents is rejected."""
@@ -447,17 +501,26 @@ class TestAgentsProvidersLists:
 
     @patch("paude.cli.create_podman.create_podman_session")
     @patch("paude.cli.create._prepare_session_create")
-    def test_multi_agent_real_create_warns(self, mock_prepare, mock_create):
-        """A real (non-dry-run) create with >1 agent warns and drops extras."""
+    def test_multi_agent_real_create_passes_full_composition(
+        self, mock_prepare, mock_create
+    ):
+        """A real create passes every requested agent and provider onward."""
         mock_prepare.return_value = ([], [], {}, False)
         result = runner.invoke(app, ["create", "--agents", "claude,codex,gascity"])
         assert result.exit_code == 0
         out = _strip_ansi(result.output)
-        assert "multi-agent creation is not yet supported" in out
-        assert "codex, gascity" in out
-        # Only the primary agent is actually created.
+        assert "multi-agent creation is not yet supported" not in out
         mock_create.assert_called_once()
         assert mock_create.call_args.kwargs["agent_name"] == "claude"
+        assert mock_create.call_args.kwargs["agent_providers"] == [
+            ("claude", "vertex"),
+            ("codex", "chatgpt"),
+            ("gascity", "vertex"),
+        ]
+        assert mock_create.call_args.kwargs["credential_providers"] == [
+            "vertex",
+            "chatgpt",
+        ]
 
     @patch("paude.cli.create_podman.create_podman_session")
     @patch("paude.cli.create._prepare_session_create")
@@ -486,10 +549,10 @@ class TestAgentsProvidersLists:
 
     @patch("paude.cli.create_podman.create_podman_session")
     @patch("paude.cli.create._prepare_session_create")
-    def test_unused_explicit_provider_warns_on_real_create(
+    def test_explicit_mappings_and_extra_credentials_pass_to_create(
         self, mock_prepare, mock_create
     ):
-        """A real create warns when an explicit --providers entry goes unused."""
+        """Mappings and extra credentials remain independent."""
         mock_prepare.return_value = ([], [], {}, False)
         result = runner.invoke(
             app,
@@ -498,34 +561,40 @@ class TestAgentsProvidersLists:
                 "--agents",
                 "claude,codex",
                 "--providers",
-                "anthropic,openai",
+                "anthropic,openai,vertex",
+                "--agent-provider",
+                "claude=anthropic,codex=openai",
             ],
         )
         assert result.exit_code == 0
-        out = _strip_ansi(result.output)
-        assert "not used by any agent" in out
-        assert "openai" in out
         mock_create.assert_called_once()
+        assert mock_create.call_args.kwargs["agent_providers"] == [
+            ("claude", "anthropic"),
+            ("codex", "openai"),
+        ]
+        assert mock_create.call_args.kwargs["credential_providers"] == [
+            "anthropic",
+            "openai",
+            "vertex",
+        ]
 
     @patch("paude.cli.create_podman.create_podman_session")
     @patch("paude.cli.create._prepare_session_create")
-    def test_single_agent_unused_provider_warns_on_real_create(
-        self, mock_prepare, mock_create
-    ):
-        """A real create with one agent still warns about unused --providers entries."""
+    def test_single_agent_extra_provider_is_allowed(self, mock_prepare, mock_create):
+        """An extra credential provider need not map to an agent."""
         mock_prepare.return_value = ([], [], {}, False)
         result = runner.invoke(
             app, ["create", "--agents", "claude", "--providers", "vertex,openai"]
         )
         assert result.exit_code == 0
-        out = _strip_ansi(result.output)
-        assert "multi-agent creation is not yet supported" not in out
-        assert "not used by any agent" in out
-        assert "openai" in out
         mock_create.assert_called_once()
+        assert mock_create.call_args.kwargs["credential_providers"] == [
+            "vertex",
+            "openai",
+        ]
 
-    def test_unused_explicit_provider_not_shown_in_dry_run(self):
-        """A --providers entry unused by any agent doesn't appear in the preview."""
+    def test_extra_credential_provider_shown_in_dry_run(self):
+        """Dry-run shows the exact credential-provider set."""
         result = runner.invoke(
             app,
             [
@@ -533,14 +602,13 @@ class TestAgentsProvidersLists:
                 "--agents",
                 "claude,codex",
                 "--providers",
-                "anthropic,openai",
+                "vertex,chatgpt,openai",
                 "--dry-run",
             ],
         )
         assert result.exit_code == 0
         out = _strip_ansi(result.stdout)
-        assert "providers: anthropic, chatgpt" in out
-        assert "openai" not in out
+        assert "credential providers: vertex, chatgpt, openai" in out
         assert "codex -> chatgpt" in out
 
 

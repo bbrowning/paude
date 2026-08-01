@@ -7,13 +7,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from paude.agents import get_agents
 from paude.backends.base import SessionConfig
 from paude.backends.labels import (
     PAUDE_LABEL_AGENT,
+    PAUDE_LABEL_AGENT_PROVIDERS,
     PAUDE_LABEL_APP,
     PAUDE_LABEL_CREATED,
     PAUDE_LABEL_DOMAINS,
     PAUDE_LABEL_FORWARD_PORTS,
+    PAUDE_LABEL_PROVIDERS,
     PAUDE_LABEL_PROXY_IMAGE,
     PAUDE_LABEL_SESSION,
     PAUDE_LABEL_WORKSPACE,
@@ -27,9 +30,12 @@ from paude.backends.podman import (
 from paude.backends.podman.helpers import (
     build_session_from_container,
     find_container_by_session_name,
+    get_session_composition,
+    get_session_credential_providers,
     get_session_forward_ports,
 )
 from paude.backends.podman.session_setup import SessionSetup
+from paude.backends.proxy_config import ProxyCredentials
 from paude.backends.session_env import decode_path as _decode_path_raw
 from paude.backends.session_env import encode_path as _encode_path_raw
 
@@ -1149,6 +1155,46 @@ class TestPodmanBackendStartSessionWithProxy:
         mock_runner.start_container.assert_called_once()
 
 
+class TestComposedCodexAuthentication:
+    """Tests for Codex authentication selection in composed sessions."""
+
+    @pytest.mark.parametrize(
+        ("codex_provider", "expected_chatgpt_mode"),
+        [("openai", False), ("chatgpt", True)],
+    )
+    @patch("paude.backends.podman.session_setup.get_session_composition")
+    def test_codex_profile_uses_codex_provider_only(
+        self,
+        mock_composition: MagicMock,
+        codex_provider: str,
+        expected_chatgpt_mode: bool,
+    ) -> None:
+        """Another ChatGPT agent must not switch Codex's configured provider."""
+        composition = get_agents(
+            ["codex", "opencode"],
+            providers={"codex": codex_provider, "opencode": "chatgpt"},
+            include_bundled=False,
+        )
+        mock_composition.return_value = composition
+        runner = MagicMock()
+        engine = MagicMock()
+        setup = SessionSetup(runner, engine)
+        setup.gather_proxy_credentials = MagicMock(  # type: ignore[method-assign]
+            return_value=ProxyCredentials(chatgpt_oauth_mode=True)
+        )
+        setup.inject_stub_credentials = MagicMock()  # type: ignore[method-assign]
+        setup.inject_codex_auth = MagicMock()  # type: ignore[method-assign]
+        setup.sync_host_config = MagicMock()  # type: ignore[method-assign]
+        setup.sync_sandbox_config = MagicMock()  # type: ignore[method-assign]
+        proxy = MagicMock()
+
+        setup.start_session_containers("session", "container", proxy)
+
+        setup.inject_codex_auth.assert_called_once_with(
+            "container", chatgpt_mode=expected_chatgpt_mode
+        )
+
+
 class TestPodmanBackendStopSessionWithProxy:
     """Tests for stop_session proxy lifecycle."""
 
@@ -1852,8 +1898,7 @@ class TestForwardPortsPersistence:
         )
         labels = SessionSetup.build_session_labels(config, "s", "2026-01-01")
         assert (
-            labels[PAUDE_LABEL_FORWARD_PORTS]
-            == "127.0.0.1:8372:8372,0.0.0.0:8080:80"
+            labels[PAUDE_LABEL_FORWARD_PORTS] == "127.0.0.1:8372:8372,0.0.0.0:8080:80"
         )
 
     def test_build_session_labels_omits_forward_ports_when_empty(self) -> None:
@@ -1861,6 +1906,58 @@ class TestForwardPortsPersistence:
         config = SessionConfig(name="s", workspace=Path("/tmp/ws"), image="img")
         labels = SessionSetup.build_session_labels(config, "s", "2026-01-01")
         assert PAUDE_LABEL_FORWARD_PORTS not in labels
+
+    def test_composition_label_round_trips_agent_providers(self) -> None:
+        config = SessionConfig(
+            name="s",
+            workspace=Path("/tmp/ws"),
+            image="img",
+            agent="gascity",
+            provider="vertex",
+            agent_providers=[
+                ("gascity", "vertex"),
+                ("claude", "vertex"),
+                ("codex", "chatgpt"),
+            ],
+            credential_providers=["vertex", "chatgpt", "openai"],
+        )
+        labels = SessionSetup.build_session_labels(config, "s", "2026-01-01")
+
+        runner = MagicMock()
+        runner.list_containers.return_value = [{"Labels": labels}]
+        composition = get_session_composition(runner, "s")
+
+        assert labels[PAUDE_LABEL_AGENT_PROVIDERS]
+        assert labels[PAUDE_LABEL_PROVIDERS]
+        assert composition.names == ["gascity", "claude", "codex"]
+        assert [item.config.provider for item in composition.agents] == [
+            "vertex",
+            "vertex",
+            "chatgpt",
+        ]
+        assert get_session_credential_providers(runner, "s") == [
+            "vertex",
+            "chatgpt",
+            "openai",
+        ]
+
+    def test_legacy_session_derives_credentials_from_mappings(self) -> None:
+        config = SessionConfig(
+            name="s",
+            workspace=Path("/tmp/ws"),
+            image="img",
+            agent="claude",
+            agent_providers=[("claude", "anthropic"), ("codex", "openai")],
+        )
+        labels = SessionSetup.build_session_labels(config, "s", "2026-01-01")
+        labels.pop(PAUDE_LABEL_PROVIDERS)
+        runner = MagicMock()
+        runner.list_containers.return_value = [{"Labels": labels}]
+
+        assert get_session_credential_providers(runner, "s") == [
+            "anthropic",
+            "openai",
+        ]
 
     def test_get_session_forward_ports_decodes_label(self) -> None:
         """get_session_forward_ports decodes the persisted label."""
@@ -1878,9 +1975,7 @@ class TestForwardPortsPersistence:
     def test_get_session_forward_ports_empty_without_label(self) -> None:
         """No label yields an empty list."""
         runner = MagicMock()
-        runner.list_containers.return_value = [
-            {"Labels": {PAUDE_LABEL_SESSION: "s"}}
-        ]
+        runner.list_containers.return_value = [{"Labels": {PAUDE_LABEL_SESSION: "s"}}]
         assert get_session_forward_ports(runner, "s") == []
 
     def test_collect_forward_ports_merges_and_dedups(self) -> None:

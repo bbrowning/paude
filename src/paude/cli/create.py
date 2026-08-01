@@ -7,11 +7,11 @@ from typing import Annotated
 
 import typer
 
-from paude.agents import get_agent
+from paude.agents import get_agent, get_agents
 from paude.cli.app import BackendType, app
 from paude.cli.helpers import (
-    _expand_allowed_domains,
     _parse_agent_args,
+    _parse_agent_provider_options,
     _prepare_session_create,
     _split_list_option,
 )
@@ -113,8 +113,8 @@ def session_create(
         typer.Option(
             "--provider",
             help=(
-                "Inference provider (e.g., vertex, openai, anthropic). "
-                "Alias for a single-item --providers."
+                "Provider mapping for the primary agent (e.g., vertex, openai). "
+                "Cannot be combined with --agent-provider."
             ),
         ),
     ] = None,
@@ -123,8 +123,18 @@ def session_create(
         typer.Option(
             "--providers",
             help=(
-                "Inference providers (comma-separated and/or repeatable), "
-                "e.g. --providers vertex,chatgpt. Cannot be combined with "
+                "Credential providers to configure in the proxy and container "
+                "(comma-separated and/or repeatable)."
+            ),
+        ),
+    ] = None,
+    agent_provider: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--agent-provider",
+            help=(
+                "Map an installed agent to a provider as AGENT=PROVIDER. "
+                "Comma-separated and/or repeatable. Cannot be combined with "
                 "--provider."
             ),
         ),
@@ -225,12 +235,14 @@ def session_create(
 
     # Resolve layered configuration
     try:
+        cli_agent_providers = _parse_agent_provider_options(agent_provider)
         resolved = resolve_create_options(
             cli_backend=backend.value if backend is not None else None,
             cli_agent=agent,
             cli_provider=provider,
             cli_agents=cli_agents,
             cli_providers=cli_providers,
+            cli_agent_providers=cli_agent_providers,
             cli_yolo=yolo,
             cli_git=git,
             cli_platform=platform,
@@ -255,6 +267,16 @@ def session_create(
     # Empty string means explicitly disabled via --no-gpu
     r_gpu = resolved.gpu.value or None
     r_otel_endpoint = resolved.otel_endpoint.value
+
+    try:
+        composition = get_agents(
+            [agent for agent, _provider in resolved.agent_providers],
+            providers=dict(resolved.agent_providers),
+            include_bundled=False,
+        )
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
 
     # Parse forwarded port specs into (host_ip, host_port, container_port) tuples
     from paude.backends.port_forward_utils import parse_forward_port_specs
@@ -282,17 +304,19 @@ def session_create(
 
     # Handle dry-run mode
     if dry_run:
-        from paude.cli.helpers import _get_provider_aliases
         from paude.dry_run import show_dry_run
 
         parsed_args = _parse_agent_args(claude_args)
-        agent_instance = get_agent(r_agent, provider=r_provider)
-
-        expanded = _expand_allowed_domains(
-            r_allowed_domains,
-            extra_aliases=agent_instance.config.extra_domain_aliases,
-            provider_aliases=_get_provider_aliases(r_provider, r_agent),
-            required_aliases=agent_instance.config.required_domain_aliases,
+        expanded, _parsed, _env, _unrestricted = _prepare_session_create(
+            allowed_domains=r_allowed_domains,
+            yolo=r_yolo,
+            claude_args=claude_args,
+            config_obj=config,
+            agent_name=r_agent,
+            provider_name=r_provider,
+            otel_endpoint=r_otel_endpoint,
+            composition=composition,
+            credential_providers=resolved.providers,
         )
         show_dry_run(
             flags={
@@ -302,28 +326,9 @@ def session_create(
                 "claude_args": parsed_args,
             },
             resolved=resolved,
+            composition=composition,
         )
         raise typer.Exit()
-
-    # Multi-agent creation is not yet supported: a real (non-dry-run) create
-    # launches only the primary agent. Warn so extra agents aren't dropped
-    # silently -- use --dry-run to preview the full multi-agent resolution.
-    if len(resolved.agents) > 1:
-        dropped = ", ".join(resolved.agents[1:])
-        typer.echo(
-            "Warning: multi-agent creation is not yet supported; creating only "
-            f"the primary agent '{r_agent}'. Ignoring: {dropped}. "
-            "Use --dry-run to preview the full multi-agent resolution.",
-            err=True,
-        )
-
-    if resolved.dropped_providers:
-        dropped_providers = ", ".join(resolved.dropped_providers)
-        typer.echo(
-            "Warning: some --providers entries are not used by any agent; "
-            f"ignoring: {dropped_providers}.",
-            err=True,
-        )
 
     if ssh_key and not host:
         typer.echo(
@@ -361,6 +366,8 @@ def session_create(
         agent_name=r_agent,
         provider_name=r_provider,
         otel_endpoint=r_otel_endpoint,
+        composition=composition,
+        credential_providers=resolved.providers,
     )
 
     # Compute OTEL proxy ports (non-standard ports to allow through proxy)
@@ -387,6 +394,8 @@ def session_create(
         platform=r_platform,
         agent_name=r_agent,
         provider_name=r_provider,
+        agent_providers=resolved.agent_providers,
+        credential_providers=resolved.providers,
         engine_binary=r_backend.value,
         ssh_host=parsed_ssh_host,
         ssh_key=ssh_key,

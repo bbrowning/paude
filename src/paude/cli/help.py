@@ -141,7 +141,7 @@ _SECTIONS: tuple[HelpSection, ...] = (
             "User defaults: ~/.config/paude/defaults.json"
             " (backend, yolo, git, domains, etc.)\n"
             'Project hints: paude.json "create" section'
-            " (allowed-domains, agent, provider, agents, providers,"
+            " (allowed-domains, agent, provider, agents, providers, agent-providers,"
             " forward-ports)"
         ),
     ),
@@ -172,14 +172,16 @@ _SECTIONS: tuple[HelpSection, ...] = (
             ("--agent openclaw", "OpenClaw (web UI on port 18789)"),
             (
                 "--agents a,b,c",
-                "Preview multiple agents with --dry-run; a real create uses "
-                "only the primary (first)",
+                "Install multiple agents; first is primary and launches",
             ),
             ("", ""),
             (
                 "--providers x,y",
-                "Provider pool (comma-separated/repeatable); only the "
-                "primary agent's default is overridden",
+                "Configure provider credentials in the proxy/container",
+            ),
+            (
+                "--agent-provider a=p",
+                "Map an installed agent to a provider; repeatable",
             ),
             ("--provider vertex", "Vertex AI (default for claude, openclaw)"),
             ("--provider anthropic", "Anthropic API"),

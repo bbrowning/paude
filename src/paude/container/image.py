@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 from paude import __version__
-from paude.agents.base import Agent
+from paude.agents.base import Agent, AgentComposition
 from paude.config.claude_layer import generate_claude_layer_dockerfile
 from paude.config.models import PaudeConfig
 from paude.container.build_context import (
@@ -41,6 +41,7 @@ class ImageManager:
         script_dir: Path | None = None,
         platform: str | None = None,
         agent: Agent | None = None,
+        composition: AgentComposition | None = None,
         engine: ContainerEngine | None = None,
     ):
         self.script_dir = script_dir
@@ -48,11 +49,16 @@ class ImageManager:
         self.registry = os.environ.get("PAUDE_REGISTRY", "quay.io/bbrowning")
         self.version = __version__
         self.platform = platform if platform is not None else _detect_native_platform()
-        if agent is None:
-            from paude.agents import get_agent
+        if composition is not None:
+            resolved_agent = composition.primary
+        else:
+            if agent is None:
+                from paude.agents import get_agent
 
-            agent = get_agent("claude")
-        self.agent = agent
+                agent = get_agent("claude")
+            resolved_agent = agent
+        self.composition = composition
+        self.agent: Agent = resolved_agent
         self._engine = engine or ContainerEngine()
 
     def ensure_default_image(self, force_rebuild: bool = False) -> str:
@@ -79,7 +85,10 @@ class ImageManager:
 
         empty_config = PaudeConfig()
         dockerfile_content = generate_dockerfile_content(
-            empty_config, using_default_paude_image=False, agent=self.agent
+            empty_config,
+            using_default_paude_image=False,
+            agent=self.agent,
+            composition=self.composition,
         )
 
         layer_hash = compute_content_hash(
@@ -164,7 +173,9 @@ class ImageManager:
         """Ensure the runtime image (with agent installed) is available."""
         import sys
 
-        layer_content = generate_claude_layer_dockerfile(agent=self.agent)
+        layer_content = generate_claude_layer_dockerfile(
+            agent=self.agent, composition=self.composition
+        )
         layer_hash = compute_content_hash(
             base_image.encode(),
             self.version.encode(),
@@ -220,7 +231,7 @@ class ImageManager:
         import sys
 
         entrypoint = resolve_entrypoint(self.script_dir)
-        agent_name = self.agent.config.name if self.agent else None
+        agent_name = self._composition_fingerprint()
         effective_base = config.base_image
         if not effective_base and self.agent and self.agent.config.default_base_image:
             effective_base = self.agent.config.default_base_image
@@ -246,7 +257,10 @@ class ImageManager:
         print("Building workspace image...", file=sys.stderr)
         base_image, using_default = self._resolve_custom_base(config, config_hash)
         dockerfile_content = generate_dockerfile_content(
-            config, using_default, agent=self.agent
+            config,
+            using_default,
+            agent=self.agent,
+            composition=self.composition,
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -263,6 +277,15 @@ class ImageManager:
 
         print(f"Build complete (cached as {tag})", file=sys.stderr)
         return tag
+
+    def _composition_fingerprint(self) -> str | None:
+        """Return a stable image-cache identity for the installed agents."""
+        if self.composition is None:
+            return self.agent.config.name if self.agent else None
+        return ",".join(
+            f"{agent.config.name}:{agent.config.provider or ''}"
+            for agent in self.composition.agents
+        )
 
     def _resolve_custom_base(
         self, config: PaudeConfig, config_hash: str

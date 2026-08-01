@@ -10,7 +10,7 @@ from paude.constants import CONTAINER_ENTRYPOINT, CONTAINER_HOME
 TMUX_VERSION = "3.5a"
 
 if TYPE_CHECKING:
-    from paude.agents.base import Agent
+    from paude.agents.base import Agent, AgentComposition
 
 
 def _package_install_lines(packages: list[str]) -> list[str]:
@@ -35,6 +35,7 @@ def generate_pip_install_dockerfile(
     config: PaudeConfig,
     include_claude_install: bool = False,
     agent: Agent | None = None,
+    composition: AgentComposition | None = None,
 ) -> str:
     """Generate a minimal Dockerfile that layers on a paude base image.
 
@@ -64,17 +65,27 @@ def generate_pip_install_dockerfile(
         lines.extend(_package_install_lines(config.packages))
 
     if include_claude_install:
-        if agent is None:
+        if composition is None and agent is None:
             from paude.agents import get_agent
 
             agent = get_agent("claude")
 
-        from paude.agents import dockerfile_install_lines_for_agent
+        from paude.agents import (
+            dockerfile_install_lines_for_agent,
+            dockerfile_install_lines_for_composition,
+        )
 
         # Install the agent plus any bundled toolchains, so composite agents
         # like gascity ship every bundled CLI. The composer emits the trailing
         # USER paude / WORKDIR footer.
-        lines.extend(dockerfile_install_lines_for_agent(agent, CONTAINER_HOME))
+        if composition is not None:
+            lines.extend(
+                dockerfile_install_lines_for_composition(composition, CONTAINER_HOME)
+            )
+        else:
+            if agent is None:
+                raise ValueError("An agent is required when no composition is provided")
+            lines.extend(dockerfile_install_lines_for_agent(agent, CONTAINER_HOME))
     else:
         lines.append("")
         lines.append("USER paude")
@@ -86,6 +97,7 @@ def generate_pip_install_dockerfile(
 def generate_workspace_dockerfile(
     config: PaudeConfig,
     agent: Agent | None = None,
+    composition: AgentComposition | None = None,
 ) -> str:
     """Generate a Dockerfile that wraps the user's base image with paude requirements.
 
@@ -187,16 +199,24 @@ RUN if ! command -v tini >/dev/null 2>&1; then \\
 
     lines.append("")
     lines.append("# Create the fixed non-root runtime user")
-    if agent is None:
+    if composition is None and agent is None:
         from paude.agents import get_agent
 
         agent = get_agent("claude")
 
-    config_dir = agent.config.config_dir_name
+    if composition is not None:
+        install_agents = composition.agents
+    elif agent is not None:
+        install_agents = [agent]
+    else:
+        raise ValueError("An agent is required when no composition is provided")
+    config_dirs = list(
+        dict.fromkeys(item.config.config_dir_name for item in install_agents)
+    )
     lines.append(
         "RUN (id paude >/dev/null 2>&1 || (groupadd paude 2>/dev/null && useradd -M -d /home/paude -s /bin/bash -g paude paude 2>/dev/null) || adduser -D -s /bin/bash paude) && "
         "umask 0002 && "
-        f"mkdir -p {CONTAINER_HOME}/{config_dir} {CONTAINER_HOME}/.config {CONTAINER_HOME}/.paude && "
+        f"mkdir -p {' '.join(f'{CONTAINER_HOME}/{directory}' for directory in config_dirs)} {CONTAINER_HOME}/.config {CONTAINER_HOME}/.paude && "
         f"chown -R paude {CONTAINER_HOME}"
     )
 
@@ -213,11 +233,21 @@ RUN if ! command -v tini >/dev/null 2>&1; then \\
         " /usr/local/bin/patch-openclaw-otel-logs.sh"
     )
 
-    from paude.agents import dockerfile_install_lines_for_agent
+    from paude.agents import (
+        dockerfile_install_lines_for_agent,
+        dockerfile_install_lines_for_composition,
+    )
 
     # Install the agent plus any bundled toolchains, so composite agents like
     # gascity ship every bundled CLI.
-    lines.extend(dockerfile_install_lines_for_agent(agent, CONTAINER_HOME))
+    if composition is not None:
+        lines.extend(
+            dockerfile_install_lines_for_composition(composition, CONTAINER_HOME)
+        )
+    else:
+        if agent is None:
+            raise ValueError("An agent is required when no composition is provided")
+        lines.extend(dockerfile_install_lines_for_agent(agent, CONTAINER_HOME))
 
     lines.append("")
     lines.append("# Copy entrypoints and tmux config (requires root)")

@@ -35,6 +35,8 @@ class RegistryEntry:
     workspace: str
     agent: str
     created_at: str
+    agent_providers: list[tuple[str, str]] | None = None
+    credential_providers: list[str] | None = None
     engine: str = "podman"
     ssh_host: str | None = None
     ssh_key: str | None = None
@@ -50,6 +52,8 @@ class RegistryEntry:
             created_at=self.created_at,
             backend_type=self.backend_type,
             agent=self.agent,
+            agent_providers=self.agent_providers or [],
+            credential_providers=self.credential_providers or [],
             version=self.paude_version,
         )
 
@@ -135,6 +139,8 @@ class SessionRegistry:
             backend_type=session.backend_type,
             workspace=str(session.workspace),
             agent=session.agent,
+            agent_providers=session.agent_providers or [],
+            credential_providers=session.credential_providers or [],
             created_at=session.created_at or datetime.now(UTC).isoformat(),
             engine=engine,
             ssh_host=ssh_host,

@@ -324,6 +324,16 @@ class AgentComposition:
         """Return the install-set agent names, in install order."""
         return [agent.config.name for agent in self.agents]
 
+    @property
+    def exposed_ports(self) -> list[tuple[int, int]]:
+        """Return deduplicated ports declared by any installed agent."""
+        ports: list[tuple[int, int]] = []
+        for agent in self.agents:
+            for port in agent.config.exposed_ports:
+                if port not in ports:
+                    ports.append(port)
+        return ports
+
 
 _PREREQ_INSTALL_MARKERS = (
     "dnf install",
@@ -377,7 +387,16 @@ def compose_dockerfile_install_lines(
     Returns:
         Combined, deduplicated list of Dockerfile instruction lines.
     """
-    combined: list[str] = []
+    config_dirs = list(
+        dict.fromkeys(
+            f"{container_home}/{agent.config.config_dir_name}" for agent in agents
+        )
+    )
+    combined: list[str] = [
+        "",
+        "# Create persistent configuration directories for every installed agent",
+        f"RUN mkdir -p {' '.join(config_dirs)} && chown -R paude {container_home}",
+    ]
     seen_prereqs: set[str] = set()
     for agent in agents:
         for line in agent.dockerfile_install_lines(container_home):

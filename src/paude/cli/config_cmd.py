@@ -78,6 +78,12 @@ def config_show() -> None:
     for name, setting in settings:
         typer.echo(format_setting(name, setting))
 
+    typer.echo(f"  agents: {', '.join(resolved.agents)}")
+    typer.echo(f"  credential providers: {', '.join(resolved.providers)}")
+    typer.echo("  agent-provider mappings:")
+    for agent, provider in resolved.agent_providers:
+        typer.echo(f"    {agent} -> {provider}")
+
     # Domains
     if resolved.allowed_domains:
         typer.echo("  allowed-domains:")
@@ -107,6 +113,9 @@ def config_init() -> None:
             "backend": None,
             "agent": None,
             "provider": None,
+            "agents": [],
+            "providers": [],
+            "agent-providers": {},
             "yolo": None,
             "git": None,
             "platform": None,

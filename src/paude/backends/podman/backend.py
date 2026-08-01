@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from paude.agents.base import AgentComposition
 from paude.backends.base import Session, SessionConfig
 from paude.backends.labels import (
     PAUDE_LABEL_APP,
@@ -22,6 +23,7 @@ from paude.backends.podman.helpers import (
     container_name,
     find_container_by_session_name,
     get_session_agent,
+    get_session_composition,
     get_session_forward_ports,
     network_name,
     proxy_container_name,
@@ -97,16 +99,29 @@ class PodmanBackend:
             print(f"Creating volume {vname}...", file=sys.stderr)
             self._volume_manager.create_volume(vname, labels=labels)
 
-        from paude.agents import get_agent
+        from paude.agents import get_agent, get_agent_composition, get_agents
 
-        agent = get_agent(config.agent, provider=config.provider)
-        network, proxy_ip = self._create_session_proxy(config, name, agent, vname)
+        if config.agent_providers:
+            composition = get_agents(
+                [agent for agent, _provider in config.agent_providers],
+                providers={
+                    agent: provider
+                    for agent, provider in config.agent_providers
+                    if provider
+                },
+                include_bundled=False,
+            )
+        else:
+            composition = get_agent_composition(
+                get_agent(config.agent, provider=config.provider)
+            )
+        network, proxy_ip = self._create_session_proxy(config, name, composition, vname)
         try:
             self._setup.create_session_container(
                 config,
                 cname,
                 name,
-                agent,
+                composition,
                 labels,
                 network,
                 proxy_ip,
@@ -125,13 +140,15 @@ class PodmanBackend:
             container_id=cname,
             volume_name=vname,
             agent=config.agent,
+            agent_providers=config.agent_providers,
+            credential_providers=config.credential_providers,
         )
 
     def _create_session_proxy(
         self,
         config: SessionConfig,
         session_name: str,
-        agent: Agent,
+        composition: AgentComposition,
         vname: str,
     ) -> tuple[str | None, str | None]:
         """Set up proxy for session creation, return (network, proxy_ip)."""
@@ -139,7 +156,7 @@ class PodmanBackend:
             return None, None
         try:
             network, proxy_ip, _creds = self._setup.setup_proxy_for_session(
-                self._proxy, config, session_name, agent
+                self._proxy, config, session_name, composition
             )
         except Exception:
             if not config.reuse_volume:
@@ -239,34 +256,47 @@ class PodmanBackend:
         print(f"Starting session '{name}'...", file=sys.stderr)
 
         agent = self._setup.start_session_containers(name, cname, self._proxy)
+        composition = get_session_composition(self._runner, name)
 
-        return self._attach_with_port_forward(name, cname, agent)
+        return self._attach_with_port_forward(name, cname, agent, composition)
 
-    def _attach_with_port_forward(self, name: str, cname: str, agent: Agent) -> int:
+    def _attach_with_port_forward(
+        self,
+        name: str,
+        cname: str,
+        agent: Agent,
+        composition: AgentComposition | None = None,
+    ) -> int:
         """Start port forwarding, attach to container, and clean up on exit."""
-        ports = self._collect_forward_ports(name, agent)
+        runtime = composition or agent
+        ports = self._collect_forward_ports(name, runtime)
         if ports:
             self._port_forward.start(name, cname, ports)
-        self._setup.print_port_urls(name, agent)
+        self._setup.print_port_urls(name, runtime)
         try:
             exit_code = self._runner.attach_container(
                 cname,
                 entrypoint=CONTAINER_ENTRYPOINT,
-                extra_env=self._setup.build_attach_env(agent),
+                extra_env=self._setup.build_attach_env(runtime),
             )
         finally:
             self._port_forward.stop(name)
-        self._setup.print_port_urls(name, agent)
+        self._setup.print_port_urls(name, runtime)
         return exit_code
 
     def _collect_forward_ports(
-        self, name: str, agent: Agent
+        self, name: str, agent: Agent | AgentComposition
     ) -> list[tuple[str, int, int]]:
         """Merge agent-declared ports and user opt-in forwards for a session."""
         from paude.backends.port_forward_utils import merge_forward_ports
 
         user_ports = get_session_forward_ports(self._runner, name)
-        return merge_forward_ports(user_ports, agent.config.exposed_ports)
+        declared = (
+            agent.exposed_ports
+            if isinstance(agent, AgentComposition)
+            else agent.config.exposed_ports
+        )
+        return merge_forward_ports(user_ports, declared)
 
     def stop_session(self, name: str) -> None:
         """Stop a session (preserves volume)."""
@@ -305,8 +335,13 @@ class PodmanBackend:
             return 1
 
         # Ensure proxy is running (recreates if missing)
-        agent = get_session_agent(self._runner, name)
-        proxy_creds = self._setup.gather_proxy_credentials(agent)
+        composition = get_session_composition(self._runner, name)
+        agent = composition.primary
+        from paude.backends.podman.helpers import get_session_credential_providers
+
+        proxy_creds = self._setup.gather_proxy_credentials(
+            composition, get_session_credential_providers(self._runner, name)
+        )
         self._proxy.start_if_needed(name, credentials=proxy_creds)
         self._proxy.distribute_ca_cert(name)
 
@@ -328,7 +363,8 @@ class PodmanBackend:
         self._setup.sync_sandbox_config(cname, name)
 
         print(f"Connecting to session '{name}'...", file=sys.stderr)
-        return self._attach_with_port_forward(name, cname, agent)
+        composition = get_session_composition(self._runner, name)
+        return self._attach_with_port_forward(name, cname, agent, composition)
 
     def list_sessions(self) -> list[Session]:
         """List all sessions."""
@@ -383,8 +419,12 @@ class PodmanBackend:
     def update_allowed_domains(self, name: str, domains: list[str]) -> None:
         """Update allowed domains for a session."""
         require_session(self._runner, name)
-        agent = get_session_agent(self._runner, name)
-        proxy_creds = self._setup.gather_proxy_credentials(agent)
+        composition = get_session_composition(self._runner, name)
+        from paude.backends.podman.helpers import get_session_credential_providers
+
+        proxy_creds = self._setup.gather_proxy_credentials(
+            composition, get_session_credential_providers(self._runner, name)
+        )
         self._proxy.update_domains(name, domains, credentials=proxy_creds)
 
     def exec_in_session(self, name: str, command: str) -> tuple[int, str, str]:

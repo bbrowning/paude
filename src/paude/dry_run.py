@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import typer
 
@@ -18,10 +18,14 @@ from paude.config.resolver import (
 )
 from paude.domains import format_domains_for_display
 
+if TYPE_CHECKING:
+    from paude.agents.base import AgentComposition
+
 
 def show_dry_run(
     flags: dict[str, Any],
     resolved: ResolvedCreateOptions | None = None,
+    composition: AgentComposition | None = None,
 ) -> None:
     """Show configuration and what would be done without executing.
 
@@ -67,8 +71,15 @@ def show_dry_run(
                 typer.echo("")
                 typer.echo("Generated Dockerfile:")
                 typer.echo("-" * 40)
-                agent_instance = get_agent(flags.get("agent", "claude"))
-                dockerfile = generate_workspace_dockerfile(config, agent=agent_instance)
+                if composition is None:
+                    agent_instance = get_agent(flags.get("agent", "claude"))
+                    dockerfile = generate_workspace_dockerfile(
+                        config, agent=agent_instance
+                    )
+                else:
+                    dockerfile = generate_workspace_dockerfile(
+                        config, composition=composition
+                    )
                 for line in dockerfile.split("\n"):
                     typer.echo(f"  {line}")
                 typer.echo("-" * 40)
@@ -140,12 +151,12 @@ def _show_agents_and_providers(resolved: ResolvedCreateOptions) -> None:
     _show_provenance_groups(resolved.agents_provenance)
     typer.echo(format_setting("agent", resolved.agent))
 
-    # Providers list with provenance groups.
+    # Credential-provider set with provenance groups.
     if resolved.providers:
-        typer.echo(f"  providers: {', '.join(resolved.providers)}")
+        typer.echo(f"  credential providers: {', '.join(resolved.providers)}")
         _show_provenance_groups(resolved.providers_provenance)
     else:
-        typer.echo("  providers: (not set)  (built-in)")
+        typer.echo("  credential providers: (not set)  (built-in)")
 
     # The legacy scalar mirrors the primary agent's effective provider so it
     # doesn't contradict "per-agent providers" below when no explicit
@@ -157,7 +168,7 @@ def _show_agents_and_providers(resolved: ResolvedCreateOptions) -> None:
 
     # Derived per-agent provider mapping (first = primary).
     if resolved.agent_providers:
-        typer.echo("  per-agent providers:")
+        typer.echo("  agent-provider mappings:")
         for agent, provider in resolved.agent_providers:
             typer.echo(f"    {agent} -> {provider}")
 

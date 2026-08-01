@@ -146,6 +146,7 @@ def _parse_devcontainer(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
         create_provider=create_hints.provider,
         create_agents=create_hints.agents,
         create_providers=create_hints.providers,
+        create_agent_providers=create_hints.agent_providers,
         create_otel_endpoint=create_hints.otel_endpoint,
         create_forward_ports=create_hints.forward_ports,
     )
@@ -197,6 +198,7 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
         create_provider=create_hints.provider,
         create_agents=create_hints.agents,
         create_providers=create_hints.providers,
+        create_agent_providers=create_hints.agent_providers,
         create_otel_endpoint=create_hints.otel_endpoint,
         create_forward_ports=create_hints.forward_ports,
     )
@@ -208,6 +210,7 @@ _KNOWN_CREATE_KEYS = {
     "provider",
     "agents",
     "providers",
+    "agent-providers",
     "otel-endpoint",
     "forward-ports",
 }
@@ -222,6 +225,7 @@ class CreateHints:
     provider: str | None = None
     agents: list[str] = field(default_factory=list)
     providers: list[str] = field(default_factory=list)
+    agent_providers: dict[str, str] = field(default_factory=dict)
     otel_endpoint: str | None = None
     forward_ports: list[str] = field(default_factory=list)
 
@@ -243,6 +247,16 @@ def _parse_create_section(create_data: dict[str, Any]) -> CreateHints:
     allowed_domains = _string_list(create_data.get("allowed-domains", []))
     agents = _string_list(create_data.get("agents", []))
     providers = _string_list(create_data.get("providers", []))
+    raw_agent_providers = create_data.get("agent-providers", {})
+    agent_providers = (
+        {
+            key: value
+            for key, value in raw_agent_providers.items()
+            if isinstance(key, str) and isinstance(value, str)
+        }
+        if isinstance(raw_agent_providers, dict)
+        else {}
+    )
 
     agent = create_data.get("agent")
     if agent is not None and not isinstance(agent, str):
@@ -268,6 +282,7 @@ def _parse_create_section(create_data: dict[str, Any]) -> CreateHints:
         provider=provider,
         agents=agents,
         providers=providers,
+        agent_providers=agent_providers,
         otel_endpoint=otel_endpoint,
         forward_ports=forward_ports,
     )

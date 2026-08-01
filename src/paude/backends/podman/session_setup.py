@@ -6,12 +6,14 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from paude.agents.base import AgentComposition
 from paude.agents.codex import (
     CODEX_CHATGPT_PROFILE_TARGET,
     SYNTHETIC_CODEX_PROFILE_TOML,
 )
 from paude.backends.labels import (
     PAUDE_LABEL_AGENT,
+    PAUDE_LABEL_AGENT_PROVIDERS,
     PAUDE_LABEL_CREATED,
     PAUDE_LABEL_DOMAINS,
     PAUDE_LABEL_FORWARD_PORTS,
@@ -19,6 +21,7 @@ from paude.backends.labels import (
     PAUDE_LABEL_OTEL_ENDPOINT,
     PAUDE_LABEL_OTEL_PORTS,
     PAUDE_LABEL_PROVIDER,
+    PAUDE_LABEL_PROVIDERS,
     PAUDE_LABEL_PROXY_IMAGE,
     PAUDE_LABEL_SESSION,
     PAUDE_LABEL_VERSION,
@@ -27,7 +30,10 @@ from paude.backends.labels import (
 )
 from paude.backends.podman.helpers import (
     container_name,
-    get_session_agent,
+    encode_agent_providers,
+    encode_providers,
+    get_session_composition,
+    get_session_credential_providers,
     get_session_labels,
     proxy_container_name,
     volume_name,
@@ -52,7 +58,7 @@ from paude.container.engine import ContainerEngine
 from paude.container.runner import ContainerRunner
 
 if TYPE_CHECKING:
-    from paude.agents.base import Agent
+    from paude.agents.base import Agent, AgentComposition
     from paude.backends.base import SessionConfig
     from paude.backends.podman.proxy import PodmanProxyManager
 
@@ -64,9 +70,14 @@ class SessionSetup:
         self._runner = runner
         self._engine = engine
 
-    def get_port_urls(self, agent: Agent) -> list[str]:
+    def get_port_urls(self, agent: Agent | AgentComposition) -> list[str]:
         """Get port-forward URL strings for an agent."""
-        return [f"http://localhost:{hp}" for hp, _cp in agent.config.exposed_ports]
+        ports = (
+            agent.exposed_ports
+            if isinstance(agent, AgentComposition)
+            else agent.config.exposed_ports
+        )
+        return [f"http://localhost:{hp}" for hp, _cp in ports]
 
     def read_openclaw_token(self, cname: str) -> str | None:
         """Read the OpenClaw auth token from the container's config file."""
@@ -80,21 +91,33 @@ class SessionSetup:
             return token if token else None
         return None
 
-    def print_port_urls(self, session_name: str, agent: Agent) -> None:
+    def print_port_urls(
+        self, session_name: str, agent: Agent | AgentComposition
+    ) -> None:
         """Print access URLs for any exposed ports."""
         from paude.backends.session_env import enrich_port_url
 
+        agents = agent.agents if isinstance(agent, AgentComposition) else [agent]
         token = None
-        if agent.config.name == "openclaw":
-            token = self.read_openclaw_token(container_name(session_name))
-        for host_port, _container_port in agent.config.exposed_ports:
+        for item in agents:
+            if item.config.name == "openclaw":
+                token = self.read_openclaw_token(container_name(session_name))
+                break
+        ports = (
+            agent.exposed_ports
+            if isinstance(agent, AgentComposition)
+            else agent.config.exposed_ports
+        )
+        for host_port, _container_port in ports:
             url = enrich_port_url(f"http://localhost:{host_port}", token)
             print(
-                f"{agent.config.display_name} UI available at: {url}",
+                f"{agents[0].config.display_name} UI available at: {url}",
                 file=sys.stderr,
             )
 
-    def build_attach_env(self, agent: Agent) -> dict[str, str] | None:
+    def build_attach_env(
+        self, agent: Agent | AgentComposition
+    ) -> dict[str, str] | None:
         """Build extra environment for container attachment."""
         extra_env: dict[str, str] = {}
 
@@ -113,8 +136,7 @@ class SessionSetup:
     def sync_sandbox_config(self, cname: str, session_name: str) -> None:
         """Generate and write agent sandbox config script into container."""
         labels = get_session_labels(self._runner, session_name)
-        agent_name = str(labels.get(PAUDE_LABEL_AGENT, "claude"))
-        provider = labels.get(PAUDE_LABEL_PROVIDER) or None
+        composition = get_session_composition(self._runner, session_name)
         workspace = (
             self._runner.get_container_env(cname, "PAUDE_WORKSPACE")
             or CONTAINER_WORKSPACE
@@ -122,7 +144,7 @@ class SessionSetup:
         args = self._runner.get_container_env(cname, "PAUDE_AGENT_ARGS") or ""
         yolo = labels.get(PAUDE_LABEL_YOLO) == "1"
         content = generate_sandbox_config_script(
-            agent_name, workspace, args, provider=provider, yolo=yolo
+            composition, workspace, args, yolo=yolo
         )
         self._runner.inject_file(
             cname,
@@ -138,12 +160,17 @@ class SessionSetup:
 
         return local_gcp_adc_path()
 
-    def gather_proxy_credentials(self, agent: Agent) -> ProxyCredentials:
+    def gather_proxy_credentials(
+        self,
+        composition: AgentComposition,
+        credential_providers: list[str] | None = None,
+    ) -> ProxyCredentials:
         """Gather real credentials from host environment for the proxy container."""
         from paude.backends.proxy_config import gather_proxy_credentials
 
         return gather_proxy_credentials(
-            agent.config,
+            composition,
+            credential_providers=credential_providers,
             gcp_adc_path=self.local_adc_path(),
         )
 
@@ -197,16 +224,25 @@ class SessionSetup:
         Returns:
             The resolved agent.
         """
-        agent = get_session_agent(self._runner, name)
-        proxy_creds = self.gather_proxy_credentials(agent)
+        composition = get_session_composition(self._runner, name)
+        credential_providers = get_session_credential_providers(self._runner, name)
+        agent = composition.primary
+        proxy_creds = self.gather_proxy_credentials(composition, credential_providers)
         proxy.start_if_needed(name, credentials=proxy_creds)
         self._runner.start_container(cname)
         self.fix_volume_permissions(cname)
         proxy.distribute_ca_cert(name)
         self.inject_stub_credentials(cname)
-        if agent.config.name == "codex":
-            chatgpt = proxy_creds.chatgpt_oauth_mode
-            self.inject_codex_auth(cname, chatgpt_mode=chatgpt)
+        codex_agents = [
+            item for item in composition.agents if item.config.name == "codex"
+        ]
+        if codex_agents:
+            self.inject_codex_auth(
+                cname,
+                chatgpt_mode=any(
+                    item.config.provider == "chatgpt" for item in codex_agents
+                ),
+            )
         self.sync_host_config(cname, agent.config.name)
         self.sync_sandbox_config(cname, name)
         return agent
@@ -249,6 +285,9 @@ class SessionSetup:
             PAUDE_LABEL_AGENT: config.agent,
             PAUDE_LABEL_VERSION: __version__,
         }
+        specs = config.agent_providers or [(config.agent, config.provider or "")]
+        labels[PAUDE_LABEL_AGENT_PROVIDERS] = encode_agent_providers(specs)
+        labels[PAUDE_LABEL_PROVIDERS] = encode_providers(config.credential_providers)
         if config.provider:
             labels[PAUDE_LABEL_PROVIDER] = config.provider
         if config.gpu:
@@ -275,14 +314,16 @@ class SessionSetup:
         proxy: PodmanProxyManager,
         config: SessionConfig,
         session_name: str,
-        agent: Agent,
+        composition: AgentComposition,
     ) -> tuple[str | None, str | None, ProxyCredentials]:
         """Create and start proxy sidecar for the session.
 
         Returns:
             (network, proxy_ip, proxy_credentials) tuple.
         """
-        proxy_creds = self.gather_proxy_credentials(agent)
+        proxy_creds = self.gather_proxy_credentials(
+            composition, config.credential_providers
+        )
         network, proxy_ip = proxy.create_proxy(
             session_name,
             config.proxy_image or "",
@@ -305,7 +346,7 @@ class SessionSetup:
         config: SessionConfig,
         cname: str,
         session_name: str,
-        agent: Agent,
+        composition: AgentComposition,
         labels: dict[str, str],
         network: str | None,
         proxy_ip: str | None,
@@ -318,7 +359,7 @@ class SessionSetup:
             if config.proxy_image
             else None
         )
-        env, _agent_args = build_session_env(config, agent, proxy_name=proxy_name)
+        env, _agent_args = build_session_env(config, composition, proxy_name=proxy_name)
         env["PAUDE_WORKSPACE"] = CONTAINER_WORKSPACE
         dns = [proxy_ip] if proxy_ip else None
         agent_ip = derive_agent_ip(proxy_ip) if proxy_ip else None

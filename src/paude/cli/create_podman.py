@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from paude.agents import get_agent
+from paude.agents import get_agents
 from paude.backends import PodmanBackend, SessionConfig, SessionExistsError
 from paude.cli.helpers import (
     _detect_dev_script_dir,
@@ -37,6 +37,8 @@ def create_podman_session(
     platform: str | None,
     agent_name: str = "claude",
     provider_name: str | None = None,
+    agent_providers: list[tuple[str, str]] | None = None,
+    credential_providers: list[str] | None = None,
     engine_binary: str = "podman",
     ssh_host: str | None = None,
     ssh_key: str | None = None,
@@ -53,11 +55,21 @@ def create_podman_session(
 
     engine = ContainerEngine(engine_binary, transport=transport)
     home = Path.home()
-    agent_instance = get_agent(agent_name, provider=provider_name)
+    specs = agent_providers or [(agent_name, provider_name or "")]
+    composition = get_agents(
+        [name for name, _provider in specs],
+        providers={name: provider for name, provider in specs if provider},
+        include_bundled=False,
+    )
+    resolved_specs = [
+        (item.config.name, item.config.provider or "") for item in composition.agents
+    ]
+    agent_instance = composition.primary
     image_manager = ImageManager(
         script_dir=_detect_dev_script_dir(),
         platform=platform,
         agent=agent_instance,
+        composition=composition,
         engine=engine,
     )
 
@@ -75,7 +87,7 @@ def create_podman_session(
 
     # Build mounts — skip config bind mounts for local engines (use podman cp
     # instead, which avoids SELinux label issues). SSH remotes keep bind mounts.
-    mounts = build_mounts(home, agent_instance, include_config=engine.is_remote)
+    mounts = build_mounts(home, composition, include_config=engine.is_remote)
 
     # Sync configs to remote host if using SSH
     remote_config_paths = None
@@ -110,8 +122,11 @@ def create_podman_session(
         proxy_image=podman_proxy_image,
         agent=agent_name,
         provider=provider_name,
+        agent_providers=resolved_specs,
+        credential_providers=credential_providers
+        or [provider for _agent, provider in resolved_specs],
         gpu=gpu,
-        ports=agent_instance.config.exposed_ports,
+        ports=composition.exposed_ports,
         forward_ports=forward_ports or [],
         otel_ports=otel_ports or [],
         otel_endpoint=otel_endpoint,

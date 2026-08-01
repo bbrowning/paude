@@ -6,8 +6,10 @@ import base64
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from paude.agents.base import AgentComposition
+
 if TYPE_CHECKING:
-    from paude.agents.base import Agent, AgentConfig
+    from paude.agents.base import Agent, AgentComposition, AgentConfig
     from paude.backends.base import SessionConfig
 
 
@@ -25,9 +27,8 @@ def build_agent_env(config: AgentConfig) -> dict[str, str]:
         "PAUDE_AGENT_INSTALL_SCRIPT": config.install_script,
         "PAUDE_AGENT_SESSION_NAME": config.session_name,
         "PAUDE_AGENT_LAUNCH_CMD": config.process_name,
+        "PAUDE_AGENT_CONFIG_FILE": config.config_file_name or "",
     }
-    if config.config_file_name:
-        env["PAUDE_AGENT_CONFIG_FILE"] = config.config_file_name
     return env
 
 
@@ -64,7 +65,7 @@ def decode_path(encoded: str, *, url_safe: bool = False) -> Path:
 
 def build_session_env(
     config: SessionConfig,
-    agent: Agent,
+    agent: Agent | AgentComposition,
     proxy_name: str | None = None,
 ) -> tuple[dict[str, str], list[str]]:
     """Build environment variables and args for a session.
@@ -82,23 +83,53 @@ def build_session_env(
     Returns:
         Tuple of (env_dict, agent_args).
     """
+    if isinstance(agent, AgentComposition):
+        composition = agent
+        primary = agent.primary
+    else:
+        composition = None
+        primary = agent
     env = dict(config.env)
-    env.update(build_agent_env(agent.config))
+    env.update(build_agent_env(primary.config))
     # build_agent_env sets LAUNCH_CMD to process_name, which is wrong for
     # agents where the launch binary differs from the process name (e.g.
     # OpenClaw: process_name="node" but launch is "openclaw gateway ...").
     # Override with the agent's actual launch command (no args — those are
     # passed separately via PAUDE_AGENT_ARGS).
-    env["PAUDE_AGENT_LAUNCH_CMD"] = agent.launch_command("")
+    env["PAUDE_AGENT_LAUNCH_CMD"] = primary.launch_command("")
+
+    if composition is not None:
+        configs = [item.config for item in composition.agents]
+        env["PAUDE_AGENT_CONFIG_DIRS"] = " ".join(
+            config.config_dir_name for config in configs
+        )
+        config_files = list(
+            dict.fromkeys(
+                config.config_file_name for config in configs if config.config_file_name
+            )
+        )
+        env["PAUDE_AGENT_CONFIG_FILES"] = " ".join(config_files)
+        env["PAUDE_AGENT_PROVIDERS"] = ",".join(
+            f"{item.config.name}={item.config.provider or ''}"
+            for item in composition.agents
+        )
+        if any(
+            item.config.name == "codex" and item.config.provider == "chatgpt"
+            for item in composition.agents
+        ):
+            env["PAUDE_CODEX_CHATGPT_MODE"] = "1"
+
+    if config.credential_providers:
+        env["PAUDE_PROVIDERS"] = ",".join(config.credential_providers)
 
     agent_args = list(config.args)
-    if config.yolo and agent.config.yolo_flag:
-        agent_args = [agent.config.yolo_flag] + agent_args
+    if config.yolo and primary.config.yolo_flag:
+        agent_args = [primary.config.yolo_flag] + agent_args
 
     if agent_args:
-        env[agent.config.args_env_var] = " ".join(agent_args)
+        env[primary.config.args_env_var] = " ".join(agent_args)
     # Backward compat: also set PAUDE_CLAUDE_ARGS for existing containers
-    if agent_args and agent.config.name == "claude":
+    if agent_args and primary.config.name == "claude":
         env["PAUDE_CLAUDE_ARGS"] = " ".join(agent_args)
 
     env["PAUDE_SUPPRESS_PROMPTS"] = "1"
@@ -108,7 +139,19 @@ def build_session_env(
         from paude.environment import build_proxy_environment
 
         env.update(build_proxy_environment(proxy_name))
-        for var in agent.config.secret_env_vars:
+        secret_vars = (
+            [var for item in composition.agents for var in item.config.secret_env_vars]
+            if composition is not None
+            else primary.config.secret_env_vars
+        )
+        from paude.providers import get_provider
+
+        secret_vars.extend(
+            var
+            for provider_name in config.credential_providers
+            for var in get_provider(provider_name).secret_env_vars
+        )
+        for var in dict.fromkeys(secret_vars):
             env[var] = PROXY_MANAGED_CREDENTIAL
         env["GH_TOKEN"] = PROXY_MANAGED_CREDENTIAL
 
@@ -116,7 +159,7 @@ def build_session_env(
 
 
 def generate_sandbox_config_script(
-    agent_name: str,
+    agent_name: str | AgentComposition,
     workspace: str,
     args: str,
     provider: str | None = None,
@@ -127,5 +170,14 @@ def generate_sandbox_config_script(
     from paude.agents import get_agent
     from paude.constants import CONTAINER_HOME
 
-    agent = get_agent(agent_name, provider=provider)
-    return agent.apply_sandbox_config(CONTAINER_HOME, workspace, args, yolo=yolo)
+    if isinstance(agent_name, str):
+        from paude.agents import get_agent, get_agent_composition
+
+        composition = get_agent_composition(get_agent(agent_name, provider=provider))
+    else:
+        composition = agent_name
+
+    return "\n".join(
+        agent.apply_sandbox_config(CONTAINER_HOME, workspace, args, yolo=yolo)
+        for agent in composition.agents
+    )

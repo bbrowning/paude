@@ -33,16 +33,14 @@ def format_setting(name: str, setting: SettingValue[Any]) -> str:
 class ResolvedCreateOptions:
     """Fully-resolved create options with provenance tracking.
 
-    The ``agent`` and ``provider`` scalars are retained for backward
-    compatibility and always describe the *primary* (first) agent and its
-    resolved provider. The ``agents``/``providers`` lists hold the full
-    resolved sets, and ``agent_providers`` maps each agent to the provider it
-    will use (first = primary).
+    The ``agent`` and ``provider`` scalars describe the primary agent and its
+    resolved provider. ``agents`` is the exact install set, ``providers`` is
+    the credential-provider set, and ``agent_providers`` is the effective
+    mapping for every installed agent.
 
-    Note: session creation currently uses only the primary agent/provider
-    scalars; the ``agents``/``providers``/``agent_providers`` lists are consumed
-    by the ``--dry-run`` preview only. Multi-agent creation is not yet
-    implemented, so a real create ignores all but the primary agent.
+    Session creation carries the complete ``agent_providers`` list through the
+    image, container, and lifecycle paths. The scalar fields remain for
+    backwards-compatible display and single-agent callers.
     """
 
     backend: SettingValue[str] = field(
@@ -73,9 +71,7 @@ class ResolvedCreateOptions:
     agents_provenance: list[tuple[list[str], Source]] = field(default_factory=list)
     providers: list[str] = field(default_factory=list)
     providers_provenance: list[tuple[list[str], Source]] = field(default_factory=list)
-    # Explicit --providers entries never assigned to any agent (real create warns).
-    dropped_providers: list[str] = field(default_factory=list)
-    # Derived per-agent provider mapping (ordered, first = primary).
+    # Effective per-agent provider mapping (ordered, first = primary).
     agent_providers: list[tuple[str, str]] = field(default_factory=list)
     allowed_domains: list[str] = field(default_factory=list)
     allowed_domains_provenance: list[tuple[list[str], Source]] = field(
@@ -93,6 +89,7 @@ def resolve_create_options(
     cli_provider: str | None = None,
     cli_agents: list[str] | None = None,
     cli_providers: list[str] | None = None,
+    cli_agent_providers: dict[str, str] | None = None,
     cli_yolo: bool | None,
     cli_git: bool | None,
     cli_platform: str | None,
@@ -126,8 +123,8 @@ def resolve_create_options(
 
     if cli_agent is not None and cli_agents is not None:
         raise ValueError("Specify --agent or --agents, not both.")
-    if cli_provider is not None and cli_providers is not None:
-        raise ValueError("Specify --provider or --providers, not both.")
+    if cli_provider is not None and cli_agent_providers is not None:
+        raise ValueError("Specify --provider or --agent-provider, not both.")
 
     if user_defaults.backend not in (None, "podman", "docker"):
         raise ValueError(
@@ -150,6 +147,7 @@ def resolve_create_options(
         cli_agents=cli_agents,
         cli_provider=cli_provider,
         cli_providers=cli_providers,
+        cli_agent_providers=cli_agent_providers,
         project_config=project_config,
         user_defaults=user_defaults,
     )
@@ -262,19 +260,26 @@ def _resolve_option_list(
     project: list[str] | None,
     user: list[str] | None,
     builtin: list[str],
+    deduplicate: bool = True,
 ) -> tuple[list[str], Source]:
     """Resolve a list-valued setting using precedence order.
 
     An empty list at any layer is treated as "not set" and falls through to
-    the next layer. The returned list is de-duplicated preserving order.
+    the next layer. By default, the returned list is de-duplicated preserving
+    order. Positional lists can disable de-duplication while still discarding
+    empty entries.
     """
+
+    def normalize(values: list[str]) -> list[str]:
+        return _dedupe(values) if deduplicate else [value for value in values if value]
+
     if cli:
-        return _dedupe(cli), "cli"
+        return normalize(cli), "cli"
     if project:
-        return _dedupe(project), "paude.json"
+        return normalize(project), "paude.json"
     if user:
-        return _dedupe(user), "user defaults"
-    return _dedupe(builtin), "built-in"
+        return normalize(user), "user defaults"
+    return normalize(builtin), "built-in"
 
 
 def _resolve_agents_and_providers(
@@ -284,69 +289,78 @@ def _resolve_agents_and_providers(
     cli_agents: list[str] | None,
     cli_provider: str | None,
     cli_providers: list[str] | None,
+    cli_agent_providers: dict[str, str] | None,
     project_config: PaudeConfig | None,
     user_defaults: UserDefaults,
 ) -> None:
-    """Resolve the agent and provider lists, then derive per-agent providers.
+    """Resolve installed agents, credentials, and per-agent mappings.
 
     Populates ``agents``/``providers`` (with provenance), the ``agent``/
     ``provider`` primary scalars (for back-compat), and the ``agent_providers``
     mapping. Validates every agent name and agent/provider combination.
     """
-    # A singular flag/hint contributes a one-element list at its layer.
     agents, agents_source = _resolve_option_list(
         cli=cli_agents if cli_agents is not None else _as_list(cli_agent),
         project=_project_list(project_config, "create_agents", "create_agent"),
         user=user_defaults.agents or _as_list(user_defaults.agent),
         builtin=["claude"],
+        deduplicate=False,
     )
     if not agents:
         raise ValueError(
             "Agent name cannot be empty. Specify a non-empty --agent/--agents value."
         )
+    duplicates = [name for index, name in enumerate(agents) if name in agents[:index]]
+    if duplicates:
+        names = ", ".join(_dedupe(duplicates))
+        raise ValueError(f"Duplicate agent names are not allowed: {names}.")
     result.agents = agents
     result.agents_provenance = [(agents, agents_source)]
     result.agent = SettingValue(agents[0], agents_source)
 
-    provider_pool, providers_source = _resolve_option_list(
-        cli=cli_providers if cli_providers is not None else _as_list(cli_provider),
-        project=_project_list(project_config, "create_providers", "create_provider"),
-        user=user_defaults.providers or _as_list(user_defaults.provider),
+    credential_providers, providers_source = _resolve_option_list(
+        cli=cli_providers,
+        project=project_config.create_providers if project_config else None,
+        user=user_defaults.providers,
         builtin=[],
     )
-    if not provider_pool and providers_source != "built-in":
+    if not credential_providers and providers_source != "built-in":
         raise ValueError(
             "Provider name cannot be empty. Specify a non-empty "
             "--provider/--providers value."
         )
 
-    # The primary provider scalar mirrors the highest-precedence explicit
-    # provider (first in the pool), or None when nothing was configured.
-    primary_provider = provider_pool[0] if provider_pool else None
-    result.provider = SettingValue(
-        primary_provider,
-        providers_source if provider_pool else "built-in",
+    requested_mappings, mapping_source = _resolve_agent_provider_mappings(
+        primary_agent=agents[0],
+        cli_provider=cli_provider,
+        cli_agent_providers=cli_agent_providers,
+        project_config=project_config,
+        user_defaults=user_defaults,
     )
+    result.agent_providers = _derive_agent_providers(agents, requested_mappings)
+    result.provider = SettingValue(result.agent_providers[0][1], mapping_source)
 
-    # Derive the provider each agent will use. The primary agent honors the
-    # explicit primary provider (back-compat with `--provider`); every other
-    # agent uses its own default provider.
-    result.agent_providers = _derive_agent_providers(agents, primary_provider)
+    from paude.providers import get_provider
 
-    # Only list providers that are actually assigned to some agent: an
-    # explicit --providers entry beyond what the primary agent consumes is
-    # never applied to any agent, so including it here would misleadingly
-    # suggest it's in effect.
-    used = _dedupe(provider for _, provider in result.agent_providers)
-    used_explicit = [p for p in provider_pool if p in used]
-    auto_added = [p for p in used if p not in provider_pool]
-    result.providers = used
-    result.providers_provenance = []
-    if used_explicit:
-        result.providers_provenance.append((used_explicit, providers_source))
-    if auto_added:
-        result.providers_provenance.append((auto_added, "built-in"))
-    result.dropped_providers = [p for p in provider_pool if p not in used]
+    for provider_name in credential_providers:
+        get_provider(provider_name)
+    mapped_providers = _dedupe(provider for _, provider in result.agent_providers)
+    if credential_providers:
+        missing = [
+            provider
+            for provider in mapped_providers
+            if provider not in credential_providers
+        ]
+        if missing:
+            raise ValueError(
+                "Credential providers must include every mapped provider; missing: "
+                + ", ".join(missing)
+            )
+        result.providers = credential_providers
+        result.providers_provenance = [(credential_providers, providers_source)]
+    else:
+        result.providers = mapped_providers
+        result.providers_provenance = [(mapped_providers, mapping_source)]
 
 
 def _as_list(value: str | None) -> list[str] | None:
@@ -368,14 +382,47 @@ def _project_list(
     return _as_list(getattr(project_config, scalar_attr))
 
 
+def _resolve_agent_provider_mappings(
+    *,
+    primary_agent: str,
+    cli_provider: str | None,
+    cli_agent_providers: dict[str, str] | None,
+    project_config: PaudeConfig | None,
+    user_defaults: UserDefaults,
+) -> tuple[dict[str, str], Source]:
+    """Resolve the highest-precedence explicit mapping layer."""
+    if cli_agent_providers:
+        return dict(cli_agent_providers), "cli"
+    if cli_provider is not None:
+        return {primary_agent: cli_provider}, "cli"
+    if project_config is not None:
+        if project_config.create_agent_providers and project_config.create_provider:
+            raise ValueError(
+                "Specify provider or agent-providers in project config, not both."
+            )
+        if project_config.create_agent_providers:
+            return dict(project_config.create_agent_providers), "paude.json"
+        if project_config.create_provider is not None:
+            return {primary_agent: project_config.create_provider}, "paude.json"
+    if user_defaults.agent_providers and user_defaults.provider:
+        raise ValueError(
+            "Specify provider or agent-providers in user defaults, not both."
+        )
+    if user_defaults.agent_providers:
+        return dict(user_defaults.agent_providers), "user defaults"
+    if user_defaults.provider is not None:
+        return {primary_agent: user_defaults.provider}, "user defaults"
+    return {}, "built-in"
+
+
 def _derive_agent_providers(
-    agents: list[str], primary_provider: str | None
+    agents: list[str], mappings: dict[str, str]
 ) -> list[tuple[str, str]]:
     """Map each agent to the provider it will use, validating each combination.
 
-    The primary (first) agent uses ``primary_provider`` when one was supplied,
-    otherwise its own default. Every subsequent agent uses its default. Each
-    (agent, provider) pair is validated via ``resolve_agent_provider``.
+    Explicit mappings override named agents. Unmapped agents use their default.
+    Each assigned pair is validated via
+    ``resolve_agent_provider``.
 
     Raises:
         ValueError: If an agent name is unknown or the agent/provider
@@ -388,14 +435,19 @@ def _derive_agent_providers(
     )
 
     mapping: list[tuple[str, str]] = []
-    for index, agent in enumerate(agents):
+    unknown = [agent for agent in mappings if agent not in agents]
+    if unknown:
+        raise ValueError(
+            "Provider mappings reference agents that are not installed: "
+            + ", ".join(unknown)
+        )
+    for agent in agents:
         # Validate the agent name (raises with a friendly message if unknown).
         get_agent(agent)
 
-        if index == 0 and primary_provider is not None:
-            provider = primary_provider
-        else:
-            provider = DEFAULT_PROVIDER.get(agent) or ""
+        provider = mappings.get(agent, DEFAULT_PROVIDER.get(agent) or "")
+        if not provider:
+            raise ValueError("Provider name cannot be empty.")
 
         # Validate the combination and resolve the effective provider name.
         provider_config, _ = resolve_agent_provider(agent, provider or None)

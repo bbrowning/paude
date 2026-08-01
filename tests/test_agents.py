@@ -113,6 +113,11 @@ class TestGetAgents:
         composition = get_agents(["gascity"])
         assert composition.names == ["gascity", "claude", "gemini"]
 
+    def test_explicit_multi_agent_list_is_exact(self) -> None:
+        composition = get_agents(["gascity", "claude", "codex"], include_bundled=False)
+        assert composition.names == ["gascity", "claude", "codex"]
+        assert "gemini" not in composition.names
+
     def test_acceptance_gascity_plus_codex(self) -> None:
         composition = get_agents(["gascity", "codex"])
         assert composition.names == ["gascity", "claude", "gemini", "codex"]

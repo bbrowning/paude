@@ -5,10 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from paude.agents.base import AgentComposition
 from paude.constants import CONTAINER_HOME
 
 if TYPE_CHECKING:
-    from paude.agents.base import Agent
+    from paude.agents.base import Agent, AgentComposition
 
 
 def resolve_path(path: Path) -> Path | None:
@@ -29,7 +30,10 @@ def resolve_path(path: Path) -> Path | None:
 
 
 def build_mounts(
-    home: Path, agent: Agent | None = None, *, include_config: bool = True
+    home: Path,
+    agent: Agent | AgentComposition | None = None,
+    *,
+    include_config: bool = True,
 ) -> list[str]:
     """Build the list of volume mount arguments for podman.
 
@@ -52,7 +56,12 @@ def build_mounts(
 
     if include_config:
         # Agent-specific config mounts
-        if agent is not None:
+        if isinstance(agent, AgentComposition):
+            for item in agent.agents:
+                for mount in item.host_config_mounts(home):
+                    if mount not in mounts:
+                        mounts.append(mount)
+        elif agent is not None:
             mounts.extend(agent.host_config_mounts(home))
         else:
             # Backward compat: Claude defaults when no agent provided

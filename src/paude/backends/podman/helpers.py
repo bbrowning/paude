@@ -5,6 +5,7 @@ Free functions and naming helpers extracted from PodmanBackend.
 
 from __future__ import annotations
 
+import json
 import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -12,11 +13,13 @@ from typing import TYPE_CHECKING, Any
 from paude.backends.base import Session
 from paude.backends.labels import (
     PAUDE_LABEL_AGENT,
+    PAUDE_LABEL_AGENT_PROVIDERS,
     PAUDE_LABEL_APP,
     PAUDE_LABEL_CREATED,
     PAUDE_LABEL_DOMAINS,
     PAUDE_LABEL_FORWARD_PORTS,
     PAUDE_LABEL_PROVIDER,
+    PAUDE_LABEL_PROVIDERS,
     PAUDE_LABEL_SESSION,
     PAUDE_LABEL_VERSION,
     PAUDE_LABEL_WORKSPACE,
@@ -32,7 +35,7 @@ from paude.backends.session_env import decode_path
 from paude.container.runner import ContainerRunner
 
 if TYPE_CHECKING:
-    from paude.agents.base import Agent
+    from paude.agents.base import Agent, AgentComposition
 
 
 def _get_container_status(container: dict[str, Any]) -> str:
@@ -185,6 +188,9 @@ def build_session_from_container(
 
     agent_name = labels.get(PAUDE_LABEL_AGENT, "claude")
     provider_name = labels.get(PAUDE_LABEL_PROVIDER)
+    raw_specs = labels.get(PAUDE_LABEL_AGENT_PROVIDERS)
+    agent_providers = _parse_agent_providers(raw_specs)
+    credential_providers = _parse_providers(labels.get(PAUDE_LABEL_PROVIDERS))
     version = labels.get(PAUDE_LABEL_VERSION)
 
     return Session(
@@ -197,6 +203,8 @@ def build_session_from_container(
         volume_name=volume_name(name),
         agent=agent_name,
         provider=provider_name,
+        agent_providers=agent_providers,
+        credential_providers=credential_providers,
         version=version,
     )
 
@@ -254,12 +262,88 @@ def get_session_labels(runner: ContainerRunner, session_name: str) -> dict[str, 
 
 def get_session_agent(runner: ContainerRunner, session_name: str) -> Agent:
     """Get the agent instance for a session from its container labels."""
-    from paude.agents import get_agent
+    return get_session_composition(runner, session_name).primary
+
+
+def get_session_composition(
+    runner: ContainerRunner, session_name: str
+) -> AgentComposition:
+    """Get the full agent composition for a session from its labels."""
+    from paude.agents import get_agent, get_agent_composition, get_agents
 
     labels = get_session_labels(runner, session_name)
     agent_name = str(labels.get(PAUDE_LABEL_AGENT, "claude"))
     provider = labels.get(PAUDE_LABEL_PROVIDER) or None
-    return get_agent(agent_name, provider=provider)
+    specs = _parse_agent_providers(labels.get(PAUDE_LABEL_AGENT_PROVIDERS))
+    if specs:
+        return get_agents(
+            [name for name, _provider in specs],
+            providers={name: provider for name, provider in specs if provider},
+            include_bundled=False,
+        )
+    return get_agent_composition(get_agent(agent_name, provider=provider))
+
+
+def encode_agent_providers(specs: list[tuple[str, str]]) -> str:
+    """Encode ordered agent/provider pairs for a container label."""
+    return json.dumps(specs, separators=(",", ":"))
+
+
+def encode_providers(providers: list[str]) -> str:
+    """Encode a credential-provider set for a container label."""
+    return json.dumps(providers, separators=(",", ":"))
+
+
+def get_session_credential_providers(
+    runner: ContainerRunner, session_name: str
+) -> list[str]:
+    """Get credential providers, deriving them for legacy sessions."""
+    labels = get_session_labels(runner, session_name)
+    providers = _parse_providers(labels.get(PAUDE_LABEL_PROVIDERS))
+    if providers:
+        return providers
+    return list(
+        dict.fromkeys(
+            agent.config.provider or ""
+            for agent in get_session_composition(runner, session_name).agents
+            if agent.config.provider
+        )
+    )
+
+
+def _parse_providers(raw: str | None) -> list[str]:
+    """Parse a credential-provider label, returning empty when invalid."""
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(value, list):
+        return []
+    return list(dict.fromkeys(item for item in value if isinstance(item, str)))
+
+
+def _parse_agent_providers(raw: str | None) -> list[tuple[str, str]]:
+    """Parse a composition label, returning an empty list when invalid."""
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(value, list):
+        return []
+    specs: list[tuple[str, str]] = []
+    for item in value:
+        if (
+            isinstance(item, list)
+            and len(item) == 2
+            and isinstance(item[0], str)
+            and isinstance(item[1], str)
+        ):
+            specs.append((item[0], item[1]))
+    return specs
 
 
 def get_session_forward_ports(

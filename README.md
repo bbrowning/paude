@@ -16,19 +16,24 @@ Run AI coding agents in secure containers. They make commits, you pull them back
 
 > Agents are installed automatically inside the container — no local agent installation needed. You just need authentication credentials for your chosen provider.
 
-Use `--agents` (and `--providers`) to parse, resolve, and preview more than one
-at once — values are comma-separated and/or repeatable, and the first agent is
-the primary. Creating multiple agents in a single session is not yet supported,
-so pair the lists with `--dry-run` to preview the full resolution:
+Agent installation, credential setup, and provider selection are independent.
+`--agents` is the exact install set and its first entry launches as the primary.
+`--providers` selects credentials to configure, while `--agent-provider` maps
+installed agents to those providers:
 
 ```bash
-paude create --agents gascity,claude,codex --providers vertex,chatgpt --dry-run my-project
+paude create \
+  --agents gascity,claude,codex \
+  --providers vertex,chatgpt \
+  --agent-provider gascity=vertex,claude=vertex,codex=chatgpt \
+  my-project
 ```
 
-A real (non-`--dry-run`) create launches only the primary agent and warns that
-the extra agents were ignored. The singular `--agent`/`--provider` flags remain
-as aliases for a single agent. Each agent uses its own default provider unless
-overridden; the primary agent honors the first `--providers` value.
+Unmapped agents use their default provider. If `--providers` is omitted, its
+value is derived from the effective mappings; when supplied, it must include
+every mapped provider but may include extras. `--provider` remains shorthand
+for mapping the primary agent. Gas City no longer installs child CLIs
+implicitly—list every CLI the image should contain.
 
 ## Why Paude?
 

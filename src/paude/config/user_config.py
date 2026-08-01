@@ -23,6 +23,7 @@ class UserDefaults:
     provider: str | None = None
     agents: list[str] = field(default_factory=list)
     providers: list[str] = field(default_factory=list)
+    agent_providers: dict[str, str] = field(default_factory=dict)
     yolo: bool | None = None
     git: bool | None = None
     platform: str | None = None
@@ -39,6 +40,7 @@ _KNOWN_KEYS = {
     "provider",
     "agents",
     "providers",
+    "agent-providers",
     "yolo",
     "git",
     "platform",
@@ -127,6 +129,7 @@ def _parse_defaults(data: dict[str, Any], path: Path) -> UserDefaults:
         provider=data.get("provider"),
         agents=_string_list(data.get("agents", [])),
         providers=_string_list(data.get("providers", [])),
+        agent_providers=_string_dict(data.get("agent-providers", {})),
         yolo=data.get("yolo"),
         git=data.get("git"),
         platform=data.get("platform"),
@@ -142,3 +145,14 @@ def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, str)]
+
+
+def _string_dict(value: Any) -> dict[str, str]:
+    """Coerce a JSON object into a string-to-string mapping."""
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key: item
+        for key, item in value.items()
+        if isinstance(key, str) and isinstance(item, str)
+    }
