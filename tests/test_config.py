@@ -348,6 +348,33 @@ class TestParseConfig:
         assert config.create_allowed_domains == []
         assert config.create_agent is None
 
+    def test_parses_paude_json_create_agents_providers(self, tmp_path: Path):
+        """parse_config extracts create agents/providers lists from paude.json."""
+        config_file = tmp_path / "paude.json"
+        config_file.write_text(
+            json.dumps(
+                {
+                    "create": {
+                        "agents": ["gascity", "claude"],
+                        "providers": ["vertex", "chatgpt"],
+                    },
+                }
+            )
+        )
+
+        config = parse_config(config_file)
+        assert config.create_agents == ["gascity", "claude"]
+        assert config.create_providers == ["vertex", "chatgpt"]
+
+    def test_create_agents_default_to_empty(self, tmp_path: Path):
+        """create agents/providers default to empty lists when not present."""
+        config_file = tmp_path / "paude.json"
+        config_file.write_text(json.dumps({"create": {"agent": "claude"}}))
+
+        config = parse_config(config_file)
+        assert config.create_agents == []
+        assert config.create_providers == []
+
     def test_parses_devcontainer_create_section(self, tmp_path: Path):
         """parse_config extracts create hints from devcontainer customizations."""
         config_file = tmp_path / ".devcontainer.json"

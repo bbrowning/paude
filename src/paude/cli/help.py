@@ -141,7 +141,8 @@ _SECTIONS: tuple[HelpSection, ...] = (
             "User defaults: ~/.config/paude/defaults.json"
             " (backend, yolo, git, domains, etc.)\n"
             'Project hints: paude.json "create" section'
-            " (allowed-domains, agent, provider, forward-ports)"
+            " (allowed-domains, agent, provider, agents, providers,"
+            " forward-ports)"
         ),
     ),
     HelpSection(
@@ -169,7 +170,17 @@ _SECTIONS: tuple[HelpSection, ...] = (
             ("--agent gemini", "Gemini CLI"),
             ("--agent opencode", "OpenCode"),
             ("--agent openclaw", "OpenClaw (web UI on port 18789)"),
+            (
+                "--agents a,b,c",
+                "Preview multiple agents with --dry-run; a real create uses "
+                "only the primary (first)",
+            ),
             ("", ""),
+            (
+                "--providers x,y",
+                "Provider pool (comma-separated/repeatable); only the "
+                "primary agent's default is overridden",
+            ),
             ("--provider vertex", "Vertex AI (default for claude, openclaw)"),
             ("--provider anthropic", "Anthropic API"),
             ("--provider chatgpt", "Codex ChatGPT-plan OAuth, HTTP/SSE (default)"),

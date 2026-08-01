@@ -10,7 +10,7 @@ import typer
 from paude.agents import get_agent
 from paude.config import detect_config, parse_config
 from paude.config.dockerfile import generate_workspace_dockerfile
-from paude.config.resolver import ResolvedCreateOptions, format_setting
+from paude.config.resolver import ResolvedCreateOptions, Source, format_setting
 from paude.domains import format_domains_for_display
 
 
@@ -89,8 +89,7 @@ def _show_resolved_flags(
     typer.echo("Flags:")
     typer.echo(format_setting("backend", resolved.backend))
     typer.echo(f"  verbose: {flags.get('verbose', False)}")
-    typer.echo(format_setting("agent", resolved.agent))
-    typer.echo(format_setting("provider", resolved.provider))
+    _show_agents_and_providers(resolved)
     typer.echo(format_setting("yolo", resolved.yolo))
     typer.echo(format_setting("git", resolved.git))
 
@@ -123,6 +122,40 @@ def _show_resolved_flags(
 
     if flags.get("claude_args"):
         typer.echo(f"  args: {flags['claude_args']}")
+
+
+def _show_agents_and_providers(resolved: ResolvedCreateOptions) -> None:
+    """Show the agents/providers lists, their provenance, and per-agent mapping.
+
+    The scalar ``agent``/``provider`` lines are retained for backward
+    compatibility and describe the primary (first) agent and its provider.
+    """
+    # Agents list with provenance groups.
+    typer.echo(f"  agents: {', '.join(resolved.agents)}")
+    _show_provenance_groups(resolved.agents_provenance)
+    typer.echo(format_setting("agent", resolved.agent))
+
+    # Providers list with provenance groups.
+    if resolved.providers:
+        typer.echo(f"  providers: {', '.join(resolved.providers)}")
+        _show_provenance_groups(resolved.providers_provenance)
+    else:
+        typer.echo("  providers: (not set)  (built-in)")
+    typer.echo(format_setting("provider", resolved.provider))
+
+    # Derived per-agent provider mapping (first = primary).
+    if resolved.agent_providers:
+        typer.echo("  per-agent providers:")
+        for agent, provider in resolved.agent_providers:
+            typer.echo(f"    {agent} -> {provider}")
+
+
+def _show_provenance_groups(
+    provenance: list[tuple[list[str], Source]],
+) -> None:
+    """Print each ``(values, source)`` provenance group as an indented line."""
+    for values, source in provenance:
+        typer.echo(f"    {', '.join(values)}  ({source})")
 
 
 def _show_legacy_flags(flags: dict[str, Any]) -> None:

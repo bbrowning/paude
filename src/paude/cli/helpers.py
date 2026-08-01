@@ -181,6 +181,26 @@ def _parse_agent_args(claude_args: str | None) -> list[str]:
 _parse_claude_args = _parse_agent_args
 
 
+def _split_list_option(values: list[str] | None) -> list[str] | None:
+    """Normalize a repeatable, comma-separated CLI option into a list.
+
+    Each occurrence may itself contain comma-separated entries, so
+    ``--agents a,b --agents c`` yields ``["a", "b", "c"]``. Whitespace is
+    stripped and empty entries are dropped. Returns None when the option was
+    not provided (``values is None``) or contained no usable entries, so the
+    resolver can distinguish "unset" from an explicit list.
+    """
+    if values is None:
+        return None
+    items = [
+        entry.strip()
+        for value in values
+        for entry in value.split(",")
+        if entry.strip()
+    ]
+    return items or None
+
+
 def _get_provider_aliases(
     provider_name: str | None, agent_name: str
 ) -> list[str] | None:

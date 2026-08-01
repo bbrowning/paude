@@ -119,9 +119,7 @@ def test_dry_run_no_gpu_hides_gpu():
 
 def test_dry_run_shows_forward_ports():
     """--dry-run shows forward-ports with cli provenance when specified."""
-    result = runner.invoke(
-        app, ["create", "--forward-port", "8372", "--dry-run"]
-    )
+    result = runner.invoke(app, ["create", "--forward-port", "8372", "--dry-run"])
     assert result.exit_code == 0
     assert "forward-ports: 8372  (cli)" in result.stdout
 
@@ -152,9 +150,7 @@ def test_dry_run_hides_forward_ports_when_unset():
 
 def test_forward_port_invalid_spec_errors():
     """An invalid --forward-port spec fails with a clear error."""
-    result = runner.invoke(
-        app, ["create", "--forward-port", "not-a-port", "--dry-run"]
-    )
+    result = runner.invoke(app, ["create", "--forward-port", "not-a-port", "--dry-run"])
     assert result.exit_code == 1
     # Error goes to stderr, which typer may redirect to stdout
     output = result.stdout + (result.stderr or "")
@@ -368,6 +364,138 @@ class TestCodexChatgptProvider:
             app, ["create", "--agent", "codex", "--provider", "vertex", "--dry-run"]
         )
         assert result.exit_code != 0
+
+
+class TestAgentsProvidersLists:
+    """Tests for the list-valued --agents/--providers options."""
+
+    def test_agents_providers_dry_run(self):
+        """--agents/--providers show both lists and per-agent providers."""
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--agents",
+                "gascity,claude,codex",
+                "--providers",
+                "vertex,chatgpt",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        out = _strip_ansi(result.stdout)
+        assert "agents: gascity, claude, codex" in out
+        assert "providers: vertex, chatgpt" in out
+        # Derived per-agent providers.
+        assert "gascity -> vertex" in out
+        assert "claude -> vertex" in out
+        assert "codex -> chatgpt" in out
+
+    def test_agents_repeatable_option(self):
+        """--agents can be repeated as well as comma-separated."""
+        result = runner.invoke(
+            app,
+            ["create", "--agents", "gascity", "--agents", "claude", "--dry-run"],
+        )
+        assert result.exit_code == 0
+        assert "agents: gascity, claude" in _strip_ansi(result.stdout)
+
+    def test_singular_agent_alias_dry_run(self):
+        """--agent still resolves to a single-item agents list."""
+        result = runner.invoke(app, ["create", "--agent", "gascity", "--dry-run"])
+        assert result.exit_code == 0
+        assert "agents: gascity" in _strip_ansi(result.stdout)
+
+    def test_agents_deduplicated(self):
+        """Duplicate agents are removed, preserving order."""
+        result = runner.invoke(
+            app, ["create", "--agents", "claude,claude,codex", "--dry-run"]
+        )
+        assert result.exit_code == 0
+        assert "agents: claude, codex" in _strip_ansi(result.stdout)
+
+    def test_agent_and_agents_conflict(self):
+        """Passing both --agent and --agents fails with a clear message."""
+        result = runner.invoke(
+            app, ["create", "--agent", "claude", "--agents", "codex", "--dry-run"]
+        )
+        assert result.exit_code != 0
+        assert "not both" in _strip_ansi(result.output)
+
+    def test_provider_and_providers_conflict(self):
+        """Passing both --provider and --providers fails with a clear message."""
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--provider",
+                "vertex",
+                "--providers",
+                "chatgpt",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "not both" in _strip_ansi(result.output)
+
+    def test_unknown_agent_rejected(self):
+        """An unknown agent name in --agents is rejected."""
+        result = runner.invoke(
+            app, ["create", "--agents", "not-a-real-agent", "--dry-run"]
+        )
+        assert result.exit_code != 0
+
+    @patch("paude.cli.create_podman.create_podman_session")
+    @patch("paude.cli.create._prepare_session_create")
+    def test_multi_agent_real_create_warns(self, mock_prepare, mock_create):
+        """A real (non-dry-run) create with >1 agent warns and drops extras."""
+        mock_prepare.return_value = ([], [], {}, False)
+        result = runner.invoke(app, ["create", "--agents", "claude,codex,gascity"])
+        assert result.exit_code == 0
+        out = _strip_ansi(result.output)
+        assert "multi-agent creation is not yet supported" in out
+        assert "codex, gascity" in out
+        # Only the primary agent is actually created.
+        mock_create.assert_called_once()
+        assert mock_create.call_args.kwargs["agent_name"] == "claude"
+
+    @patch("paude.cli.create_podman.create_podman_session")
+    @patch("paude.cli.create._prepare_session_create")
+    def test_single_agent_real_create_no_warning(self, mock_prepare, mock_create):
+        """A real create with a single agent emits no multi-agent warning."""
+        mock_prepare.return_value = ([], [], {}, False)
+        result = runner.invoke(app, ["create", "--agents", "claude"])
+        assert result.exit_code == 0
+        assert "multi-agent creation is not yet supported" not in _strip_ansi(
+            result.output
+        )
+        mock_create.assert_called_once()
+
+    def test_empty_agent_rejected_cleanly(self):
+        """An explicit empty --agent fails with a clean error, not a traceback."""
+        result = runner.invoke(app, ["create", "--agent", "", "--dry-run"])
+        assert result.exit_code != 0
+        assert result.exception is None or not isinstance(result.exception, IndexError)
+        assert "Agent name cannot be empty" in _strip_ansi(result.output)
+
+    def test_unused_explicit_provider_not_shown_in_dry_run(self):
+        """A --providers entry unused by any agent doesn't appear in the preview."""
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--agents",
+                "claude,codex",
+                "--providers",
+                "anthropic,openai",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        out = _strip_ansi(result.stdout)
+        assert "providers: anthropic, chatgpt" in out
+        assert "openai" not in out
+        assert "codex -> chatgpt" in out
 
 
 @pytest.mark.parametrize(
