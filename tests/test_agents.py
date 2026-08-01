@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from paude.agents import get_agent, get_agents, list_agents
+from paude.agents import get_agent, get_agent_composition, get_agents, list_agents
 from paude.agents.base import (
     AgentComposition,
     AgentConfig,
@@ -158,6 +158,34 @@ class TestGetAgents:
             get_agents(["bogus"])
 
 
+class TestGetAgentComposition:
+    """Tests for get_agent_composition()'s verbatim-primary contract."""
+
+    def test_preserves_custom_instance_verbatim(self) -> None:
+        # "anthropic" differs from claude's own default provider ("vertex"),
+        # so this proves the instance is used as-is rather than rebuilt from
+        # the registry with its default provider.
+        agent = get_agent("claude", provider="anthropic")
+        composition = get_agent_composition(agent)
+        assert composition.primary is agent
+        assert composition.primary.config.provider == "anthropic"
+
+    def test_single_agent_with_no_bundles_composes_to_itself(self) -> None:
+        agent = get_agent("codex")
+        composition = get_agent_composition(agent)
+        assert composition.agents == [agent]
+
+    def test_expands_bundled_agents_around_existing_instance(self) -> None:
+        agent = get_agent("gascity")
+        composition = get_agent_composition(agent)
+        assert composition.primary is agent
+        assert composition.names == ["gascity", "claude", "gemini"]
+        # Bundled agents are freshly resolved from the registry (not the
+        # same objects as get_agent("gascity")'s own bundled dependencies).
+        assert isinstance(composition.agents[1], ClaudeAgent)
+        assert isinstance(composition.agents[2], GeminiAgent)
+
+
 class TestComposeDockerfileInstallLines:
     """Tests for compose_dockerfile_install_lines() ordering and dedup."""
 
@@ -173,18 +201,14 @@ class TestComposeDockerfileInstallLines:
     def test_dedups_shared_node_prereq(self) -> None:
         agents = [get_agent("gemini"), get_agent("gascity")]
         lines = compose_dockerfile_install_lines(agents, "/home/paude")
-        node_installs = [
-            line for line in lines if "dnf install -y nodejs npm" in line
-        ]
+        node_installs = [line for line in lines if "dnf install -y nodejs npm" in line]
         assert len(node_installs) == 1
 
     def test_preserves_distinct_tool_installs(self) -> None:
         # Non-prereq installs (npm of a specific CLI) are never deduped.
         agents = [get_agent("gemini"), get_agent("gemini")]
         lines = compose_dockerfile_install_lines(agents, "/home/paude")
-        gemini_installs = [
-            line for line in lines if "@google/gemini-cli" in line
-        ]
+        gemini_installs = [line for line in lines if "@google/gemini-cli" in line]
         assert len(gemini_installs) == 2
 
     def test_ends_with_canonical_user_workdir(self) -> None:

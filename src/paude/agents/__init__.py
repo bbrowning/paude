@@ -27,7 +27,7 @@ __all__ = [
     "GeminiAgent",
     "OpenCodeAgent",
     "OpenClawAgent",
-    "composed_dockerfile_install_lines",
+    "dockerfile_install_lines_for_agent",
     "get_agent",
     "get_agent_composition",
     "get_agents",
@@ -149,7 +149,7 @@ def get_agent_composition(agent: Agent) -> AgentComposition:
     return AgentComposition(primary=agent, agents=ordered)
 
 
-def composed_dockerfile_install_lines(agent: Agent, container_home: str) -> list[str]:
+def dockerfile_install_lines_for_agent(agent: Agent, container_home: str) -> list[str]:
     """Return Dockerfile install lines for an agent plus its bundled toolchains.
 
     This is the composition entry point for the image build path: the given

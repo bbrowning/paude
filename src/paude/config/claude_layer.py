@@ -29,7 +29,7 @@ def generate_claude_layer_dockerfile(agent: Agent | None = None) -> str:
 
         agent = get_agent("claude")
 
-    from paude.agents import composed_dockerfile_install_lines
+    from paude.agents import dockerfile_install_lines_for_agent
 
     lines: list[str] = []
 
@@ -42,7 +42,7 @@ def generate_claude_layer_dockerfile(agent: Agent | None = None) -> str:
     # Install the agent plus any bundled toolchains, so composite agents like
     # gascity ship every bundled CLI. The composer emits the trailing
     # USER paude / WORKDIR footer.
-    lines.extend(composed_dockerfile_install_lines(agent, CONTAINER_HOME))
+    lines.extend(dockerfile_install_lines_for_agent(agent, CONTAINER_HOME))
 
     lines.append(f'ENTRYPOINT ["{CONTAINER_ENTRYPOINT}"]')
 
