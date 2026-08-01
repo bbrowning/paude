@@ -10,26 +10,25 @@ from paude.agents.base import (
     build_provider_credentials,
     claude_trust_script,
     gemini_trust_script,
-    pipefail_install_lines,
+    nodejs_prereq_install_lines,
 )
 
 GC_VERSION = "1.4.0"
 DOLT_VERSION = "2.1.10"
 BD_VERSION = "1.1.0"
 
-_CLAUDE_INSTALL_SCRIPT = "curl -fsSL https://claude.ai/install.sh | bash"
-
-_CLAUDE_CONFIG = AgentConfig(
-    name="claude",
-    display_name="Claude Code",
-    process_name="claude",
-    session_name="claude",
-    install_script=_CLAUDE_INSTALL_SCRIPT,
-)
-
 
 class GascityAgent:
-    """Gas City agent — composite agent with gc, Claude Code, and Gemini CLI."""
+    """Gas City agent — composite agent with gc, Claude Code, and Gemini CLI.
+
+    Gas City bundles the Claude Code and Gemini CLI toolchains (see
+    ``bundled_agents``); those installs are contributed by ClaudeAgent and
+    GeminiAgent. The image build path (the Dockerfile generators in
+    ``paude.config``) calls ``dockerfile_install_lines_for_agent()``, which
+    stitches every bundled toolchain into the image, so this agent's own
+    Dockerfile lines cover only the Gas City core: gc, dolt, bd, and the Node.js
+    prerequisite.
+    """
 
     def __init__(self, provider: str | None = None) -> None:
         creds = build_provider_credentials("gascity", provider)
@@ -59,6 +58,7 @@ class GascityAgent:
                 "nodejs",
             ],
             provider=creds.resolved_provider_name,
+            bundled_agents=["claude", "gemini"],
         )
 
     @property
@@ -68,31 +68,19 @@ class GascityAgent:
     def dockerfile_install_lines(self, container_home: str) -> list[str]:
         install_dir = f"{container_home}/.local/bin"
 
-        claude_lines = pipefail_install_lines(
-            _CLAUDE_CONFIG,
-            container_home,
-        )
-        claude_lines[1] += f" && rm -f {container_home}/.claude.json"
-
         lines = [
             "",
-            "# --- Gas City composite agent install ---",
+            "# --- Gas City core install (gc, dolt, bd) ---",
             "",
-            "# Install Node.js, Gemini CLI, and flock",
-            "USER root",
-            "RUN dnf install -y nodejs npm util-linux lsof && dnf clean all",
+            "# Node.js runtime (shared prereq; deduped with the bundled Gemini CLI)",
+            *nodejs_prereq_install_lines(),
             "",
-            "# Install Gemini CLI and patch OTEL proxy",
-            "RUN npm install -g @google/gemini-cli"
-            " && /usr/local/bin/patch-gemini-otel-proxy.sh"
-            " --force 2>&1",
-            "",
-            "# Install Claude Code",
-            "USER paude",
-            f"WORKDIR {container_home}",
-            *claude_lines,
+            "# Install flock (util-linux) and lsof",
+            "RUN dnf install -y util-linux lsof && dnf clean all",
             "",
             "# Install dolt, bd (beads), and gc (Gas City)",
+            "USER paude",
+            f"WORKDIR {container_home}",
             f"RUN mkdir -p {install_dir} && "
             f"D={install_dir} && "
             "ARCH=$(uname -m) && "
