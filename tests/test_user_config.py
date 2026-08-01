@@ -364,6 +364,25 @@ class TestResolveAgentsAndProviders:
         all_listed = {p for values, _ in result.providers_provenance for p in values}
         assert "openai" not in all_listed
 
+    def test_unused_explicit_provider_recorded_as_dropped(self):
+        """A --providers entry never assigned to any agent is recorded as dropped."""
+        result = self._resolve(
+            cli_agents=["claude", "codex"],
+            cli_providers=["anthropic", "openai"],
+        )
+        assert result.dropped_providers == ["openai"]
+
+    def test_empty_provider_rejected_cleanly(self):
+        """An explicit empty-string --provider raises ValueError, not a silent default."""
+        with pytest.raises(ValueError, match="Provider name cannot be empty"):
+            self._resolve(cli_agents=["claude"], cli_provider="")
+
+    def test_empty_provider_from_user_defaults_rejected_cleanly(self):
+        """An explicit empty-string provider in user defaults raises ValueError."""
+        user = UserDefaults(provider="")
+        with pytest.raises(ValueError, match="Provider name cannot be empty"):
+            self._resolve(user_defaults=user)
+
 
 class TestUserDefaultsGpu:
     """Tests for GPU field in user defaults."""

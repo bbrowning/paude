@@ -478,6 +478,52 @@ class TestAgentsProvidersLists:
         assert result.exception is None or not isinstance(result.exception, IndexError)
         assert "Agent name cannot be empty" in _strip_ansi(result.output)
 
+    def test_empty_provider_rejected_cleanly(self):
+        """An explicit empty --provider fails with a clean error, not a silent default."""
+        result = runner.invoke(app, ["create", "--provider", "", "--dry-run"])
+        assert result.exit_code != 0
+        assert "Provider name cannot be empty" in _strip_ansi(result.output)
+
+    @patch("paude.cli.create_podman.create_podman_session")
+    @patch("paude.cli.create._prepare_session_create")
+    def test_unused_explicit_provider_warns_on_real_create(
+        self, mock_prepare, mock_create
+    ):
+        """A real create warns when an explicit --providers entry goes unused."""
+        mock_prepare.return_value = ([], [], {}, False)
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--agents",
+                "claude,codex",
+                "--providers",
+                "anthropic,openai",
+            ],
+        )
+        assert result.exit_code == 0
+        out = _strip_ansi(result.output)
+        assert "not used by any agent" in out
+        assert "openai" in out
+        mock_create.assert_called_once()
+
+    @patch("paude.cli.create_podman.create_podman_session")
+    @patch("paude.cli.create._prepare_session_create")
+    def test_single_agent_unused_provider_warns_on_real_create(
+        self, mock_prepare, mock_create
+    ):
+        """A real create with one agent still warns about unused --providers entries."""
+        mock_prepare.return_value = ([], [], {}, False)
+        result = runner.invoke(
+            app, ["create", "--agents", "claude", "--providers", "vertex,openai"]
+        )
+        assert result.exit_code == 0
+        out = _strip_ansi(result.output)
+        assert "multi-agent creation is not yet supported" not in out
+        assert "not used by any agent" in out
+        assert "openai" in out
+        mock_create.assert_called_once()
+
     def test_unused_explicit_provider_not_shown_in_dry_run(self):
         """A --providers entry unused by any agent doesn't appear in the preview."""
         result = runner.invoke(

@@ -10,7 +10,12 @@ import typer
 from paude.agents import get_agent
 from paude.config import detect_config, parse_config
 from paude.config.dockerfile import generate_workspace_dockerfile
-from paude.config.resolver import ResolvedCreateOptions, Source, format_setting
+from paude.config.resolver import (
+    ResolvedCreateOptions,
+    SettingValue,
+    Source,
+    format_setting,
+)
 from paude.domains import format_domains_for_display
 
 
@@ -141,7 +146,14 @@ def _show_agents_and_providers(resolved: ResolvedCreateOptions) -> None:
         _show_provenance_groups(resolved.providers_provenance)
     else:
         typer.echo("  providers: (not set)  (built-in)")
-    typer.echo(format_setting("provider", resolved.provider))
+
+    # The legacy scalar mirrors the primary agent's effective provider so it
+    # doesn't contradict "per-agent providers" below when no explicit
+    # --provider/--providers was given.
+    provider_display = resolved.provider
+    if provider_display.value is None and resolved.agent_providers:
+        provider_display = SettingValue(resolved.agent_providers[0][1], "built-in")
+    typer.echo(format_setting("provider", provider_display))
 
     # Derived per-agent provider mapping (first = primary).
     if resolved.agent_providers:

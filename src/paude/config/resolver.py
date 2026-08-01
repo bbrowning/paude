@@ -73,6 +73,8 @@ class ResolvedCreateOptions:
     agents_provenance: list[tuple[list[str], Source]] = field(default_factory=list)
     providers: list[str] = field(default_factory=list)
     providers_provenance: list[tuple[list[str], Source]] = field(default_factory=list)
+    # Explicit --providers entries never assigned to any agent (real create warns).
+    dropped_providers: list[str] = field(default_factory=list)
     # Derived per-agent provider mapping (ordered, first = primary).
     agent_providers: list[tuple[str, str]] = field(default_factory=list)
     allowed_domains: list[str] = field(default_factory=list)
@@ -312,6 +314,11 @@ def _resolve_agents_and_providers(
         user=user_defaults.providers or _as_list(user_defaults.provider),
         builtin=[],
     )
+    if not provider_pool and providers_source != "built-in":
+        raise ValueError(
+            "Provider name cannot be empty. Specify a non-empty "
+            "--provider/--providers value."
+        )
 
     # The primary provider scalar mirrors the highest-precedence explicit
     # provider (first in the pool), or None when nothing was configured.
@@ -339,6 +346,7 @@ def _resolve_agents_and_providers(
         result.providers_provenance.append((used_explicit, providers_source))
     if auto_added:
         result.providers_provenance.append((auto_added, "built-in"))
+    result.dropped_providers = [p for p in provider_pool if p not in used]
 
 
 def _as_list(value: str | None) -> list[str] | None:
