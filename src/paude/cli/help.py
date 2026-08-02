@@ -68,8 +68,14 @@ _SECTIONS: tuple[HelpSection, ...] = (
     HelpSection(
         title="Copying Files (without git)",
         rows=(
-            ("paude cp ./file.txt session:file.txt", "Copy local file to session"),
-            ("paude cp session:output.log ./", "Copy file from session to local"),
+            (
+                "paude cp ./file.txt session:file.txt",
+                "Copy local file to a session (including SSH hosts)",
+            ),
+            (
+                "paude cp session:output.log ./",
+                "Copy a session file to the local machine",
+            ),
             ("paude cp ./src :src", "Auto-detect session, copy dir"),
             ("paude cp :results ./results", "Auto-detect session, copy from"),
         ),

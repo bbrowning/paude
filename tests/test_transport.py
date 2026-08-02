@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -153,6 +154,173 @@ class TestSshTransport:
         assert t.host == "user@host"
         assert t.key == "/k"
         assert t.port == 22
+
+    def test_copy_file_to_host_streams_and_preserves_metadata(self, tmp_path) -> None:
+        source = tmp_path / "input.txt"
+        source.write_bytes(b"copy-data")
+        source.chmod(0o751)
+        modified_at = 1_700_000_000
+        os.utime(source, (modified_at, modified_at))
+        destination = tmp_path / "remote" / "renamed.txt"
+        transport = SshTransport("user@host")
+
+        with patch.object(transport, "ssh_base", return_value=["sh", "-c"]):
+            transport.copy_to_host(str(source), str(destination))
+
+        assert destination.read_bytes() == b"copy-data"
+        assert destination.stat().st_mode & 0o777 == 0o751
+        assert int(destination.stat().st_mtime) == modified_at
+
+    def test_copy_file_from_host_streams_and_preserves_metadata(self, tmp_path) -> None:
+        source = tmp_path / "remote" / "output.txt"
+        source.parent.mkdir()
+        source.write_bytes(b"copy-data")
+        source.chmod(0o751)
+        modified_at = 1_700_000_000
+        os.utime(source, (modified_at, modified_at))
+        destination = tmp_path / "output.txt"
+        transport = SshTransport("user@host")
+
+        with patch.object(transport, "ssh_base", return_value=["sh", "-c"]):
+            transport.copy_from_host(str(source), str(destination))
+
+        assert destination.read_bytes() == b"copy-data"
+        assert destination.stat().st_mode & 0o777 == 0o751
+        assert int(destination.stat().st_mtime) == modified_at
+
+    def test_copy_file_from_host_retains_name_for_directory_target(
+        self, tmp_path
+    ) -> None:
+        source = tmp_path / "remote" / "output.txt"
+        source.parent.mkdir()
+        source.write_bytes(b"copy-data")
+        destination = tmp_path / "downloads"
+        destination.mkdir()
+        transport = SshTransport("user@host")
+
+        with patch.object(transport, "ssh_base", return_value=["sh", "-c"]):
+            transport.copy_from_host(str(source), str(destination))
+
+        assert (destination / source.name).read_bytes() == b"copy-data"
+
+    def test_copy_symlink_from_host_preserves_link(self, tmp_path) -> None:
+        secret = tmp_path / "host-secret"
+        secret.write_text("do-not-copy")
+        source = tmp_path / "remote" / "secret-link"
+        source.parent.mkdir()
+        source.symlink_to(secret)
+        destination = tmp_path / "downloads"
+        destination.mkdir()
+        transport = SshTransport("user@host")
+
+        with patch.object(transport, "ssh_base", return_value=["sh", "-c"]):
+            transport.copy_from_host(str(source), str(destination))
+
+        copied = destination / source.name
+        assert copied.is_symlink()
+        assert copied.readlink() == secret
+
+    def test_copy_dangling_symlink_from_host_preserves_link(self, tmp_path) -> None:
+        source = tmp_path / "remote" / "missing-link"
+        source.parent.mkdir()
+        source.symlink_to("/missing/remote-target")
+        destination = tmp_path / "downloads"
+        destination.mkdir()
+        transport = SshTransport("user@host")
+
+        with patch.object(transport, "ssh_base", return_value=["sh", "-c"]):
+            transport.copy_from_host(str(source), str(destination))
+
+        copied = destination / source.name
+        assert copied.is_symlink()
+        assert copied.readlink() == source.readlink()
+
+    def test_copy_directory_from_host_preserves_nested_symlink(self, tmp_path) -> None:
+        secret = tmp_path / "host-secret"
+        secret.write_text("do-not-copy")
+        source = tmp_path / "remote" / "results"
+        source.mkdir(parents=True)
+        (source / "secret-link").symlink_to(secret)
+        destination = tmp_path / "downloads"
+        destination.mkdir()
+        transport = SshTransport("user@host")
+
+        with patch.object(transport, "ssh_base", return_value=["sh", "-c"]):
+            transport.copy_from_host(str(source), str(destination))
+
+        copied = destination / source.name / "secret-link"
+        assert copied.is_symlink()
+        assert copied.readlink() == secret
+
+    def test_copy_from_host_does_not_traverse_destination_symlink(
+        self, tmp_path
+    ) -> None:
+        source = tmp_path / "remote" / "results"
+        source.mkdir(parents=True)
+        (source / "nested").mkdir()
+        (source / "nested" / "output.txt").write_text("copy-data")
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        destination = tmp_path / "downloads"
+        target = destination / source.name
+        target.mkdir(parents=True)
+        (target / "nested").symlink_to(outside, target_is_directory=True)
+        transport = SshTransport("user@host")
+
+        with patch.object(transport, "ssh_base", return_value=["sh", "-c"]):
+            transport.copy_from_host(str(source), str(destination))
+
+        assert not (outside / "output.txt").exists()
+        assert not (target / "nested").is_symlink()
+        assert (target / "nested" / "output.txt").read_text() == "copy-data"
+
+    def test_copy_directory_contents_from_host(self, tmp_path) -> None:
+        source = tmp_path / "remote" / "results"
+        source.mkdir(parents=True)
+        (source / "output.txt").write_text("copy-data")
+        (source / ".hidden").write_text("hidden-data")
+        destination = tmp_path / "downloads"
+        transport = SshTransport("user@host")
+
+        with patch.object(transport, "ssh_base", return_value=["sh", "-c"]):
+            transport.copy_from_host(f"{source}/.", str(destination))
+
+        assert (destination / "output.txt").read_text() == "copy-data"
+        assert (destination / ".hidden").read_text() == "hidden-data"
+        assert not (destination / source.name).exists()
+
+    def test_copy_directory_contents_to_host(self, tmp_path) -> None:
+        source = tmp_path / "input"
+        source.mkdir()
+        (source / "input.txt").write_text("copy-data")
+        (source / ".hidden").write_text("hidden-data")
+        destination = tmp_path / "remote"
+        transport = SshTransport("user@host")
+
+        with patch.object(transport, "ssh_base", return_value=["sh", "-c"]):
+            transport.copy_to_host(f"{source}/.", f"{destination}/.")
+
+        assert (destination / "input.txt").read_text() == "copy-data"
+        assert (destination / ".hidden").read_text() == "hidden-data"
+        assert not (destination / source.name).exists()
+
+    @patch("paude.transport.ssh.subprocess.Popen")
+    def test_copy_from_host_uses_portable_tar_options(
+        self, mock_popen: MagicMock, tmp_path
+    ) -> None:
+        remote_process = MagicMock()
+        remote_process.stdout = MagicMock()
+        remote_process.communicate.return_value = (b"", b"transfer failed")
+        remote_process.returncode = 1
+        mock_popen.return_value = remote_process
+        transport = SshTransport("user@host")
+
+        with pytest.raises(RuntimeError, match="transfer failed"):
+            transport.copy_from_host("/remote/output.txt", str(tmp_path))
+
+        remote_command = mock_popen.call_args_list[0].args[0][-1]
+        assert remote_command.startswith("tar -cf - -C ")
+        assert "--warning" not in remote_command
 
     @patch("paude.transport.ssh.subprocess.run")
     def test_validate_success(self, mock_run: MagicMock) -> None:

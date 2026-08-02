@@ -3,6 +3,13 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
+
+from paude.transport.file_copy import (
+    copies_directory_contents,
+    copy_path,
+    without_contents_suffix,
+)
 
 
 class LocalTransport:
@@ -31,6 +38,14 @@ class LocalTransport:
         result = subprocess.run(cmd)
         return result.returncode
 
+    def copy_to_host(self, local_path: str, host_path: str) -> None:
+        """Copy a local path to another local path."""
+        _copy_path(local_path, host_path)
+
+    def copy_from_host(self, host_path: str, local_path: str) -> None:
+        """Copy a local path to another local path."""
+        _copy_path(host_path, local_path)
+
     @property
     def is_remote(self) -> bool:
         return False
@@ -38,3 +53,11 @@ class LocalTransport:
     @property
     def host_label(self) -> str:
         return "local"
+
+
+def _copy_path(source_path: str, destination_path: str) -> None:
+    """Copy a path while retaining trailing ``/.`` semantics."""
+    contents = copies_directory_contents(source_path)
+    if contents:
+        source_path = without_contents_suffix(source_path)
+    copy_path(Path(source_path), Path(destination_path), contents=contents)

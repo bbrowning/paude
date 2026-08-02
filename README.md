@@ -280,6 +280,14 @@ Note that a plain `ssh -L` reaches the remote *host's* loopback, so the containe
 paude create --yolo my-project -a '-p "refactor the auth module"'
 ```
 
+File copies also cross the SSH connection automatically. The local path is
+always resolved on the machine where you run `paude`:
+
+```bash
+paude cp dgx-spark-codex:/pvc/workspace/output.log ./output.log
+paude cp ./input.txt dgx-spark-codex:/pvc/workspace/input.txt
+```
+
 Or just start the session and type your request in the agent interface.
 
 ### Something Not Working?
