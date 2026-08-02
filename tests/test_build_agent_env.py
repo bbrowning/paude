@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from paude.agents.base import AgentConfig
+from paude.backends.session_env import build_agent_env
 
 
 def _make_config(**overrides: object) -> AgentConfig:
@@ -16,3 +17,11 @@ def _make_config(**overrides: object) -> AgentConfig:
     }
     defaults.update(overrides)
     return AgentConfig(**defaults)  # type: ignore[arg-type]
+
+
+def test_build_agent_env_includes_all_persistent_dirs() -> None:
+    config = _make_config(extra_persistent_dir_names=[".agents", ".local/share/test"])
+
+    env = build_agent_env(config)
+
+    assert env["PAUDE_AGENT_CONFIG_DIRS"] == ".claude .agents .local/share/test"

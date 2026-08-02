@@ -73,7 +73,7 @@ class TestBuildSessionEnv:
 
         env, _args = build_session_env(config, composition, proxy_name="proxy-test")
 
-        assert env["PAUDE_AGENT_CONFIG_DIRS"] == ".gascity .claude .codex"
+        assert env["PAUDE_AGENT_CONFIG_DIRS"] == ".gc .claude .codex .agents"
         assert env["PAUDE_AGENT_CONFIG_FILES"] == ".claude.json"
         assert env["PAUDE_AGENT_PROVIDERS"] == (
             "gascity=vertex,claude=vertex,codex=chatgpt"

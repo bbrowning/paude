@@ -29,6 +29,10 @@ class OpenCodeAgent:
             secret_env_vars=creds.secret_env_vars,
             passthrough_env_prefixes=creds.passthrough_env_prefixes,
             config_dir_name=".config/opencode",
+            extra_persistent_dir_names=[
+                ".local/share/opencode",
+                ".local/state/opencode",
+            ],
             config_file_name=None,
             activity_files=[],
             yolo_flag="--auto",

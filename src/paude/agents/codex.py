@@ -12,7 +12,6 @@ from paude.agents.base import (
 )
 from paude.constants import CONTAINER_HOME
 
-CODEX_VERSION = "0.144.5"
 CODEX_CHATGPT_PROFILE_NAME = "paude-chatgpt-http"
 CODEX_CHATGPT_PROFILE_TARGET = (
     f"/home/paude/.codex/{CODEX_CHATGPT_PROFILE_NAME}.config.toml"
@@ -39,9 +38,8 @@ _INSTALL_SCRIPT = (
     '*) echo "Unsupported architecture: $ARCH" && exit 1 ;; '
     "esac && "
     "curl -fsSL "
-    '"https://github.com/openai/codex/releases/download/'
-    f"rust-v{CODEX_VERSION}"
-    '/codex-${CODEX_ARCH}.tar.gz"'
+    '"https://github.com/openai/codex/releases/latest/download/'
+    'codex-${CODEX_ARCH}.tar.gz"'
     ' | tar xz -C "$HOME/.local/bin" "codex-${CODEX_ARCH}" && '
     'mv "$HOME/.local/bin/codex-${CODEX_ARCH}" "$HOME/.local/bin/codex"'
 )
@@ -64,6 +62,7 @@ class CodexAgent:
             secret_env_vars=creds.secret_env_vars,
             passthrough_env_prefixes=creds.passthrough_env_prefixes,
             config_dir_name=".codex",
+            extra_persistent_dir_names=[".agents"],
             config_file_name=None,
             activity_files=[],
             yolo_flag="--dangerously-bypass-approvals-and-sandbox",

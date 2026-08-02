@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from paude.agents import get_agents
 from paude.agents.base import compose_dockerfile_install_lines
-from paude.agents.gascity import BD_VERSION, DOLT_VERSION, GC_VERSION, GascityAgent
+from paude.agents.gascity import GascityAgent
 
 
 class TestGascityAgentConfig:
@@ -26,7 +26,7 @@ class TestGascityAgentConfig:
         assert GascityAgent().config.session_name == "gascity"
 
     def test_config_dir_name(self) -> None:
-        assert GascityAgent().config.config_dir_name == ".gascity"
+        assert GascityAgent().config.config_dir_name == ".gc"
 
     def test_config_file_name_is_none(self) -> None:
         assert GascityAgent().config.config_file_name is None
@@ -109,17 +109,21 @@ class TestGascityAgentDockerfile:
     def test_contains_dolt(self) -> None:
         text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
         assert "dolthub/dolt" in text
-        assert DOLT_VERSION in text
+        assert "dolthub/dolt/releases/latest" in text
 
     def test_contains_bd(self) -> None:
         text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
         assert "gastownhall/beads" in text
-        assert BD_VERSION in text
+        assert "gastownhall/beads/releases/latest" in text
 
     def test_contains_gc(self) -> None:
         text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
         assert "gastownhall/gascity" in text
-        assert GC_VERSION in text
+        assert "gastownhall/gascity/releases/latest" in text
+
+    def test_latest_release_lookup_does_not_require_jq(self) -> None:
+        text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
+        assert "jq" not in text
 
     def test_contains_flock(self) -> None:
         text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
@@ -273,11 +277,11 @@ class TestGascityComposedInstall:
     def test_contains_gc_dolt_bd(self) -> None:
         text = self._composed()
         assert "gastownhall/gascity" in text
-        assert GC_VERSION in text
+        assert "gastownhall/gascity/releases/latest" in text
         assert "dolthub/dolt" in text
-        assert DOLT_VERSION in text
+        assert "dolthub/dolt/releases/latest" in text
         assert "gastownhall/beads" in text
-        assert BD_VERSION in text
+        assert "gastownhall/beads/releases/latest" in text
 
     def test_contains_claude(self) -> None:
         text = self._composed()
@@ -376,6 +380,6 @@ class TestGascityBuildPathInstall:
         assert "claude.ai/install.sh" in dockerfile
         assert "openai/codex" in dockerfile
         assert "@google/gemini-cli" not in dockerfile
-        assert "/home/paude/.gascity" in dockerfile
+        assert "/home/paude/.gc" in dockerfile
         assert "/home/paude/.claude" in dockerfile
         assert "/home/paude/.codex" in dockerfile

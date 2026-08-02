@@ -767,6 +767,26 @@ class TestPersistConfigDir:
             '{"metrics.disabled":true}'
         )
 
+    def test_persists_nested_xdg_directory(self, tmp_path: Path) -> None:
+        """Nested state paths retain their HOME-relative layout on the PVC."""
+        home = tmp_path / "home"
+        state = home / ".local" / "share" / "opencode"
+        state.mkdir(parents=True)
+        (state / "opencode.db").write_text("session data")
+        pvc = tmp_path / "pvc"
+        pvc.mkdir()
+
+        script = _build_persist_config_dir_script(
+            str(home), str(pvc), ".local/share/opencode"
+        )
+        result = _run_script(script)
+
+        assert result.returncode == 0, result.stderr
+        assert state.is_symlink()
+        assert (pvc / ".local/share/opencode/opencode.db").read_text() == (
+            "session data"
+        )
+
     def test_preserves_pvc_state_on_reconnect(self, tmp_path: Path) -> None:
         """Reconnect: PVC has existing dolt data, symlink preserved."""
         home = tmp_path / "home"

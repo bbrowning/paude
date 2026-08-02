@@ -21,7 +21,7 @@ paude
 | `stop` | Stops the container, preserves the volume |
 | `connect` | Attaches to running session |
 | `cp` | Copies files between local machine and session |
-| `upgrade` | Upgrades session to current paude version; can also reconfigure options (`--otel-endpoint`, `--allowed-domains`, `--gpu`/`--no-gpu`, `--yolo`/`--no-yolo`, `--provider`) in place, preserving data |
+| `upgrade` | Pulls current bases, rebuilds with the latest stable agent tooling, and recreates the session while preserving workspace and agent state; can also reconfigure options (`--otel-endpoint`, `--allowed-domains`, `--gpu`/`--no-gpu`, `--yolo`/`--no-yolo`, `--provider`) |
 | `remote` | Manages git remotes for code sync |
 | `delete` | Removes all resources including volume |
 | `list` | Shows all sessions with version info |
@@ -67,6 +67,31 @@ paude delete my-project --confirm
 # (useful for orphaned or legacy sessions)
 paude delete my-project --confirm --force
 ```
+
+`upgrade` performs a fresh build even when the session already uses the
+current Paude version. Before replacing the container, it migrates state from
+older container writable layers into the session volume. This preserves agent
+configuration, logins, conversation history, installed skills, and other
+mutable state in addition to `/pvc/workspace`.
+
+The legacy `--rebuild` option is still accepted for compatibility, but is no
+longer necessary because upgrades always rebuild.
+
+### Persisted agent state
+
+| Agent | PVC-backed home paths |
+|-------|-----------------------|
+| Claude Code | `~/.claude`, `~/.claude.json` |
+| Codex CLI | `~/.codex`, `~/.agents` |
+| Cursor CLI | `~/.cursor`, `~/.config/cursor` |
+| Gemini CLI | `~/.gemini`, `~/.agents` |
+| OpenCode | `~/.config/opencode`, `~/.local/share/opencode`, `~/.local/state/opencode` |
+| OpenClaw | `~/.openclaw` |
+| Gas City | `~/.gc`, bundled-agent paths |
+
+Shared writable Git and Dolt configuration is also stored on the session
+volume. Regenerable caches and image-installed binaries are rebuilt instead
+of persisted.
 
 ## Backend Selection
 

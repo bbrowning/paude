@@ -26,13 +26,14 @@ class GeminiAgent:
             # Runtime fallback only — requires Node.js already in the image.
             # Normal path: dockerfile_install_lines bakes Node.js + CLI into image,
             # and install_agent() skips via `command -v gemini`.
-            install_script="npm install -g @google/gemini-cli@0.35.3",
+            install_script="npm install -g @google/gemini-cli@latest",
             install_dir=".local/bin",
             env_vars=creds.extra_env_vars,
             passthrough_env_vars=creds.passthrough_env_vars,
             secret_env_vars=creds.secret_env_vars,
             passthrough_env_prefixes=creds.passthrough_env_prefixes,
             config_dir_name=".gemini",
+            extra_persistent_dir_names=[".agents"],
             config_file_name=None,
             activity_files=[],
             yolo_flag="--yolo",
@@ -52,7 +53,7 @@ class GeminiAgent:
             *nodejs_prereq_install_lines(),
             "",
             "# Install Gemini CLI and patch OTEL proxy",
-            "RUN npm install -g @google/gemini-cli@0.35.3"
+            "RUN npm install -g @google/gemini-cli@latest"
             " && /usr/local/bin/patch-gemini-otel-proxy.sh"
             " --force 2>&1",
             "",

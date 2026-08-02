@@ -61,12 +61,17 @@ class TestUpgradeCommand:
         output = result.stdout + (result.stderr or "")
         assert "not found" in output
 
+    @patch("paude.cli.upgrade._upgrade_podman")
     @patch("paude.cli.upgrade.find_session_backend")
-    def test_upgrade_already_up_to_date(self, mock_find: MagicMock) -> None:
-        """Session version matches current __version__, should print up to date."""
+    def test_upgrade_same_version_still_refreshes(
+        self, mock_find: MagicMock, mock_upgrade_podman: MagicMock
+    ) -> None:
+        """A same-version upgrade still refreshes agent tooling."""
         from paude import __version__
+        from paude.backends.podman.backend import PodmanBackend
 
         mock_backend = MagicMock()
+        mock_backend.__class__ = PodmanBackend
         mock_backend.get_session.return_value = _make_session(
             "test-session", version=__version__
         )
@@ -75,8 +80,8 @@ class TestUpgradeCommand:
         result = runner.invoke(app, ["upgrade", "test-session"])
 
         assert result.exit_code == 0
-        output = result.stdout + (result.stderr or "")
-        assert "already at version" in output
+        mock_upgrade_podman.assert_called_once()
+        assert mock_upgrade_podman.call_args.args[2] is True
 
     @patch("paude.cli.upgrade._upgrade_podman")
     @patch("paude.cli.upgrade.find_session_backend")
@@ -184,6 +189,31 @@ class TestUpgradePodman:
         if proxy_image is not None:
             labels[PAUDE_LABEL_PROXY_IMAGE] = proxy_image
         return labels
+
+    def test_reused_volume_survives_container_creation_rollback(self) -> None:
+        from paude.backends import SessionConfig
+        from paude.backends.podman.backend import PodmanBackend
+
+        backend = MagicMock(spec=PodmanBackend)
+        backend._runner = MagicMock()
+        backend._network_manager = MagicMock()
+        backend._volume_manager = MagicMock()
+        config = SessionConfig(
+            name="test-session",
+            workspace=Path("/workspace"),
+            image="paude:latest",
+            reuse_volume=True,
+        )
+
+        PodmanBackend._rollback_session_resources(
+            backend,
+            config,
+            "test-session",
+            "paude-test-session-workspace",
+            volume_reused=True,
+        )
+
+        backend._volume_manager.remove_volume.assert_not_called()
 
     @patch("paude.mounts.build_mounts", return_value=[])
     @patch("paude.cli.helpers._prepare_session_create")
@@ -325,7 +355,9 @@ class TestUpgradePodman:
 
         _upgrade_podman("test-session", backend, rebuild=False, overrides=_NO_OVERRIDES)
 
-        mock_image_manager.ensure_default_image.assert_called_once()
+        mock_image_manager.ensure_default_image.assert_called_once_with(
+            force_rebuild=True
+        )
 
     @patch("paude.mounts.build_mounts", return_value=[])
     @patch("paude.cli.helpers._prepare_session_create")

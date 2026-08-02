@@ -21,7 +21,6 @@ from paude.agents.base import (
 from paude.agents.claude import ClaudeAgent
 from paude.agents.codex import (
     CODEX_CHATGPT_PROFILE_NAME,
-    CODEX_VERSION,
     SYNTHETIC_CODEX_PROFILE_TOML,
     CodexAgent,
 )
@@ -269,6 +268,8 @@ class TestAgentConfig:
         assert cfg.extra_domain_aliases == ["claude"]
         assert cfg.exposed_ports == []
         assert cfg.default_base_image is None
+        assert cfg.extra_persistent_dir_names == []
+        assert cfg.persistent_dir_names == [".claude"]
 
 
 class TestClaudeAgentConfig:
@@ -478,15 +479,18 @@ class TestCodexAgentConfig:
         cfg = CodexAgent().config
         assert "openai/codex" in cfg.install_script
 
-    def test_install_script_contains_version(self) -> None:
+    def test_install_script_uses_latest_stable_release(self) -> None:
         cfg = CodexAgent().config
-        assert CODEX_VERSION in cfg.install_script
+        assert "releases/latest/download" in cfg.install_script
 
     def test_config_dir_name(self) -> None:
         assert CodexAgent().config.config_dir_name == ".codex"
 
     def test_config_file_name_is_none(self) -> None:
         assert CodexAgent().config.config_file_name is None
+
+    def test_persistent_dirs(self) -> None:
+        assert CodexAgent().config.persistent_dir_names == [".codex", ".agents"]
 
     def test_yolo_flag(self) -> None:
         assert (
@@ -570,7 +574,7 @@ class TestCodexAgentDockerfile:
     def test_contains_version(self) -> None:
         lines = CodexAgent().dockerfile_install_lines("/home/paude")
         text = "\n".join(lines)
-        assert CODEX_VERSION in text
+        assert "releases/latest/download" in text
 
     def test_contains_arch_detection(self) -> None:
         lines = CodexAgent().dockerfile_install_lines("/home/paude")
@@ -725,6 +729,9 @@ class TestGeminiAgentConfig:
 
     def test_config_file_name_is_none(self) -> None:
         assert GeminiAgent().config.config_file_name is None
+
+    def test_persistent_dirs(self) -> None:
+        assert GeminiAgent().config.persistent_dir_names == [".gemini", ".agents"]
 
     def test_yolo_flag(self) -> None:
         assert GeminiAgent().config.yolo_flag == "--yolo"
@@ -889,6 +896,12 @@ class TestCursorAgentConfig:
 
     def test_config_file_name_is_none(self) -> None:
         assert CursorAgent().config.config_file_name is None
+
+    def test_persistent_dirs(self) -> None:
+        assert CursorAgent().config.persistent_dir_names == [
+            ".cursor",
+            ".config/cursor",
+        ]
 
     def test_yolo_flag(self) -> None:
         assert CursorAgent().config.yolo_flag == "--yolo"
@@ -1420,6 +1433,13 @@ class TestOpenCodeAgentConfig:
 
     def test_config_file_name_is_none(self) -> None:
         assert OpenCodeAgent().config.config_file_name is None
+
+    def test_persistent_dirs(self) -> None:
+        assert OpenCodeAgent().config.persistent_dir_names == [
+            ".config/opencode",
+            ".local/share/opencode",
+            ".local/state/opencode",
+        ]
 
     def test_yolo_flag(self) -> None:
         assert OpenCodeAgent().config.yolo_flag == "--auto"
