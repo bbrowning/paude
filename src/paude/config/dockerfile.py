@@ -131,24 +131,24 @@ def generate_workspace_dockerfile(
 RUN if command -v apt-get >/dev/null 2>&1; then \\
         apt-get update && \\
         apt-get install -y --no-install-recommends \\
-            git curl ca-certificates bash tmux locales socat \\
+            git curl ca-certificates bash tmux locales socat jq \\
             coreutils findutils grep sed gawk diffutils less file \\
             tar gzip xz-utils unzip zip && \\
         rm -rf /var/lib/apt/lists/* && \\
         localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8; \\
     elif command -v apk >/dev/null 2>&1; then \\
-        apk add --no-cache git curl ca-certificates bash tmux socat \\
+        apk add --no-cache git curl ca-certificates bash tmux socat jq \\
             coreutils findutils grep sed gawk diffutils less file \\
             tar gzip xz unzip zip; \\
     elif command -v dnf >/dev/null 2>&1; then \\
         dnf install -y --allowerasing \\
-            git curl ca-certificates bash glibc-langpack-en socat \\
+            git curl ca-certificates bash glibc-langpack-en socat jq \\
             which coreutils findutils grep sed gawk diffutils less file \\
             tar gzip xz unzip zip && \\
         dnf clean all; \\
     elif command -v yum >/dev/null 2>&1; then \\
         yum install -y --allowerasing \\
-            git curl ca-certificates bash glibc-langpack-en socat \\
+            git curl ca-certificates bash glibc-langpack-en socat jq \\
             which coreutils findutils grep sed gawk diffutils less file \\
             tar gzip xz unzip zip && \\
         yum clean all; \\
@@ -211,7 +211,11 @@ RUN if ! command -v tini >/dev/null 2>&1; then \\
     else:
         raise ValueError("An agent is required when no composition is provided")
     config_dirs = list(
-        dict.fromkeys(item.config.config_dir_name for item in install_agents)
+        dict.fromkeys(
+            directory
+            for item in install_agents
+            for directory in item.config.persistent_dir_names
+        )
     )
     lines.append(
         "RUN (id paude >/dev/null 2>&1 || (groupadd paude 2>/dev/null && useradd -M -d /home/paude -s /bin/bash -g paude paude 2>/dev/null) || adduser -D -s /bin/bash paude) && "

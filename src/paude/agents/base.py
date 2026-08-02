@@ -26,6 +26,8 @@ class AgentConfig:
         secret_env_vars: Host env vars to deliver securely (not in container spec).
         passthrough_env_prefixes: Host env var prefixes to forward.
         config_dir_name: Config directory under HOME (e.g., ".claude").
+        extra_persistent_dir_names: Additional mutable directories under HOME
+            that must survive container recreation.
         config_file_name: Config file under HOME (e.g., ".claude.json"), or None.
         activity_files: Paths (relative to config dir) for activity detection.
         yolo_flag: CLI flag to skip permissions
@@ -54,6 +56,7 @@ class AgentConfig:
     secret_env_vars: list[str] = field(default_factory=list)
     passthrough_env_prefixes: list[str] = field(default_factory=list)
     config_dir_name: str = ".claude"
+    extra_persistent_dir_names: list[str] = field(default_factory=list)
     config_file_name: str | None = ".claude.json"
     activity_files: list[str] = field(default_factory=list)
     yolo_flag: str | None = "--dangerously-skip-permissions"
@@ -65,6 +68,13 @@ class AgentConfig:
     default_base_image: str | None = None
     provider: str | None = None
     bundled_agents: list[str] = field(default_factory=list)
+
+    @property
+    def persistent_dir_names(self) -> list[str]:
+        """Return every HOME-relative directory that must live on the PVC."""
+        return list(
+            dict.fromkeys([self.config_dir_name, *self.extra_persistent_dir_names])
+        )
 
 
 @dataclass
@@ -389,7 +399,9 @@ def compose_dockerfile_install_lines(
     """
     config_dirs = list(
         dict.fromkeys(
-            f"{container_home}/{agent.config.config_dir_name}" for agent in agents
+            f"{container_home}/{directory}"
+            for agent in agents
+            for directory in agent.config.persistent_dir_names
         )
     )
     combined: list[str] = [

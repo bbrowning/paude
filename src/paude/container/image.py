@@ -69,8 +69,8 @@ class ImageManager:
         """
         if self.agent and self.agent.config.default_base_image:
             return self._ensure_agent_base_image(force_rebuild=force_rebuild)
-        base_tag = self._ensure_base_image()
-        return self._ensure_runtime_image(base_tag)
+        base_tag = self._ensure_base_image(force_refresh=force_rebuild)
+        return self._ensure_runtime_image(base_tag, force_rebuild=force_rebuild)
 
     def _ensure_agent_base_image(self, force_rebuild: bool = False) -> str:
         """Build image using agent's default base image with paude infrastructure.
@@ -118,7 +118,11 @@ class ImageManager:
             build_args = {"BASE_IMAGE": base_image}
             try:
                 self.build_image(
-                    Path(tmpdir) / "Dockerfile", tag, Path(tmpdir), build_args
+                    Path(tmpdir) / "Dockerfile",
+                    tag,
+                    Path(tmpdir),
+                    build_args,
+                    fresh=force_rebuild,
                 )
             except Exception:
                 engine_name = self._engine.binary
@@ -135,7 +139,7 @@ class ImageManager:
         print(f"{agent_display} installed successfully.", file=sys.stderr)
         return tag
 
-    def _ensure_base_image(self) -> str:
+    def _ensure_base_image(self, force_refresh: bool = False) -> str:
         """Ensure the base paude image (without agent) is available."""
         import sys
 
@@ -145,15 +149,15 @@ class ImageManager:
                 tag = f"paude-base-centos10:latest-{arch}"
             else:
                 tag = "paude-base-centos10:latest"
-            if not self._engine.image_exists(tag):
+            if force_refresh or not self._engine.image_exists(tag):
                 print(f"Building {tag} image...", file=sys.stderr)
                 dockerfile = self.script_dir / "containers" / "paude" / "Dockerfile"
                 context = self.script_dir / "containers" / "paude"
-                self.build_image(dockerfile, tag, context)
+                self.build_image(dockerfile, tag, context, fresh=force_refresh)
             return tag
         else:
             tag = f"{self.registry}/paude-base-centos10:{self.version}"
-            if not self._engine.image_exists(tag):
+            if force_refresh or not self._engine.image_exists(tag):
                 print(f"Pulling {tag}...", file=sys.stderr)
                 try:
                     self._engine.run(
@@ -169,7 +173,9 @@ class ImageManager:
                     raise
             return tag
 
-    def _ensure_runtime_image(self, base_image: str) -> str:
+    def _ensure_runtime_image(
+        self, base_image: str, force_rebuild: bool = False
+    ) -> str:
         """Ensure the runtime image (with agent installed) is available."""
         import sys
 
@@ -188,7 +194,7 @@ class ImageManager:
         else:
             runtime_tag = f"paude-runtime:{layer_hash[:12]}"
 
-        if self._engine.image_exists(runtime_tag):
+        if not force_rebuild and self._engine.image_exists(runtime_tag):
             print(f"Using cached runtime image: {runtime_tag}", file=sys.stderr)
             return runtime_tag
 
@@ -201,7 +207,14 @@ class ImageManager:
 
             build_args = {"BASE_IMAGE": base_image}
             try:
-                self.build_image(dockerfile_path, runtime_tag, Path(tmpdir), build_args)
+                self.build_image(
+                    dockerfile_path,
+                    runtime_tag,
+                    Path(tmpdir),
+                    build_args,
+                    fresh=force_rebuild,
+                    pull=False,
+                )
             except Exception:
                 engine_name = self._engine.binary
                 print(
@@ -255,7 +268,9 @@ class ImageManager:
             return tag
 
         print("Building workspace image...", file=sys.stderr)
-        base_image, using_default = self._resolve_custom_base(config, config_hash)
+        base_image, using_default = self._resolve_custom_base(
+            config, config_hash, force_rebuild=force_rebuild
+        )
         dockerfile_content = generate_dockerfile_content(
             config,
             using_default,
@@ -273,7 +288,14 @@ class ImageManager:
                 copy_features_cache(Path(tmpdir))
 
             build_args = {"BASE_IMAGE": base_image}
-            self.build_image(Path(tmpdir) / "Dockerfile", tag, Path(tmpdir), build_args)
+            self.build_image(
+                Path(tmpdir) / "Dockerfile",
+                tag,
+                Path(tmpdir),
+                build_args,
+                fresh=force_rebuild,
+                pull=not using_default and config.dockerfile is None,
+            )
 
         print(f"Build complete (cached as {tag})", file=sys.stderr)
         return tag
@@ -288,7 +310,10 @@ class ImageManager:
         )
 
     def _resolve_custom_base(
-        self, config: PaudeConfig, config_hash: str
+        self,
+        config: PaudeConfig,
+        config_hash: str,
+        force_rebuild: bool = False,
     ) -> tuple[str, bool]:
         """Resolve the base image for custom workspace builds."""
         import sys
@@ -301,7 +326,11 @@ class ImageManager:
             print(f"  → Building from: {config.dockerfile}", file=sys.stderr)
             user_build_args = dict(config.build_args)
             self.build_image(
-                config.dockerfile, user_image, build_context, user_build_args
+                config.dockerfile,
+                user_image,
+                build_context,
+                user_build_args,
+                fresh=force_rebuild,
             )
             print("  → Adding paude requirements...", file=sys.stderr)
             return user_image, False
@@ -313,7 +342,7 @@ class ImageManager:
             print(f"  → Using agent default base: {base}", file=sys.stderr)
             return base, False
         else:
-            base_image = self.ensure_default_image()
+            base_image = self.ensure_default_image(force_rebuild=force_rebuild)
             print(f"  → Using default paude image: {base_image}", file=sys.stderr)
             return base_image, True
 
@@ -335,11 +364,11 @@ class ImageManager:
                 print(f"Building {tag} image...", file=sys.stderr)
                 dockerfile = self.script_dir / "containers" / "proxy" / "Dockerfile"
                 context = self.script_dir / "containers" / "proxy"
-                self.build_image(dockerfile, tag, context)
+                self.build_image(dockerfile, tag, context, fresh=force_rebuild)
             return tag
         else:
             tag = f"{self.registry}/paude-proxy-centos10:{self.version}"
-            if not self._engine.image_exists(tag):
+            if force_rebuild or not self._engine.image_exists(tag):
                 print(f"Pulling {tag}...", file=sys.stderr)
                 try:
                     self._engine.run(
@@ -361,6 +390,8 @@ class ImageManager:
         tag: str,
         context: Path,
         build_args: dict[str, str] | None = None,
+        fresh: bool = False,
+        pull: bool | None = None,
     ) -> None:
         """Build a container image.
 
@@ -368,10 +399,23 @@ class ImageManager:
         remote host via tar pipe before building.
         """
         if self._engine.is_remote:
-            self._build_image_remote(dockerfile, tag, context, build_args)
+            self._build_image_remote(
+                dockerfile,
+                tag,
+                context,
+                build_args,
+                fresh=fresh,
+                pull=pull,
+            )
             return
 
         cmd = ["build", "-f", str(dockerfile), "-t", tag]
+
+        should_pull = fresh if pull is None else pull
+        if should_pull:
+            cmd.append("--pull")
+        if fresh:
+            cmd.append("--no-cache")
 
         if self.platform:
             cmd.extend(["--platform", self.platform])
@@ -387,6 +431,8 @@ class ImageManager:
         tag: str,
         context: Path,
         build_args: dict[str, str] | None = None,
+        fresh: bool = False,
+        pull: bool | None = None,
     ) -> None:
         """Build an image on a remote host by transferring the build context."""
         import subprocess
@@ -448,6 +494,11 @@ class ImageManager:
 
             # Build on remote
             cmd = ["build", "-f", remote_dockerfile, "-t", tag]
+            should_pull = fresh if pull is None else pull
+            if should_pull:
+                cmd.append("--pull")
+            if fresh:
+                cmd.append("--no-cache")
             if self.platform:
                 cmd.extend(["--platform", self.platform])
             if build_args:

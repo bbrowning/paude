@@ -562,6 +562,7 @@ class TestGenerateWorkspaceDockerfile:
         dockerfile = generate_workspace_dockerfile(config)
 
         for pkg in [
+            "jq",
             "findutils",
             "grep",
             "sed",

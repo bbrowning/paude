@@ -97,7 +97,10 @@ class PodmanBackend:
         created_at = datetime.now(UTC).isoformat()
         labels = SessionSetup.build_session_labels(config, name, created_at)
         print(f"Creating session '{name}'...", file=sys.stderr)
-        if config.reuse_volume and self._volume_manager.volume_exists(vname):
+        volume_reused = config.reuse_volume and self._volume_manager.volume_exists(
+            vname
+        )
+        if volume_reused:
             print(f"Reusing existing volume {vname}...", file=sys.stderr)
         else:
             print(f"Creating volume {vname}...", file=sys.stderr)
@@ -119,7 +122,9 @@ class PodmanBackend:
             composition = get_agent_composition(
                 get_agent(config.agent, provider=config.provider)
             )
-        network, proxy_ip = self._create_session_proxy(config, name, composition, vname)
+        network, proxy_ip = self._create_session_proxy(
+            config, name, composition, vname, volume_reused
+        )
         try:
             self._setup.create_session_container(
                 config,
@@ -131,7 +136,7 @@ class PodmanBackend:
                 proxy_ip,
             )
         except Exception:
-            self._rollback_session_resources(config, name, vname)
+            self._rollback_session_resources(config, name, vname, volume_reused)
             raise
 
         print(f"Session '{name}' created (stopped).", file=sys.stderr)
@@ -154,6 +159,7 @@ class PodmanBackend:
         session_name: str,
         composition: AgentComposition,
         vname: str,
+        volume_reused: bool,
     ) -> tuple[str | None, str | None]:
         """Set up proxy for session creation, return (network, proxy_ip)."""
         if not config.proxy_image:
@@ -163,7 +169,7 @@ class PodmanBackend:
                 self._proxy, config, session_name, composition
             )
         except Exception:
-            if not config.reuse_volume:
+            if not volume_reused:
                 self._volume_manager.remove_volume(vname, force=True)
             raise
         return network, proxy_ip
@@ -173,13 +179,15 @@ class PodmanBackend:
         config: SessionConfig,
         session_name: str,
         vname: str,
+        volume_reused: bool,
     ) -> None:
         """Clean up proxy/volume on container creation failure."""
         if config.proxy_image:
             pname = proxy_container_name(session_name)
             self._runner.remove_container(pname, force=True)
             self._network_manager.remove_network(network_name(session_name))
-        self._volume_manager.remove_volume(vname, force=True)
+        if not volume_reused:
+            self._volume_manager.remove_volume(vname, force=True)
 
     def start_session_no_attach(self, name: str) -> None:
         """Start containers without attaching (for git setup, etc.)."""

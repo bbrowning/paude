@@ -32,6 +32,7 @@ class CursorAgent:
             secret_env_vars=creds.secret_env_vars,
             passthrough_env_prefixes=creds.passthrough_env_prefixes,
             config_dir_name=".cursor",
+            extra_persistent_dir_names=[".config/cursor"],
             config_file_name=None,
             activity_files=[],
             yolo_flag="--yolo",

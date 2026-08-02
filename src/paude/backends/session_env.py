@@ -28,6 +28,7 @@ def build_agent_env(config: AgentConfig) -> dict[str, str]:
         "PAUDE_AGENT_SESSION_NAME": config.session_name,
         "PAUDE_AGENT_LAUNCH_CMD": config.process_name,
         "PAUDE_AGENT_CONFIG_FILE": config.config_file_name or "",
+        "PAUDE_AGENT_CONFIG_DIRS": " ".join(config.persistent_dir_names),
     }
     return env
 
@@ -101,7 +102,11 @@ def build_session_env(
     if composition is not None:
         configs = [item.config for item in composition.agents]
         env["PAUDE_AGENT_CONFIG_DIRS"] = " ".join(
-            config.config_dir_name for config in configs
+            dict.fromkeys(
+                directory
+                for config in configs
+                for directory in config.persistent_dir_names
+            )
         )
         config_files = list(
             dict.fromkeys(

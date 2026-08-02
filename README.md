@@ -163,6 +163,20 @@ uv tool install paude
 
 > **First run**: Paude pulls container images on first use. This takes a few minutes; subsequent runs start immediately.
 
+### Persistent sessions and upgrades
+
+Agent configuration, logins, conversation history, skills, and workspace data
+are stored on each session's private volume. They survive `start`, `stop`, and
+container recreation. After updating Paude, refresh a session with:
+
+```bash
+paude upgrade SESSION
+```
+
+The command performs a fresh build with the latest stable agent tooling and
+migrates state from older containers before replacing them. See
+[Session Management](docs/SESSIONS.md) for the per-agent persistence paths.
+
 ### Your First Session
 
 ```bash

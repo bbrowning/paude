@@ -70,7 +70,11 @@ class TestPodmanUpgrade:
                     container,
                     "sh",
                     "-c",
-                    "mkdir -p /pvc/workspace && echo upgrade-test > /pvc/workspace/marker.txt",
+                    "mkdir -p /pvc/workspace && "
+                    "echo upgrade-test > /pvc/workspace/marker.txt && "
+                    "rm -rf /home/paude/.gemini && "
+                    "mkdir -p /home/paude/.gemini && "
+                    "echo legacy-agent-state > /home/paude/.gemini/settings.json",
                 ],
                 check=True,
                 capture_output=True,
@@ -132,6 +136,21 @@ class TestPodmanUpgrade:
             )
             assert result.returncode == 0
             assert "upgrade-test" in result.stdout
+
+            # Legacy state from the old container layer was migrated to PVC.
+            result = subprocess.run(
+                [
+                    "podman",
+                    "exec",
+                    container,
+                    "cat",
+                    "/pvc/.gemini/settings.json",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode == 0
+            assert "legacy-agent-state" in result.stdout
 
             # 7. Verify proxy container exists
             result = subprocess.run(

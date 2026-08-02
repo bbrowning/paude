@@ -313,6 +313,33 @@ class TestPodmanBackendCreateSession:
         mock_volume.remove_volume.assert_called_once()
 
     @patch("paude.backends.podman.backend.ContainerRunner")
+    def test_reuse_missing_volume_cleans_up_on_container_failure(
+        self, mock_runner_class: MagicMock
+    ) -> None:
+        """A newly created reuse target is removed if container creation fails."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = False
+        mock_runner.create_container.side_effect = RuntimeError("Container failed")
+        mock_runner_class.return_value = mock_runner
+        mock_volume = MagicMock()
+        mock_volume.volume_exists.return_value = False
+        backend = _make_create_session_backend(mock_runner, mock_volume)
+        config = SessionConfig(
+            name="test-session",
+            workspace=Path("/home/user/project"),
+            image="paude:latest",
+            reuse_volume=True,
+        )
+
+        with pytest.raises(RuntimeError, match="Container failed"):
+            backend.create_session(config)
+
+        mock_volume.create_volume.assert_called_once()
+        mock_volume.remove_volume.assert_called_once_with(
+            "paude-test-session-workspace", force=True
+        )
+
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_with_yolo_mode(self, mock_runner_class: MagicMock) -> None:
         """Create session with yolo=True adds permission skip flag."""
         mock_runner = MagicMock()

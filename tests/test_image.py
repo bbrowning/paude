@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from paude.container.image import ImageManager, _detect_native_platform
 
@@ -61,3 +62,46 @@ class TestImageManagerComposition:
         assert manager._composition_fingerprint() == (
             "gascity:vertex,claude:vertex,codex:chatgpt"
         )
+
+
+class TestFreshBuild:
+    """Tests for cache-bypassing image refreshes."""
+
+    def test_local_fresh_build_pulls_and_disables_cache(self) -> None:
+        engine = MagicMock()
+        engine.is_remote = False
+        manager = ImageManager(engine=engine, platform="linux/amd64")
+
+        manager.build_image(Path("Dockerfile"), "test:latest", Path("."), fresh=True)
+
+        args = engine.run.call_args.args
+        assert "--pull" in args
+        assert "--no-cache" in args
+
+    def test_normal_build_keeps_cache_available(self) -> None:
+        engine = MagicMock()
+        engine.is_remote = False
+        manager = ImageManager(engine=engine, platform="linux/amd64")
+
+        manager.build_image(Path("Dockerfile"), "test:latest", Path("."))
+
+        args = engine.run.call_args.args
+        assert "--pull" not in args
+        assert "--no-cache" not in args
+
+    def test_fresh_local_wrapper_can_skip_registry_pull(self) -> None:
+        engine = MagicMock()
+        engine.is_remote = False
+        manager = ImageManager(engine=engine, platform="linux/amd64")
+
+        manager.build_image(
+            Path("Dockerfile"),
+            "test:latest",
+            Path("."),
+            fresh=True,
+            pull=False,
+        )
+
+        args = engine.run.call_args.args
+        assert "--pull" not in args
+        assert "--no-cache" in args

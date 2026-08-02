@@ -11,10 +11,6 @@ from paude.agents.base import (
     nodejs_prereq_install_lines,
 )
 
-GC_VERSION = "1.4.0"
-DOLT_VERSION = "2.1.10"
-BD_VERSION = "1.1.0"
-
 
 class GascityAgent:
     """Gas City agent — composite agent with gc, Claude Code, and Gemini CLI.
@@ -45,7 +41,7 @@ class GascityAgent:
             passthrough_env_vars=creds.passthrough_env_vars,
             secret_env_vars=creds.secret_env_vars,
             passthrough_env_prefixes=creds.passthrough_env_prefixes,
-            config_dir_name=".gascity",
+            config_dir_name=".gc",
             config_file_name=None,
             yolo_flag=None,
             clear_command=None,
@@ -84,18 +80,27 @@ class GascityAgent:
             'aarch64) BIN_ARCH="arm64" ;; '
             '*) echo "Unsupported: $ARCH" && exit 1 ;; '
             "esac && "
+            "DOLT_URL=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "
+            "https://github.com/dolthub/dolt/releases/latest) && "
+            "DOLT_TAG=${DOLT_URL##*/} && DOLT_VERSION=${DOLT_TAG#v} && "
+            "BD_URL=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "
+            "https://github.com/gastownhall/beads/releases/latest) && "
+            "BD_TAG=${BD_URL##*/} && BD_VERSION=${BD_TAG#v} && "
+            "GC_URL=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "
+            "https://github.com/gastownhall/gascity/releases/latest) && "
+            "GC_TAG=${GC_URL##*/} && GC_VERSION=${GC_TAG#v} && "
             'curl -fsSL "https://github.com/dolthub/dolt'
-            f"/releases/download/v{DOLT_VERSION}"
+            "/releases/download/${DOLT_TAG}"
             '/dolt-linux-${BIN_ARCH}.tar.gz"'
             " | tar xz --strip-components=2"
             " -C $D dolt-linux-${BIN_ARCH}/bin/dolt && "
             'curl -fsSL "https://github.com/gastownhall'
-            f"/beads/releases/download/v{BD_VERSION}"
-            f'/beads_{BD_VERSION}_linux_${{BIN_ARCH}}.tar.gz"'
+            "/beads/releases/download/${BD_TAG}"
+            '/beads_${BD_VERSION}_linux_${BIN_ARCH}.tar.gz"'
             " | tar xz -C $D bd && "
             'curl -fsSL "https://github.com/gastownhall'
-            f"/gascity/releases/download/v{GC_VERSION}"
-            f"/gascity_{GC_VERSION}_linux_${{BIN_ARCH}}"
+            "/gascity/releases/download/${GC_TAG}"
+            "/gascity_${GC_VERSION}_linux_${BIN_ARCH}"
             '.tar.gz" | tar xz -C $D gc && '
             "$D/dolt config --global --set metrics.disabled true && "
             '$D/dolt config --global --set user.name "Paude Agent" && '

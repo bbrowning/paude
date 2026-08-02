@@ -46,7 +46,10 @@ def session_upgrade(
     name: Annotated[str, typer.Argument(help="Session name to upgrade")],
     rebuild: Annotated[
         bool,
-        typer.Option("--rebuild", help="Force image rebuild even at same version."),
+        typer.Option(
+            "--rebuild",
+            help="Deprecated compatibility flag; upgrades always rebuild.",
+        ),
     ] = False,
     backend: Annotated[
         BackendType | None,
@@ -120,8 +123,8 @@ def session_upgrade(
     """Upgrade a session to the current paude version.
 
     Can also reconfigure session options (e.g., --otel-endpoint, --gpu)
-    without losing workspace data. Use --rebuild to force an image rebuild
-    when only changing configuration at the same version.
+    without losing workspace or agent data. Upgrades always pull and rebuild
+    agent tooling, including when the Paude version is unchanged.
     """
     from paude import __version__
     from paude.backends.podman.backend import PodmanBackend
@@ -181,16 +184,7 @@ def session_upgrade(
 
     has_overrides = overrides.has_changes()
 
-    # Check version
-    if session.version == __version__ and not rebuild and not has_overrides:
-        typer.echo(
-            f"Session '{name}' is already at version {__version__}. "
-            "Use --rebuild to force an image rebuild, or pass config "
-            "flags (e.g. --otel-endpoint) to reconfigure."
-        )
-        return
-
-    if has_overrides and not rebuild and session.version == __version__:
+    if has_overrides and session.version == __version__:
         typer.echo(
             f"Reconfiguring session '{name}' (version {__version__})...",
             err=True,
@@ -209,7 +203,7 @@ def session_upgrade(
 
     try:
         if isinstance(backend_obj, PodmanBackend):
-            _upgrade_podman(name, backend_obj, rebuild, overrides)
+            _upgrade_podman(name, backend_obj, True, overrides)
         else:
             typer.echo("Unsupported backend for upgrade.", err=True)
             raise typer.Exit(1)
@@ -384,6 +378,13 @@ def _upgrade_podman(
     agent_specs = [
         (item.config.name, item.config.provider or "") for item in composition.agents
     ]
+
+    # Salvage state written by older images before deleting their writable layer.
+    from paude.cli.upgrade_persistence import migrate_legacy_state
+
+    typer.echo("Migrating persistent agent state...", err=True)
+    migrate_legacy_state(backend._runner, container_name(name), composition)
+
     image_manager = ImageManager(
         script_dir=_detect_dev_script_dir(),
         agent=agent_instance,
@@ -394,10 +395,10 @@ def _upgrade_podman(
     try:
         if config is not None and config.has_customizations:
             image = image_manager.ensure_custom_image(
-                config, force_rebuild=rebuild, workspace=workspace
+                config, force_rebuild=True, workspace=workspace
             )
         else:
-            image = image_manager.ensure_default_image(force_rebuild=rebuild)
+            image = image_manager.ensure_default_image(force_rebuild=True)
     except Exception as e:
         typer.echo(f"Error building image: {e}", err=True)
         raise typer.Exit(1) from None
@@ -405,7 +406,7 @@ def _upgrade_podman(
     # Build proxy image (always required — all sessions use proxy)
     proxy_image: str | None = None
     try:
-        proxy_image = image_manager.ensure_proxy_image(force_rebuild=rebuild)
+        proxy_image = image_manager.ensure_proxy_image(force_rebuild=True)
     except Exception as e:
         typer.echo(f"Error building proxy image: {e}", err=True)
         raise typer.Exit(1) from None
