@@ -4,6 +4,15 @@ from __future__ import annotations
 
 import shlex
 import subprocess
+import tempfile
+from pathlib import Path, PurePosixPath
+
+from paude.platform import is_macos
+from paude.transport.file_copy import (
+    copies_directory_contents,
+    copy_path,
+    without_contents_suffix,
+)
 
 SSH_CONNECT_TIMEOUT = 10
 SSH_STATUS_TIMEOUT = 2
@@ -82,6 +91,106 @@ class SshTransport:
         result = subprocess.run(full)
         return result.returncode
 
+    def copy_to_host(self, local_path: str, host_path: str) -> None:
+        """Copy a local path to a path on the SSH host."""
+        contents = copies_directory_contents(local_path)
+        source_path = without_contents_suffix(local_path) if contents else local_path
+        source = Path(source_path)
+        if not source.exists() and not source.is_symlink():
+            raise FileNotFoundError(local_path)
+        if contents and (source.is_symlink() or not source.is_dir()):
+            raise ValueError(f"Copy source is not a directory: {local_path}")
+
+        if contents:
+            remote_directory = (
+                without_contents_suffix(host_path)
+                if copies_directory_contents(host_path)
+                else host_path
+            )
+            self.run(["mkdir", "-p", remote_directory])
+            tar_cmd = _local_tar_command(source, contents=True)
+            remote_cmd = f"tar -xf - -C {shlex.quote(remote_directory)}"
+            self._pipe_tar(tar_cmd, remote_cmd)
+            return
+
+        remote_parent = str(PurePosixPath(host_path).parent)
+        self.run(["mkdir", "-p", remote_parent])
+        tar_source = source if source.name else source.resolve()
+        tar_name = tar_source.name
+        tar_cmd = _local_tar_command(tar_source)
+        remote_cmd = _remote_extract_command(remote_parent, tar_name, host_path)
+        self._pipe_tar(tar_cmd, remote_cmd)
+
+    def copy_from_host(self, host_path: str, local_path: str) -> None:
+        """Copy a path from the SSH host to a local path."""
+        contents = copies_directory_contents(host_path)
+        if contents:
+            remote_source = without_contents_suffix(host_path)
+            remote_cmd = f"tar -cf - -C {shlex.quote(remote_source)} ."
+            source_name = None
+        else:
+            trimmed_host_path = host_path.rstrip("/")
+            source_name = PurePosixPath(trimmed_host_path).name
+            if not source_name:
+                raise ValueError(f"Invalid remote copy path: {host_path}")
+            remote_parent = str(PurePosixPath(trimmed_host_path).parent)
+            archive_name = f"./{source_name}"
+            remote_cmd = (
+                f"tar -cf - -C {shlex.quote(remote_parent)} {shlex.quote(archive_name)}"
+            )
+        remote_process = subprocess.Popen(
+            [*self.ssh_base(), "--", remote_cmd],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        destination = Path(local_path)
+        with tempfile.TemporaryDirectory(prefix="paude-copy-") as temp_dir:
+            temp_root = Path(temp_dir)
+            extract_process = subprocess.Popen(
+                ["tar", "-xf", "-", "-C", str(temp_root)],
+                stdin=remote_process.stdout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            if remote_process.stdout is not None:
+                remote_process.stdout.close()
+            _extract_stdout, extract_stderr = extract_process.communicate()
+            _remote_stdout, remote_stderr = remote_process.communicate()
+            if remote_process.returncode != 0:
+                detail = remote_stderr.decode(errors="replace").strip()
+                message = detail or f"SSH file transfer failed for '{host_path}'"
+                raise RuntimeError(message)
+            if extract_process.returncode != 0:
+                detail = extract_stderr.decode(errors="replace").strip()
+                message = detail or f"Local archive extraction failed for '{host_path}'"
+                raise RuntimeError(message)
+            if contents:
+                copy_path(temp_root, destination, contents=True)
+            else:
+                if source_name is None:
+                    raise RuntimeError("Remote copy source name was not resolved")
+                source = temp_root / source_name
+                if not source.exists() and not source.is_symlink():
+                    raise RuntimeError(f"Remote copy did not contain '{source_name}'")
+                copy_path(source, destination)
+
+    def _pipe_tar(self, tar_cmd: list[str], remote_cmd: str) -> None:
+        tar_process = subprocess.Popen(tar_cmd, stdout=subprocess.PIPE)
+        remote_process = subprocess.Popen(
+            [*self.ssh_base(), "--", remote_cmd],
+            stdin=tar_process.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if tar_process.stdout is not None:
+            tar_process.stdout.close()
+        _stdout, stderr = remote_process.communicate()
+        tar_returncode = tar_process.wait()
+        if tar_returncode != 0 or remote_process.returncode != 0:
+            detail = stderr.decode(errors="replace").strip() if stderr else ""
+            raise RuntimeError(detail or "SSH file transfer failed")
+
     @property
     def is_remote(self) -> bool:
         return True
@@ -105,6 +214,36 @@ class SshTransport:
         result = self.run([engine_binary, "--version"], check=False)
         if result.returncode != 0:
             raise RuntimeError(f"'{engine_binary}' not found on {self._host}")
+
+
+def _remote_extract_command(
+    remote_parent: str, source_name: str, host_path: str
+) -> str:
+    """Build a remote extraction command that honors the destination name."""
+    extract = f"tar -xf - -C {shlex.quote(remote_parent)}"
+    if source_name == PurePosixPath(host_path).name:
+        return extract
+
+    temp_template = str(PurePosixPath(remote_parent) / ".paude-copy-XXXXXX")
+    temp_source = f'"$temp_dir"/{shlex.quote(source_name)}'
+    return (
+        f"temp_dir=$(mktemp -d {shlex.quote(temp_template)}) || exit; "
+        "trap 'rm -rf -- \"$temp_dir\"' EXIT; "
+        'tar -xf - -C "$temp_dir" && '
+        f"mv -f -- {temp_source} {shlex.quote(host_path)}"
+    )
+
+
+def _local_tar_command(source: Path, *, contents: bool = False) -> list[str]:
+    """Build a local tar command using a portable archive operand."""
+    command = ["tar"]
+    if is_macos():
+        command.append("--no-mac-metadata")
+    if contents:
+        command.extend(["-cf", "-", "-C", str(source), "."])
+    else:
+        command.extend(["-cf", "-", "-C", str(source.parent), f"./{source.name}"])
+    return command
 
 
 def parse_ssh_host(host_str: str) -> tuple[str, int | None]:

@@ -17,6 +17,10 @@ from paude.backends.podman.exceptions import (
     SessionExistsError,
     SessionNotFoundError,
 )
+from paude.backends.podman.file_copy import (
+    copy_from_container,
+    copy_to_container,
+)
 from paude.backends.podman.helpers import (
     _generate_session_name,
     build_session_from_container,
@@ -439,12 +443,12 @@ class PodmanBackend:
     def copy_to_session(self, name: str, local_path: str, remote_path: str) -> None:
         """Copy a file or directory from local to a running session."""
         cname = require_running_session(self._runner, name)
-        self._engine.run("cp", local_path, f"{cname}:{remote_path}")
+        copy_to_container(self._engine, cname, local_path, remote_path)
 
     def copy_from_session(self, name: str, remote_path: str, local_path: str) -> None:
         """Copy a file or directory from a running session to local."""
         cname = require_running_session(self._runner, name)
-        self._engine.run("cp", f"{cname}:{remote_path}", local_path)
+        copy_from_container(self._engine, cname, remote_path, local_path)
 
     def stop_container(self, name: str) -> None:
         """Stop a container by name."""

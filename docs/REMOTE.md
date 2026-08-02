@@ -49,6 +49,18 @@ paude create my-project --host user@hostname:2222
 3. The container runs on the remote host with the same isolation and network filtering as local sessions
 4. `paude connect` tunnels the session back to your terminal via SSH
 
+File copies with `paude cp` use the same SSH connection. A session path is
+resolved inside the remote container while the local path is resolved on the
+machine where `paude` is invoked:
+
+```bash
+paude cp user@gpu-box-session:/pvc/workspace/output.log ./output.log
+paude cp ./input.txt user@gpu-box-session:/pvc/workspace/input.txt
+```
+
+Paude stages the transfer briefly on the remote host and removes the staging
+directory after the copy completes.
+
 ### Limitations
 
 - `--host` and `--ssh-key` are CLI-only flags (not stored in user defaults)
