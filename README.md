@@ -131,8 +131,10 @@ Pass `--provider openai` to use the plain `OPENAI_API_KEY` provider instead
 — no ChatGPT plan, no proxy-managed auth. The default Codex network policy
 allows `chatgpt.com` and `auth.openai.com` for the ChatGPT API and OAuth
 exchange.
-Paude selects Codex's HTTP/SSE transport by default because the local MITM
-proxy does not support the Responses WebSocket transport. Codex Apps are
+Paude merges the required HTTP/SSE provider settings into the session's
+persistent Codex `config.toml` because the local MITM proxy does not support
+the Responses WebSocket transport. Existing model, MCP, project trust, and
+other user settings are preserved across starts and upgrades. Codex Apps are
 disabled for ChatGPT OAuth sessions so the Apps MCP integration does not
 attempt to connect from the container; standalone MCP server configuration
 is unchanged.

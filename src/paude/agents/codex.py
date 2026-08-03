@@ -12,23 +12,6 @@ from paude.agents.base import (
 )
 from paude.constants import CONTAINER_HOME
 
-CODEX_CHATGPT_PROFILE_NAME = "paude-chatgpt-http"
-CODEX_CHATGPT_PROFILE_TARGET = (
-    f"/home/paude/.codex/{CODEX_CHATGPT_PROFILE_NAME}.config.toml"
-)
-SYNTHETIC_CODEX_PROFILE_TOML = f'''model_provider = "{CODEX_CHATGPT_PROFILE_NAME}"
-
-[model_providers.{CODEX_CHATGPT_PROFILE_NAME}]
-name = "Paude ChatGPT HTTP"
-base_url = "https://chatgpt.com/backend-api/codex"
-wire_api = "responses"
-requires_openai_auth = true
-supports_websockets = false
-
-[features]
-apps = false
-'''
-
 _INSTALL_SCRIPT = (
     'mkdir -p "$HOME/.local/bin" && '
     "ARCH=$(uname -m) && "

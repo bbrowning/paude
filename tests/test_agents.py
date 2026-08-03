@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import tomllib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -19,11 +18,7 @@ from paude.agents.base import (
     pipefail_install_lines,
 )
 from paude.agents.claude import ClaudeAgent
-from paude.agents.codex import (
-    CODEX_CHATGPT_PROFILE_NAME,
-    SYNTHETIC_CODEX_PROFILE_TOML,
-    CodexAgent,
-)
+from paude.agents.codex import CodexAgent
 from paude.agents.cursor import CursorAgent
 from paude.agents.gascity import GascityAgent
 from paude.agents.gemini import GeminiAgent
@@ -533,20 +528,6 @@ class TestCodexAgentConfig:
 
     def test_env_vars_empty(self) -> None:
         assert CodexAgent().config.env_vars == {"CODEX_HOME": "/home/paude/.codex"}
-
-    def test_chatgpt_profile_disables_websockets(self) -> None:
-        assert f'model_provider = "{CODEX_CHATGPT_PROFILE_NAME}"' in (
-            SYNTHETIC_CODEX_PROFILE_TOML
-        )
-        assert 'base_url = "https://chatgpt.com/backend-api/codex"' in (
-            SYNTHETIC_CODEX_PROFILE_TOML
-        )
-        assert "requires_openai_auth = true" in SYNTHETIC_CODEX_PROFILE_TOML
-        assert "supports_websockets = false" in SYNTHETIC_CODEX_PROFILE_TOML
-
-    def test_chatgpt_profile_disables_apps(self) -> None:
-        profile = tomllib.loads(SYNTHETIC_CODEX_PROFILE_TOML)
-        assert profile["features"]["apps"] is False
 
     def test_activity_files_empty(self) -> None:
         assert CodexAgent().config.activity_files == []

@@ -78,7 +78,7 @@ class TestBuildSessionEnv:
         assert env["PAUDE_AGENT_PROVIDERS"] == (
             "gascity=vertex,claude=vertex,codex=chatgpt"
         )
-        assert env["PAUDE_CODEX_CHATGPT_MODE"] == "1"
+        assert "PAUDE_CODEX_CHATGPT_MODE" not in env
         assert env["CLAUDE_CODE_USE_VERTEX"] == "1"
         assert env["CODEX_HOME"] == "/home/paude/.codex"
 
