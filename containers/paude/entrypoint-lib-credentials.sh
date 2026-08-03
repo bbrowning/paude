@@ -80,11 +80,49 @@ setup_ca_trust() {
     fi
 }
 
+# Seed the writable global Git config used inside the container.
+#
+# Local sessions provide the host config through /credentials/gitconfig. SSH
+# sessions provide it as a read-only $HOME/.gitconfig bind mount. Both paths
+# must converge on the same writable, persistent PVC file.
+setup_gitconfig() {
+    local config_path="$1"
+    local home_path="$2"
+    local pvc_path="$3"
+    local source_path=""
+
+    if [[ -f "$config_path/gitconfig" ]]; then
+        source_path="$config_path/gitconfig"
+    elif [[ -f "$home_path/.gitconfig" ]]; then
+        source_path="$home_path/.gitconfig"
+    fi
+
+    # Seed once so user changes survive reconnects and container recreation.
+    # A session without a host config still needs a real PVC-backed file so
+    # git config --global does not fall back to the container writable layer.
+    if [[ ! -f "$pvc_path/.gitconfig" ]]; then
+        if [[ -n "$source_path" ]]; then
+            cp -f "$source_path" "$pvc_path/.gitconfig" 2>/dev/null || true
+        else
+            touch "$pvc_path/.gitconfig" 2>/dev/null || true
+        fi
+        chmod 664 "$pvc_path/.gitconfig" 2>/dev/null || true
+        chcon --reference="$pvc_path" "$pvc_path/.gitconfig" 2>/dev/null || true
+    fi
+    if [[ -f "$pvc_path/.gitconfig" ]]; then
+        export GIT_CONFIG_GLOBAL="$pvc_path/.gitconfig"
+    fi
+}
+
 # Set up credentials from tmpfs-based storage (/credentials)
 setup_credentials() {
     local config_path="/credentials"
 
-    # Only set up if synchronized credentials exist.
+    # Git config is handled for both local /credentials sync and remote
+    # read-only home mounts. Other credentials only exist in /credentials.
+    setup_gitconfig "$config_path" "$HOME" "/pvc"
+
+    # Only set up the remaining synchronized credentials if they exist.
     if [[ ! -d "$config_path" ]]; then
         return 0
     fi
@@ -94,19 +132,6 @@ setup_credentials() {
         mkdir -p "$HOME/.config"
         rm -rf "$HOME/.config/gcloud" 2>/dev/null || true
         ln -sf "$config_path/gcloud" "$HOME/.config/gcloud"
-    fi
-
-    # Unlike gcloud/gitignore (symlinked read-only), gitconfig must be
-    # writable — tools like GasCity add entries via `git config --global`.
-    # Seed once to PVC so additions survive pod restarts. To force a
-    # re-seed from host config, delete /pvc/.gitconfig before restarting.
-    if [[ -f "$config_path/gitconfig" ]] && [[ ! -f /pvc/.gitconfig ]]; then
-        cp -f "$config_path/gitconfig" /pvc/.gitconfig 2>/dev/null || true
-        chmod 664 /pvc/.gitconfig 2>/dev/null || true
-        chcon --reference=/pvc /pvc/.gitconfig 2>/dev/null || true
-    fi
-    if [[ -f /pvc/.gitconfig ]]; then
-        export GIT_CONFIG_GLOBAL=/pvc/.gitconfig
     fi
 
     # Set up global gitignore via symlink

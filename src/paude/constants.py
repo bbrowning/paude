@@ -2,6 +2,7 @@
 
 CONTAINER_WORKSPACE = "/pvc/workspace"
 CONTAINER_HOME = "/home/paude"
+CONTAINER_GIT_CONFIG = "/pvc/.gitconfig"
 CONTAINER_ENTRYPOINT = "/usr/local/bin/entrypoint.sh"
 BASE_REF_NAME = "refs/paude/base"
 GCP_ADC_FILENAME = "application_default_credentials.json"
