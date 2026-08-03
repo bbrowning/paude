@@ -19,6 +19,7 @@ RUN dnf install -y dnf-plugins-core && \
         python3.12 \
         python3.12-pip \
         procps-ng \
+        tmux \
         which \
         coreutils \
         findutils \
@@ -38,23 +39,7 @@ RUN dnf install -y dnf-plugins-core && \
         ripgrep \
     && dnf clean all && \
     alternatives --install /usr/bin/python python /usr/bin/python3.12 1 && \
-    alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
-
-# Build tmux 3.5a from source (CentOS Stream 10 / RHEL 10 distro tmux has
-# a capture-pane -p segfault that crashes the tmux server)
-ARG TMUX_VERSION=3.5a
-RUN dnf install -y gcc libevent-devel ncurses-devel bison && \
-    curl -fsSL "https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz" \
-        -o /tmp/tmux.tar.gz && \
-    tar -xzf /tmp/tmux.tar.gz -C /tmp && \
-    cd /tmp/tmux-${TMUX_VERSION} && \
-    ./configure --prefix=/usr/local && \
-    make -j"$(nproc)" && \
-    make install && \
-    rm -rf /tmp/tmux-${TMUX_VERSION} /tmp/tmux.tar.gz && \
-    dnf remove -y gcc libevent-devel ncurses-devel bison && \
-    dnf install -y libevent ncurses-libs && \
-    dnf clean all && \
+    alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 && \
     tmux -V
 
 # Set UTF-8 locale
