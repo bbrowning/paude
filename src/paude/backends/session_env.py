@@ -118,11 +118,6 @@ def build_session_env(
             f"{item.config.name}={item.config.provider or ''}"
             for item in composition.agents
         )
-        if any(
-            item.config.name == "codex" and item.config.provider == "chatgpt"
-            for item in composition.agents
-        ):
-            env["PAUDE_CODEX_CHATGPT_MODE"] = "1"
 
     if config.credential_providers:
         env["PAUDE_PROVIDERS"] = ",".join(config.credential_providers)

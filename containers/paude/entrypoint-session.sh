@@ -39,38 +39,6 @@ if ! mkdir -p "$HOME" 2>/dev/null || ! touch "$HOME/.test" 2>/dev/null; then
 fi
 rm -f "$HOME/.test" 2>/dev/null || true
 
-# Paude's ChatGPT OAuth profile uses HTTP/SSE because the local MITM proxy
-# does not transparently support Codex's Responses WebSocket transport.  The
-# profile file is injected only for sessions with host ChatGPT OAuth state.
-if [[ "$AGENT_NAME" == "codex" ]] && [[ -f "$HOME/.codex/paude-chatgpt-http.config.toml" ]]; then
-    AGENT_ARGS="--profile paude-chatgpt-http ${AGENT_ARGS}"
-fi
-
-# Make the same ChatGPT HTTP/SSE profile available to Codex processes started
-# by an orchestrator such as Gas City. The primary Codex path above uses
-# launch arguments; child Codex processes need a PATH-level wrapper instead.
-if [[ "${PAUDE_CODEX_CHATGPT_MODE:-}" == "1" ]] && [[ "$AGENT_NAME" != "codex" ]]; then
-    _real_codex=""
-    for _candidate in /home/paude/.local/bin/codex /pvc/.local/bin/codex /usr/local/bin/codex; do
-        if [[ -x "$_candidate" ]]; then
-            _real_codex="$_candidate"
-            break
-        fi
-    done
-    if [[ -n "$_real_codex" ]]; then
-        mkdir -p /tmp/paude-bin
-        cat > /tmp/paude-bin/codex <<CODEX_WRAPPER
-#!/bin/bash
-for arg in "\$@"; do
-    [[ "\$arg" == "--profile" ]] && exec "$_real_codex" "\$@"
-done
-exec "$_real_codex" --profile paude-chatgpt-http "\$@"
-CODEX_WRAPPER
-        chmod 755 /tmp/paude-bin/codex
-        export PATH="/tmp/paude-bin:$PATH"
-    fi
-fi
-
 # Update CA trust early (before any HTTPS calls like agent install)
 # The CA cert is injected by the host after the container starts.
 setup_ca_trust
@@ -103,13 +71,6 @@ fi
 # Add PVC local bin to PATH (for agent and other tools installed to PVC)
 # Also keep home .local/bin for tools installed during image build
 export PATH="/pvc/.local/bin:$HOME/.local/bin:$PATH"
-# Keep the ChatGPT Codex wrapper ahead of the normal tool directories after
-# adding the persistent install locations above. This matters when an
-# orchestrator launches Codex as a child process.
-if [[ -d /tmp/paude-bin ]]; then
-    export PATH="/tmp/paude-bin:$PATH"
-fi
-
 # Set up GitHub token from the synced credentials file if available.
 if [[ -f /credentials/github_token ]]; then
     GH_TOKEN=$(<"/credentials/github_token")

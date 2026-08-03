@@ -22,7 +22,9 @@ persist_config_dir() {
 
     if [[ ! -L "$home_dir" ]]; then
         if [[ -d "$home_dir" ]]; then
-            cp -dR --preserve=mode,timestamps "$home_dir/." "$pvc_dir/" 2>/dev/null || true
+            # Image-baked files seed missing PVC state but never replace state
+            # that already survived a restart or container recreation.
+            cp -dRn --preserve=mode,timestamps "$home_dir/." "$pvc_dir/" 2>/dev/null || true
             rm -rf "$home_dir" 2>/dev/null || true
         fi
         if [[ ! -e "$home_dir" ]]; then

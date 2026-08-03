@@ -1190,7 +1190,7 @@ class TestComposedCodexAuthentication:
         [("openai", False), ("chatgpt", True)],
     )
     @patch("paude.backends.podman.session_setup.get_session_composition")
-    def test_codex_profile_uses_codex_provider_only(
+    def test_codex_config_uses_codex_provider_only(
         self,
         mock_composition: MagicMock,
         codex_provider: str,
@@ -1210,14 +1210,14 @@ class TestComposedCodexAuthentication:
             return_value=ProxyCredentials(chatgpt_oauth_mode=True)
         )
         setup.inject_stub_credentials = MagicMock()  # type: ignore[method-assign]
-        setup.inject_codex_auth = MagicMock()  # type: ignore[method-assign]
+        setup.configure_codex = MagicMock()  # type: ignore[method-assign]
         setup.sync_host_config = MagicMock()  # type: ignore[method-assign]
         setup.sync_sandbox_config = MagicMock()  # type: ignore[method-assign]
         proxy = MagicMock()
 
         setup.start_session_containers("session", "container", proxy)
 
-        setup.inject_codex_auth.assert_called_once_with(
+        setup.configure_codex.assert_called_once_with(
             "container", chatgpt_mode=expected_chatgpt_mode
         )
 

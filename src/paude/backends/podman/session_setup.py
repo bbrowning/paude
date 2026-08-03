@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from paude.agents.base import AgentComposition
-from paude.agents.codex import (
-    CODEX_CHATGPT_PROFILE_TARGET,
-    SYNTHETIC_CODEX_PROFILE_TOML,
+from paude.agents.codex_config import (
+    CODEX_CONFIG_TARGET,
+    LEGACY_CODEX_PROFILE_TARGET,
+    reconcile_codex_config,
 )
 from paude.backends.labels import (
     PAUDE_LABEL_AGENT,
@@ -55,6 +56,7 @@ from paude.constants import (
     SANDBOX_CONFIG_TARGET,
 )
 from paude.container.engine import ContainerEngine
+from paude.container.files import ContainerFileManager
 from paude.container.runner import ContainerRunner
 
 if TYPE_CHECKING:
@@ -69,6 +71,7 @@ class SessionSetup:
     def __init__(self, runner: ContainerRunner, engine: ContainerEngine) -> None:
         self._runner = runner
         self._engine = engine
+        self._files = ContainerFileManager(engine)
 
     def get_port_urls(self, agent: Agent | AgentComposition) -> list[str]:
         """Get port-forward URL strings for an agent."""
@@ -180,22 +183,27 @@ class SessionSetup:
 
         self._runner.inject_file(cname, STUB_ADC_JSON, GCP_ADC_TARGET, owner="paude")
 
-    def inject_codex_auth(self, cname: str, *, chatgpt_mode: bool) -> None:
-        """Install the ChatGPT provider profile for Codex; else clear codex auth."""
-        if chatgpt_mode:
-            self._runner.inject_file(
+    def configure_codex(self, cname: str, *, chatgpt_mode: bool) -> None:
+        """Reconcile Paude's settings with Codex's persistent default config."""
+        default_content = self._files.read_file(cname, CODEX_CONFIG_TARGET)
+        legacy_content = self._files.read_file(cname, LEGACY_CODEX_PROFILE_TARGET)
+        update = reconcile_codex_config(
+            default_content,
+            legacy_content,
+            chatgpt_mode=chatgpt_mode,
+        )
+        if update.changed:
+            self._files.replace_file(
                 cname,
-                SYNTHETIC_CODEX_PROFILE_TOML,
-                CODEX_CHATGPT_PROFILE_TARGET,
+                CODEX_CONFIG_TARGET,
+                update.content,
                 owner="paude",
-                mode="600",
             )
-        else:
+        if update.remove_legacy_profile:
+            self._files.remove_file(cname, LEGACY_CODEX_PROFILE_TARGET)
+        if not chatgpt_mode:
             self._runner.exec_in_container(
                 cname, ["rm", "-f", CODEX_AUTH_TARGET], check=False
-            )
-            self._runner.exec_in_container(
-                cname, ["rm", "-f", CODEX_CHATGPT_PROFILE_TARGET], check=False
             )
 
     def fix_volume_permissions(self, container_name: str) -> None:
@@ -237,7 +245,7 @@ class SessionSetup:
             item for item in composition.agents if item.config.name == "codex"
         ]
         if codex_agents:
-            self.inject_codex_auth(
+            self.configure_codex(
                 cname,
                 chatgpt_mode=any(
                     item.config.provider == "chatgpt" for item in codex_agents

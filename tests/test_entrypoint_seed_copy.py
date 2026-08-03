@@ -112,12 +112,11 @@ class TestEntrypointContract:
             in content
         )
 
-    def test_entrypoint_wraps_child_codex_for_chatgpt_http(self) -> None:
-        """Gas City child Codex processes inherit the ChatGPT HTTP profile."""
+    def test_entrypoint_does_not_select_a_separate_codex_profile(self) -> None:
+        """Codex uses its persistent default config for every launch path."""
         content = ENTRYPOINT_PATH.read_text()
-        assert "PAUDE_CODEX_CHATGPT_MODE" in content
-        assert r'exec "$_real_codex" --profile paude-chatgpt-http "\$@"' in content
-        assert 'export PATH="/tmp/paude-bin:$PATH"' in content
+        assert "PAUDE_CODEX_CHATGPT_MODE" not in content
+        assert "--profile paude-chatgpt-http" not in content
 
 
 def _build_gemini_sandbox_script(
@@ -464,7 +463,7 @@ def _persist_config_dir_bash_function(pvc_dir: str) -> str:
 
             if [[ ! -L "$home_dir" ]]; then
                 if [[ -d "$home_dir" ]]; then
-                    cp -RPp "$home_dir/." "$pvc_dir/" 2>/dev/null || true
+                    cp -RPpn "$home_dir/." "$pvc_dir/" 2>/dev/null || true
                     rm -rf "$home_dir" 2>/dev/null || true
                 fi
                 if [[ ! -e "$home_dir" ]]; then
@@ -617,6 +616,32 @@ class TestPersistAgentConfig:
         assert (home / ".claude").is_symlink()
         # Baked content was merged into PVC
         assert (pvc / ".claude" / "settings.json").read_text() == '{"baked": true}'
+
+    def test_image_baked_config_does_not_replace_pvc_state(
+        self, tmp_path: Path
+    ) -> None:
+        """A recreated container cannot overwrite persistent user config."""
+        home = tmp_path / "home"
+        home.mkdir()
+        pvc = tmp_path / "pvc"
+        pvc.mkdir()
+        baked_config = home / ".codex"
+        baked_config.mkdir()
+        (baked_config / "config.toml").write_text('model = "baked"\n')
+        pvc_config = pvc / ".codex"
+        pvc_config.mkdir()
+        (pvc_config / "config.toml").write_text('model = "user"\n')
+
+        script = _build_persist_script(
+            str(home),
+            str(pvc),
+            agent_config_dir=".codex",
+            agent_config_file="",
+        )
+        result = _run_script(script)
+
+        assert result.returncode == 0, result.stderr
+        assert (pvc_config / "config.toml").read_text() == 'model = "user"\n'
 
     def test_idempotent_on_reconnect(self, tmp_path: Path) -> None:
         """Reconnect: symlinks already exist, no-op."""

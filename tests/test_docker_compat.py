@@ -6,9 +6,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from paude.agents.codex import (
-    CODEX_CHATGPT_PROFILE_TARGET,
-    SYNTHETIC_CODEX_PROFILE_TOML,
+from paude.agents.codex_config import (
+    CODEX_CONFIG_TARGET,
+    LEGACY_CODEX_PROFILE_TARGET,
+    CodexConfigError,
+    reconcile_codex_config,
 )
 from paude.backends.naming import is_local_backend
 from paude.backends.podman import PodmanBackend
@@ -442,36 +444,62 @@ class TestStubCredentialInjection:
         assert exec_calls[0][1].get("input") == STUB_ADC_JSON
 
 
-class TestCodexSyntheticAuth:
-    """Tests for Codex ChatGPT provider profile injection in the agent container."""
+class TestCodexConfigReconciliation:
+    """Tests for persistent default-config handling shared by Docker and Podman."""
 
-    @patch("subprocess.run")
-    def test_injects_only_provider_profile(self, mock_run: MagicMock) -> None:
-        """No auth.json is ever seeded; only `codex login` itself writes it."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-        backend = PodmanBackend(engine=ContainerEngine("podman"))
-
-        backend._setup.inject_codex_auth("paude-test", chatgpt_mode=True)
-
-        injections = [
-            c for c in mock_run.call_args_list if c[1].get("input") is not None
+    def test_chatgpt_updates_default_and_removes_legacy_profile(self) -> None:
+        backend = PodmanBackend(engine=MagicMock())
+        backend._setup._files = MagicMock()
+        backend._setup._files.read_file.side_effect = [
+            'model = "user-model"\n',
+            '[projects."/pvc/workspace"]\ntrust_level = "trusted"\n',
         ]
-        assert len(injections) == 1
-        assert injections[0][1]["input"] == SYNTHETIC_CODEX_PROFILE_TOML
-        assert CODEX_CHATGPT_PROFILE_TARGET in injections[0][0][0][-1]
 
-    @patch("subprocess.run")
-    def test_removes_auth_when_not_chatgpt_mode(self, mock_run: MagicMock) -> None:
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-        backend = PodmanBackend(engine=ContainerEngine("podman"))
+        backend._setup.configure_codex("paude-test", chatgpt_mode=True)
 
-        backend._setup.inject_codex_auth("paude-test", chatgpt_mode=False)
-
-        exec_args = [c[0][0] for c in mock_run.call_args_list if "exec" in c[0][0]]
-        assert any(
-            "rm" in args and "/home/paude/.codex/auth.json" in args
-            for args in exec_args
+        write = backend._setup._files.replace_file.call_args
+        assert write.args[:2] == ("paude-test", CODEX_CONFIG_TARGET)
+        assert 'model = "user-model"' in write.args[2]
+        assert 'trust_level = "trusted"' in write.args[2]
+        assert 'model_provider = "paude-chatgpt-http"' in write.args[2]
+        backend._setup._files.remove_file.assert_called_once_with(
+            "paude-test", LEGACY_CODEX_PROFILE_TARGET
         )
-        assert any(
-            "rm" in args and CODEX_CHATGPT_PROFILE_TARGET in args for args in exec_args
+
+    def test_correct_chatgpt_config_is_not_rewritten(self) -> None:
+        backend = PodmanBackend(engine=MagicMock())
+        backend._setup._files = MagicMock()
+        first = reconcile_codex_config(None, None, chatgpt_mode=True)
+        backend._setup._files.read_file.side_effect = [first.content, None]
+
+        backend._setup.configure_codex("paude-test", chatgpt_mode=True)
+
+        backend._setup._files.replace_file.assert_not_called()
+
+    def test_invalid_config_is_not_rewritten_or_cleaned_up(self) -> None:
+        backend = PodmanBackend(engine=MagicMock())
+        backend._setup._files = MagicMock()
+        backend._setup._files.read_file.side_effect = [
+            "invalid = [toml",
+            'model = "legacy"\n',
+        ]
+
+        with pytest.raises(CodexConfigError, match="invalid TOML"):
+            backend._setup.configure_codex("paude-test", chatgpt_mode=True)
+
+        backend._setup._files.replace_file.assert_not_called()
+        backend._setup._files.remove_file.assert_not_called()
+
+    def test_non_chatgpt_removes_container_auth(self) -> None:
+        backend = PodmanBackend(engine=MagicMock())
+        backend._setup._files = MagicMock()
+        backend._setup._files.read_file.side_effect = [None, None]
+        backend._setup._runner = MagicMock()
+
+        backend._setup.configure_codex("paude-test", chatgpt_mode=False)
+
+        backend._setup._runner.exec_in_container.assert_called_once_with(
+            "paude-test",
+            ["rm", "-f", "/home/paude/.codex/auth.json"],
+            check=False,
         )
