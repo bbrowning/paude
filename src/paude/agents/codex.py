@@ -8,6 +8,7 @@ from paude.agents.base import (
     AgentConfig,
     build_environment_from_config,
     build_provider_credentials,
+    nodejs_prereq_install_lines,
     pipefail_install_lines,
 )
 from paude.constants import CONTAINER_HOME
@@ -61,6 +62,9 @@ class CodexAgent:
 
     def dockerfile_install_lines(self, container_home: str) -> list[str]:
         return [
+            "",
+            "# Install Node.js for Codex documentation tooling",
+            *nodejs_prereq_install_lines(),
             "",
             "# Install Codex CLI",
             "USER paude",

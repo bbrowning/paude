@@ -199,15 +199,33 @@ def pipefail_install_lines(config: AgentConfig, container_home: str) -> list[str
 
 
 def nodejs_prereq_install_lines() -> list[str]:
-    """Return canonical Dockerfile lines to install the Node.js runtime as root.
+    """Return portable Dockerfile lines to ensure Node.js and npm as root.
 
     Emitted verbatim by every agent that needs Node.js (e.g. Gemini CLI, the
     Gas City core) so that compose_dockerfile_install_lines() can collapse the
-    repeated install down to a single layer.
+    repeated install down to a single layer. Existing Node.js installations are
+    reused, which keeps custom Debian, Alpine, and Node-based images portable.
     """
     return [
         "USER root",
-        "RUN dnf install -y nodejs npm && dnf clean all",
+        (
+            "RUN if command -v node >/dev/null 2>&1 && "
+            "command -v npm >/dev/null 2>&1; then "
+            "echo 'Node.js and npm already installed'; "
+            "elif command -v apt-get >/dev/null 2>&1; then "
+            "apt-get update && apt-get install -y --no-install-recommends "
+            "nodejs npm && rm -rf /var/lib/apt/lists/*; "
+            "elif command -v apk >/dev/null 2>&1; then "
+            "apk add --no-cache nodejs npm; "
+            "elif command -v dnf >/dev/null 2>&1; then "
+            "dnf install -y nodejs npm && dnf clean all; "
+            "elif command -v yum >/dev/null 2>&1; then "
+            "yum install -y nodejs npm && yum clean all; "
+            "else "
+            "echo 'Error: Node.js and npm require a supported package manager' "
+            ">&2; exit 1; "
+            "fi"
+        ),
     ]
 
 

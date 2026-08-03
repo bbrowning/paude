@@ -18,6 +18,8 @@ Run AI coding agents in secure containers. They make commits, you pull them back
 
 Paude-managed agent containers include common development utilities, including
 `rg` (ripgrep) for fast code search.
+The Codex CLI image also includes Node.js for documentation tooling, using the
+custom base image's package manager or an existing Node.js installation.
 
 Agent installation, credential setup, and provider selection are independent.
 `--agents` is the exact install set and its first entry launches as the primary.

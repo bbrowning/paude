@@ -200,7 +200,17 @@ class TestComposeDockerfileInstallLines:
     def test_dedups_shared_node_prereq(self) -> None:
         agents = [get_agent("gemini"), get_agent("gascity")]
         lines = compose_dockerfile_install_lines(agents, "/home/paude")
-        node_installs = [line for line in lines if "dnf install -y nodejs npm" in line]
+        node_installs = [
+            line for line in lines if line.startswith("RUN if command -v node")
+        ]
+        assert len(node_installs) == 1
+
+    def test_dedups_codex_and_gemini_node_prereq(self) -> None:
+        agents = [get_agent("codex"), get_agent("gemini")]
+        lines = compose_dockerfile_install_lines(agents, "/home/paude")
+        node_installs = [
+            line for line in lines if line.startswith("RUN if command -v node")
+        ]
         assert len(node_installs) == 1
 
     def test_preserves_distinct_tool_installs(self) -> None:
@@ -232,6 +242,26 @@ class TestNodejsPrereqInstallLines:
         assert lines[0] == "USER root"
         assert "nodejs" in lines[1]
         assert "npm" in lines[1]
+
+    def test_reuses_existing_node_and_npm(self) -> None:
+        install = nodejs_prereq_install_lines()[1]
+        assert "command -v node" in install
+        assert "command -v npm" in install
+        assert "already installed" in install
+
+    def test_dispatches_supported_package_managers(self) -> None:
+        install = nodejs_prereq_install_lines()[1]
+        for package_manager in ("apt-get", "apk", "dnf", "yum"):
+            assert f"command -v {package_manager}" in install
+        assert "apt-get update" in install
+        assert "apk add --no-cache nodejs npm" in install
+        assert "dnf install -y nodejs npm" in install
+        assert "yum install -y nodejs npm" in install
+
+    def test_fails_without_supported_package_manager(self) -> None:
+        install = nodejs_prereq_install_lines()[1]
+        assert "require a supported package manager" in install
+        assert "exit 1" in install
 
     def test_identical_across_calls(self) -> None:
         # Dedup relies on byte-identical output.
@@ -551,6 +581,15 @@ class TestCodexAgentDockerfile:
         lines = CodexAgent().dockerfile_install_lines("/home/paude")
         text = "\n".join(lines)
         assert "openai/codex" in text
+
+    def test_installs_nodejs_for_documentation_tooling(self) -> None:
+        lines = CodexAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "Node.js for Codex documentation tooling" in text
+        assert "command -v apt-get" in text
+        assert "command -v apk" in text
+        assert "command -v dnf" in text
+        assert "command -v yum" in text
 
     def test_contains_version(self) -> None:
         lines = CodexAgent().dockerfile_install_lines("/home/paude")

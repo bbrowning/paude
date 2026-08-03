@@ -305,7 +305,9 @@ class TestGascityComposedInstall:
         lines = compose_dockerfile_install_lines(
             get_agents(["gascity"]).agents, "/home/paude"
         )
-        node_installs = [line for line in lines if "dnf install -y nodejs npm" in line]
+        node_installs = [
+            line for line in lines if line.startswith("RUN if command -v node")
+        ]
         assert len(node_installs) == 1
 
     def test_ends_with_canonical_layout(self) -> None:
