@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from paude.agents import get_agents
 from paude.agents.base import compose_dockerfile_install_lines
-from paude.agents.gascity import GascityAgent
+from paude.agents.gascity import BD_VERSION, DOLT_VERSION, GC_VERSION, GascityAgent
 
 
 class TestGascityAgentConfig:
@@ -109,21 +109,24 @@ class TestGascityAgentDockerfile:
     def test_contains_dolt(self) -> None:
         text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
         assert "dolthub/dolt" in text
-        assert "dolthub/dolt/releases/latest" in text
+        assert DOLT_VERSION in text
 
     def test_contains_bd(self) -> None:
         text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
         assert "gastownhall/beads" in text
-        assert "gastownhall/beads/releases/latest" in text
+        assert BD_VERSION in text
 
     def test_contains_gc(self) -> None:
         text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
         assert "gastownhall/gascity" in text
-        assert "gastownhall/gascity/releases/latest" in text
+        assert GC_VERSION in text
 
-    def test_latest_release_lookup_does_not_require_jq(self) -> None:
+    def test_uses_pinned_release_urls(self) -> None:
         text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
-        assert "jq" not in text
+        assert f"/dolt/releases/download/v{DOLT_VERSION}" in text
+        assert f"/beads/releases/download/v{BD_VERSION}" in text
+        assert f"/gascity/releases/download/v{GC_VERSION}" in text
+        assert "releases/latest" not in text
 
     def test_contains_flock(self) -> None:
         text = "\n".join(GascityAgent().dockerfile_install_lines("/home/paude"))
@@ -277,11 +280,11 @@ class TestGascityComposedInstall:
     def test_contains_gc_dolt_bd(self) -> None:
         text = self._composed()
         assert "gastownhall/gascity" in text
-        assert "gastownhall/gascity/releases/latest" in text
+        assert GC_VERSION in text
         assert "dolthub/dolt" in text
-        assert "dolthub/dolt/releases/latest" in text
+        assert DOLT_VERSION in text
         assert "gastownhall/beads" in text
-        assert "gastownhall/beads/releases/latest" in text
+        assert BD_VERSION in text
 
     def test_contains_claude(self) -> None:
         text = self._composed()
