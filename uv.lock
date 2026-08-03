@@ -321,7 +321,7 @@ wheels = [
 
 [[package]]
 name = "paude"
-version = "0.20.0a6"
+version = "0.20.0a7"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
