@@ -511,6 +511,18 @@ class TestProxyDockerfileCopyFiles:
             )
 
 
+class TestPaudeDockerfilePackages:
+    """Validate packages installed in the standard Paude image."""
+
+    def test_installs_ripgrep(self):
+        """The standard image includes the rg code-search command."""
+        dockerfile = (
+            Path(__file__).parent.parent / "containers" / "paude" / "Dockerfile"
+        )
+
+        assert "ripgrep" in dockerfile.read_text()
+
+
 class TestVolumeManager:
     """Tests for VolumeManager."""
 

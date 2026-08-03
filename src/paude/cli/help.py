@@ -69,6 +69,13 @@ _SECTIONS: tuple[HelpSection, ...] = (
         ),
     ),
     HelpSection(
+        title="Container Environment",
+        text=(
+            "Paude-managed agent containers include common development"
+            " utilities, including rg (ripgrep) for fast code search."
+        ),
+    ),
+    HelpSection(
         title="Copying Files (without git)",
         rows=(
             (
