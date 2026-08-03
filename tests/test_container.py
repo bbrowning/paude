@@ -522,6 +522,28 @@ class TestPaudeDockerfilePackages:
 
         assert "ripgrep" in dockerfile.read_text()
 
+    def test_uses_distribution_tmux_package(self):
+        """The standard image must not compile tmux under emulation."""
+        dockerfile = (
+            Path(__file__).parent.parent / "containers" / "paude" / "Dockerfile"
+        ).read_text()
+
+        assert "        tmux \\\n        which" in dockerfile
+        assert "TMUX_VERSION" not in dockerfile
+        assert "./configure" not in dockerfile
+        assert "make -j" not in dockerfile
+
+    def test_exposes_python3_alternative(self):
+        """The standard image exposes python3 for bundled scripts."""
+        dockerfile = (
+            Path(__file__).parent.parent / "containers" / "paude" / "Dockerfile"
+        ).read_text()
+
+        assert (
+            "alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1"
+            in dockerfile
+        )
+
 
 class TestVolumeManager:
     """Tests for VolumeManager."""

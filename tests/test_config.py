@@ -362,6 +362,22 @@ class TestGenerateWorkspaceDockerfile:
 
         assert "--allowerasing" in dockerfile
 
+    def test_dnf_and_yum_install_tmux_from_the_distribution(self):
+        """dnf/yum images use the fixed distribution tmux package."""
+        config = PaudeConfig()
+        dockerfile = generate_workspace_dockerfile(config)
+
+        dnf_section = dockerfile.split("elif command -v dnf", 1)[1].split(
+            "elif command -v yum", 1
+        )[0]
+        yum_section = dockerfile.split("elif command -v yum", 1)[1].split("else", 1)[0]
+
+        assert "bash tmux glibc-langpack-en" in dnf_section
+        assert "bash tmux glibc-langpack-en" in yum_section
+        assert "TMUX_VERSION" not in dockerfile
+        assert "./configure" not in dockerfile
+        assert "make -j" not in dockerfile
+
     def test_copies_tmux_conf(self):
         """generate_workspace_dockerfile includes COPY for tmux.conf."""
         config = PaudeConfig()
