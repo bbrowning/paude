@@ -16,6 +16,9 @@ Run AI coding agents in secure containers. They make commits, you pull them back
 
 > Agents are installed automatically inside the container — no local agent installation needed. You just need authentication credentials for your chosen provider.
 
+Paude-managed agent containers include common development utilities, including
+`rg` (ripgrep) for fast code search.
+
 Agent installation, credential setup, and provider selection are independent.
 `--agents` is the exact install set and its first entry launches as the primary.
 `--providers` selects credentials to configure, while `--agent-provider` maps

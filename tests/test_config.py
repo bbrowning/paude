@@ -570,10 +570,15 @@ class TestGenerateWorkspaceDockerfile:
             "diffutils",
             "less",
             "file",
+            "ripgrep",
             "unzip",
             "zip",
         ]:
             assert pkg in dockerfile, f"Expected package '{pkg}' in Dockerfile"
+
+        # Keep ripgrep available regardless of which supported package manager
+        # the user's base image provides.
+        assert dockerfile.count("ripgrep") == 4
 
     def test_dnf_uses_allowerasing(self):
         """generate_workspace_dockerfile uses --allowerasing for dnf to replace coreutils-single."""
