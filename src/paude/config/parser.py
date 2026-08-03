@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from paude.config.models import FeatureSpec, PaudeConfig
+from paude.config.models import PaudeConfig
 from paude.config.user_config import _string_list, _warn_unknown_keys
 
 
@@ -20,7 +20,7 @@ def parse_config(config_file: Path) -> PaudeConfig:
     """Parse a configuration file.
 
     Args:
-        config_file: Path to the config file (devcontainer.json or paude.json).
+        config_file: Path to a paude.json file.
 
     Returns:
         Parsed configuration.
@@ -28,6 +28,9 @@ def parse_config(config_file: Path) -> PaudeConfig:
     Raises:
         ConfigError: If the file cannot be parsed.
     """
+    if config_file.name != "paude.json":
+        raise ConfigError(f"Unknown config file type: {config_file}")
+
     try:
         content = config_file.read_text()
         data = json.loads(content)
@@ -36,13 +39,7 @@ def parse_config(config_file: Path) -> PaudeConfig:
     except OSError as e:
         raise ConfigError(f"Cannot read {config_file}: {e}") from e
 
-    # Determine config type
-    if "devcontainer" in config_file.name or config_file.parent.name == ".devcontainer":
-        return _parse_devcontainer(config_file, data)
-    elif config_file.name == "paude.json":
-        return _parse_paude_json(config_file, data)
-    else:
-        raise ConfigError(f"Unknown config file type: {config_file}")
+    return _parse_paude_json(config_file, data)
 
 
 def _extract_build_config(
@@ -81,75 +78,6 @@ def _extract_build_config(
 
     build_args = build_config.get("args", {})
     return dockerfile, build_context, build_args
-
-
-def _parse_devcontainer(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
-    """Parse a devcontainer.json file.
-
-    Args:
-        config_file: Path to the config file.
-        data: Parsed JSON data.
-
-    Returns:
-        Parsed configuration.
-    """
-    config_dir = config_file.parent
-
-    # Extract image
-    base_image = data.get("image")
-
-    # Extract build config
-    dockerfile, build_context, build_args = _extract_build_config(config_dir, data)
-
-    # Parse features
-    features: list[FeatureSpec] = []
-    if "features" in data:
-        for feature_url, options in data["features"].items():
-            if isinstance(options, dict):
-                features.append(FeatureSpec(url=feature_url, options=options))
-            else:
-                features.append(FeatureSpec(url=feature_url, options={}))
-        if features:
-            print(f"Found {len(features)} feature(s)", file=sys.stderr)
-
-    # Parse postCreateCommand
-    post_create_command: str | None = None
-    if "postCreateCommand" in data:
-        pcc = data["postCreateCommand"]
-        if isinstance(pcc, list):
-            post_create_command = " && ".join(pcc)
-        else:
-            post_create_command = pcc
-
-    # Parse containerEnv
-    container_env = data.get("containerEnv", {})
-
-    # Warn about unsupported properties
-    _warn_unsupported_properties(data)
-
-    # Parse create hints from customizations.paude.create
-    create_section = data.get("customizations", {}).get("paude", {}).get("create", {})
-    create_hints = _parse_create_section(create_section)
-
-    return PaudeConfig(
-        config_file=config_file,
-        config_type="devcontainer",
-        base_image=base_image,
-        dockerfile=dockerfile,
-        build_context=build_context,
-        features=features,
-        post_create_command=post_create_command,
-        container_env=container_env,
-        build_args=build_args,
-        create_allowed_domains=create_hints.allowed_domains,
-        create_agent=create_hints.agent,
-        create_provider=create_hints.provider,
-        create_agents=create_hints.agents,
-        create_providers=create_hints.providers,
-        create_agent_providers=create_hints.agent_providers,
-        create_otel_endpoint=create_hints.otel_endpoint,
-        create_forward_ports=create_hints.forward_ports,
-    )
 
 
 def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
@@ -192,7 +120,7 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
         build_context=build_context,
         build_args=build_args,
         packages=packages,
-        post_create_command=setup_command,
+        setup_command=setup_command,
         create_allowed_domains=create_hints.allowed_domains,
         create_agent=create_hints.agent,
         create_provider=create_hints.provider,
@@ -286,22 +214,3 @@ def _parse_create_section(create_data: dict[str, Any]) -> CreateHints:
         otel_endpoint=otel_endpoint,
         forward_ports=forward_ports,
     )
-
-
-def _warn_unsupported_properties(data: dict[str, Any]) -> None:
-    """Warn about unsupported properties in devcontainer.json."""
-    unsupported = [
-        "mounts",
-        "runArgs",
-        "privileged",
-        "capAdd",
-        "forwardPorts",
-        "remoteUser",
-    ]
-    for prop in unsupported:
-        if prop in data:
-            print(
-                f"Warning: Ignoring unsupported property '{prop}' in config",
-                file=sys.stderr,
-            )
-            print("  → paude controls this for security", file=sys.stderr)

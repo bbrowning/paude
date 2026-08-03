@@ -10,7 +10,7 @@ def _isolate_config(request, tmp_path, monkeypatch):
     Prevents tests from reading or writing the real
     ~/.config/paude/ (sessions registry, user defaults, etc.)
     and from picking up workspace config files (paude.json,
-    .devcontainer.json) via detect_config().
+    paude.json via detect_config().
 
     Skipped for integration tests which need real container engine
     config (e.g. podman network definitions).

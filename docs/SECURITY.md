@@ -60,13 +60,3 @@ These risks are accepted by design:
 2. **Secrets readable**: Any `.env` file synced into the container — via `--git` or `paude cp` — is readable there. Mitigation: network filtering prevents exfiltration; avoid `--allowed-domains all` with sensitive workspaces, and don't sync in `.gitignore`d secrets.
 3. **No audit logging**: Commands executed aren't logged. This is a forensics gap, not a security breach vector.
 4. **Port-forward exposure**: `--forward-port HOST_IP:HOST:CONTAINER` with a non-loopback `HOST_IP` (e.g. `0.0.0.0`) exposes the forwarded container port to your LAN with no additional authentication — anyone who can reach that host/port gets the same access a local loopback connection would. Mitigation: only bind non-loopback addresses on trusted networks; the default forms (bare `PORT` / `HOST:CONTAINER`) bind loopback only.
-
-## Unsupported devcontainer Properties (Security)
-
-These properties are ignored for security reasons:
-- `mounts` - paude controls mounts
-- `runArgs` - paude controls run arguments
-- `privileged` - never allowed
-- `capAdd` - never allowed
-- `forwardPorts` - paude controls networking
-- `remoteUser` - paude controls user

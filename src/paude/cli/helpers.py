@@ -321,9 +321,6 @@ def _prepare_session_create(
             for key, value in os.environ.items():
                 if key.startswith(prefix):
                     env.setdefault(key, value)
-    if config_obj and config_obj.container_env:
-        env.update(config_obj.container_env)
-
     extra_aliases: list[str] = []
     required_aliases: list[str] = []
     provider_aliases: list[str] = []
@@ -428,9 +425,9 @@ def _finalize_session_create(
     typer.echo(f"  paude connect {session.name}")
 
 
-def _run_post_create_command(backend: Backend, session_name: str, command: str) -> None:
-    """Run a devcontainer postCreateCommand in the session container."""
-    typer.echo("Running postCreateCommand...", err=True)
+def _run_setup_command(backend: Backend, session_name: str, command: str) -> None:
+    """Run a paude setup command in the session container."""
+    typer.echo("Running setup command...", err=True)
     rc, stdout, stderr = backend.exec_in_session(
         session_name, f"cd /pvc/workspace && {command}"
     )
@@ -439,9 +436,9 @@ def _run_post_create_command(backend: Backend, session_name: str, command: str) 
     if stderr:
         typer.echo(stderr.rstrip(), err=True)
     if rc != 0:
-        typer.echo(f"Warning: postCreateCommand failed (exit {rc})", err=True)
+        typer.echo(f"Warning: setup command failed (exit {rc})", err=True)
     else:
-        typer.echo("postCreateCommand completed.", err=True)
+        typer.echo("Setup command completed.", err=True)
 
 
 def _parse_copy_path(path_arg: str) -> tuple[str | None, str]:

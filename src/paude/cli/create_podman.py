@@ -13,7 +13,7 @@ from paude.backends import PodmanBackend, SessionConfig, SessionExistsError
 from paude.cli.helpers import (
     _detect_dev_script_dir,
     _finalize_session_create,
-    _run_post_create_command,
+    _run_setup_command,
 )
 from paude.config.models import PaudeConfig
 
@@ -178,7 +178,5 @@ def create_podman_session(
         paude_version=__version__,
     )
 
-    if config and config.post_create_command:
-        _run_post_create_command(
-            backend_instance, session.name, config.post_create_command
-        )
+    if config and config.setup_command:
+        _run_setup_command(backend_instance, session.name, config.setup_command)

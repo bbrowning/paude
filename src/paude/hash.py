@@ -20,7 +20,7 @@ def compute_config_hash(
     even when no other inputs have changed.
 
     Args:
-        config_file: Path to config file (devcontainer.json or paude.json).
+        config_file: Path to paude.json.
         dockerfile: Path to Dockerfile if specified in config.
         base_image: Base image name if specified.
         entrypoint: Path to entrypoint.sh.
