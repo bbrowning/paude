@@ -4,29 +4,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
-
-
-@dataclass
-class FeatureSpec:
-    """Specification for a dev container feature."""
-
-    url: str
-    options: dict[str, Any] = field(default_factory=dict)
+from typing import Literal
 
 
 @dataclass
 class PaudeConfig:
     """Configuration for a paude workspace.
 
-    This dataclass represents the parsed configuration from either:
-    - devcontainer.json (standard dev container format)
-    - paude.json (paude-specific simple format)
-    - No config (defaults)
+    This dataclass represents the parsed configuration from paude.json or no
+    config (defaults).
     """
 
     config_file: Path | None = None
-    config_type: Literal["default", "devcontainer", "paude"] = "default"
+    config_type: Literal["default", "paude"] = "default"
 
     # Image configuration (mutually exclusive with dockerfile)
     base_image: str | None = None
@@ -35,14 +25,8 @@ class PaudeConfig:
     dockerfile: Path | None = None
     build_context: Path | None = None
 
-    # Features
-    features: list[FeatureSpec] = field(default_factory=list)
-
-    # Post-create command
-    post_create_command: str | None = None
-
-    # Container environment variables
-    container_env: dict[str, str] = field(default_factory=dict)
+    # Setup command
+    setup_command: str | None = None
 
     # Additional packages to install (paude.json format)
     packages: list[str] = field(default_factory=list)
@@ -64,9 +48,5 @@ class PaudeConfig:
     def has_customizations(self) -> bool:
         """Whether this config requires a custom image build."""
         return bool(
-            self.base_image
-            or self.dockerfile
-            or self.packages
-            or self.features
-            or self.post_create_command
+            self.base_image or self.dockerfile or self.packages or self.setup_command
         )

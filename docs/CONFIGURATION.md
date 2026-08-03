@@ -19,7 +19,7 @@ paude create
 Settings are resolved in layers (highest priority wins):
 
 1. **CLI flags** — explicit flags on `paude create`
-2. **Project config** — `paude.json` or `devcontainer.json` in the workspace
+2. **Project config** — `paude.json` in the workspace
 3. **User defaults** — `~/.config/paude/defaults.json`
 4. **Built-in defaults** — hardcoded fallbacks
 
@@ -58,7 +58,7 @@ Then edit it to set the values you want. Any field set to `null` or omitted uses
 
 ### Project Hints
 
-Projects can declare defaults in their `paude.json` or `devcontainer.json` so that anyone cloning the repo gets the right settings automatically.
+Projects can declare defaults in their `paude.json` so that anyone cloning the repo gets the right settings automatically.
 
 **In paude.json** — add a `"create"` section:
 
@@ -69,22 +69,6 @@ Projects can declare defaults in their `paude.json` or `devcontainer.json` so th
   "create": {
     "allowed-domains": ["default", "golang"],
     "agent": "claude"
-  }
-}
-```
-
-**In devcontainer.json** — nest under `customizations.paude.create`:
-
-```json
-{
-  "image": "python:3.11-slim",
-  "customizations": {
-    "paude": {
-      "create": {
-        "allowed-domains": ["default", "nodejs"],
-        "agent": "gemini"
-      }
-    }
   }
 }
 ```
@@ -315,9 +299,9 @@ Select only the repositories the agent should access, and grant only **Contents:
 
 ## Custom Container Environments (BYOC)
 
-Paude supports custom container configurations via devcontainer.json or paude.json.
+Paude supports custom container configurations via `paude.json`.
 
-**Using paude.json** (simpler):
+**Using paude.json**:
 
 ```json
 {
@@ -326,17 +310,6 @@ Paude supports custom container configurations via devcontainer.json or paude.js
     "setup": "pip install -r requirements.txt"
 }
 ```
-
-**Using devcontainer.json**:
-
-```json
-{
-    "image": "python:3.11-slim",
-    "postCreateCommand": "pip install -r requirements.txt"
-}
-```
-
-See [`examples/README.md`](../examples/README.md) for more configurations (Python, Node.js, Go).
 
 **paude.json properties:**
 
@@ -348,18 +321,6 @@ See [`examples/README.md`](../examples/README.md) for more configurations (Pytho
 | `build.args` | Build arguments for Dockerfile |
 | `packages` | Additional system packages to install |
 | `setup` | Run after first start |
-
-**devcontainer.json properties:**
-
-| Property | Description |
-|----------|-------------|
-| `image` | Base container image |
-| `build.dockerfile` | Path to custom Dockerfile |
-| `build.context` | Build context directory |
-| `build.args` | Build arguments for Dockerfile |
-| `features` | Dev container features (ghcr.io OCI artifacts) |
-| `postCreateCommand` | Run after first start |
-| `containerEnv` | Environment variables |
 
 ## GPU Passthrough
 

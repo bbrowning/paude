@@ -1734,17 +1734,17 @@ class TestDetectDevScriptDir:
         assert result is None
 
 
-class TestRunPostCreateCommand:
-    """Tests for _run_post_create_command."""
+class TestRunSetupCommand:
+    """Tests for _run_setup_command."""
 
     def test_runs_command_in_workspace(self):
         """Executes the command with cd to /pvc/workspace."""
-        from paude.cli.helpers import _run_post_create_command
+        from paude.cli.helpers import _run_setup_command
 
         backend = MagicMock()
         backend.exec_in_session.return_value = (0, "ok\n", "")
 
-        _run_post_create_command(backend, "test-session", "npm install")
+        _run_setup_command(backend, "test-session", "npm install")
 
         backend.exec_in_session.assert_called_once_with(
             "test-session", "cd /pvc/workspace && npm install"
@@ -1752,7 +1752,7 @@ class TestRunPostCreateCommand:
 
     def test_prints_stdout_and_stderr(self, capsys):
         """Prints command output to stderr."""
-        from paude.cli.helpers import _run_post_create_command
+        from paude.cli.helpers import _run_setup_command
 
         backend = MagicMock()
         backend.exec_in_session.return_value = (
@@ -1761,21 +1761,21 @@ class TestRunPostCreateCommand:
             "warn: deprecated\n",
         )
 
-        _run_post_create_command(backend, "s1", "npm install")
+        _run_setup_command(backend, "s1", "npm install")
 
         captured = capsys.readouterr()
         assert "installed 42 packages" in captured.err
         assert "warn: deprecated" in captured.err
-        assert "postCreateCommand completed" in captured.err
+        assert "Setup command completed" in captured.err
 
     def test_warns_on_failure(self, capsys):
         """Prints warning when command fails."""
-        from paude.cli.helpers import _run_post_create_command
+        from paude.cli.helpers import _run_setup_command
 
         backend = MagicMock()
         backend.exec_in_session.return_value = (1, "", "error: not found\n")
 
-        _run_post_create_command(backend, "s1", "bad-cmd")
+        _run_setup_command(backend, "s1", "bad-cmd")
 
         captured = capsys.readouterr()
-        assert "postCreateCommand failed (exit 1)" in captured.err
+        assert "setup command failed (exit 1)" in captured.err

@@ -5,12 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from paude.config.models import FeatureSpec, PaudeConfig
+from paude.config.models import PaudeConfig
 from paude.container.build_context import (
     copy_entrypoints,
-    copy_features_cache,
     generate_dockerfile_content,
-    inject_features,
     resolve_entrypoint,
 )
 
@@ -183,104 +181,27 @@ class TestCopyEntrypoints:
             assert not (dest_dir / lib_name).exists()
 
 
-class TestInjectFeatures:
-    """Tests for inject_features()."""
-
-    def test_returns_unchanged_when_no_features(self) -> None:
-        content = "FROM ubuntu\nUSER paude\nRUN echo hi"
-        assert inject_features(content, None) == content
-        assert inject_features(content, []) == content
-
-    @patch("paude.features.installer.generate_features_dockerfile")
-    def test_injects_before_user_paude(self, mock_gen: MagicMock) -> None:
-        mock_gen.return_value = "\n# FEATURES\nRUN install-feature\n"
-        features = [FeatureSpec(url="ghcr.io/test/feature:1")]
-        content = "FROM ubuntu\nUSER paude\nRUN echo hi"
-
-        result = inject_features(content, features)
-
-        assert "\n# FEATURES\nRUN install-feature\n\nUSER paude" in result
-        mock_gen.assert_called_once_with(features)
-
-    @patch("paude.features.installer.generate_features_dockerfile")
-    def test_only_replaces_first_user_paude(self, mock_gen: MagicMock) -> None:
-        mock_gen.return_value = "\n# FEAT\n"
-        features = [FeatureSpec(url="ghcr.io/test/feature:1")]
-        content = "FROM ubuntu\nUSER paude\nRUN something\nUSER paude"
-
-        result = inject_features(content, features)
-
-        # The features block should appear only once
-        assert result.count("# FEAT") == 1
-        # Second USER paude should remain untouched
-        assert result.endswith("USER paude")
-
-
-class TestCopyFeaturesCache:
-    """Tests for copy_features_cache()."""
-
-    @patch("paude.container.build_context.shutil.copytree")
-    @patch("paude.features.downloader.FEATURE_CACHE_DIR")
-    def test_copies_cache_when_exists(
-        self, mock_cache_dir: MagicMock, mock_copytree: MagicMock, tmp_path: Path
-    ) -> None:
-        mock_cache_dir.exists.return_value = True
-        copy_features_cache(tmp_path)
-        mock_copytree.assert_called_once_with(mock_cache_dir, tmp_path / "features")
-
-    @patch("paude.container.build_context.shutil.copytree")
-    @patch("paude.features.downloader.FEATURE_CACHE_DIR")
-    def test_skips_when_no_cache(
-        self, mock_cache_dir: MagicMock, mock_copytree: MagicMock, tmp_path: Path
-    ) -> None:
-        mock_cache_dir.exists.return_value = False
-        copy_features_cache(tmp_path)
-        mock_copytree.assert_not_called()
-
-
 class TestGenerateDockerfileContent:
     """Tests for generate_dockerfile_content()."""
 
-    @patch("paude.container.build_context.inject_features")
     @patch("paude.config.dockerfile.generate_pip_install_dockerfile")
-    def test_uses_pip_install_for_default_image(
-        self, mock_pip: MagicMock, mock_inject: MagicMock
-    ) -> None:
+    def test_uses_pip_install_for_default_image(self, mock_pip: MagicMock) -> None:
         mock_pip.return_value = "FROM base\nRUN pip install"
-        mock_inject.return_value = "FROM base\nRUN pip install"
         config = PaudeConfig()
 
-        generate_dockerfile_content(config, using_default_paude_image=True)
+        result = generate_dockerfile_content(config, using_default_paude_image=True)
 
         mock_pip.assert_called_once_with(
             config, include_claude_install=False, agent=None
         )
-        mock_inject.assert_called_once()
+        assert result == "FROM base\nRUN pip install"
 
-    @patch("paude.container.build_context.inject_features")
     @patch("paude.config.dockerfile.generate_workspace_dockerfile")
-    def test_uses_workspace_for_custom_image(
-        self, mock_ws: MagicMock, mock_inject: MagicMock
-    ) -> None:
+    def test_uses_workspace_for_custom_image(self, mock_ws: MagicMock) -> None:
         mock_ws.return_value = "FROM custom\nRUN setup"
-        mock_inject.return_value = "FROM custom\nRUN setup"
         config = PaudeConfig()
 
-        generate_dockerfile_content(config, using_default_paude_image=False)
+        result = generate_dockerfile_content(config, using_default_paude_image=False)
 
         mock_ws.assert_called_once_with(config, agent=None)
-        mock_inject.assert_called_once()
-
-    @patch("paude.container.build_context.inject_features")
-    @patch("paude.config.dockerfile.generate_pip_install_dockerfile")
-    def test_injects_features(
-        self, mock_pip: MagicMock, mock_inject: MagicMock
-    ) -> None:
-        mock_pip.return_value = "FROM base"
-        mock_inject.return_value = "FROM base"
-        features = [FeatureSpec(url="ghcr.io/test/feat:1")]
-        config = PaudeConfig(features=features)
-
-        generate_dockerfile_content(config, using_default_paude_image=True)
-
-        mock_inject.assert_called_once_with("FROM base", features)
+        assert result == "FROM custom\nRUN setup"

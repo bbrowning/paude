@@ -9,10 +9,7 @@ from pathlib import Path
 def detect_config(workspace: Path) -> Path | None:
     """Detect configuration file in the workspace.
 
-    Priority order:
-    1. .devcontainer/devcontainer.json
-    2. .devcontainer.json
-    3. paude.json
+    The only project configuration file recognized by paude is ``paude.json``.
 
     Args:
         workspace: Path to the workspace directory.
@@ -20,15 +17,9 @@ def detect_config(workspace: Path) -> Path | None:
     Returns:
         Path to the config file if found, None otherwise.
     """
-    candidates = [
-        (workspace / ".devcontainer" / "devcontainer.json", "devcontainer"),
-        (workspace / ".devcontainer.json", "devcontainer"),
-        (workspace / "paude.json", "paude"),
-    ]
-
-    for candidate, config_type in candidates:
-        if candidate.exists():
-            print(f"Detected {config_type} config: {candidate}", file=sys.stderr)
-            return candidate
+    candidate = workspace / "paude.json"
+    if candidate.exists():
+        print(f"Detected paude config: {candidate}", file=sys.stderr)
+        return candidate
 
     return None

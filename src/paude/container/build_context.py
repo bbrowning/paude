@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from paude.config.models import FeatureSpec, PaudeConfig
+from paude.config.models import PaudeConfig
 
 if TYPE_CHECKING:
     from paude.agents.base import Agent, AgentComposition
@@ -65,34 +64,6 @@ def copy_entrypoints(entrypoint: Path, dest_dir: Path) -> None:
             lib_dest.chmod(0o755)
 
 
-def inject_features(dockerfile_content: str, features: list[FeatureSpec] | None) -> str:
-    """Inject devcontainer features block into Dockerfile content."""
-    if not features:
-        return dockerfile_content
-
-    from paude.features.installer import generate_features_dockerfile
-
-    features_block = generate_features_dockerfile(features)
-    if features_block:
-        # Replace only FIRST "\nUSER paude" - features run as root.
-        # count=1 avoids duplicating when Dockerfile has multiple USER paude
-        dockerfile_content = dockerfile_content.replace(
-            "\nUSER paude",
-            f"{features_block}\nUSER paude",
-            1,
-        )
-    return dockerfile_content
-
-
-def copy_features_cache(dest_dir: Path) -> None:
-    """Copy downloaded features to build context if present."""
-    from paude.features.downloader import FEATURE_CACHE_DIR
-
-    if FEATURE_CACHE_DIR.exists():
-        features_dest = dest_dir / "features"
-        shutil.copytree(FEATURE_CACHE_DIR, features_dest)
-
-
 def generate_dockerfile_content(
     config: PaudeConfig,
     using_default_paude_image: bool,
@@ -100,7 +71,7 @@ def generate_dockerfile_content(
     agent: Agent | None = None,
     composition: AgentComposition | None = None,
 ) -> str:
-    """Generate Dockerfile content with features injected."""
+    """Generate Dockerfile content for a configured workspace."""
     if using_default_paude_image:
         from paude.config.dockerfile import generate_pip_install_dockerfile
 
@@ -127,4 +98,4 @@ def generate_dockerfile_content(
                 config, agent=agent, composition=composition
             )
 
-    return inject_features(content, config.features)
+    return content

@@ -60,9 +60,8 @@ def show_dry_run(
             if config.packages:
                 typer.echo(f"Packages: {', '.join(config.packages)}")
 
-            # Setup/post-create command
-            if config.post_create_command:
-                typer.echo(f"Setup command: {config.post_create_command}")
+            if config.setup_command:
+                typer.echo(f"Setup command: {config.setup_command}")
 
             # Show what would be built
             if config.base_image or config.dockerfile:

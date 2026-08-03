@@ -25,18 +25,19 @@ class TestFullFlow:
         assert result.exit_code == 0
         assert "Configuration: none" in result.stdout
 
-    def test_dry_run_with_devcontainer_json(
+    def test_dry_run_ignores_devcontainer_json(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
-        """Full flow with devcontainer.json in dry-run mode."""
+        """Legacy devcontainer files do not affect dry-run configuration."""
         monkeypatch.chdir(tmp_path)
-        devcontainer = tmp_path / ".devcontainer.json"
+        devcontainer = tmp_path / ".devcontainer" / "devcontainer.json"
+        devcontainer.parent.mkdir()
         devcontainer.write_text(json.dumps({"image": "python:3.11-slim"}))
 
         result = runner.invoke(app, ["create", "--dry-run"])
         assert result.exit_code == 0
-        assert "devcontainer" in result.stdout
-        assert "python:3.11-slim" in result.stdout
+        assert "Configuration: none" in result.stdout
+        assert "python:3.11-slim" not in result.stdout
 
     def test_dry_run_with_paude_json(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

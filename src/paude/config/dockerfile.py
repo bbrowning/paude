@@ -56,9 +56,9 @@ def generate_pip_install_dockerfile(
     lines.append("ARG BASE_IMAGE")
     lines.append("FROM ${BASE_IMAGE}")
 
-    # Switch to root for package installation and feature injection
+    # Switch to root for package installation
     lines.append("")
-    lines.append("# Ensure root for any feature installation")
+    lines.append("# Ensure root for package installation")
     lines.append("USER root")
 
     if config.packages:

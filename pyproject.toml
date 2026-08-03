@@ -79,8 +79,6 @@ select = [
 ignore = [
     "S603",  # subprocess calls - expected for podman wrapper
     "S607",  # partial executable path - expected for podman/git
-    "S310",  # URL open audit - expected for feature downloader
-    "S202",  # tarfile extractall - expected for feature extraction
 ]
 
 [tool.ruff.lint.per-file-ignores]

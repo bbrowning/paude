@@ -12,7 +12,6 @@ from paude.config.claude_layer import generate_claude_layer_dockerfile
 from paude.config.models import PaudeConfig
 from paude.container.build_context import (
     copy_entrypoints,
-    copy_features_cache,
     generate_dockerfile_content,
     resolve_entrypoint,
 )
@@ -283,9 +282,6 @@ class ImageManager:
 
             if not using_default:
                 copy_entrypoints(entrypoint, Path(tmpdir))
-
-            if config.features:
-                copy_features_cache(Path(tmpdir))
 
             build_args = {"BASE_IMAGE": base_image}
             self.build_image(

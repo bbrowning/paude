@@ -123,7 +123,7 @@ paude/
 │   │   ├── claude_layer.py    # Agent config layering
 │   │   ├── detector.py        # Config file detection
 │   │   ├── dockerfile.py      # Dockerfile generation
-│   │   ├── models.py          # Data models (PaudeConfig, FeatureSpec)
+│   │   ├── models.py          # PaudeConfig data model
 │   │   ├── parser.py          # Config file parsing
 │   │   ├── resolver.py        # Config resolution with provenance
 │   │   └── user_config.py     # User config defaults and persistence
@@ -136,9 +136,6 @@ paude/
 │   │   ├── proxy_runner.py    # Proxy container execution
 │   │   ├── runner.py          # Container execution
 │   │   └── volume.py          # Volume management
-│   ├── features/              # Dev container features
-│   │   ├── downloader.py      # Feature downloading
-│   │   └── installer.py       # Feature installation
 │   ├── git_remote/            # Git remote management
 │   │   ├── container_ops.py   # Container workspace git setup
 │   │   ├── exec_cmd.py        # Execution command builders
@@ -170,7 +167,6 @@ paude/
 │       ├── Dockerfile             # Proxy container image (paude-proxy)
 │       └── entrypoint.sh          # Proxy container entrypoint
 ├── tests/                 # Python tests (pytest)
-├── examples/              # Example configurations
 ├── docs/                  # Documentation
 ├── pyproject.toml         # Python project configuration
 ├── Makefile               # Build and release automation

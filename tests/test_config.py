@@ -21,23 +21,14 @@ from paude.config.dockerfile import generate_pip_install_dockerfile
 class TestDetectConfig:
     """Tests for config detection."""
 
-    def test_finds_devcontainer_in_folder(self, tmp_path: Path):
-        """detect_config finds .devcontainer/devcontainer.json."""
+    def test_ignores_devcontainer_files(self, tmp_path: Path):
+        """detect_config ignores both legacy devcontainer filename forms."""
         devcontainer_dir = tmp_path / ".devcontainer"
         devcontainer_dir.mkdir()
-        config_file = devcontainer_dir / "devcontainer.json"
-        config_file.write_text('{"image": "python:3.11"}')
+        (devcontainer_dir / "devcontainer.json").write_text('{"image": "python:3.11"}')
+        (tmp_path / ".devcontainer.json").write_text('{"image": "node:22"}')
 
-        result = detect_config(tmp_path)
-        assert result == config_file
-
-    def test_finds_devcontainer_in_root(self, tmp_path: Path):
-        """detect_config finds .devcontainer.json."""
-        config_file = tmp_path / ".devcontainer.json"
-        config_file.write_text('{"image": "python:3.11"}')
-
-        result = detect_config(tmp_path)
-        assert result == config_file
+        assert detect_config(tmp_path) is None
 
     def test_finds_paude_json(self, tmp_path: Path):
         """detect_config finds paude.json."""
@@ -49,7 +40,7 @@ class TestDetectConfig:
 
     def test_respects_priority_order(self, tmp_path: Path):
         """detect_config respects priority order."""
-        # Create all three config files
+        # A paude.json is selected even when legacy files are present.
         devcontainer_dir = tmp_path / ".devcontainer"
         devcontainer_dir.mkdir()
         (devcontainer_dir / "devcontainer.json").write_text('{"image": "priority1"}')
@@ -57,7 +48,7 @@ class TestDetectConfig:
         (tmp_path / "paude.json").write_text('{"base": "priority3"}')
 
         result = detect_config(tmp_path)
-        assert result == devcontainer_dir / "devcontainer.json"
+        assert result == tmp_path / "paude.json"
 
     def test_returns_none_when_no_config(self, tmp_path: Path):
         """detect_config returns None when no config exists."""
@@ -68,48 +59,14 @@ class TestDetectConfig:
 class TestParseConfig:
     """Tests for config parsing."""
 
-    def test_parses_devcontainer_with_image(self, tmp_path: Path):
-        """parse_config handles devcontainer with image."""
-        config_file = tmp_path / ".devcontainer.json"
-        config_file.write_text('{"image": "python:3.11-slim"}')
+    def test_rejects_devcontainer_file(self, tmp_path: Path):
+        """parse_config accepts only paude.json."""
+        config_file = tmp_path / ".devcontainer" / "devcontainer.json"
+        config_file.parent.mkdir()
+        config_file.write_text("not parsed")
 
-        config = parse_config(config_file)
-        assert config.config_type == "devcontainer"
-        assert config.base_image == "python:3.11-slim"
-        assert config.dockerfile is None
-
-    def test_parses_devcontainer_with_dockerfile(self, tmp_path: Path):
-        """parse_config handles devcontainer with dockerfile and context."""
-        devcontainer_dir = tmp_path / ".devcontainer"
-        devcontainer_dir.mkdir()
-        config_file = devcontainer_dir / "devcontainer.json"
-        config_file.write_text(
-            json.dumps(
-                {
-                    "build": {
-                        "dockerfile": "Dockerfile",
-                        "context": "..",
-                    }
-                }
-            )
-        )
-
-        config = parse_config(config_file)
-        assert config.config_type == "devcontainer"
-        assert config.dockerfile == devcontainer_dir / "Dockerfile"
-        # Context should resolve to tmp_path (the parent of .devcontainer)
-        assert config.build_context == tmp_path
-
-    def test_resolves_relative_dockerfile_paths(self, tmp_path: Path):
-        """parse_config resolves relative dockerfile paths correctly."""
-        devcontainer_dir = tmp_path / ".devcontainer"
-        devcontainer_dir.mkdir()
-        config_file = devcontainer_dir / "devcontainer.json"
-        config_file.write_text('{"build": {"dockerfile": "../custom/Dockerfile"}}')
-
-        config = parse_config(config_file)
-        expected = devcontainer_dir / ".." / "custom" / "Dockerfile"
-        assert config.dockerfile == expected
+        with pytest.raises(ConfigError, match="Unknown config file type"):
+            parse_config(config_file)
 
     def test_parses_paude_json_with_packages(self, tmp_path: Path):
         """parse_config handles paude.json with packages."""
@@ -133,7 +90,7 @@ class TestParseConfig:
         )
 
         config = parse_config(config_file)
-        assert config.post_create_command == "pip install -r requirements.txt"
+        assert config.setup_command == "pip install -r requirements.txt"
 
     def test_handles_invalid_json(self, tmp_path: Path):
         """parse_config handles invalid JSON."""
@@ -154,120 +111,6 @@ class TestParseConfig:
         captured = capsys.readouterr()
         assert "pip_install" in captured.err
         assert "deprecated" in captured.err
-
-    def test_warns_unsupported_properties(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ):
-        """parse_config logs warnings for unsupported properties."""
-        config_file = tmp_path / ".devcontainer.json"
-        config_file.write_text(
-            json.dumps(
-                {
-                    "image": "python:3.11",
-                    "mounts": ["/host:/container"],
-                    "runArgs": ["--privileged"],
-                }
-            )
-        )
-
-        parse_config(config_file)
-        captured = capsys.readouterr()
-        assert "mounts" in captured.err
-        assert "runArgs" in captured.err
-
-    def test_parses_post_create_command_array(self, tmp_path: Path):
-        """parse_config handles postCreateCommand as array."""
-        config_file = tmp_path / ".devcontainer.json"
-        config_file.write_text(
-            json.dumps(
-                {"image": "python:3.11", "postCreateCommand": ["npm", "install"]}
-            )
-        )
-
-        config = parse_config(config_file)
-        assert config.post_create_command == "npm && install"
-
-    def test_parses_devcontainer_features(self, tmp_path: Path):
-        """parse_config extracts features with options from devcontainer.json."""
-        config_file = tmp_path / ".devcontainer.json"
-        config_file.write_text(
-            json.dumps(
-                {
-                    "image": "python:3.11",
-                    "features": {
-                        "ghcr.io/devcontainers/features/node:1": {"version": "20"},
-                        "ghcr.io/devcontainers/features/go:1": {},
-                    },
-                }
-            )
-        )
-
-        config = parse_config(config_file)
-        assert len(config.features) == 2
-        urls = {f.url for f in config.features}
-        assert "ghcr.io/devcontainers/features/node:1" in urls
-        assert "ghcr.io/devcontainers/features/go:1" in urls
-        node_feature = next(f for f in config.features if "node" in f.url)
-        assert node_feature.options == {"version": "20"}
-
-    def test_parses_devcontainer_container_env(self, tmp_path: Path):
-        """parse_config extracts containerEnv from devcontainer.json."""
-        config_file = tmp_path / ".devcontainer.json"
-        config_file.write_text(
-            json.dumps(
-                {
-                    "image": "python:3.11",
-                    "containerEnv": {"FOO": "bar", "BAZ": "qux"},
-                }
-            )
-        )
-
-        config = parse_config(config_file)
-        assert config.container_env == {"FOO": "bar", "BAZ": "qux"}
-
-    def test_parses_post_create_command_string(self, tmp_path: Path):
-        """parse_config handles postCreateCommand as a plain string."""
-        config_file = tmp_path / ".devcontainer.json"
-        config_file.write_text(
-            json.dumps(
-                {
-                    "image": "python:3.11",
-                    "postCreateCommand": "make setup && make install",
-                }
-            )
-        )
-
-        config = parse_config(config_file)
-        assert config.post_create_command == "make setup && make install"
-
-    def test_parses_build_args(self, tmp_path: Path):
-        """parse_config extracts build args from devcontainer.json."""
-        devcontainer_dir = tmp_path / ".devcontainer"
-        devcontainer_dir.mkdir()
-        config_file = devcontainer_dir / "devcontainer.json"
-        config_file.write_text(
-            json.dumps(
-                {
-                    "build": {
-                        "dockerfile": "Dockerfile",
-                        "args": {"NODE_VERSION": "20", "DEBUG": "true"},
-                    }
-                }
-            )
-        )
-
-        config = parse_config(config_file)
-        assert config.build_args == {"NODE_VERSION": "20", "DEBUG": "true"}
-
-    def test_handles_absolute_dockerfile_path(self, tmp_path: Path):
-        """parse_config handles absolute dockerfile path without resolving relative."""
-        config_file = tmp_path / ".devcontainer.json"
-        config_file.write_text(
-            json.dumps({"build": {"dockerfile": "/opt/docker/Dockerfile"}})
-        )
-
-        config = parse_config(config_file)
-        assert config.dockerfile == Path("/opt/docker/Dockerfile")
 
     def test_unknown_config_type_raises(self, tmp_path: Path):
         """parse_config raises ConfigError for unknown file type."""
@@ -317,7 +160,7 @@ class TestParseConfig:
         assert config.base_image is None
         assert config.dockerfile is None
         assert config.packages == []
-        assert config.post_create_command is None
+        assert config.setup_command is None
         assert config.build_args == {}
 
     def test_parses_paude_json_create_section(self, tmp_path: Path):
@@ -384,29 +227,6 @@ class TestParseConfig:
         assert config.create_providers == []
         assert config.create_agent_providers == {}
 
-    def test_parses_devcontainer_create_section(self, tmp_path: Path):
-        """parse_config extracts create hints from devcontainer customizations."""
-        config_file = tmp_path / ".devcontainer.json"
-        config_file.write_text(
-            json.dumps(
-                {
-                    "image": "python:3.11",
-                    "customizations": {
-                        "paude": {
-                            "create": {
-                                "allowed-domains": ["golang", ".example.com"],
-                                "agent": "claude",
-                            }
-                        }
-                    },
-                }
-            )
-        )
-
-        config = parse_config(config_file)
-        assert config.create_allowed_domains == ["golang", ".example.com"]
-        assert config.create_agent == "claude"
-
     def test_parses_paude_json_create_otel_endpoint(self, tmp_path: Path):
         """parse_config extracts otel-endpoint from paude.json create section."""
         config_file = tmp_path / "paude.json"
@@ -415,27 +235,6 @@ class TestParseConfig:
                 {
                     "create": {
                         "otel-endpoint": "http://collector:4318",
-                    },
-                }
-            )
-        )
-
-        config = parse_config(config_file)
-        assert config.create_otel_endpoint == "http://collector:4318"
-
-    def test_parses_devcontainer_create_otel_endpoint(self, tmp_path: Path):
-        """parse_config extracts otel-endpoint from devcontainer customizations."""
-        config_file = tmp_path / ".devcontainer.json"
-        config_file.write_text(
-            json.dumps(
-                {
-                    "image": "python:3.11",
-                    "customizations": {
-                        "paude": {
-                            "create": {
-                                "otel-endpoint": "http://collector:4318",
-                            }
-                        }
                     },
                 }
             )
@@ -472,27 +271,6 @@ class TestParseConfig:
         """Numeric JSON port entries are coerced to strings."""
         config_file = tmp_path / "paude.json"
         config_file.write_text(json.dumps({"create": {"forward-ports": [8372]}}))
-
-        config = parse_config(config_file)
-        assert config.create_forward_ports == ["8372"]
-
-    def test_parses_devcontainer_forward_ports(self, tmp_path: Path):
-        """parse_config extracts forward-ports from devcontainer customizations."""
-        config_file = tmp_path / ".devcontainer.json"
-        config_file.write_text(
-            json.dumps(
-                {
-                    "image": "python:3.11",
-                    "customizations": {
-                        "paude": {
-                            "create": {
-                                "forward-ports": ["8372"],
-                            }
-                        }
-                    },
-                }
-            )
-        )
 
         config = parse_config(config_file)
         assert config.create_forward_ports == ["8372"]
@@ -540,10 +318,7 @@ class TestGenerateWorkspaceDockerfile:
 
     def test_handles_image_based_config(self):
         """generate_workspace_dockerfile handles image-based configs."""
-        config = PaudeConfig(
-            config_type="devcontainer",
-            base_image="python:3.11-slim",
-        )
+        config = PaudeConfig(config_type="paude", base_image="python:3.11-slim")
         dockerfile = generate_workspace_dockerfile(config)
 
         assert "FROM ${BASE_IMAGE}" in dockerfile
@@ -660,11 +435,11 @@ class TestGeneratePipInstallDockerfile:
             f"Expected 'USER paude', got '{last_user_line}'"
         )
 
-    def test_starts_with_user_root_for_feature_injection(self):
+    def test_starts_with_user_root_for_agent_install(self):
         """Dockerfile with include_claude_install has USER root before USER paude.
 
-        This ensures features (injected before first USER paude) run as root,
-        even when the base image ends with a non-root user.
+        This ensures the agent install runs as root, even when the base image
+        ends with a non-root user.
         """
         config = PaudeConfig()
         dockerfile = generate_pip_install_dockerfile(
@@ -709,22 +484,14 @@ class TestGeneratePipInstallDockerfile:
         assert "vim" in dockerfile
         assert "User-specified packages from paude.json" in dockerfile
 
-    def test_minimal_dockerfile_has_user_paude_for_features(self):
-        """Minimal Dockerfile (no claude) still has USER paude for features.
-
-        This ensures features can be injected even when using the default paude image.
-        Features are injected before the first USER paude line.
-        """
+    def test_minimal_dockerfile_has_user_paude(self):
+        """Minimal Dockerfile (no claude) still has USER paude."""
         config = PaudeConfig()
         dockerfile = generate_pip_install_dockerfile(
             config, include_claude_install=False
         )
 
-        # Should have USER paude even with minimal config
-        assert "USER paude" in dockerfile, (
-            "Minimal Dockerfile should have USER paude for feature injection"
-        )
-        # Should have USER root before USER paude for features to run as root
+        assert "USER paude" in dockerfile
         lines = dockerfile.split("\n")
         user_lines = [
             (i, line.strip())
@@ -733,9 +500,7 @@ class TestGeneratePipInstallDockerfile:
         ]
 
         assert len(user_lines) >= 2, "Expected at least 2 USER lines"
-        assert user_lines[0][1] == "USER root", (
-            "First USER should be root for feature injection"
-        )
+        assert user_lines[0][1] == "USER root"
         assert user_lines[1][1] == "USER paude", "Second USER should be paude"
 
 
