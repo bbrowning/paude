@@ -165,6 +165,8 @@ _SECTIONS: tuple[HelpSection, ...] = (
             " is maximum risk mode.\n"
             "Codex ChatGPT settings are merged into persistent config;"
             " Apps are disabled and standalone MCP servers are unchanged.\n"
+            "Git config is writable persistent session state for all processes;"
+            " host Git config remains read-only.\n"
             "PAUDE_GITHUB_TOKEN is explicit only;"
             " host GH_TOKEN is never auto-propagated."
         ),

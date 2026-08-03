@@ -737,6 +737,20 @@ class TestPersistAgentConfigContract:
             "so host config is merged into PVC without clobbering runtime state"
         )
 
+    def test_gitconfig_setup_is_shared_by_local_and_remote_paths(self) -> None:
+        """Git config setup must run before the session starts tmux."""
+        credentials = ENTRYPOINT_LIB_CREDENTIALS_PATH.read_text()
+        entrypoint = ENTRYPOINT_PATH.read_text()
+
+        assert "setup_gitconfig()" in credentials
+        assert 'setup_gitconfig "$config_path" "$HOME" "/pvc"' in credentials
+        setup_pos = entrypoint.find("\nsetup_credentials\n")
+        tmux_pos = entrypoint.find('tmux send-keys -t "$AGENT_SESSION_NAME"')
+        assert setup_pos != -1
+        assert tmux_pos != -1
+        assert setup_pos < tmux_pos
+        assert "GIT_CONFIG_GLOBAL" in entrypoint[tmux_pos:]
+
     def test_sandbox_config_python_uses_cp_for_claude_json(self) -> None:
         """Claude agent's apply_sandbox_config must use cp+rm, not mv."""
         from paude.agents.claude import ClaudeAgent
@@ -749,6 +763,102 @@ class TestPersistAgentConfigContract:
         assert 'rm -f "${claude_json}.tmp"' in script, (
             "Claude sandbox config must remove temp file after cp"
         )
+
+
+def _build_gitconfig_setup_script(
+    home: Path,
+    pvc: Path,
+    credentials: Path,
+) -> str:
+    """Build a script that exercises the real setup_gitconfig function."""
+    return textwrap.dedent(
+        f"""\
+        #!/bin/bash
+        set -e
+        source "{ENTRYPOINT_LIB_CREDENTIALS_PATH}"
+        setup_gitconfig "{credentials}" "{home}" "{pvc}"
+        git config --global beads.role maintainer
+        """
+    )
+
+
+class TestGitconfigPersistence:
+    """Tests for the common writable Git config setup."""
+
+    def test_seedless_session_creates_persistent_config(self, tmp_path: Path) -> None:
+        """A session without host credentials still persists global Git writes."""
+        home = tmp_path / "home"
+        pvc = tmp_path / "pvc"
+        credentials = tmp_path / "credentials"
+        home.mkdir()
+        pvc.mkdir()
+
+        result = _run_script(_build_gitconfig_setup_script(home, pvc, credentials))
+
+        assert result.returncode == 0, result.stderr
+        assert "role = maintainer" in (pvc / ".gitconfig").read_text()
+        assert not (home / ".gitconfig").exists()
+
+    def test_remote_read_only_home_config_is_copied_to_pvc(
+        self, tmp_path: Path
+    ) -> None:
+        """Remote bind-mounted config is never modified by global Git writes."""
+        home = tmp_path / "home"
+        pvc = tmp_path / "pvc"
+        credentials = tmp_path / "credentials"
+        home.mkdir()
+        pvc.mkdir()
+        credentials.mkdir()
+        host_gitconfig = home / ".gitconfig"
+        host_gitconfig.write_text("[user]\n\tname = Host User\n")
+        host_gitconfig.chmod(0o444)
+
+        result = _run_script(_build_gitconfig_setup_script(home, pvc, credentials))
+
+        assert result.returncode == 0, result.stderr
+        assert "role = maintainer" in (pvc / ".gitconfig").read_text()
+        assert (pvc / ".gitconfig").stat().st_mode & 0o222
+        assert "beads.role" not in host_gitconfig.read_text()
+
+    def test_local_credentials_config_is_preferred(self, tmp_path: Path) -> None:
+        """Local /credentials sync remains the preferred seed source."""
+        home = tmp_path / "home"
+        pvc = tmp_path / "pvc"
+        credentials = tmp_path / "credentials"
+        home.mkdir()
+        pvc.mkdir()
+        credentials.mkdir()
+        (home / ".gitconfig").write_text("[user]\n\tname = Home User\n")
+        credential_gitconfig = credentials / "gitconfig"
+        credential_gitconfig.write_text("[user]\n\tname = Credential User\n")
+
+        result = _run_script(_build_gitconfig_setup_script(home, pvc, credentials))
+
+        assert result.returncode == 0, result.stderr
+        content = (pvc / ".gitconfig").read_text()
+        assert "Credential User" in content
+        assert "Home User" not in content
+        assert "beads.role" not in credential_gitconfig.read_text()
+
+    def test_existing_pvc_config_is_preserved(self, tmp_path: Path) -> None:
+        """Reconnects retain the persistent config instead of reseeding it."""
+        home = tmp_path / "home"
+        pvc = tmp_path / "pvc"
+        credentials = tmp_path / "credentials"
+        home.mkdir()
+        pvc.mkdir()
+        credentials.mkdir()
+        (home / ".gitconfig").write_text("[user]\n\tname = New Host User\n")
+        existing = pvc / ".gitconfig"
+        existing.write_text("[user]\n\tname = Existing User\n")
+
+        result = _run_script(_build_gitconfig_setup_script(home, pvc, credentials))
+
+        assert result.returncode == 0, result.stderr
+        content = existing.read_text()
+        assert "Existing User" in content
+        assert "New Host User" not in content
+        assert "role = maintainer" in content
 
 
 def _build_persist_config_dir_script(

@@ -359,6 +359,24 @@ class TestPodmanRunningSession:
         assert returncode == 0
         assert "hello" in stdout
 
+    def test_exec_in_session_uses_persistent_git_config(
+        self, running_session: tuple[PodmanBackend, str, Path]
+    ) -> None:
+        """Later exec processes write global Git settings to the PVC."""
+        backend, name, _workspace = running_session
+
+        returncode, _stdout, stderr = backend.exec_in_session(
+            name, "git config --global paude.integration enabled"
+        )
+
+        assert returncode == 0, stderr
+        returncode, stdout, stderr = backend.exec_in_session(
+            name,
+            "git config --file /pvc/.gitconfig --get paude.integration",
+        )
+        assert returncode == 0, stderr
+        assert stdout.strip() == "enabled"
+
     def test_copy_to_and_from_session(
         self,
         running_session: tuple[PodmanBackend, str, Path],

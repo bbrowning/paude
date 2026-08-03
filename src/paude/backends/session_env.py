@@ -155,6 +155,12 @@ def build_session_env(
             env[var] = PROXY_MANAGED_CREDENTIAL
         env["GH_TOKEN"] = PROXY_MANAGED_CREDENTIAL
 
+    # Set this at container creation time so every process, including later
+    # docker/podman exec commands, uses the persistent writable config.
+    from paude.constants import CONTAINER_GIT_CONFIG
+
+    env["GIT_CONFIG_GLOBAL"] = CONTAINER_GIT_CONFIG
+
     return env, agent_args
 
 

@@ -52,6 +52,18 @@ class TestBuildSessionEnv:
 
         assert env["PAUDE_SUPPRESS_PROMPTS"] == "1"
 
+    def test_global_git_config_is_inherited_by_container_processes(self) -> None:
+        """Every process uses the writable session-volume Git config."""
+        config = SessionConfig(
+            name="test",
+            workspace=Path("/home/user/project"),
+            image="test-image",
+        )
+
+        env, _args = build_session_env(config, ClaudeAgent(), proxy_name="proxy")
+
+        assert env["GIT_CONFIG_GLOBAL"] == "/pvc/.gitconfig"
+
     def test_composition_exports_all_runtime_metadata(self) -> None:
         composition = get_agents(
             ["gascity", "claude", "codex"],

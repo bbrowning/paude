@@ -9,7 +9,7 @@ The container intentionally restricts certain operations:
 | Host working directory | not mounted | Code lives in a separate named volume, synced via git (see [Code Synchronization](SESSIONS.md#code-synchronization)) — the agent never touches host files directly |
 | gcloud credentials | never enter the agent's container; a non-functional stub ADC file is injected instead | Real credentials live only on the network-filtering proxy sidecar, which signs Vertex AI requests on the container's behalf |
 | Agent config and session state | copied in, then stored on the private session volume | Prevents host config poisoning while preserving settings and history across container upgrades |
-| `~/.gitconfig` | writable copy, persisted on the session volume (read-only bind mount only for `--host` remote sessions) | Git identity |
+| `~/.gitconfig` | host config is read-only; a writable copy is persisted at `/pvc/.gitconfig` for local and `--host` remote sessions | Git identity |
 | SSH keys | not mounted | Prevents git push via SSH |
 | GitHub CLI config | not mounted | Prevents cached host credentials |
 | `GH_TOKEN` (host) | never propagated | Set `PAUDE_GITHUB_TOKEN` before `create`/`start`; the real token goes only to the proxy sidecar, never the agent's container |

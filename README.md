@@ -169,7 +169,11 @@ uv tool install paude
 
 Agent configuration, logins, conversation history, skills, and workspace data
 are stored on each session's private volume. They survive `start`, `stop`, and
-container recreation. After updating Paude, refresh a session with:
+container recreation. Each session gets a writable `/pvc/.gitconfig`, seeded
+from the host config when available or created empty otherwise. All container
+processes use it, so `git config --global` works consistently for local and
+SSH-remote Docker/Podman sessions without modifying the host config.
+After updating Paude, refresh a session with:
 
 ```bash
 paude upgrade SESSION
