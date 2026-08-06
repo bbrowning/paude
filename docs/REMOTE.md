@@ -45,9 +45,10 @@ paude create my-project --host user@hostname:2222
 ### How It Works
 
 1. Paude validates SSH connectivity and that the container engine is available on the remote host
-2. Container images are built or pulled on the remote host
-3. The container runs on the remote host with the same isolation and network filtering as local sessions
-4. `paude connect` tunnels the session back to your terminal via SSH
+2. Paude detects the remote host's CPU architecture (via `uname -m` over SSH) so images are built/pulled for that architecture rather than your local machine's — use `--platform` to override if detection is unavailable or wrong
+3. Container images are built or pulled on the remote host
+4. The container runs on the remote host with the same isolation and network filtering as local sessions
+5. `paude connect` tunnels the session back to your terminal via SSH
 
 File copies with `paude cp` use the same SSH connection. A session path is
 resolved inside the remote container while the local path is resolved on the

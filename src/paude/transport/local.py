@@ -38,6 +38,12 @@ class LocalTransport:
         result = subprocess.run(cmd)
         return result.returncode
 
+    def machine(self) -> str:
+        """Return the local machine's CPU architecture."""
+        import platform as plat
+
+        return plat.machine()
+
     def copy_to_host(self, local_path: str, host_path: str) -> None:
         """Copy a local path to another local path."""
         _copy_path(local_path, host_path)

@@ -60,6 +60,10 @@ class TestLocalTransport:
     def test_host_label(self) -> None:
         assert LocalTransport().host_label == "local"
 
+    @patch("platform.machine", return_value="arm64")
+    def test_machine(self, mock_machine: MagicMock) -> None:
+        assert LocalTransport().machine() == "arm64"
+
 
 class TestSshTransport:
     def test_ssh_base_minimal(self) -> None:
@@ -351,3 +355,33 @@ class TestSshTransport:
         transport = SshTransport("user@host")
         with pytest.raises(RuntimeError, match="'docker' not found"):
             transport.validate_engine("docker")
+
+    @patch("paude.transport.ssh.subprocess.run")
+    def test_machine_success(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="aarch64\n", stderr=""
+        )
+        transport = SshTransport("user@host")
+        assert transport.machine() == "aarch64"
+
+    @pytest.mark.parametrize(
+        "run_kwargs",
+        [
+            {
+                "return_value": subprocess.CompletedProcess(
+                    args=[], returncode=1, stdout="", stderr="no uname"
+                )
+            },
+            {"side_effect": subprocess.TimeoutExpired(cmd="uname -m", timeout=10)},
+            {"side_effect": OSError("ssh: command not found")},
+        ],
+        ids=["nonzero-exit", "timeout", "oserror"],
+    )
+    @patch("paude.transport.ssh.subprocess.run")
+    def test_machine_failure_raises(
+        self, mock_run: MagicMock, run_kwargs: dict
+    ) -> None:
+        mock_run.configure_mock(**run_kwargs)
+        transport = SshTransport("user@host")
+        with pytest.raises(RuntimeError, match="architecture"):
+            transport.machine()

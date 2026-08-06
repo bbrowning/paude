@@ -215,6 +215,18 @@ class SshTransport:
         if result.returncode != 0:
             raise RuntimeError(f"'{engine_binary}' not found on {self._host}")
 
+    def machine(self) -> str:
+        """Query the remote host's CPU architecture via ``uname -m``."""
+        try:
+            result = self.run(["uname", "-m"], check=False)
+        except (subprocess.SubprocessError, OSError) as e:
+            raise RuntimeError(
+                f"Could not determine architecture of {self._host}: {e}"
+            ) from e
+        if result.returncode != 0:
+            raise RuntimeError(f"Could not determine architecture of {self._host}")
+        return result.stdout.strip()
+
 
 def _remote_extract_command(
     remote_parent: str, source_name: str, host_path: str

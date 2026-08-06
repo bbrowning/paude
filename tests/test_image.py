@@ -5,45 +5,73 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from paude.container.image import ImageManager, _detect_native_platform
+from paude.container.image import ImageManager, _detect_platform
 
 
-class TestDetectNativePlatform:
-    """Tests for _detect_native_platform()."""
+class TestDetectPlatformLocal:
+    """Tests for _detect_platform() with no transport (local detection)."""
 
     @patch("platform.machine", return_value="arm64")
     def test_arm64_mac(self, mock_machine: object) -> None:
-        assert _detect_native_platform() == "linux/arm64"
+        assert _detect_platform() == "linux/arm64"
 
     @patch("platform.machine", return_value="aarch64")
     def test_aarch64_linux(self, mock_machine: object) -> None:
-        assert _detect_native_platform() == "linux/arm64"
+        assert _detect_platform() == "linux/arm64"
 
     @patch("platform.machine", return_value="x86_64")
     def test_x86_64(self, mock_machine: object) -> None:
-        assert _detect_native_platform() == "linux/amd64"
+        assert _detect_platform() == "linux/amd64"
 
     @patch("platform.machine", return_value="AMD64")
     def test_case_insensitive(self, mock_machine: object) -> None:
-        assert _detect_native_platform() == "linux/amd64"
+        assert _detect_platform() == "linux/amd64"
+
+
+class TestDetectPlatformTransport:
+    """Tests for _detect_platform() delegating to transport.machine()."""
+
+    def test_transport_arm64(self) -> None:
+        transport = MagicMock()
+        transport.machine.return_value = "aarch64"
+        assert _detect_platform(transport) == "linux/arm64"
+
+    def test_transport_amd64(self) -> None:
+        transport = MagicMock()
+        transport.machine.return_value = "x86_64"
+        assert _detect_platform(transport) == "linux/amd64"
+
+    @patch("platform.machine", return_value="x86_64")
+    def test_transport_failure_falls_back_to_local(self, mock_machine: object) -> None:
+        transport = MagicMock()
+        transport.machine.side_effect = RuntimeError("could not determine arch")
+        assert _detect_platform(transport) == "linux/amd64"
+        mock_machine.assert_called_once()
 
 
 class TestImageManagerPlatform:
     """Tests for ImageManager platform auto-detection."""
 
-    @patch("paude.container.image._detect_native_platform", return_value="linux/arm64")
-    def test_none_platform_auto_detects(self, mock_detect: object) -> None:
+    @patch("paude.container.image._detect_platform", return_value="linux/arm64")
+    def test_none_platform_auto_detects(self, mock_detect: MagicMock) -> None:
         mgr = ImageManager(platform=None)
         assert mgr.platform == "linux/arm64"
+        mock_detect.assert_called_once_with(mgr._engine.transport)
 
     def test_explicit_platform_used(self) -> None:
         mgr = ImageManager(platform="linux/amd64")
         assert mgr.platform == "linux/amd64"
 
-    @patch("paude.container.image._detect_native_platform", return_value="linux/arm64")
-    def test_default_platform_auto_detects(self, mock_detect: object) -> None:
+    @patch("paude.container.image._detect_platform", return_value="linux/arm64")
+    def test_default_platform_auto_detects(self, mock_detect: MagicMock) -> None:
         mgr = ImageManager()
         assert mgr.platform == "linux/arm64"
+        mock_detect.assert_called_once_with(mgr._engine.transport)
+
+    def test_explicit_platform_skips_detection(self) -> None:
+        with patch("paude.container.image._detect_platform") as mock_detect:
+            ImageManager(platform="linux/amd64")
+            mock_detect.assert_not_called()
 
 
 class TestImageManagerComposition:
