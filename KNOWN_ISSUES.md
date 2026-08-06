@@ -21,6 +21,7 @@ Technical debt identified during codebase analysis. Address these before adding 
 - `cli/commands.py` — 580 lines
 - `workflow.py` — 467 lines
 - `container/runner.py` — 442 lines
+- `container/image.py` — 531 lines
 
 **Still open — methods exceeding 50-line limit:**
 - `workflow.py` — `harvest_session()` (~102 lines), `status_sessions()` (~84), `reset_session()` (~72)

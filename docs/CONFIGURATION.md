@@ -141,6 +141,8 @@ paude create --dry-run
 
 > **Backend values**: `podman` (default) or `docker`.
 
+> **Platform auto-detection**: when unset, paude auto-detects the target architecture — the remote host's architecture (via SSH) when `--host` is used, otherwise the local machine's. Use `--platform` (e.g. `linux/amd64`, `linux/arm64`) to override.
+
 ## Network Domains
 
 By default, paude runs a proxy sidecar that filters network access to Vertex AI, Python packages, GitHub, and agent-specific domains only.

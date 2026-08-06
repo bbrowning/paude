@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from paude import __version__
 from paude.agents.base import Agent, AgentComposition
@@ -19,15 +20,34 @@ from paude.container.engine import ContainerEngine
 from paude.hash import compute_config_hash, compute_content_hash
 from paude.platform import is_macos
 
+if TYPE_CHECKING:
+    from paude.transport.base import Transport
+
 __all__ = ["ImageManager"]
 
 
-def _detect_native_platform() -> str:
-    """Detect the native platform for container builds."""
-    import platform as plat
+def _detect_platform(transport: Transport | None = None) -> str:
+    """Detect the container build platform to target.
 
-    machine = plat.machine().lower()
-    if machine in ("arm64", "aarch64"):
+    Container images must match the architecture of the host that will run
+    them, which may differ from the local machine invoking ``paude`` (e.g.
+    a remote host reached over SSH). Falls back to the local machine's
+    architecture if there's no transport or the transport can't determine
+    its host's architecture.
+    """
+    machine = None
+    if transport is not None:
+        try:
+            machine = transport.machine()
+        except RuntimeError:
+            machine = None
+
+    if machine is None:
+        import platform as plat
+
+        machine = plat.machine()
+
+    if machine.lower() in ("arm64", "aarch64"):
         return "linux/arm64"
     return "linux/amd64"
 
@@ -47,7 +67,12 @@ class ImageManager:
         self.dev_mode = os.environ.get("PAUDE_DEV", "0") == "1"
         self.registry = os.environ.get("PAUDE_REGISTRY", "quay.io/bbrowning")
         self.version = __version__
-        self.platform = platform if platform is not None else _detect_native_platform()
+        self._engine = engine or ContainerEngine()
+        self.platform = (
+            platform
+            if platform is not None
+            else _detect_platform(self._engine.transport)
+        )
         if composition is not None:
             resolved_agent = composition.primary
         else:
@@ -58,7 +83,6 @@ class ImageManager:
             resolved_agent = agent
         self.composition = composition
         self.agent: Agent = resolved_agent
-        self._engine = engine or ContainerEngine()
 
     def ensure_default_image(self, force_rebuild: bool = False) -> str:
         """Ensure the default paude image is available.
