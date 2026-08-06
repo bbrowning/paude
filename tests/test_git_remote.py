@@ -25,6 +25,7 @@ from paude.git_remote import (
     is_git_repository,
     list_paude_remotes,
     podman_exec_builder,
+    resolve_local_git_identity,
     resolve_origin_cmd,
     resolve_session_remote,
     set_base_ref_in_container,
@@ -1370,3 +1371,42 @@ class TestUnifiedCloneFromOrigin:
         result = clone_from_origin(builder, "https://github.com/user/repo.git")
 
         assert result is False
+
+
+class TestResolveLocalGitIdentity:
+    """Tests for resolve_local_git_identity()."""
+
+    @patch("paude.git_remote.utils.subprocess.run")
+    def test_returns_name_and_email(self, mock_run) -> None:
+        """Both values are returned, stripped of trailing whitespace."""
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="Ada Lovelace\n"),
+            MagicMock(returncode=0, stdout="ada@example.com\n"),
+        ]
+
+        assert resolve_local_git_identity() == ("Ada Lovelace", "ada@example.com")
+
+    @patch("paude.git_remote.utils.subprocess.run")
+    def test_unset_values_return_none(self, mock_run) -> None:
+        """A non-zero git exit maps to None for that field."""
+        mock_run.side_effect = [
+            MagicMock(returncode=1, stdout=""),
+            MagicMock(returncode=1, stdout=""),
+        ]
+
+        assert resolve_local_git_identity() == (None, None)
+
+    @patch("paude.git_remote.utils.subprocess.run")
+    def test_blank_value_maps_to_none(self, mock_run) -> None:
+        """A blank value is treated as unset."""
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="   \n"),
+            MagicMock(returncode=0, stdout="ada@example.com\n"),
+        ]
+
+        assert resolve_local_git_identity() == (None, "ada@example.com")
+
+    @patch("paude.git_remote.utils.subprocess.run", side_effect=FileNotFoundError)
+    def test_missing_git_returns_none(self, mock_run) -> None:
+        """A missing git binary is swallowed rather than raised."""
+        assert resolve_local_git_identity() == (None, None)

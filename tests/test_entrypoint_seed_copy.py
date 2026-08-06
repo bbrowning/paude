@@ -8,6 +8,7 @@ directory, and verifying results.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import textwrap
 from pathlib import Path
@@ -41,13 +42,21 @@ def _read_all_entrypoint_files() -> str:
     )
 
 
-def _run_script(script: str) -> subprocess.CompletedProcess[str]:
-    """Run a bash script and return the result."""
+def _run_script(
+    script: str, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run a bash script and return the result.
+
+    ``env``, when given, is merged onto the current environment so callers can
+    inject variables (e.g. PAUDE_GIT_USER_NAME) the entrypoint reads.
+    """
+    run_env = {**os.environ, **env} if env else None
     return subprocess.run(
         ["bash", "-c", script],
         capture_output=True,
         text=True,
         timeout=10,
+        env=run_env,
     )
 
 
@@ -859,6 +868,59 @@ class TestGitconfigPersistence:
         assert "Existing User" in content
         assert "New Host User" not in content
         assert "role = maintainer" in content
+
+    def test_env_identity_fills_when_source_lacks_user(self, tmp_path: Path) -> None:
+        """PAUDE_GIT_USER_* seeds identity when the config has none.
+
+        Covers the reported bug: identity that lives outside a copied
+        ~/.gitconfig (XDG/system/includeIf) is passed in via env and written
+        into the persistent config so commits are attributed.
+        """
+        home = tmp_path / "home"
+        pvc = tmp_path / "pvc"
+        credentials = tmp_path / "credentials"
+        home.mkdir()
+        pvc.mkdir()
+
+        result = _run_script(
+            _build_gitconfig_setup_script(home, pvc, credentials),
+            env={
+                "PAUDE_GIT_USER_NAME": "Ada Lovelace",
+                "PAUDE_GIT_USER_EMAIL": "ada@example.com",
+            },
+        )
+
+        assert result.returncode == 0, result.stderr
+        content = (pvc / ".gitconfig").read_text()
+        assert "Ada Lovelace" in content
+        assert "ada@example.com" in content
+
+    def test_env_identity_does_not_override_existing_user(self, tmp_path: Path) -> None:
+        """An identity already in the config wins over the env fallback."""
+        home = tmp_path / "home"
+        pvc = tmp_path / "pvc"
+        credentials = tmp_path / "credentials"
+        home.mkdir()
+        pvc.mkdir()
+        credentials.mkdir()
+        (credentials / "gitconfig").write_text(
+            "[user]\n\tname = Config User\n\temail = config@example.com\n"
+        )
+
+        result = _run_script(
+            _build_gitconfig_setup_script(home, pvc, credentials),
+            env={
+                "PAUDE_GIT_USER_NAME": "Env User",
+                "PAUDE_GIT_USER_EMAIL": "env@example.com",
+            },
+        )
+
+        assert result.returncode == 0, result.stderr
+        content = (pvc / ".gitconfig").read_text()
+        assert "Config User" in content
+        assert "config@example.com" in content
+        assert "Env User" not in content
+        assert "env@example.com" not in content
 
 
 def _build_persist_config_dir_script(

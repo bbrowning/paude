@@ -111,6 +111,19 @@ setup_gitconfig() {
     fi
     if [[ -f "$pvc_path/.gitconfig" ]]; then
         export GIT_CONFIG_GLOBAL="$pvc_path/.gitconfig"
+        # Ensure a git identity even when the copied config lacked one. The
+        # host identity may live in XDG/system config or an includeIf section,
+        # which a raw ~/.gitconfig copy misses; the host resolves it via
+        # git config and passes it in PAUDE_GIT_USER_NAME/EMAIL. Only fill when
+        # missing so a value from the copied config or a prior run is kept.
+        if [[ -n "${PAUDE_GIT_USER_NAME:-}" ]] &&
+            ! git config --global --get user.name &>/dev/null; then
+            git config --global user.name "$PAUDE_GIT_USER_NAME" 2>/dev/null || true
+        fi
+        if [[ -n "${PAUDE_GIT_USER_EMAIL:-}" ]] &&
+            ! git config --global --get user.email &>/dev/null; then
+            git config --global user.email "$PAUDE_GIT_USER_EMAIL" 2>/dev/null || true
+        fi
     fi
 }
 
