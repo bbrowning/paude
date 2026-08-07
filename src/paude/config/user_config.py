@@ -30,7 +30,6 @@ class UserDefaults:
     gpu: str | None = None
     allowed_domains: list[str] = field(default_factory=list)
     otel_endpoint: str | None = None
-    forward_ports: list[str] = field(default_factory=list)
 
 
 # Keys allowed in the top-level "defaults" object
@@ -47,7 +46,6 @@ _KNOWN_KEYS = {
     "gpu",
     "allowed-domains",
     "otel-endpoint",
-    "forward-ports",
 }
 
 
@@ -117,12 +115,6 @@ def _warn_unknown_keys(
 
 def _parse_defaults(data: dict[str, Any], path: Path) -> UserDefaults:
     """Parse the 'defaults' object into a UserDefaults dataclass."""
-    forward_ports = data.get("forward-ports", [])
-    if not isinstance(forward_ports, list):
-        forward_ports = []
-    else:
-        forward_ports = [str(p) for p in forward_ports]
-
     return UserDefaults(
         backend=data.get("backend"),
         agent=data.get("agent"),
@@ -136,7 +128,6 @@ def _parse_defaults(data: dict[str, Any], path: Path) -> UserDefaults:
         gpu=data.get("gpu"),
         allowed_domains=_string_list(data.get("allowed-domains", [])),
         otel_endpoint=data.get("otel-endpoint"),
-        forward_ports=forward_ports,
     )
 
 

@@ -128,7 +128,6 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
         create_providers=create_hints.providers,
         create_agent_providers=create_hints.agent_providers,
         create_otel_endpoint=create_hints.otel_endpoint,
-        create_forward_ports=create_hints.forward_ports,
     )
 
 
@@ -140,7 +139,6 @@ _KNOWN_CREATE_KEYS = {
     "providers",
     "agent-providers",
     "otel-endpoint",
-    "forward-ports",
 }
 
 
@@ -155,7 +153,6 @@ class CreateHints:
     providers: list[str] = field(default_factory=list)
     agent_providers: dict[str, str] = field(default_factory=dict)
     otel_endpoint: str | None = None
-    forward_ports: list[str] = field(default_factory=list)
 
 
 def _parse_create_section(create_data: dict[str, Any]) -> CreateHints:
@@ -198,12 +195,6 @@ def _parse_create_section(create_data: dict[str, Any]) -> CreateHints:
     if otel_endpoint is not None and not isinstance(otel_endpoint, str):
         otel_endpoint = None
 
-    forward_ports = create_data.get("forward-ports", [])
-    if not isinstance(forward_ports, list):
-        forward_ports = []
-    else:
-        forward_ports = [str(p) for p in forward_ports]
-
     return CreateHints(
         allowed_domains=allowed_domains,
         agent=agent,
@@ -212,5 +203,4 @@ def _parse_create_section(create_data: dict[str, Any]) -> CreateHints:
         providers=providers,
         agent_providers=agent_providers,
         otel_endpoint=otel_endpoint,
-        forward_ports=forward_ports,
     )

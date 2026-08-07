@@ -74,8 +74,8 @@ Projects can declare defaults in their `paude.json` so that anyone cloning the r
 ```
 
 Only `allowed-domains`, `agent`, `provider`, `agents`, `providers`,
-`agent-providers`, `otel-endpoint`, and `forward-ports` are supported as
-project-level create hints.
+`agent-providers`, and `otel-endpoint` are supported as project-level create
+hints.
 
 `agents` is the exact install set; the first entry is primary and launches.
 `providers` is the credential set configured in the proxy and container, not a
@@ -104,9 +104,13 @@ Domains from user defaults and project config are **merged** (union). For exampl
 
 However, if you pass `--allowed-domains` on the CLI, it **overrides** entirely — no merging with user/project config occurs. The one exception is provider-required domains, which are always forced onto the allowlist regardless of what you pass — see [Network Domains](#network-domains).
 
-### Forward-Port Resolution
+### Port Forwarding
 
-Unlike domains, `forward-ports` don't merge across layers: the highest-precedence layer that sets any ports (CLI > project > user defaults) wins outright, replacing lower layers entirely.
+Port forwarding is not part of the configuration layers. It is a per-attach
+decision made on the command line via `--forward-port` on `paude connect` or
+`paude start`; nothing about forwarding is read from config files or persisted
+with the session. See the [Port Forwarding](../README.md#port-forwarding)
+section of the README.
 
 ### Inspecting Resolved Configuration
 
@@ -137,7 +141,6 @@ paude create --dry-run
 | `providers` | yes | yes | `--providers` | (none) |
 | `agent-providers` | yes | yes | `--agent-provider` | agent defaults |
 | `otel-endpoint` | yes | yes | `--otel-endpoint` | (none) |
-| `forward-ports` | yes | yes | `--forward-port` | (none) |
 
 > **Backend values**: `podman` (default) or `docker`.
 

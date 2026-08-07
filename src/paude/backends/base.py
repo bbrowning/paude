@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from paude.backends.port_forward_utils import ForwardPort
+
 
 class SessionNotFoundError(Exception):
     """Session not found."""
@@ -65,8 +67,6 @@ class SessionConfig:
         yolo: Enable YOLO mode.
         network: Podman network name for proxy setup.
         ports: Ports to expose as (host_port, container_port) tuples.
-        forward_ports: User opt-in container->host forwards as
-            (host_ip, host_port, container_port) tuples.
     """
 
     name: str | None
@@ -88,7 +88,6 @@ class SessionConfig:
     gpu: str | None = None
     reuse_volume: bool = False
     ports: list[tuple[int, int]] = field(default_factory=list)
-    forward_ports: list[tuple[str, int, int]] = field(default_factory=list)
     otel_ports: list[int] = field(default_factory=list)
     otel_endpoint: str | None = None
 
@@ -136,13 +135,19 @@ class Backend(Protocol):
         """
         ...
 
-    def start_session(self, name: str) -> int:
+    def start_session(
+        self,
+        name: str,
+        forward_ports: list[ForwardPort] | None = None,
+    ) -> int:
         """Start a session and connect to it.
 
         Starts the container/scales to 1 and connects.
 
         Args:
             name: Session name.
+            forward_ports: Container->host forwards to set up for this attach,
+                as (host_ip, host_port, container_port) tuples.
 
         Returns:
             Exit code from the connected session.
@@ -159,11 +164,17 @@ class Backend(Protocol):
         """
         ...
 
-    def connect_session(self, name: str) -> int:
+    def connect_session(
+        self,
+        name: str,
+        forward_ports: list[ForwardPort] | None = None,
+    ) -> int:
         """Attach to a running session.
 
         Args:
             name: Session name.
+            forward_ports: Container->host forwards to set up for this attach,
+                as (host_ip, host_port, container_port) tuples.
 
         Returns:
             Exit code from the attached session.

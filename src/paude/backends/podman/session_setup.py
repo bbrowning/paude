@@ -17,7 +17,6 @@ from paude.backends.labels import (
     PAUDE_LABEL_AGENT_PROVIDERS,
     PAUDE_LABEL_CREATED,
     PAUDE_LABEL_DOMAINS,
-    PAUDE_LABEL_FORWARD_PORTS,
     PAUDE_LABEL_GPU,
     PAUDE_LABEL_OTEL_ENDPOINT,
     PAUDE_LABEL_OTEL_PORTS,
@@ -309,12 +308,6 @@ class SessionSetup:
             labels[PAUDE_LABEL_OTEL_PORTS] = ",".join(str(p) for p in config.otel_ports)
         if config.otel_endpoint:
             labels[PAUDE_LABEL_OTEL_ENDPOINT] = config.otel_endpoint
-        if config.forward_ports:
-            from paude.backends.port_forward_utils import encode_forward_ports
-
-            labels[PAUDE_LABEL_FORWARD_PORTS] = encode_forward_ports(
-                config.forward_ports
-            )
         return labels
 
     def setup_proxy_for_session(

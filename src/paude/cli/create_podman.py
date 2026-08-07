@@ -46,7 +46,6 @@ def create_podman_session(
     gpu: str | None = None,
     otel_ports: list[int] | None = None,
     otel_endpoint: str | None = None,
-    forward_ports: list[tuple[str, int, int]] | None = None,
 ) -> None:
     """Local container session creation logic (Podman or Docker)."""
     from paude.container import ImageManager
@@ -127,7 +126,6 @@ def create_podman_session(
         or [provider for _agent, provider in resolved_specs],
         gpu=gpu,
         ports=composition.exposed_ports,
-        forward_ports=forward_ports or [],
         otel_ports=otel_ports or [],
         otel_endpoint=otel_endpoint,
     )

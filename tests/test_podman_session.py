@@ -15,7 +15,6 @@ from paude.backends.labels import (
     PAUDE_LABEL_APP,
     PAUDE_LABEL_CREATED,
     PAUDE_LABEL_DOMAINS,
-    PAUDE_LABEL_FORWARD_PORTS,
     PAUDE_LABEL_PROVIDERS,
     PAUDE_LABEL_PROXY_IMAGE,
     PAUDE_LABEL_SESSION,
@@ -32,7 +31,6 @@ from paude.backends.podman.helpers import (
     find_container_by_session_name,
     get_session_composition,
     get_session_credential_providers,
-    get_session_forward_ports,
 )
 from paude.backends.podman.session_setup import SessionSetup
 from paude.backends.proxy_config import ProxyCredentials
@@ -596,6 +594,30 @@ class TestPodmanBackendStartSession:
         assert exit_code == 0
 
     @patch("paude.backends.podman.backend.ContainerRunner")
+    def test_start_session_forwards_ports_to_connect_when_running(
+        self, mock_runner_class: MagicMock
+    ) -> None:
+        """An already-running session hands forward ports to connect_session."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.side_effect = lambda name: (
+            name == "paude-running-session"
+        )
+        mock_runner.get_container_state.return_value = "running"
+        mock_runner_class.return_value = mock_runner
+
+        backend = _make_backend(mock_runner)
+        backend.connect_session = MagicMock(return_value=0)  # type: ignore[method-assign]
+
+        exit_code = backend.start_session(
+            "running-session", [("127.0.0.1", 8372, 8372)]
+        )
+
+        backend.connect_session.assert_called_once_with(
+            "running-session", [("127.0.0.1", 8372, 8372)]
+        )
+        assert exit_code == 0
+
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_start_session_raises_if_not_found(
         self, mock_runner_class: MagicMock
     ) -> None:
@@ -697,6 +719,58 @@ class TestPodmanBackendConnectSession:
 
         mock_runner.attach_container.assert_called_once()
         assert exit_code == 0
+
+    @patch("paude.backends.podman.backend.ContainerRunner")
+    def test_connect_session_starts_requested_port_forward(
+        self, mock_runner_class: MagicMock
+    ) -> None:
+        """CLI --forward-port values are forwarded for this connection."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = True
+        mock_runner.container_running.return_value = True
+        mock_runner.attach_container.return_value = 0
+        mock_runner.exec_in_container.return_value = MagicMock(returncode=0)
+        mock_runner.list_containers.return_value = [
+            {"Labels": {PAUDE_LABEL_SESSION: "my-session", PAUDE_LABEL_AGENT: "claude"}}
+        ]
+        mock_runner_class.return_value = mock_runner
+
+        backend = PodmanBackend()
+        backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
+        backend._port_forward = MagicMock()
+
+        with patch.object(backend._setup, "sync_host_config"):
+            backend.connect_session("my-session", [("127.0.0.1", 8372, 8372)])
+
+        backend._port_forward.start.assert_called_once_with(
+            "my-session", "paude-my-session", [("127.0.0.1", 8372, 8372)]
+        )
+
+    @patch("paude.backends.podman.backend.ContainerRunner")
+    def test_connect_session_without_ports_skips_forward(
+        self, mock_runner_class: MagicMock
+    ) -> None:
+        """No --forward-port and no agent ports means no forwarder is started."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = True
+        mock_runner.container_running.return_value = True
+        mock_runner.attach_container.return_value = 0
+        mock_runner.exec_in_container.return_value = MagicMock(returncode=0)
+        mock_runner.list_containers.return_value = [
+            {"Labels": {PAUDE_LABEL_SESSION: "my-session", PAUDE_LABEL_AGENT: "claude"}}
+        ]
+        mock_runner_class.return_value = mock_runner
+
+        backend = PodmanBackend()
+        backend._runner = mock_runner
+        backend._proxy._runner = mock_runner
+        backend._port_forward = MagicMock()
+
+        with patch.object(backend._setup, "sync_host_config"):
+            backend.connect_session("my-session")
+
+        backend._port_forward.start.assert_not_called()
 
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_connect_session_shows_empty_workspace_message(
@@ -1912,27 +1986,8 @@ class TestPodmanPortUrls:
         assert env["PAUDE_PORT_URLS"] == "http://localhost:18789"
 
 
-class TestForwardPortsPersistence:
-    """Tests for user opt-in forwarded-port label persistence and merging."""
-
-    def test_build_session_labels_includes_forward_ports(self) -> None:
-        """Forward ports are encoded into a container label when set."""
-        config = SessionConfig(
-            name="s",
-            workspace=Path("/tmp/ws"),
-            image="img",
-            forward_ports=[("127.0.0.1", 8372, 8372), ("0.0.0.0", 8080, 80)],
-        )
-        labels = SessionSetup.build_session_labels(config, "s", "2026-01-01")
-        assert (
-            labels[PAUDE_LABEL_FORWARD_PORTS] == "127.0.0.1:8372:8372,0.0.0.0:8080:80"
-        )
-
-    def test_build_session_labels_omits_forward_ports_when_empty(self) -> None:
-        """No forward-ports label is written when none are configured."""
-        config = SessionConfig(name="s", workspace=Path("/tmp/ws"), image="img")
-        labels = SessionSetup.build_session_labels(config, "s", "2026-01-01")
-        assert PAUDE_LABEL_FORWARD_PORTS not in labels
+class TestSessionLabelPersistence:
+    """Tests for session label round-tripping (agents, providers)."""
 
     def test_composition_label_round_trips_agent_providers(self) -> None:
         config = SessionConfig(
@@ -2011,24 +2066,9 @@ class TestForwardPortsPersistence:
             "openai",
         ]
 
-    def test_get_session_forward_ports_decodes_label(self) -> None:
-        """get_session_forward_ports decodes the persisted label."""
-        runner = MagicMock()
-        runner.list_containers.return_value = [
-            {
-                "Labels": {
-                    PAUDE_LABEL_SESSION: "s",
-                    PAUDE_LABEL_FORWARD_PORTS: "127.0.0.1:8372:8372",
-                }
-            }
-        ]
-        assert get_session_forward_ports(runner, "s") == [("127.0.0.1", 8372, 8372)]
 
-    def test_get_session_forward_ports_empty_without_label(self) -> None:
-        """No label yields an empty list."""
-        runner = MagicMock()
-        runner.list_containers.return_value = [{"Labels": {PAUDE_LABEL_SESSION: "s"}}]
-        assert get_session_forward_ports(runner, "s") == []
+class TestCollectForwardPorts:
+    """Tests for merging CLI forward ports with agent-declared ports."""
 
     def test_collect_forward_ports_merges_and_dedups(self) -> None:
         """User forwards take precedence over agent ports on host-bind conflict."""
@@ -2037,11 +2077,10 @@ class TestForwardPortsPersistence:
         agent = MagicMock()
         agent.config.exposed_ports = [(18789, 18789), (8372, 8372)]
 
-        with patch(
-            "paude.backends.podman.backend.get_session_forward_ports",
-            return_value=[("0.0.0.0", 8080, 80), ("127.0.0.1", 8372, 9999)],
-        ):
-            ports = backend._collect_forward_ports("s", agent)
+        ports = backend._collect_forward_ports(
+            agent,
+            [("0.0.0.0", 8080, 80), ("127.0.0.1", 8372, 9999)],
+        )
 
         # User forwards first; agent's loopback 8372 is deduped (user owns it),
         # agent's 18789 is appended.
@@ -2050,3 +2089,23 @@ class TestForwardPortsPersistence:
             ("127.0.0.1", 8372, 9999),
             ("127.0.0.1", 18789, 18789),
         ]
+
+    def test_collect_forward_ports_agent_only(self) -> None:
+        """Without CLI forwards, only agent-declared ports are forwarded."""
+        runner = MagicMock()
+        backend = _make_backend(mock_runner=runner)
+        agent = MagicMock()
+        agent.config.exposed_ports = [(18789, 18789)]
+
+        assert backend._collect_forward_ports(agent, None) == [
+            ("127.0.0.1", 18789, 18789)
+        ]
+
+    def test_collect_forward_ports_none_when_nothing_declared(self) -> None:
+        """No CLI forwards and no agent ports yields an empty list."""
+        runner = MagicMock()
+        backend = _make_backend(mock_runner=runner)
+        agent = MagicMock()
+        agent.config.exposed_ports = []
+
+        assert backend._collect_forward_ports(agent, None) == []

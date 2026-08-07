@@ -237,20 +237,23 @@ The endpoint hostname is automatically added to the proxy allowlist and non-stan
 
 ### Port Forwarding
 
-Some agents run a service inside the container that you want to reach from your host — for example a web dashboard. Forwarding is **opt-in**: by default no container ports are exposed. Use `--forward-port` to forward one or more ports:
+Some agents run a service inside the container that you want to reach from your host — for example a web dashboard. Forwarding is **opt-in and per-connection**: by default no container ports are exposed. Pass `--forward-port` when you attach to a session, on either `paude connect` or `paude start`:
 
 ```bash
 # Forward container port 8372 to host port 8372
-paude create --forward-port 8372 my-project
+paude connect my-project --forward-port 8372
 
 # Different host port than container port (HOST:CONTAINER)
-paude create --forward-port 9000:8372 my-project
+paude connect my-project --forward-port 9000:8372
 
 # Bind a non-loopback host interface (HOST_IP:HOST:CONTAINER)
-paude create --forward-port 0.0.0.0:8372:8372 my-project
+paude connect my-project --forward-port 0.0.0.0:8372:8372
 
 # Repeat the flag to forward multiple ports
-paude create --forward-port 8372 --forward-port 5173 my-project
+paude connect my-project --forward-port 8372 --forward-port 5173
+
+# Works the same on the start path (start a stopped session, then attach)
+paude start my-project --forward-port 8372
 ```
 
 `--forward-port` accepts three forms:
@@ -259,32 +262,19 @@ paude create --forward-port 8372 --forward-port 5173 my-project
 - `HOST:CONTAINER` — map a different host port (binds `127.0.0.1`)
 - `HOST_IP:HOST:CONTAINER` — bind a specific host interface (e.g. `0.0.0.0` to expose on your LAN)
 
-Forwarding starts when you `paude start`/`paude connect` and stops when you disconnect. It works on both the Podman and Docker backends.
+Because forwarding is decided at attach time, you choose which ports to expose on every `connect`/`start`, and nothing is persisted with the session. Forwarding starts when you attach and stops when you disconnect. It works on both the Podman and Docker backends.
 
 **macOS (podman machine):** Podman runs containers in a VM on macOS, but the forwarder's listener runs on your Mac host directly — it never binds inside the VM. Reaching the container uses the same `podman exec` path `paude connect` already relies on, so `--forward-port` behaves the same as on Linux; no extra `podman machine` port-publishing is needed.
 
 **Loopback binding:** the forwarder reaches the service over `127.0.0.1` *inside* the container, so the in-container service must listen on `127.0.0.1` (or `0.0.0.0`) rather than a container-external interface. Every connection appears to the service as coming from `127.0.0.1`, which satisfies services that only accept loopback traffic.
-
-You can also set `forward-ports` in a project's `paude.json` `create` section or in `~/.config/paude/defaults.json`:
-
-```json
-{
-  "create": {
-    "forward-ports": ["8372"]
-  }
-}
-```
-
-Resolution follows the usual precedence — CLI `--forward-port` overrides `paude.json`, which overrides user defaults (the highest layer that sets any ports wins; layers are not merged).
 
 #### Worked example: Gas City dashboard
 
 The Gas City agent serves a dashboard inside the container on `127.0.0.1:8372`. To reach it from your host:
 
 ```bash
-# Create a Gas City session that forwards the dashboard port
-paude create --agent gascity --forward-port 8372 my-project
-paude connect my-project
+# Connect to a Gas City session and forward the dashboard port
+paude connect my-project --forward-port 8372
 ```
 
 While connected, paude prints `Port-forward active: http://127.0.0.1:8372`. Open <http://localhost:8372> in your host browser to view the dashboard.
@@ -292,12 +282,11 @@ While connected, paude prints `Port-forward active: http://127.0.0.1:8372`. Open
 **Remote hosts (SSH):** the forwarder runs on your local machine even when the container runs on a remote host, tunnelling each connection through `ssh … podman exec`. So the same flag works transparently over SSH — no manual tunnel required:
 
 ```bash
-paude create --agent gascity --forward-port 8372 --host user@remote my-project
-paude connect my-project
+paude connect my-project --forward-port 8372
 # Dashboard is reachable at http://localhost:8372 on your LOCAL machine
 ```
 
-If you prefer to forward without paude (e.g. for a session created without `--forward-port`), the equivalent manual SSH tunnel is:
+If you prefer to forward without paude, the equivalent manual SSH tunnel is:
 
 ```bash
 ssh -L 8372:127.0.0.1:8372 user@remote

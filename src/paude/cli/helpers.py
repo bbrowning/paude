@@ -20,6 +20,7 @@ from paude.session_discovery import (
 
 if TYPE_CHECKING:
     from paude.agents.base import AgentComposition
+    from paude.backends.port_forward_utils import ForwardPort
 
 
 def find_session_backend(
@@ -200,6 +201,17 @@ def _parse_agent_args(claude_args: str | None) -> list[str]:
         return shlex.split(claude_args)
     except ValueError as e:
         typer.echo(f"Error parsing --args: {e}", err=True)
+        raise typer.Exit(1) from None
+
+
+def _parse_forward_ports(specs: list[str] | None) -> list[ForwardPort]:
+    """Parse --forward-port specs into normalized tuples, exiting on a bad spec."""
+    from paude.backends.port_forward_utils import parse_forward_port_specs
+
+    try:
+        return parse_forward_port_specs(specs or [])
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
 
 
