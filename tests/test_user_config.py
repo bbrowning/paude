@@ -194,39 +194,6 @@ class TestResolveCreateOptions:
         assert result.gpu.value == ""
         assert result.gpu.source == "cli"
 
-    def test_forward_ports_default_empty(self):
-        """Forward ports default to an empty list from built-in."""
-        result = self._resolve()
-        assert result.forward_ports.value == []
-        assert result.forward_ports.source == "built-in"
-
-    def test_forward_ports_from_user_defaults(self):
-        """Forward ports resolve from user defaults when nothing higher set."""
-        user = UserDefaults(forward_ports=["8372"])
-        result = self._resolve(user_defaults=user)
-        assert result.forward_ports.value == ["8372"]
-        assert result.forward_ports.source == "user defaults"
-
-    def test_forward_ports_project_overrides_user(self):
-        """Project forward-ports fully override user defaults (no merge)."""
-        user = UserDefaults(forward_ports=["8372"])
-        project = PaudeConfig(create_forward_ports=["9090:90"])
-        result = self._resolve(user_defaults=user, project_config=project)
-        assert result.forward_ports.value == ["9090:90"]
-        assert result.forward_ports.source == "paude.json"
-
-    def test_forward_ports_cli_overrides_all(self):
-        """CLI --forward-port fully overrides project and user layers."""
-        user = UserDefaults(forward_ports=["8372"])
-        project = PaudeConfig(create_forward_ports=["9090:90"])
-        result = self._resolve(
-            cli_forward_ports=["1234"],
-            user_defaults=user,
-            project_config=project,
-        )
-        assert result.forward_ports.value == ["1234"]
-        assert result.forward_ports.source == "cli"
-
 
 class TestResolveAgentsAndProviders:
     """Tests for list-valued agents/providers resolution."""
@@ -482,36 +449,6 @@ class TestUserDefaultsOtelEndpoint:
 
         result = load_user_defaults(config)
         assert result.otel_endpoint is None
-
-
-class TestUserDefaultsForwardPorts:
-    """Tests for forward-ports in user defaults."""
-
-    def test_forward_ports_load_from_json(self, tmp_path: Path):
-        """forward-ports field loads from JSON config."""
-        config = tmp_path / "defaults.json"
-        config.write_text(
-            json.dumps({"defaults": {"forward-ports": ["8372", "9090:90"]}})
-        )
-
-        result = load_user_defaults(config)
-        assert result.forward_ports == ["8372", "9090:90"]
-
-    def test_forward_ports_coerce_ints(self, tmp_path: Path):
-        """Numeric forward-ports entries are coerced to strings."""
-        config = tmp_path / "defaults.json"
-        config.write_text(json.dumps({"defaults": {"forward-ports": [8372]}}))
-
-        result = load_user_defaults(config)
-        assert result.forward_ports == ["8372"]
-
-    def test_forward_ports_default_empty(self, tmp_path: Path):
-        """forward-ports defaults to empty list when not in config."""
-        config = tmp_path / "defaults.json"
-        config.write_text(json.dumps({"defaults": {"backend": "podman"}}))
-
-        result = load_user_defaults(config)
-        assert result.forward_ports == []
 
 
 class TestUserDefaultsAgentsProviders:

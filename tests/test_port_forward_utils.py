@@ -1,12 +1,10 @@
-"""Tests for port-forward spec parsing and label encoding utilities."""
+"""Tests for port-forward spec parsing and merging utilities."""
 
 from __future__ import annotations
 
 import pytest
 
 from paude.backends.port_forward_utils import (
-    decode_forward_ports,
-    encode_forward_ports,
     merge_forward_ports,
     parse_forward_port_spec,
     parse_forward_port_specs,
@@ -82,28 +80,6 @@ class TestParseForwardPortSpecs:
     def test_same_host_port_different_ip_is_not_conflict(self):
         result = parse_forward_port_specs(["127.0.0.1:8080:80", "0.0.0.0:8080:81"])
         assert result == [("127.0.0.1", 8080, 80), ("0.0.0.0", 8080, 81)]
-
-
-class TestEncodeDecodeForwardPorts:
-    """Tests for label encode/decode round-tripping."""
-
-    def test_round_trip(self):
-        ports = [("127.0.0.1", 8372, 8372), ("0.0.0.0", 8080, 80)]
-        encoded = encode_forward_ports(ports)
-        assert encoded == "127.0.0.1:8372:8372,0.0.0.0:8080:80"
-        assert decode_forward_ports(encoded) == ports
-
-    def test_decode_empty_string(self):
-        assert decode_forward_ports("") == []
-
-    def test_decode_skips_malformed_entries(self):
-        # Second entry is malformed and should be skipped, not raise.
-        assert decode_forward_ports("127.0.0.1:8372:8372,garbage") == [
-            ("127.0.0.1", 8372, 8372)
-        ]
-
-    def test_encode_empty(self):
-        assert encode_forward_ports([]) == ""
 
 
 class TestMergeForwardPorts:

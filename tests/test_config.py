@@ -251,38 +251,6 @@ class TestParseConfig:
         config = parse_config(config_file)
         assert config.create_otel_endpoint is None
 
-    def test_parses_paude_json_forward_ports(self, tmp_path: Path):
-        """parse_config extracts forward-ports from paude.json create section."""
-        config_file = tmp_path / "paude.json"
-        config_file.write_text(
-            json.dumps(
-                {
-                    "create": {
-                        "forward-ports": ["8372", "9090:90"],
-                    },
-                }
-            )
-        )
-
-        config = parse_config(config_file)
-        assert config.create_forward_ports == ["8372", "9090:90"]
-
-    def test_forward_ports_coerces_ints_to_str(self, tmp_path: Path):
-        """Numeric JSON port entries are coerced to strings."""
-        config_file = tmp_path / "paude.json"
-        config_file.write_text(json.dumps({"create": {"forward-ports": [8372]}}))
-
-        config = parse_config(config_file)
-        assert config.create_forward_ports == ["8372"]
-
-    def test_forward_ports_defaults_to_empty(self, tmp_path: Path):
-        """forward-ports defaults to empty list when not in create section."""
-        config_file = tmp_path / "paude.json"
-        config_file.write_text(json.dumps({"create": {"agent": "claude"}}))
-
-        config = parse_config(config_file)
-        assert config.create_forward_ports == []
-
     def test_warns_unknown_create_keys(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ):

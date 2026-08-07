@@ -11,6 +11,7 @@ from paude.cli.app import BackendType, app
 from paude.cli.helpers import (
     _auto_select_session,
     _get_backend_instance,
+    _parse_forward_ports,
     find_session_backend,
 )
 from paude.session_discovery import resolve_session_for_backend
@@ -29,15 +30,28 @@ def session_start(
             help="Container backend (auto-detected from session if not specified).",
         ),
     ] = None,
+    forward_port: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--forward-port",
+            help=(
+                "Forward a container port to the host for this session. "
+                "Repeatable. Accepts PORT (same on both), HOST:CONTAINER, or "
+                "HOST_IP:HOST:CONTAINER. Binds 127.0.0.1 by default."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Start a session and connect to it."""
+    forward_ports = _parse_forward_ports(forward_port)
+
     # Auto-detect backend if name is provided but backend is not
     if name and backend is None:
         result = find_session_backend(name)
         if result:
             backend, backend_obj = result
             try:
-                exit_code = backend_obj.start_session(name)
+                exit_code = backend_obj.start_session(name, forward_ports)
                 raise typer.Exit(exit_code)
             except Exception as e:
                 typer.echo(f"Error starting session: {e}", err=True)
@@ -58,7 +72,7 @@ def session_start(
             multi_hint_format="  paude start {name}  # {backend_type}, {status}",
         )
         typer.echo(f"Starting '{session.name}' ({session.backend_type})...")
-        exit_code = backend_obj.start_session(session.name)
+        exit_code = backend_obj.start_session(session.name, forward_ports)
         raise typer.Exit(exit_code)
 
     # Backend specified explicitly
@@ -69,7 +83,7 @@ def session_start(
             raise typer.Exit(1)
 
     try:
-        exit_code = backend_instance.start_session(name)
+        exit_code = backend_instance.start_session(name, forward_ports)
         raise typer.Exit(exit_code)
     except SessionNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)

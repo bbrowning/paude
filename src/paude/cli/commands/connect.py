@@ -10,6 +10,7 @@ from paude.cli.app import BackendType, app
 from paude.cli.helpers import (
     _auto_select_session,
     _get_backend_instance,
+    _parse_forward_ports,
     find_session_backend,
 )
 from paude.session_discovery import resolve_session_for_backend
@@ -28,14 +29,27 @@ def session_connect(
             help="Container backend (auto-detected from session if not specified).",
         ),
     ] = None,
+    forward_port: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--forward-port",
+            help=(
+                "Forward a container port to the host for this connection. "
+                "Repeatable. Accepts PORT (same on both), HOST:CONTAINER, or "
+                "HOST_IP:HOST:CONTAINER. Binds 127.0.0.1 by default."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Attach to a running session."""
+    forward_ports = _parse_forward_ports(forward_port)
+
     # Auto-detect backend if name is provided but backend is not
     if name and backend is None:
         result = find_session_backend(name)
         if result:
             backend, backend_obj = result
-            exit_code = backend_obj.connect_session(name)
+            exit_code = backend_obj.connect_session(name, forward_ports)
             raise typer.Exit(exit_code)
         else:
             typer.echo(f"Session '{name}' not found.", err=True)
@@ -57,7 +71,7 @@ def session_connect(
             multi_hint_format="  paude connect {name}  # {backend_type}, {workspace}",
         )
         typer.echo(f"Connecting to '{session.name}' ({session.backend_type})...")
-        exit_code = backend_obj.connect_session(session.name)
+        exit_code = backend_obj.connect_session(session.name, forward_ports)
         raise typer.Exit(exit_code)
 
     # Backend specified explicitly
@@ -67,5 +81,5 @@ def session_connect(
         if not name:
             raise typer.Exit(1)
 
-    exit_code = backend_instance.connect_session(name)
+    exit_code = backend_instance.connect_session(name, forward_ports)
     raise typer.Exit(exit_code)

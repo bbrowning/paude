@@ -178,17 +178,6 @@ def session_create(
             help="OTLP collector endpoint for telemetry export (e.g., http://collector:4318).",
         ),
     ] = None,
-    forward_port: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--forward-port",
-            help=(
-                "Forward a container port to the host. Repeatable. Accepts "
-                "PORT (same on both), HOST:CONTAINER, or HOST_IP:HOST:CONTAINER. "
-                "Binds 127.0.0.1 by default."
-            ),
-        ),
-    ] = None,
     host: Annotated[
         str | None,
         typer.Option(
@@ -249,7 +238,6 @@ def session_create(
             cli_gpu=cli_gpu,
             cli_allowed_domains=allowed_domains,
             cli_otel_endpoint=otel_endpoint,
-            cli_forward_ports=forward_port,
             project_config=config,
             user_defaults=user_defaults,
         )
@@ -276,18 +264,6 @@ def session_create(
         )
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from None
-
-    # Parse forwarded port specs into (host_ip, host_port, container_port) tuples
-    from paude.backends.port_forward_utils import parse_forward_port_specs
-
-    try:
-        r_forward_ports = parse_forward_port_specs(resolved.forward_ports.value)
-    except ValueError as e:
-        typer.echo(
-            f"Error: {e} (from {resolved.forward_ports.source})",
-            err=True,
-        )
         raise typer.Exit(1) from None
 
     # Use resolved domains, or fall back to ["default"] if nothing configured
@@ -403,5 +379,4 @@ def session_create(
         gpu=r_gpu,
         otel_ports=otel_ports,
         otel_endpoint=r_otel_endpoint,
-        forward_ports=r_forward_ports,
     )

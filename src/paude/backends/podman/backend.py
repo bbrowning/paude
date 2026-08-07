@@ -28,7 +28,6 @@ from paude.backends.podman.helpers import (
     find_container_by_session_name,
     get_session_agent,
     get_session_composition,
-    get_session_forward_ports,
     network_name,
     proxy_container_name,
     require_running_session,
@@ -38,6 +37,7 @@ from paude.backends.podman.helpers import (
 from paude.backends.podman.port_forward import PodmanPortForwardManager
 from paude.backends.podman.proxy import PodmanProxyManager
 from paude.backends.podman.session_setup import SessionSetup
+from paude.backends.port_forward_utils import ForwardPort, merge_forward_ports
 from paude.constants import (
     CONTAINER_ENTRYPOINT,
     GCP_ADC_SECRET_NAME,
@@ -252,7 +252,11 @@ class PodmanBackend:
         self._volume_manager.remove_volume_verified(vname)
         self._runner.remove_secret(GCP_ADC_SECRET_NAME)
 
-    def start_session(self, name: str) -> int:
+    def start_session(
+        self,
+        name: str,
+        forward_ports: list[ForwardPort] | None = None,
+    ) -> int:
         """Start a session and connect to it."""
         cname = require_session(self._runner, name)
 
@@ -263,14 +267,16 @@ class PodmanBackend:
                 f"Session '{name}' is already running, connecting...",
                 file=sys.stderr,
             )
-            return self.connect_session(name)
+            return self.connect_session(name, forward_ports)
 
         print(f"Starting session '{name}'...", file=sys.stderr)
 
         agent = self._setup.start_session_containers(name, cname, self._proxy)
         composition = get_session_composition(self._runner, name)
 
-        return self._attach_with_port_forward(name, cname, agent, composition)
+        return self._attach_with_port_forward(
+            name, cname, agent, composition, forward_ports
+        )
 
     def _attach_with_port_forward(
         self,
@@ -278,10 +284,11 @@ class PodmanBackend:
         cname: str,
         agent: Agent,
         composition: AgentComposition | None = None,
+        forward_ports: list[ForwardPort] | None = None,
     ) -> int:
         """Start port forwarding, attach to container, and clean up on exit."""
         runtime = composition or agent
-        ports = self._collect_forward_ports(name, runtime)
+        ports = self._collect_forward_ports(runtime, forward_ports)
         if ports:
             self._port_forward.start(name, cname, ports)
         self._setup.print_port_urls(name, runtime)
@@ -297,12 +304,12 @@ class PodmanBackend:
         return exit_code
 
     def _collect_forward_ports(
-        self, name: str, agent: Agent | AgentComposition
-    ) -> list[tuple[str, int, int]]:
-        """Merge agent-declared ports and user opt-in forwards for a session."""
-        from paude.backends.port_forward_utils import merge_forward_ports
-
-        user_ports = get_session_forward_ports(self._runner, name)
+        self,
+        agent: Agent | AgentComposition,
+        forward_ports: list[ForwardPort] | None,
+    ) -> list[ForwardPort]:
+        """Merge agent-declared ports with user opt-in forwards for this attach."""
+        user_ports = forward_ports or []
         declared = (
             agent.exposed_ports
             if isinstance(agent, AgentComposition)
@@ -330,7 +337,11 @@ class PodmanBackend:
 
         print(f"Session '{name}' stopped.", file=sys.stderr)
 
-    def connect_session(self, name: str) -> int:
+    def connect_session(
+        self,
+        name: str,
+        forward_ports: list[ForwardPort] | None = None,
+    ) -> int:
         """Attach to a running session."""
         cname = container_name(name)
 
@@ -376,7 +387,9 @@ class PodmanBackend:
 
         print(f"Connecting to session '{name}'...", file=sys.stderr)
         composition = get_session_composition(self._runner, name)
-        return self._attach_with_port_forward(name, cname, agent, composition)
+        return self._attach_with_port_forward(
+            name, cname, agent, composition, forward_ports
+        )
 
     def list_sessions(self) -> list[Session]:
         """List all sessions."""

@@ -146,29 +146,6 @@ def merge_forward_ports(
     return merged
 
 
-def encode_forward_ports(ports: list[ForwardPort]) -> str:
-    """Serialize forward ports for storage in a container label."""
-    return ",".join(f"{ip}:{hp}:{cp}" for ip, hp, cp in ports)
-
-
-def decode_forward_ports(value: str) -> list[ForwardPort]:
-    """Parse forward ports previously stored with :func:`encode_forward_ports`.
-
-    Malformed entries are skipped so a corrupt label never breaks attach.
-    """
-    result: list[ForwardPort] = []
-    for item in value.split(","):
-        text = item.strip()
-        if not text:
-            continue
-        try:
-            ip, host_raw, container_raw = text.rsplit(":", 2)
-            result.append((ip, int(host_raw), int(container_raw)))
-        except ValueError:
-            continue
-    return result
-
-
 @lru_cache(maxsize=1)
 def pid_dir() -> Path:
     """Return the directory for storing port-forward PID files."""

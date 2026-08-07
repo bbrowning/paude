@@ -146,8 +146,12 @@ _SECTIONS: tuple[HelpSection, ...] = (
                 "Export agent telemetry to OTLP collector",
             ),
             (
-                "paude create --forward-port 8372",
-                "Forward a container port to the host (opt-in)",
+                "paude connect --forward-port 8372",
+                "Forward a container port to the host for this connection",
+            ),
+            (
+                "paude start my-project --forward-port 8372",
+                "Start a stopped session and forward a port",
             ),
         ),
     ),
@@ -164,8 +168,7 @@ _SECTIONS: tuple[HelpSection, ...] = (
             "User defaults: ~/.config/paude/defaults.json"
             " (backend, yolo, git, domains, etc.)\n"
             'Project hints: paude.json "create" section'
-            " (allowed-domains, agent, provider, agents, providers, agent-providers,"
-            " forward-ports)"
+            " (allowed-domains, agent, provider, agents, providers, agent-providers)"
         ),
     ),
     HelpSection(
