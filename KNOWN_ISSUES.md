@@ -208,3 +208,4 @@ Note: README's agent table/examples were not re-audited as part of the 2026-07-3
 **Discovered**: 2026-07-31 during docs/ audit (`docs/CONFIGURATION.md`)
 
 Gas City no longer contributes a standalone alias. Its resolved child-agent composition contributes the Claude/Gemini domains when those children are installed.
+
