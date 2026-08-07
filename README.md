@@ -335,7 +335,7 @@ Or just start the session and type your request in the agent interface.
 - [Session Management](docs/SESSIONS.md) — commands, lifecycle, code sync
 - [Configuration](docs/CONFIGURATION.md) — defaults, network domains, GitHub CLI, custom environments
 - [Security Model](docs/SECURITY.md) — attack vectors, `--yolo` safety, residual risks
-- [Orchestration](docs/ORCHESTRATION.md) — fire-and-forget workflow, harvest, PRs
+- [Orchestration](docs/ORCHESTRATION.md) — fire-and-forget workflow, harvest (including containers holding multiple repos), PRs
 - [Remote Hosts & Docker](docs/REMOTE.md) — SSH remotes, Docker backend, GPU passthrough
 
 ## How It Works

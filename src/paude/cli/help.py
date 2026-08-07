@@ -61,6 +61,10 @@ _SECTIONS: tuple[HelpSection, ...] = (
         rows=(
             ("paude remote add [NAME]", "Add git remote (requires running container)"),
             ("paude remote add --push [NAME]", "Add remote AND push current branch"),
+            (
+                "paude remote add NAME --container-path DIR --remote R",
+                "Expose a repo at DIR inside the box as remote R",
+            ),
             ("paude remote list", "List all paude git remotes"),
             ("paude remote remove [NAME]", "Remove git remote for session"),
             ("paude remote cleanup", "Remove remotes for deleted sessions"),

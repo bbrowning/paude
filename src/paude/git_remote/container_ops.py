@@ -41,13 +41,21 @@ def _exec_in_container(
     return result.returncode == 0
 
 
-def _build_workspace_init_cmd(branch: str) -> str:
-    """Build bash command to initialize a git workspace."""
+def _build_workspace_init_cmd(
+    branch: str, workspace_path: str = CONTAINER_WORKSPACE
+) -> str:
+    """Build bash command to initialize a git workspace.
+
+    Idempotent: if ``workspace_path`` already contains a git repo, ``git init``
+    is skipped and only ``receive.denyCurrentBranch updateInstead`` is (re)applied
+    so pushes into a checked-out repo update its working tree.
+    """
     quoted_branch = shlex.quote(branch)
+    ws = shlex.quote(workspace_path)
     return (
-        f"test -d {CONTAINER_WORKSPACE}/.git || "
-        f"git init -b {quoted_branch} {CONTAINER_WORKSPACE} && "
-        f"git -C {CONTAINER_WORKSPACE} config receive.denyCurrentBranch updateInstead"
+        f"test -d {ws}/.git || "
+        f"git init -b {quoted_branch} {ws} && "
+        f"git -C {ws} config receive.denyCurrentBranch updateInstead"
     )
 
 
@@ -67,7 +75,11 @@ _PRECOMMIT_CMD = (
 
 from paude.constants import BASE_REF_NAME  # noqa: E402
 
-_SET_BASE_REF_CMD = f"git -C {CONTAINER_WORKSPACE} update-ref {BASE_REF_NAME} HEAD"
+
+def _build_set_base_ref_cmd(workspace_path: str = CONTAINER_WORKSPACE) -> str:
+    """Build bash command to point refs/paude/base at HEAD."""
+    ws = shlex.quote(workspace_path)
+    return f"git -C {ws} update-ref {BASE_REF_NAME} HEAD"
 
 
 def _build_clone_from_origin_cmd(origin_https_url: str) -> str:
@@ -86,9 +98,10 @@ def initialize_container_workspace(
     exec_builder: ExecCmdBuilder,
     branch: str = "main",
     transport: Transport | None = None,
+    workspace_path: str = CONTAINER_WORKSPACE,
 ) -> bool:
     """Initialize git repository in a container's workspace."""
-    bash_cmd = _build_workspace_init_cmd(branch)
+    bash_cmd = _build_workspace_init_cmd(branch, workspace_path)
     exec_cmd = exec_builder(bash_cmd)
     return _exec_in_container(
         exec_cmd, error_msg="Failed to init workspace", transport=transport
@@ -111,9 +124,10 @@ def set_origin_in_container(
 def set_base_ref_in_container(
     exec_builder: ExecCmdBuilder,
     transport: Transport | None = None,
+    workspace_path: str = CONTAINER_WORKSPACE,
 ) -> bool:
     """Set refs/paude/base to HEAD in a container's workspace."""
-    exec_cmd = exec_builder(_SET_BASE_REF_CMD)
+    exec_cmd = exec_builder(_build_set_base_ref_cmd(workspace_path))
     return _exec_in_container(
         exec_cmd, error_msg="Failed to set base ref", transport=transport
     )

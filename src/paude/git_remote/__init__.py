@@ -5,8 +5,8 @@
 import subprocess as subprocess  # noqa: F811, PLC0414
 
 from paude.git_remote.container_ops import (
-    _SET_BASE_REF_CMD,
     _build_clone_from_origin_cmd,
+    _build_set_base_ref_cmd,
     _build_set_origin_cmd,
     _build_workspace_init_cmd,
     _exec_in_container,
@@ -34,6 +34,8 @@ from paude.git_remote.utils import (
     git_push_tags_to_remote,
     git_push_to_remote,
     git_remote_add,
+    git_remote_exists,
+    git_remote_get_url,
     git_remote_remove,
     is_container_running_podman,
     is_ext_protocol_allowed,
@@ -47,8 +49,8 @@ from paude.git_remote.utils import (
 
 __all__ = [
     "ExecCmdBuilder",
-    "_SET_BASE_REF_CMD",
     "_build_clone_from_origin_cmd",
+    "_build_set_base_ref_cmd",
     "_build_set_origin_cmd",
     "_build_workspace_init_cmd",
     "_exec_in_container",
@@ -66,6 +68,8 @@ __all__ = [
     "git_push_tags_to_remote",
     "git_push_to_remote",
     "git_remote_add",
+    "git_remote_exists",
+    "git_remote_get_url",
     "git_remote_remove",
     "initialize_container_workspace",
     "is_container_running_podman",

@@ -12,6 +12,7 @@ from paude.backends.naming import (
     engine_binary_for_backend,
     resource_name,
 )
+from paude.constants import CONTAINER_WORKSPACE
 
 if TYPE_CHECKING:
     from paude.backends.base import Session
@@ -73,10 +74,13 @@ def _prepare_session_git_remote(
     *,
     branch: str = "main",
     transport: Transport | None = None,
+    workspace_path: str = CONTAINER_WORKSPACE,
 ) -> tuple[str, Transport | None]:
     """Resolve a session's remote URL/transport and prepare its container workspace.
 
     Used by both `paude remote add` and `paude harvest` to auto-add a remote.
+    ``workspace_path`` selects which repo path inside the container the remote
+    points at (defaults to the top-level workspace).
     Raises typer.Exit(1) if the container isn't running or workspace init fails.
     """
     from paude.git_remote import (
@@ -87,7 +91,7 @@ def _prepare_session_git_remote(
     )
 
     remote_url, resolved_transport = resolve_session_remote(
-        session_name, container_name, engine
+        session_name, container_name, engine, workspace_path=workspace_path
     )
     effective_transport = transport if transport is not None else resolved_transport
 
@@ -102,7 +106,10 @@ def _prepare_session_git_remote(
     typer.echo("Initializing git repository in container...")
     exec_builder = podman_exec_builder(container_name, engine)
     if not initialize_container_workspace(
-        exec_builder, branch=branch, transport=effective_transport
+        exec_builder,
+        branch=branch,
+        transport=effective_transport,
+        workspace_path=workspace_path,
     ):
         raise typer.Exit(1)
 
@@ -295,6 +302,7 @@ def _push_after_add(
     rname: str,
     branch: str,
     transport: Transport | None,
+    workspace_path: str = CONTAINER_WORKSPACE,
 ) -> None:
     """Push branch and set base ref after adding a remote."""
     from paude.git_remote import git_push_to_remote, set_base_ref_in_container
@@ -307,5 +315,5 @@ def _push_after_add(
 
     ctx = GitSetupContext.from_session(session, transport)
     eb, tp = ctx.make_exec_context()
-    set_base_ref_in_container(eb, transport=tp)
+    set_base_ref_in_container(eb, transport=tp, workspace_path=workspace_path)
     typer.echo("Push complete.")

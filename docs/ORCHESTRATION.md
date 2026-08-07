@@ -46,6 +46,19 @@ This creates a local `feature/auth-refactor` branch with all of the agent's comm
 
 Protected branches (`main`, `master`, `release`, `release-*`, `release/*`) cannot be used as harvest targets.
 
+### Harvesting a repo at a non-default path
+
+By default, harvest targets the session's top-level workspace (`/pvc/workspace`) and the local repo the session was created from. If a session's container holds more than one git repo — for example a workspace with several repos checked out under sub-paths — you can harvest any of them:
+
+```bash
+paude harvest my-project -b fix/foo \
+  --container-path /pvc/workspace/repos/api \  # repo path inside the container
+  --remote rig-api \                           # git remote name to use
+  --repo ~/src/api                             # host repo to harvest into
+```
+
+`--container-path` selects which repo inside the container to fetch from, `--remote` names the git remote (default `paude-<session>`; use a non-`paude-` name so `paude remote cleanup` leaves it alone), and `--repo` chooses which host checkout to harvest into (default: the session's recorded workspace). Set up a matching remote up front with `paude remote add my-project --container-path <path> --remote <remote>` if you prefer, though harvest adds it automatically when missing.
+
 ## Open a PR
 
 Once you're satisfied with the changes, harvest again with `--pr` to push the branch and create a pull request:
