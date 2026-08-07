@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from paude.backends.base import Session
@@ -406,6 +407,573 @@ class TestUpgradePodman:
         backend._network_manager.remove_network.assert_called_once_with(
             "paude-net-test-session"
         )
+
+    @patch("paude.mounts.build_mounts", return_value=[])
+    @patch("paude.cli.helpers._prepare_session_create")
+    @patch("paude.container.ImageManager")
+    @patch("paude.config.detector.detect_config", return_value=None)
+    @patch("paude.backends.podman.helpers.find_container_by_session_name")
+    def test_upgrade_podman_build_failure_is_retryable(
+        self,
+        mock_find_container: MagicMock,
+        mock_detect_config: MagicMock,
+        mock_image_manager_class: MagicMock,
+        mock_prepare: MagicMock,
+        mock_build_mounts: MagicMock,
+    ) -> None:
+        """A failed image build raises a plain exception (not typer.Exit), so the
+        caller reports it as retryable; the manifest survives and nothing is torn
+        down."""
+        from paude import upgrade_state
+        from paude.cli.upgrade import _upgrade_podman
+
+        mock_find_container.return_value = {"Labels": self._make_container_labels()}
+
+        mock_image_manager = MagicMock()
+        mock_image_manager.ensure_default_image.side_effect = RuntimeError("boom")
+        mock_image_manager_class.return_value = mock_image_manager
+
+        mock_prepare.return_value = ([], [], {}, True)
+
+        from paude.backends.podman.backend import PodmanBackend
+
+        backend = MagicMock(spec=PodmanBackend)
+        backend._runner = MagicMock()
+        backend._runner.container_exists.return_value = False
+        backend._network_manager = MagicMock()
+        backend._volume_manager = MagicMock()
+        backend._engine = MagicMock()
+
+        # A plain error (typer.Exit is not a RuntimeError), so this asserts the
+        # failure is routed to session_upgrade's "data is safe / retry" handler.
+        with pytest.raises(RuntimeError):
+            _upgrade_podman(
+                "test-session", backend, rebuild=False, overrides=_NO_OVERRIDES
+            )
+
+        # The manifest (written before the build) survives, so a re-run resumes.
+        assert upgrade_state.load("test-session") is not None
+        backend.create_session.assert_not_called()
+
+
+class TestUpgradeResume:
+    """Tests for crash-safe, resumable upgrade behaviour."""
+
+    def _labels(
+        self,
+        agent: str = "claude",
+        gpu: str | None = None,
+        yolo: bool = False,
+    ) -> dict[str, str]:
+        labels: dict[str, str] = {
+            PAUDE_LABEL_AGENT: agent,
+            PAUDE_LABEL_WORKSPACE: encode_path(
+                Path("/home/user/project"), url_safe=True
+            ),
+            PAUDE_LABEL_SESSION: "test-session",
+            PAUDE_LABEL_CREATED: "2026-01-01T00:00:00+00:00",
+        }
+        if gpu is not None:
+            labels[PAUDE_LABEL_GPU] = gpu
+        if yolo:
+            labels[PAUDE_LABEL_YOLO] = "1"
+        return labels
+
+    @patch("paude.mounts.build_mounts", return_value=[])
+    @patch("paude.cli.helpers._prepare_session_create")
+    @patch("paude.container.ImageManager")
+    @patch("paude.config.detector.detect_config", return_value=None)
+    @patch("paude.backends.podman.helpers.find_container_by_session_name")
+    def test_manifest_written_before_teardown(
+        self,
+        mock_find_container: MagicMock,
+        mock_detect_config: MagicMock,
+        mock_image_manager_class: MagicMock,
+        mock_prepare: MagicMock,
+        mock_build_mounts: MagicMock,
+    ) -> None:
+        """A manifest is persisted before any destructive step, so an interrupt
+        during teardown leaves a recoverable session."""
+        from paude import upgrade_state
+        from paude.cli.upgrade import _upgrade_podman
+
+        mock_find_container.return_value = {
+            "Labels": self._labels(gpu="all", yolo=True)
+        }
+
+        mock_image_manager = MagicMock()
+        mock_image_manager.ensure_default_image.return_value = "paude:latest"
+        mock_image_manager.ensure_proxy_image.return_value = "proxy:rebuilt"
+        mock_image_manager_class.return_value = mock_image_manager
+        mock_prepare.return_value = ([], [], {}, True)
+
+        from paude.backends.podman.backend import PodmanBackend
+
+        backend = MagicMock(spec=PodmanBackend)
+        backend._runner = MagicMock()
+        backend._runner.container_exists.return_value = False
+        # Interrupt exactly at the first destructive removal.
+        backend._runner.remove_container.side_effect = KeyboardInterrupt
+        backend._network_manager = MagicMock()
+        backend._volume_manager = MagicMock()
+        backend._engine = MagicMock()
+
+        with pytest.raises(KeyboardInterrupt):
+            _upgrade_podman(
+                "test-session", backend, rebuild=False, overrides=_NO_OVERRIDES
+            )
+
+        # Config was captured durably before teardown was attempted.
+        manifest = upgrade_state.load("test-session")
+        assert manifest is not None
+        assert manifest.agent == "claude"
+        assert manifest.gpu == "all"
+        assert manifest.yolo is True
+        # The replacement was never created (we were interrupted first).
+        backend.create_session.assert_not_called()
+
+    @patch("paude.mounts.build_mounts", return_value=[])
+    @patch("paude.cli.helpers._prepare_session_create")
+    @patch("paude.container.ImageManager")
+    @patch("paude.config.detector.detect_config", return_value=None)
+    @patch("paude.backends.podman.helpers.find_container_by_session_name")
+    def test_resume_uses_manifest_when_container_gone(
+        self,
+        mock_find_container: MagicMock,
+        mock_detect_config: MagicMock,
+        mock_image_manager_class: MagicMock,
+        mock_prepare: MagicMock,
+        mock_build_mounts: MagicMock,
+    ) -> None:
+        """With a manifest present and the old container gone, config is rebuilt
+        from the manifest (not container labels) and the volume is reused."""
+        from paude import upgrade_state
+        from paude.cli.upgrade import _upgrade_podman
+        from paude.upgrade_state import UpgradeManifest
+
+        upgrade_state.save(
+            UpgradeManifest(
+                name="test-session",
+                to_version="0.20.0",
+                created_at="2026-01-01T00:00:00+00:00",
+                workspace="/home/user/project",
+                agent="gemini",
+                gpu="all",
+                yolo=True,
+                allowed_domains=[".googleapis.com"],
+            )
+        )
+        mock_find_container.return_value = None  # container already removed
+
+        mock_image_manager = MagicMock()
+        mock_image_manager.ensure_default_image.return_value = "paude:latest"
+        mock_image_manager.ensure_proxy_image.return_value = "proxy:rebuilt"
+        mock_image_manager_class.return_value = mock_image_manager
+        mock_prepare.return_value = ([".googleapis.com"], [], {}, False)
+
+        from paude.backends.podman.backend import PodmanBackend
+
+        backend = MagicMock(spec=PodmanBackend)
+        backend._runner = MagicMock()
+        backend._runner.container_exists.return_value = False
+        backend._network_manager = MagicMock()
+        backend._volume_manager = MagicMock()
+        backend._engine = MagicMock()
+
+        _upgrade_podman("test-session", backend, rebuild=False, overrides=_NO_OVERRIDES)
+
+        config = backend.create_session.call_args[0][0]
+        assert config.agent == "gemini"
+        assert config.gpu == "all"
+        assert config.yolo is True
+        assert config.reuse_volume is True
+        # Config came from the manifest, never from the (gone) container labels.
+        mock_find_container.assert_not_called()
+        backend.start_session_no_attach.assert_called_once_with("test-session")
+
+    @patch("paude.cli.upgrade._upgrade_podman")
+    @patch("paude.cli.upgrade.find_session_backend")
+    def test_success_deletes_manifest(
+        self, mock_find: MagicMock, mock_upgrade_podman: MagicMock
+    ) -> None:
+        """A completed upgrade clears the manifest."""
+        from paude import upgrade_state
+        from paude.backends.podman.backend import PodmanBackend
+        from paude.upgrade_state import UpgradeManifest
+
+        upgrade_state.save(
+            UpgradeManifest(
+                name="test-session",
+                to_version="0.20.0",
+                created_at="t",
+                workspace="/w",
+            )
+        )
+        mock_backend = MagicMock()
+        mock_backend.__class__ = PodmanBackend
+        mock_backend.get_session.return_value = _make_session(
+            "test-session", version="0.1.0"
+        )
+        mock_find.return_value = ("podman", mock_backend)
+
+        result = runner.invoke(app, ["upgrade", "test-session"])
+
+        assert result.exit_code == 0
+        mock_upgrade_podman.assert_called_once()
+        assert upgrade_state.load("test-session") is None
+
+    @patch("paude.cli.upgrade._upgrade_podman")
+    @patch("paude.cli.upgrade.find_session_backend")
+    def test_stale_marker_cleared_when_already_current(
+        self, mock_find: MagicMock, mock_upgrade_podman: MagicMock
+    ) -> None:
+        """A leftover manifest for an already-current session is just cleared."""
+        from paude import __version__, upgrade_state
+        from paude.backends.podman.backend import PodmanBackend
+        from paude.upgrade_state import UpgradeManifest
+
+        upgrade_state.save(
+            UpgradeManifest(
+                name="test-session",
+                to_version=__version__,
+                created_at="t",
+                workspace="/w",
+            )
+        )
+        mock_backend = MagicMock()
+        mock_backend.__class__ = PodmanBackend
+        mock_backend.get_session.return_value = _make_session(
+            "test-session", status="running", version=__version__
+        )
+        mock_find.return_value = ("podman", mock_backend)
+
+        result = runner.invoke(app, ["upgrade", "test-session"])
+
+        assert result.exit_code == 0
+        mock_upgrade_podman.assert_not_called()
+        assert upgrade_state.load("test-session") is None
+        output = result.stdout + (result.stderr or "")
+        assert "already at version" in output
+
+    @patch("paude.cli.upgrade._upgrade_podman")
+    @patch("paude.cli.upgrade.find_session_backend")
+    def test_interrupted_between_create_and_start_resumes(
+        self, mock_find: MagicMock, mock_upgrade_podman: MagicMock
+    ) -> None:
+        """A manifest plus a target-version container left in 'stopped' state
+        (created but never started) must resume, not silently clear the marker.
+
+        _upgrade_podman creates the container before starting it; a
+        created-but-not-started container reports podman state 'created', which
+        maps to session status 'stopped'. The fast-path must not treat that as a
+        finished upgrade.
+        """
+        from paude import __version__, upgrade_state
+        from paude.backends.podman.backend import PodmanBackend
+        from paude.upgrade_state import UpgradeManifest
+
+        upgrade_state.save(
+            UpgradeManifest(
+                name="test-session",
+                to_version=__version__,
+                created_at="t",
+                workspace="/w",
+            )
+        )
+        mock_backend = MagicMock()
+        mock_backend.__class__ = PodmanBackend
+        mock_backend.get_session.return_value = _make_session(
+            "test-session", status="stopped", version=__version__
+        )
+        mock_find.return_value = ("podman", mock_backend)
+
+        result = runner.invoke(app, ["upgrade", "test-session"])
+
+        assert result.exit_code == 0
+        # The fast-path must NOT fire: the upgrade must actually resume.
+        mock_upgrade_podman.assert_called_once()
+        assert upgrade_state.load("test-session") is None
+        output = result.stdout + (result.stderr or "")
+        assert "cleared stale upgrade marker" not in output
+
+    @patch("paude.cli.upgrade._upgrade_podman")
+    @patch("paude.cli.upgrade.find_session_backend")
+    def test_stale_marker_degraded_resumes(
+        self, mock_find: MagicMock, mock_upgrade_podman: MagicMock
+    ) -> None:
+        """A degraded session (running container, missing proxy) with a lingering
+        manifest means the upgrade did not finish, so it must resume."""
+        from paude import __version__, upgrade_state
+        from paude.backends.podman.backend import PodmanBackend
+        from paude.upgrade_state import UpgradeManifest
+
+        upgrade_state.save(
+            UpgradeManifest(
+                name="test-session",
+                to_version=__version__,
+                created_at="t",
+                workspace="/w",
+            )
+        )
+        mock_backend = MagicMock()
+        mock_backend.__class__ = PodmanBackend
+        mock_backend.get_session.return_value = _make_session(
+            "test-session", status="degraded", version=__version__
+        )
+        mock_find.return_value = ("podman", mock_backend)
+
+        result = runner.invoke(app, ["upgrade", "test-session"])
+
+        assert result.exit_code == 0
+        mock_upgrade_podman.assert_called_once()
+        assert upgrade_state.load("test-session") is None
+
+    @patch("paude.cli.upgrade._upgrade_podman")
+    @patch("paude.cli.upgrade.find_session_backend")
+    def test_stale_marker_refreshes_registry_version(
+        self, mock_find: MagicMock, mock_upgrade_podman: MagicMock
+    ) -> None:
+        """The running fast-path refreshes the registry paude_version before
+        clearing the marker, so a crash between _upgrade_podman finishing and the
+        registry update doesn't leave the recorded version stale."""
+        from paude import __version__, upgrade_state
+        from paude.backends.base import Session
+        from paude.backends.podman.backend import PodmanBackend
+        from paude.upgrade_state import UpgradeManifest
+
+        SessionRegistry().register(
+            Session(
+                name="test-session",
+                status="running",
+                workspace=Path("/w"),
+                created_at="t",
+                backend_type="podman",
+            ),
+            paude_version="0.1.0",
+        )
+        upgrade_state.save(
+            UpgradeManifest(
+                name="test-session",
+                to_version=__version__,
+                created_at="t",
+                workspace="/w",
+            )
+        )
+        mock_backend = MagicMock()
+        mock_backend.__class__ = PodmanBackend
+        mock_backend.get_session.return_value = _make_session(
+            "test-session", status="running", version=__version__
+        )
+        mock_find.return_value = ("podman", mock_backend)
+
+        result = runner.invoke(app, ["upgrade", "test-session"])
+
+        assert result.exit_code == 0
+        # Fast-path fired (no rebuild) ...
+        mock_upgrade_podman.assert_not_called()
+        # ... but the registry version was refreshed and the marker cleared.
+        entry = SessionRegistry().get("test-session")
+        assert entry is not None
+        assert entry.paude_version == __version__
+        assert upgrade_state.load("test-session") is None
+
+    @patch("paude.cli.helpers._get_backend_instance")
+    @patch("paude.cli.helpers.PodmanBackend")
+    def test_find_session_backend_offline_reconstructs(
+        self, mock_podman_cls: MagicMock, mock_get_backend: MagicMock
+    ) -> None:
+        """find_session_backend(allow_offline=True) rebuilds from the registry
+        when the session can't be discovered live."""
+        from paude.backends.base import Session
+        from paude.cli.helpers import find_session_backend
+        from paude.registry import SessionRegistry
+
+        SessionRegistry().register(
+            Session(
+                name="gone-session",
+                status="stopped",
+                workspace=Path("/w"),
+                created_at="t",
+                backend_type="podman",
+            )
+        )
+        # Live probes find nothing (container gone).
+        mock_podman_cls.return_value.get_session.return_value = None
+        sentinel = object()
+        mock_get_backend.return_value = sentinel
+
+        # Without allow_offline the session is simply not found.
+        assert find_session_backend("gone-session") is None
+
+        # With allow_offline it is reconstructed from the registry entry.
+        result = find_session_backend("gone-session", allow_offline=True)
+        assert result is not None
+        backend_type, backend = result
+        assert backend is sentinel
+        mock_get_backend.assert_called_with(backend_type, ssh_host=None, ssh_key=None)
+
+    @patch("paude.cli.helpers._get_backend_instance")
+    @patch("paude.cli.helpers.PodmanBackend")
+    def test_find_session_backend_offline_returns_none_on_bad_entry(
+        self, mock_podman_cls: MagicMock, mock_get_backend: MagicMock
+    ) -> None:
+        """A malformed registry entry must not escape as a traceback: the
+        offline reconstruction honors the documented 'returns None' contract."""
+        from paude.backends.base import Session
+        from paude.cli.helpers import find_session_backend
+        from paude.registry import SessionRegistry
+
+        SessionRegistry().register(
+            Session(
+                name="broken-session",
+                status="stopped",
+                workspace=Path("/w"),
+                created_at="t",
+                backend_type="podman",
+            )
+        )
+        # Live probes find nothing (container gone).
+        mock_podman_cls.return_value.get_session.return_value = None
+        # Reconstruction blows up (e.g. parse_ssh_host on a malformed host).
+        mock_get_backend.side_effect = ValueError("bad ssh host")
+
+        assert find_session_backend("broken-session", allow_offline=True) is None
+
+    @patch("paude.cli.upgrade._upgrade_podman")
+    @patch("paude.cli.upgrade.find_session_backend")
+    def test_resume_allows_offline_backend_lookup(
+        self, mock_find: MagicMock, mock_upgrade_podman: MagicMock
+    ) -> None:
+        """A resume passes allow_offline=True and completes even when the
+        container is gone (get_session returns None)."""
+        from paude import upgrade_state
+        from paude.backends.podman.backend import PodmanBackend
+        from paude.upgrade_state import UpgradeManifest
+
+        upgrade_state.save(
+            UpgradeManifest(
+                name="test-session",
+                to_version="0.20.0",
+                created_at="t",
+                workspace="/w",
+            )
+        )
+        mock_backend = MagicMock()
+        mock_backend.__class__ = PodmanBackend
+        mock_backend.get_session.return_value = None  # container gone
+        mock_find.return_value = ("podman", mock_backend)
+
+        result = runner.invoke(app, ["upgrade", "test-session"])
+
+        assert result.exit_code == 0
+        assert mock_find.call_args.kwargs.get("allow_offline") is True
+        mock_upgrade_podman.assert_called_once()
+        assert upgrade_state.load("test-session") is None
+
+    @patch("paude.cli.upgrade._upgrade_podman")
+    @patch("paude.cli.upgrade.find_session_backend")
+    def test_interrupt_preserves_manifest_and_reports(
+        self, mock_find: MagicMock, mock_upgrade_podman: MagicMock
+    ) -> None:
+        """An interrupted upgrade keeps the manifest and tells the user how to
+        finish it."""
+        from paude import upgrade_state
+        from paude.backends.podman.backend import PodmanBackend
+        from paude.upgrade_state import UpgradeManifest
+
+        upgrade_state.save(
+            UpgradeManifest(
+                name="test-session",
+                to_version="0.20.0",
+                created_at="t",
+                workspace="/w",
+            )
+        )
+        mock_upgrade_podman.side_effect = KeyboardInterrupt
+
+        mock_backend = MagicMock()
+        mock_backend.__class__ = PodmanBackend
+        mock_backend.get_session.return_value = _make_session(
+            "test-session", version="0.1.0"
+        )
+        mock_find.return_value = ("podman", mock_backend)
+
+        result = runner.invoke(app, ["upgrade", "test-session"])
+
+        assert result.exit_code == 130
+        assert upgrade_state.load("test-session") is not None
+        output = result.stdout + (result.stderr or "")
+        assert "interrupted" in output.lower()
+        assert "paude upgrade test-session" in output
+
+    @patch("paude.cli.upgrade._upgrade_podman")
+    @patch("paude.cli.upgrade.find_session_backend")
+    def test_build_failure_reports_retry_and_keeps_manifest(
+        self, mock_find: MagicMock, mock_upgrade_podman: MagicMock
+    ) -> None:
+        """A failed upgrade (e.g. image build error) tells the user their data is
+        safe and how to retry, and keeps the manifest so the resume can finish."""
+        from paude import upgrade_state
+        from paude.backends.podman.backend import PodmanBackend
+        from paude.upgrade_state import UpgradeManifest
+
+        upgrade_state.save(
+            UpgradeManifest(
+                name="test-session",
+                to_version="0.20.0",
+                created_at="t",
+                workspace="/w",
+            )
+        )
+        mock_upgrade_podman.side_effect = RuntimeError(
+            "building the agent image failed: boom"
+        )
+
+        mock_backend = MagicMock()
+        mock_backend.__class__ = PodmanBackend
+        mock_backend.get_session.return_value = _make_session(
+            "test-session", version="0.1.0"
+        )
+        mock_find.return_value = ("podman", mock_backend)
+
+        result = runner.invoke(app, ["upgrade", "test-session"])
+
+        assert result.exit_code == 1
+        # Manifest is preserved (cleared only on success), so a re-run resumes.
+        assert upgrade_state.load("test-session") is not None
+        output = result.stdout + (result.stderr or "")
+        assert "safe" in output.lower()
+        assert "retry" in output.lower()
+        assert "paude upgrade test-session" in output
+
+    def test_unregister_clears_manifest(self) -> None:
+        """Deleting a session (via registry.unregister) removes its manifest,
+        so a stale marker can't outlive the session."""
+        from paude import upgrade_state
+        from paude.backends.base import Session
+        from paude.registry import SessionRegistry
+        from paude.upgrade_state import UpgradeManifest
+
+        registry = SessionRegistry()
+        registry.register(
+            Session(
+                name="doomed",
+                status="stopped",
+                workspace=Path("/w"),
+                created_at="t",
+                backend_type="podman",
+            )
+        )
+        upgrade_state.save(
+            UpgradeManifest(
+                name="doomed", to_version="0.20.0", created_at="t", workspace="/w"
+            )
+        )
+        assert upgrade_state.load("doomed") is not None
+
+        registry.unregister("doomed")
+
+        assert upgrade_state.load("doomed") is None
 
 
 class TestListShowsVersion:

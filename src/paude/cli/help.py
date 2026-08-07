@@ -50,7 +50,7 @@ _SECTIONS: tuple[HelpSection, ...] = (
             ("paude stop", "Stop session (preserves data)"),
             (
                 "paude upgrade NAME",
-                "Refresh agent tooling, preserving workspace and state",
+                "Refresh agent tooling, preserving data; resumable if interrupted",
             ),
             ("paude delete NAME --confirm", "Delete session permanently"),
             ("paude delete NAME --confirm --force", "Remove from local config only"),

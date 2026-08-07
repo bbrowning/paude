@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import tempfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,6 +11,7 @@ from typing import Any
 
 from paude.backends.base import Session
 from paude.config.user_config import _paude_config_dir
+from paude.json_store import atomic_write_json
 
 logger = logging.getLogger(__name__)
 
@@ -100,18 +99,7 @@ class SessionRegistry:
 
     def _write_raw(self, data: dict[str, Any]) -> None:
         """Write raw JSON data to the registry file atomically."""
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=self._path.parent, suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w") as f:
-                json.dump(data, f, indent=2)
-            os.replace(tmp, self._path)
-        except Exception:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            raise
+        atomic_write_json(self._path, data)
 
     def _save(self, entries: dict[str, RegistryEntry]) -> None:
         """Write entries to the registry file atomically."""
@@ -150,6 +138,30 @@ class SessionRegistry:
         )
         self._save(entries)
 
+    def refresh_from_session(
+        self, name: str, session: Session | None, paude_version: str
+    ) -> None:
+        """Update a registered session's live fields and version in place.
+
+        Unlike :meth:`register`, this preserves entry fields that ``Session``
+        does not carry (``ssh_host``, ``ssh_key``, ``remote_config_dir``,
+        ``engine``, ``created_at``). Does nothing if ``name`` is not registered.
+
+        Used to record an in-place upgrade: ``session`` is the live session whose
+        agent metadata should overwrite the entry's, or ``None`` when the
+        container could not be probed (only the version is updated then).
+        """
+        entries = self.load()
+        entry = entries.get(name)
+        if entry is None:
+            return
+        if session is not None:
+            entry.agent = session.agent
+            entry.agent_providers = session.agent_providers
+            entry.credential_providers = session.credential_providers
+        entry.paude_version = paude_version
+        self._save(entries)
+
     def unregister(self, name: str) -> bool:
         """Remove a session from the registry by name.
 
@@ -158,6 +170,12 @@ class SessionRegistry:
 
         Returns True if an entry was removed, False if not found.
         """
+        # A session's upgrade manifest is local-host state that shadows its
+        # registry entry; remove it whenever the entry is removed so a stale
+        # manifest can't outlive its session and trigger a bogus resume.
+        from paude import upgrade_state
+
+        upgrade_state.delete(name)
         try:
             data = json.loads(self._path.read_text())
         except (FileNotFoundError, json.JSONDecodeError):

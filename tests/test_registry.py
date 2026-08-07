@@ -87,6 +87,57 @@ class TestSessionRegistry:
         assert entry is not None
         assert entry.remote_config_dir is None
 
+    def test_refresh_from_session_updates_version_preserving_ssh(
+        self, tmp_path: Path
+    ) -> None:
+        """refresh_from_session updates version + agent metadata but preserves
+        fields Session doesn't carry (the reason it's not just register())."""
+        path = tmp_path / "sessions.json"
+        registry = SessionRegistry(path=path)
+        registry.register(
+            _make_session("s1", agent="claude"),
+            ssh_host="host",
+            ssh_key="/key",
+            remote_config_dir="/cfg",
+            paude_version="0.1.0",
+        )
+
+        registry.refresh_from_session(
+            "s1", _make_session("s1", agent="gemini"), "0.2.0"
+        )
+
+        entry = registry.get("s1")
+        assert entry is not None
+        assert entry.paude_version == "0.2.0"
+        assert entry.agent == "gemini"
+        assert entry.ssh_host == "host"
+        assert entry.ssh_key == "/key"
+        assert entry.remote_config_dir == "/cfg"
+
+    def test_refresh_from_session_none_updates_version_only(
+        self, tmp_path: Path
+    ) -> None:
+        """With session=None (container gone), only the version is updated."""
+        path = tmp_path / "sessions.json"
+        registry = SessionRegistry(path=path)
+        registry.register(_make_session("s1", agent="claude"), paude_version="0.1.0")
+
+        registry.refresh_from_session("s1", None, "0.2.0")
+
+        entry = registry.get("s1")
+        assert entry is not None
+        assert entry.paude_version == "0.2.0"
+        assert entry.agent == "claude"
+
+    def test_refresh_from_session_missing_is_noop(self, tmp_path: Path) -> None:
+        """Refreshing an unregistered session neither errors nor creates an entry."""
+        path = tmp_path / "sessions.json"
+        registry = SessionRegistry(path=path)
+
+        registry.refresh_from_session("nope", _make_session("nope"), "0.2.0")
+
+        assert registry.get("nope") is None
+
     def test_unregister(self, tmp_path: Path) -> None:
         path = tmp_path / "sessions.json"
         registry = SessionRegistry(path=path)
