@@ -508,6 +508,12 @@ class TestCodexAgentConfig:
         cfg = CodexAgent().config
         assert "releases/latest/download" in cfg.install_script
 
+    def test_install_script_includes_code_mode_host(self) -> None:
+        cfg = CodexAgent().config
+        assert "codex-code-mode-host-${CODEX_ARCH}.tar.gz" in cfg.install_script
+        assert '"$HOME/.local/bin/codex-code-mode-host"' in cfg.install_script
+        assert 'test -x "$HOME/.local/bin/codex-code-mode-host"' in cfg.install_script
+
     def test_config_dir_name(self) -> None:
         assert CodexAgent().config.config_dir_name == ".codex"
 

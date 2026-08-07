@@ -25,7 +25,21 @@ _INSTALL_SCRIPT = (
     '"https://github.com/openai/codex/releases/latest/download/'
     'codex-${CODEX_ARCH}.tar.gz"'
     ' | tar xz -C "$HOME/.local/bin" "codex-${CODEX_ARCH}" && '
-    'mv "$HOME/.local/bin/codex-${CODEX_ARCH}" "$HOME/.local/bin/codex"'
+    'mv "$HOME/.local/bin/codex-${CODEX_ARCH}" "$HOME/.local/bin/codex" && '
+    # Recent Codex releases spawn a companion "code-mode host" binary via an
+    # absolute path next to the codex binary for every tool call. Install it
+    # alongside codex from the same (latest) release so the versioned handshake
+    # matches and tool calls work out of the box.
+    "curl -fsSL "
+    '"https://github.com/openai/codex/releases/latest/download/'
+    'codex-code-mode-host-${CODEX_ARCH}.tar.gz"'
+    ' | tar xz -C "$HOME/.local/bin" "codex-code-mode-host-${CODEX_ARCH}" && '
+    'mv "$HOME/.local/bin/codex-code-mode-host-${CODEX_ARCH}" '
+    '"$HOME/.local/bin/codex-code-mode-host" && '
+    # The build only verifies the primary codex binary (pipefail_install_lines),
+    # so verify the companion here too — a missing companion fails every tool
+    # call at runtime, the exact failure this install is meant to prevent.
+    'test -x "$HOME/.local/bin/codex-code-mode-host"'
 )
 
 
