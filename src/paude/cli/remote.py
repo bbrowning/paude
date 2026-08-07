@@ -14,6 +14,7 @@ from paude.backends.naming import (
 )
 from paude.cli.app import app
 from paude.cli.helpers import find_session_backend
+from paude.constants import CONTAINER_WORKSPACE
 
 if TYPE_CHECKING:
     from paude.backends.base import Backend, Session
@@ -37,6 +38,27 @@ def remote_command(
             help="Push current branch after adding remote (for 'add' action).",
         ),
     ] = False,
+    container_path: Annotated[
+        str,
+        typer.Option(
+            "--container-path",
+            help=(
+                "Path of the repo inside the container to expose "
+                "(for 'add'; default: the session workspace)."
+            ),
+        ),
+    ] = CONTAINER_WORKSPACE,
+    remote_name: Annotated[
+        str | None,
+        typer.Option(
+            "--remote",
+            help=(
+                "Name for the git remote (for 'add'; "
+                "default: paude-<session>). Use a non-'paude-' name for extra "
+                "remotes so 'paude remote cleanup' won't remove them."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Manage git remotes for paude sessions.
 
@@ -77,7 +99,12 @@ def remote_command(
             typer.echo("Initialize git first: git init", err=True)
             raise typer.Exit(1)
 
-        _remote_add(name, push=push)
+        _remote_add(
+            name,
+            push=push,
+            remote_name=remote_name,
+            container_path=container_path,
+        )
         return
 
     if action == "remove":
@@ -194,8 +221,16 @@ def _remote_add(
     name: str | None,
     push: bool = False,
     transport: Transport | None = None,
+    remote_name: str | None = None,
+    container_path: str = CONTAINER_WORKSPACE,
 ) -> None:
-    """Add a git remote for a session."""
+    """Add a git remote for a session.
+
+    ``remote_name`` overrides the git remote name (default ``paude-<session>``);
+    ``container_path`` selects which repo path inside the container to expose
+    (default: the top-level workspace). The container name is always
+    ``paude-<session>`` regardless of these.
+    """
     from paude.git_remote import (
         enable_ext_protocol,
         get_current_branch,
@@ -236,10 +271,12 @@ def _remote_add(
             typer.echo("Create one first: paude create", err=True)
         raise typer.Exit(1)
 
-    rname = resource_name(session.name)
+    rname = remote_name or resource_name(session.name)
     branch = get_current_branch() or "main"
 
-    remote_url, transport = _remote_add_local(session, rname, branch, transport)
+    remote_url, transport = _remote_add_local(
+        session, branch, transport, container_path
+    )
 
     # Add the remote
     if git_remote_add(rname, remote_url):
@@ -252,6 +289,7 @@ def _remote_add(
                 rname,
                 branch,
                 transport,
+                container_path,
             )
         else:
             typer.echo("")
@@ -265,9 +303,9 @@ def _remote_add(
 
 def _remote_add_local(
     session: Session,
-    rname: str,
     branch: str,
     transport: Transport | None,
+    container_path: str = CONTAINER_WORKSPACE,
 ) -> tuple[str, Transport | None]:
     """Handle local backend remote add: check container, init workspace, build URL."""
     from paude.cli.remote_git_setup import _prepare_session_git_remote
@@ -276,5 +314,10 @@ def _remote_add_local(
     engine = engine_binary_for_backend(session.backend_type)
 
     return _prepare_session_git_remote(
-        session.name, cname, engine, branch=branch, transport=transport
+        session.name,
+        cname,
+        engine,
+        branch=branch,
+        transport=transport,
+        workspace_path=container_path,
     )

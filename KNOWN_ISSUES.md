@@ -56,6 +56,26 @@ The same "parse a `user@host[:port]` string with `parse_ssh_host()`, then constr
 
 The third occurrence was added while fixing SEC-003 rather than reusing `_build_transport()`, because `_build_transport()` lives in `src/paude/cli/` and importing it from `src/paude/git_remote/` (a lower-level package) would invert the existing dependency direction. Consolidating all three requires first giving this logic a home that both `cli/` and `git_remote/`/`backends/` can depend on without a layering inversion (e.g. a small helper in `src/paude/transport/ssh.py` itself, alongside `parse_ssh_host()`). Until then, any change to `SshTransport`'s constructor or `parse_ssh_host()`'s contract needs to be checked against all three call sites.
 
+## Correctness Backlog
+
+Lower-severity correctness/robustness issues surfaced during code review.
+
+### HARVEST-001: `harvest` diff summary hardcodes `main` as the base ref
+
+**Status**: Open
+**Severity**: Low (cosmetic — harvest still succeeds)
+**Discovered**: 2026-08-07 during code review of the `--container-path`/`--repo` harvest work
+
+`harvest_session()` in `src/paude/workflow.py` prints a post-harvest change summary via `git_diff_stat("main", branch_name, cwd=workspace)` (workflow.py:~230). The base ref is hardcoded to `main`. With the new `--repo` option a user can harvest into a host repo whose default branch is `master`/`trunk`/etc.; there `git diff --stat main...<branch>` fails and `git_diff_stat()` returns `""` (`src/paude/git_remote/utils.py` — non-zero return yields empty string), so the summary line is silently omitted. Harvest itself still completes correctly. Fix by resolving the base branch the way `get_upstream_url()` does (iterate `DEFAULT_BRANCHES`, fall back to the tracking branch) instead of assuming `main`.
+
+### HARVEST-002: container path with whitespace breaks the `ext::` remote URL
+
+**Status**: Open
+**Severity**: Low (exotic input; no injection risk)
+**Discovered**: 2026-08-07 during code review of the `--container-path`/`--repo` harvest work
+
+`build_podman_remote_url()` / `build_ssh_remote_url()` in `src/paude/git_remote/utils.py` interpolate `workspace_path` into the remote URL as `ext::… %S <workspace_path>`. Git's `ext::` helper splits its command line on whitespace and `exec`s the program directly (no shell is involved, so shell metacharacters are *not* an injection vector), but a `workspace_path` containing spaces would be word-split into separate argv entries and every fetch/push would fail. Now that `--container-path` accepts arbitrary paths (previously always the space-free `/pvc/workspace`), this is reachable, though container paths with spaces are highly unusual. Note that shell-quoting does not help here — there is no shell — so a fix would need `ext::`'s own (limited) escaping or a validation/rejection of whitespace in container paths.
+
 ## Agent Limitations
 
 Issues caused by upstream agent behavior, not paude bugs.

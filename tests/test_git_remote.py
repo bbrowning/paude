@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from paude.git_remote import (
     _build_clone_from_origin_cmd,
+    _build_set_base_ref_cmd,
     _build_set_origin_cmd,
     _build_workspace_init_cmd,
     _exec_in_container,
@@ -19,6 +20,8 @@ from paude.git_remote import (
     git_fetch_from_remote,
     git_push_tags_to_remote,
     git_remote_add,
+    git_remote_exists,
+    git_remote_get_url,
     git_remote_remove,
     initialize_container_workspace,
     is_ext_protocol_allowed,
@@ -52,6 +55,75 @@ class TestBuildPodmanRemoteUrl:
         assert url == "ext::podman exec -i paude-my-session %S /custom/path"
 
 
+class TestGitRemoteExists:
+    """Tests for git_remote_exists."""
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_true_when_present(self, mock_run) -> None:
+        """Returns True and queries by exact remote name."""
+        mock_run.return_value.returncode = 0
+
+        assert git_remote_exists("rig-vllm") is True
+        assert mock_run.call_args[0][0] == ["git", "remote", "get-url", "rig-vllm"]
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_false_when_absent(self, mock_run) -> None:
+        """Returns False when the remote is unknown."""
+        mock_run.return_value.returncode = 2
+
+        assert git_remote_exists("rig-vllm") is False
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_forwards_cwd(self, mock_run) -> None:
+        """Existence check runs in the given host repo."""
+        mock_run.return_value.returncode = 0
+
+        git_remote_exists("rig-vllm", cwd=Path("/host/vllm"))
+
+        assert mock_run.call_args.kwargs["cwd"] == Path("/host/vllm")
+
+
+class TestGitRemoteGetUrl:
+    """Tests for git_remote_get_url."""
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_url_when_present(self, mock_run) -> None:
+        """Returns the trimmed URL and queries by exact remote name."""
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "ext::podman exec -i c %S /pvc/workspace\n"
+
+        result = git_remote_get_url("rig-vllm")
+
+        assert result == "ext::podman exec -i c %S /pvc/workspace"
+        assert mock_run.call_args[0][0] == ["git", "remote", "get-url", "rig-vllm"]
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_none_when_absent(self, mock_run) -> None:
+        """Returns None when the remote is unknown."""
+        mock_run.return_value.returncode = 2
+        mock_run.return_value.stdout = ""
+
+        assert git_remote_get_url("rig-vllm") is None
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_returns_none_on_empty_url(self, mock_run) -> None:
+        """Returns None rather than an empty string."""
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "\n"
+
+        assert git_remote_get_url("rig-vllm") is None
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_forwards_cwd(self, mock_run) -> None:
+        """Lookup runs in the given host repo."""
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "url\n"
+
+        git_remote_get_url("rig-vllm", cwd=Path("/host/vllm"))
+
+        assert mock_run.call_args.kwargs["cwd"] == Path("/host/vllm")
+
+
 class TestGitRemoteAdd:
     """Tests for git_remote_add."""
 
@@ -73,6 +145,16 @@ class TestGitRemoteAdd:
             "paude-test",
             "ext::podman exec -i test %S /workspace",
         ]
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_add_forwards_cwd(self, mock_run) -> None:
+        """Remote is added in the given host repo."""
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        git_remote_add("rig-vllm", "ext::...", cwd=Path("/host/vllm"))
+
+        assert mock_run.call_args.kwargs["cwd"] == Path("/host/vllm")
 
     @patch("paude.git_remote.subprocess.run")
     def test_remote_already_exists(self, mock_run) -> None:
@@ -257,6 +339,16 @@ class TestIsExtProtocolAllowed:
 
         assert result is False
 
+    @patch("paude.git_remote.subprocess.run")
+    def test_forwards_cwd(self, mock_run) -> None:
+        """The check runs in the given host repo."""
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "always\n"
+
+        is_ext_protocol_allowed(cwd=Path("/host/vllm"))
+
+        assert mock_run.call_args.kwargs["cwd"] == Path("/host/vllm")
+
 
 class TestEnableExtProtocol:
     """Tests for enable_ext_protocol."""
@@ -281,6 +373,15 @@ class TestEnableExtProtocol:
         result = enable_ext_protocol()
 
         assert result is False
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_forwards_cwd(self, mock_run) -> None:
+        """ext:: is enabled in the given host repo."""
+        mock_run.return_value.returncode = 0
+
+        enable_ext_protocol(cwd=Path("/host/vllm"))
+
+        assert mock_run.call_args.kwargs["cwd"] == Path("/host/vllm")
 
 
 class TestInitializeContainerWorkspacePodman:
@@ -620,6 +721,24 @@ class TestBashCommandBuilders:
         assert "git init -b main" in cmd
         assert "receive.denyCurrentBranch updateInstead" in cmd
         assert "/pvc/workspace" in cmd
+
+    def test_build_workspace_init_cmd_custom_path(self) -> None:
+        """Init command targets a custom container repo path."""
+        cmd = _build_workspace_init_cmd("main", "/pvc/workspace/rigs/vllm")
+        assert "git init -b main /pvc/workspace/rigs/vllm" in cmd
+        assert "git -C /pvc/workspace/rigs/vllm config" in cmd
+
+    def test_build_set_base_ref_cmd(self) -> None:
+        """Base-ref command defaults to the top-level workspace."""
+        cmd = _build_set_base_ref_cmd()
+        assert cmd == "git -C /pvc/workspace update-ref refs/paude/base HEAD"
+
+    def test_build_set_base_ref_cmd_custom_path(self) -> None:
+        """Base-ref command targets a custom container repo path."""
+        cmd = _build_set_base_ref_cmd("/pvc/workspace/rigs/vllm")
+        assert cmd == (
+            "git -C /pvc/workspace/rigs/vllm update-ref refs/paude/base HEAD"
+        )
 
     def test_build_set_origin_cmd(self) -> None:
         """Build set origin command."""
@@ -1203,6 +1322,40 @@ class TestResolveSessionRemote:
         assert transport.host == "user@gpu-server"
         assert transport.port == 2222
         assert transport.key == "/home/user/.ssh/id_ed25519"
+
+    @patch("paude.registry.SessionRegistry")
+    def test_forwards_workspace_path_local(self, mock_registry_class) -> None:
+        """workspace_path selects the container repo path in the local URL."""
+        mock_registry_class.return_value.get.return_value = None
+
+        url, _transport = resolve_session_remote(
+            "my-session",
+            "paude-my-session",
+            "podman",
+            workspace_path="/pvc/workspace/rigs/vllm",
+        )
+
+        assert url == (
+            "ext::podman exec -i paude-my-session %S /pvc/workspace/rigs/vllm"
+        )
+
+    @patch("paude.registry.SessionRegistry")
+    def test_forwards_workspace_path_ssh(self, mock_registry_class) -> None:
+        """workspace_path is threaded into the SSH-wrapped URL too."""
+        mock_registry_class.return_value.get.return_value = MagicMock(
+            ssh_host="user@gpu-server", ssh_key=None
+        )
+
+        url, _transport = resolve_session_remote(
+            "my-session",
+            "paude-my-session",
+            "docker",
+            workspace_path="/pvc/workspace/rigs/vllm",
+        )
+
+        assert url.endswith(
+            "docker exec -i paude-my-session %S /pvc/workspace/rigs/vllm"
+        )
 
 
 class TestExecCmdBuilders:

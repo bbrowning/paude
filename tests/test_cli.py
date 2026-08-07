@@ -954,6 +954,106 @@ class TestRemoteCommand:
         assert "Initializing git repository in container" in output
         mock_init.assert_called_once()
 
+    @patch("paude.cli.remote.find_session_backend")
+    @patch("paude.git_remote.is_git_repository")
+    @patch("paude.git_remote.is_ext_protocol_allowed")
+    @patch("paude.git_remote.is_container_running_podman")
+    @patch("paude.git_remote.initialize_container_workspace")
+    @patch("paude.git_remote.git_remote_add")
+    @patch("paude.git_remote.get_current_branch")
+    def test_remote_add_container_path_and_remote_name(
+        self,
+        mock_branch,
+        mock_add,
+        mock_init,
+        mock_running,
+        mock_ext,
+        mock_is_git,
+        mock_find,
+    ):
+        """--container-path/--remote expose a sub-path under a custom remote name."""
+        mock_is_git.return_value = True
+        mock_ext.return_value = True
+        mock_running.return_value = True
+        mock_init.return_value = True
+        mock_add.return_value = True
+        mock_branch.return_value = "main"
+
+        mock_session = MagicMock()
+        mock_session.name = "test-session"
+        mock_session.backend_type = "podman"
+        mock_backend = MagicMock()
+        mock_backend.get_session.return_value = mock_session
+        mock_find.return_value = (mock_session, mock_backend)
+
+        result = runner.invoke(
+            app,
+            [
+                "remote",
+                "add",
+                "test-session",
+                "--container-path",
+                "/pvc/workspace/rigs/vllm",
+                "--remote",
+                "rig-vllm",
+            ],
+        )
+
+        assert result.exit_code == 0
+        # container name stays paude-<session>; remote name + path are custom
+        mock_add.assert_called_once_with(
+            "rig-vllm",
+            "ext::podman exec -i paude-test-session %S /pvc/workspace/rigs/vllm",
+        )
+        assert mock_init.call_args.kwargs["workspace_path"] == (
+            "/pvc/workspace/rigs/vllm"
+        )
+
+
+class TestHarvestCommand:
+    """Tests for the harvest command CLI wiring."""
+
+    @patch("paude.workflow.harvest_session")
+    def test_harvest_passes_new_flags(self, mock_harvest):
+        """--container-path/--remote/--repo are forwarded to harvest_session."""
+        result = runner.invoke(
+            app,
+            [
+                "harvest",
+                "my-session",
+                "-b",
+                "fix/foo",
+                "--container-path",
+                "/pvc/workspace/rigs/vllm",
+                "--remote",
+                "rig-vllm",
+                "--repo",
+                "/host/vllm",
+            ],
+        )
+
+        assert result.exit_code == 0
+        mock_harvest.assert_called_once_with(
+            session_name="my-session",
+            branch_name="fix/foo",
+            create_pr=False,
+            pr_title=None,
+            container_path="/pvc/workspace/rigs/vllm",
+            remote_name="rig-vllm",
+            repo="/host/vllm",
+        )
+
+    @patch("paude.workflow.harvest_session")
+    def test_harvest_defaults_preserved(self, mock_harvest):
+        """Omitting the new flags keeps the single-repo defaults."""
+        result = runner.invoke(app, ["harvest", "my-session", "-b", "fix/foo"])
+
+        assert result.exit_code == 0
+        _args, kwargs = mock_harvest.call_args
+        assert kwargs["container_path"] == "/pvc/workspace"
+        assert kwargs["remote_name"] is None
+        assert kwargs["repo"] is None
+
 
 def test_subcommand_runs_without_main_execution():
     """Subcommands run without triggering main execution logic."""

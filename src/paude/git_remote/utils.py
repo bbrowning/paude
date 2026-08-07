@@ -44,12 +44,18 @@ def build_ssh_remote_url(
 
 
 def resolve_session_remote(
-    session_name: str, container_name: str, engine: str
+    session_name: str,
+    container_name: str,
+    engine: str,
+    workspace_path: str = CONTAINER_WORKSPACE,
 ) -> tuple[str, Transport | None]:
     """Resolve the git remote URL and transport for a session's container.
 
     SSH-host (--host) sessions get an ext::ssh-wrapped URL and a matching
     transport; local sessions get a plain ext::<engine> exec URL and no transport.
+
+    ``workspace_path`` selects which repo path inside the container the remote
+    points at; it defaults to the session's top-level workspace.
     """
     from paude.registry import SessionRegistry
 
@@ -67,10 +73,18 @@ def resolve_session_remote(
             engine=engine,
             ssh_key=registry_entry.ssh_key,
             ssh_port=ssh_port,
+            workspace_path=workspace_path,
         )
         return remote_url, transport
 
-    return build_podman_remote_url(container_name=container_name, engine=engine), None
+    return (
+        build_podman_remote_url(
+            container_name=container_name,
+            engine=engine,
+            workspace_path=workspace_path,
+        ),
+        None,
+    )
 
 
 def _git_config_value(key: str) -> str | None:
@@ -104,12 +118,13 @@ def resolve_local_git_identity() -> tuple[str | None, str | None]:
     return (_git_config_value("user.name"), _git_config_value("user.email"))
 
 
-def is_ext_protocol_allowed() -> bool:
+def is_ext_protocol_allowed(cwd: Path | None = None) -> bool:
     """Check if git ext:: protocol is allowed."""
     result = subprocess.run(
         ["git", "config", "--get", "protocol.ext.allow"],
         capture_output=True,
         text=True,
+        cwd=cwd,
     )
     if result.returncode == 0:
         value = result.stdout.strip().lower()
@@ -117,22 +132,24 @@ def is_ext_protocol_allowed() -> bool:
     return False
 
 
-def enable_ext_protocol() -> bool:
+def enable_ext_protocol(cwd: Path | None = None) -> bool:
     """Enable git ext:: protocol for the current repository."""
     result = subprocess.run(
         ["git", "config", "protocol.ext.allow", "always"],
         capture_output=True,
         text=True,
+        cwd=cwd,
     )
     return result.returncode == 0
 
 
-def git_remote_add(remote_name: str, remote_url: str) -> bool:
+def git_remote_add(remote_name: str, remote_url: str, cwd: Path | None = None) -> bool:
     """Add a git remote."""
     result = subprocess.run(
         ["git", "remote", "add", remote_name, remote_url],
         capture_output=True,
         text=True,
+        cwd=cwd,
     )
 
     if result.returncode != 0:
@@ -147,6 +164,30 @@ def git_remote_add(remote_name: str, remote_url: str) -> bool:
         return False
 
     return True
+
+
+def git_remote_exists(remote_name: str, cwd: Path | None = None) -> bool:
+    """Check whether a git remote with the given name exists."""
+    result = subprocess.run(
+        ["git", "remote", "get-url", remote_name],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+    )
+    return result.returncode == 0
+
+
+def git_remote_get_url(remote_name: str, cwd: Path | None = None) -> str | None:
+    """Return a git remote's URL, or None if it doesn't exist or can't be read."""
+    result = subprocess.run(
+        ["git", "remote", "get-url", remote_name],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
 
 
 def git_remote_remove(remote_name: str, cwd: Path | None = None) -> bool:

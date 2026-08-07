@@ -7,6 +7,7 @@ import shlex
 import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import typer
 
@@ -63,46 +64,123 @@ def _find_backend_and_session(
     return backend_type, backend, session
 
 
-def _ensure_remote_exists(session_name: str, backend_type: str) -> str:
-    """Ensure a paude git remote exists, auto-adding if needed."""
+def _remote_targets_container_path(remote_url: str, container_path: str) -> bool:
+    """Whether a paude ext:: remote URL points at ``container_path``.
+
+    paude remote URLs end with ``%S <container_path>``, so the container path is
+    the final whitespace-delimited token. URLs without the ``%S`` marker are not
+    paude ext:: remotes; treat those as a match so a manually configured remote
+    isn't blocked.
+    """
+    if "%S " not in remote_url:
+        return True
+    return remote_url.rsplit(" ", 1)[-1] == container_path
+
+
+def _ensure_remote_exists(
+    session_name: str,
+    backend_type: str,
+    remote_name: str | None = None,
+    container_path: str = CONTAINER_WORKSPACE,
+    cwd: Path | None = None,
+) -> str:
+    """Ensure a git remote exists in ``cwd``, auto-adding if needed.
+
+    ``remote_name`` defaults to ``paude-<session>``; ``container_path`` selects
+    which repo path inside the container the remote points at. The container name
+    is always ``paude-<session>`` regardless of the remote name.
+
+    If a remote by the resolved name already exists but points at a different
+    container path than requested, raise typer.Exit rather than silently
+    harvesting the wrong repo (the default remote name does not encode the path).
+    """
     from paude.cli.remote_git_setup import _prepare_session_git_remote
     from paude.git_remote import (
         enable_ext_protocol,
         git_remote_add,
+        git_remote_exists,
+        git_remote_get_url,
         is_ext_protocol_allowed,
-        list_paude_remotes,
     )
 
-    remote_name = resource_name(session_name)
+    container_name = resource_name(session_name)
+    resolved_remote = remote_name or container_name
 
-    for name, _url in list_paude_remotes():
-        if name == remote_name:
-            return remote_name
+    if git_remote_exists(resolved_remote, cwd=cwd):
+        existing_url = git_remote_get_url(resolved_remote, cwd=cwd)
+        if existing_url and not _remote_targets_container_path(
+            existing_url, container_path
+        ):
+            typer.echo(
+                f"Error: Remote '{resolved_remote}' already exists but points at "
+                f"a different container path than '{container_path}'.",
+                err=True,
+            )
+            typer.echo(f"  Existing remote: {existing_url}", err=True)
+            typer.echo(
+                "  Use --remote to pick a distinct remote name, or remove the "
+                "existing remote first.",
+                err=True,
+            )
+            raise typer.Exit(1)
+        return resolved_remote
 
-    typer.echo(f"Adding git remote '{remote_name}'...", err=True)
+    typer.echo(f"Adding git remote '{resolved_remote}'...", err=True)
 
-    if not is_ext_protocol_allowed():
-        if not enable_ext_protocol():
+    if not is_ext_protocol_allowed(cwd=cwd):
+        if not enable_ext_protocol(cwd=cwd):
             typer.echo("Error: Failed to enable git ext:: protocol.", err=True)
             raise typer.Exit(1)
 
     engine = engine_binary_for_backend(backend_type)
     remote_url, _transport = _prepare_session_git_remote(
-        session_name, remote_name, engine
+        session_name, container_name, engine, workspace_path=container_path
     )
 
-    if not git_remote_add(remote_name, remote_url):
-        typer.echo(f"Error: Failed to add remote '{remote_name}'.", err=True)
+    if not git_remote_add(resolved_remote, remote_url, cwd=cwd):
+        typer.echo(f"Error: Failed to add remote '{resolved_remote}'.", err=True)
         raise typer.Exit(1)
 
-    return remote_name
+    return resolved_remote
 
 
-def _get_container_branch(backend: Backend, session_name: str) -> str:
+def _verify_container_repo(
+    backend: Backend,
+    session_name: str,
+    container_path: str,
+) -> None:
+    """Ensure ``container_path`` is an existing git repo, else exit with an error.
+
+    Harvest reads from a repo the agent already created; without this guard a
+    mistyped ``--container-path`` would fall through to the workspace-init
+    ``git init`` and silently create a stray empty repo at the wrong path, then
+    fail later with a confusing ref error.
+    """
+    rc, _stdout, _stderr = backend.exec_in_session(
+        session_name,
+        f"git -C {shlex.quote(container_path)} rev-parse --is-inside-work-tree",
+    )
+    if rc != 0:
+        typer.echo(
+            f"Error: No git repository found at container path '{container_path}'.",
+            err=True,
+        )
+        typer.echo(
+            "  Check that the path is correct and the container is running.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+
+def _get_container_branch(
+    backend: Backend,
+    session_name: str,
+    container_path: str = CONTAINER_WORKSPACE,
+) -> str:
     """Query the current branch inside a session's container."""
     rc, stdout, stderr = backend.exec_in_session(
         session_name,
-        "git -C /pvc/workspace rev-parse --abbrev-ref HEAD",
+        f"git -C {shlex.quote(container_path)} rev-parse --abbrev-ref HEAD",
     )
     if rc != 0:
         typer.echo(
@@ -118,15 +196,24 @@ def harvest_session(
     branch_name: str,
     create_pr: bool = False,
     pr_title: str | None = None,
+    container_path: str = CONTAINER_WORKSPACE,
+    remote_name: str | None = None,
+    repo: str | None = None,
 ) -> None:
-    """Harvest changes from a running session into a local branch."""
+    """Harvest changes from a running session into a local branch.
+
+    ``container_path`` selects which repo path inside the container to harvest
+    from, ``remote_name`` the git remote to use, and ``repo`` the host repo to
+    harvest into. All default to the single-repo behavior (the session's
+    ``/pvc/workspace`` and recorded host workspace).
+    """
     from paude.git_remote import git_diff_stat, git_fetch_from_remote
 
     _validate_harvest_branch(branch_name)
 
     backend_type, backend, session = _find_backend_and_session(session_name)
 
-    workspace = session.workspace
+    workspace = Path(repo).expanduser().resolve() if repo else session.workspace
     if not (workspace / ".git").is_dir():
         typer.echo(
             f"Error: Workspace '{workspace}' is not a git repository "
@@ -135,9 +222,17 @@ def harvest_session(
         )
         raise typer.Exit(1)
 
-    remote_name = _ensure_remote_exists(session_name, backend_type)
+    _verify_container_repo(backend, session_name, container_path)
 
-    container_branch = _get_container_branch(backend, session_name)
+    remote_name = _ensure_remote_exists(
+        session_name,
+        backend_type,
+        remote_name=remote_name,
+        container_path=container_path,
+        cwd=workspace,
+    )
+
+    container_branch = _get_container_branch(backend, session_name, container_path)
     typer.echo(f"Container is on branch '{container_branch}'.", err=True)
 
     typer.echo(f"Fetching from '{remote_name}'...", err=True)

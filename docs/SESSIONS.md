@@ -168,3 +168,12 @@ paude remote remove my-project
 # Remove remotes whose sessions no longer exist
 paude remote cleanup
 ```
+
+By default a session exposes one repo at `/pvc/workspace` as the `paude-<session>` remote. If a container holds more than one git repo, point additional remotes at their sub-paths with `--container-path` and give each a distinct `--remote` name:
+
+```bash
+paude remote add my-project --container-path /pvc/workspace/repos/api --remote rig-api
+git -C ~/src/api fetch rig-api
+```
+
+Use a non-`paude-` remote name (as above) so `paude remote cleanup` doesn't remove it. See [Orchestration](ORCHESTRATION.md) for harvesting these sub-path repos.

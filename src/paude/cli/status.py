@@ -7,6 +7,7 @@ from typing import Annotated
 import typer
 
 from paude.cli.app import app
+from paude.constants import CONTAINER_WORKSPACE
 
 
 @app.command("status")
@@ -71,6 +72,33 @@ def harvest_cmd(
         str | None,
         typer.Option("--pr-title", help="PR title (defaults to branch name)."),
     ] = None,
+    container_path: Annotated[
+        str,
+        typer.Option(
+            "--container-path",
+            help=(
+                "Path of the repo inside the container to harvest from "
+                "(default: the session workspace)."
+            ),
+        ),
+    ] = CONTAINER_WORKSPACE,
+    remote: Annotated[
+        str | None,
+        typer.Option(
+            "--remote",
+            help="Git remote name to use (default: paude-<session>).",
+        ),
+    ] = None,
+    repo: Annotated[
+        str | None,
+        typer.Option(
+            "--repo",
+            help=(
+                "Host git repo to harvest into "
+                "(default: the session's recorded workspace)."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Harvest changes from a running session into a local branch."""
     from paude.workflow import harvest_session
@@ -80,4 +108,7 @@ def harvest_cmd(
         branch_name=branch,
         create_pr=pr,
         pr_title=pr_title,
+        container_path=container_path,
+        remote_name=remote,
+        repo=repo,
     )
