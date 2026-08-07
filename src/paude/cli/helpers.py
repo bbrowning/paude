@@ -356,6 +356,25 @@ def _prepare_session_create(
         if hostname not in expanded_domains:
             expanded_domains.append(hostname)
 
+    # Resolve the host user's git identity so commits inside the container are
+    # attributed correctly. Copying ~/.gitconfig alone misses identities kept
+    # in XDG/system config or includeIf sections, so resolve it via git config
+    # and pass it as env for the entrypoint to apply when the config lacks one.
+    from paude.git_remote import resolve_local_git_identity
+
+    git_name, git_email = resolve_local_git_identity()
+    if git_name:
+        env["PAUDE_GIT_USER_NAME"] = git_name
+    if git_email:
+        env["PAUDE_GIT_USER_EMAIL"] = git_email
+    if not git_name and not git_email:
+        typer.echo(
+            "WARNING: No git identity found on the host. Commits inside the "
+            "container will fail until you set user.name and user.email "
+            "(git config --global user.name/user.email).",
+            err=True,
+        )
+
     unrestricted = is_unrestricted(expanded_domains)
 
     # Show warnings for dangerous configurations

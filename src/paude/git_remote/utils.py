@@ -73,6 +73,37 @@ def resolve_session_remote(
     return build_podman_remote_url(container_name=container_name, engine=engine), None
 
 
+def _git_config_value(key: str) -> str | None:
+    """Return a local git config value, or None if unset/unavailable."""
+    try:
+        result = subprocess.run(
+            ["git", "config", "--get", key],
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    value = result.stdout.strip()
+    return value or None
+
+
+def resolve_local_git_identity() -> tuple[str | None, str | None]:
+    """Resolve the local user's effective git identity.
+
+    Runs ``git config --get user.name``/``user.email`` on the machine paude
+    is invoked on, honoring every config source (global, XDG, system, and
+    conditional ``includeIf`` sections). This is intentionally not run through
+    the transport: even for ``--host`` sessions the identity should come from
+    the user running paude, not the remote host.
+
+    Returns a ``(name, email)`` tuple; either element is ``None`` when unset or
+    when git is unavailable. Never raises.
+    """
+    return (_git_config_value("user.name"), _git_config_value("user.email"))
+
+
 def is_ext_protocol_allowed() -> bool:
     """Check if git ext:: protocol is allowed."""
     result = subprocess.run(

@@ -1779,3 +1779,65 @@ class TestRunSetupCommand:
 
         captured = capsys.readouterr()
         assert "setup command failed (exit 1)" in captured.err
+
+
+class TestPrepareSessionCreateGitIdentity:
+    """Git identity is resolved and injected during pre-create."""
+
+    @patch(
+        "paude.git_remote.resolve_local_git_identity",
+        return_value=("Ada Lovelace", "ada@example.com"),
+    )
+    def test_injects_identity_env(self, mock_resolve):
+        """Resolved identity is passed to the container as env vars."""
+        from paude.cli.helpers import _prepare_session_create
+
+        _domains, _args, env, _unrestricted = _prepare_session_create(
+            allowed_domains=None,
+            yolo=False,
+            claude_args=None,
+            config_obj=None,
+        )
+
+        assert env["PAUDE_GIT_USER_NAME"] == "Ada Lovelace"
+        assert env["PAUDE_GIT_USER_EMAIL"] == "ada@example.com"
+
+    @patch(
+        "paude.git_remote.resolve_local_git_identity",
+        return_value=(None, None),
+    )
+    def test_warns_and_omits_when_no_identity(self, mock_resolve, capsys):
+        """No identity: env vars are omitted and a warning is printed."""
+        from paude.cli.helpers import _prepare_session_create
+
+        _domains, _args, env, _unrestricted = _prepare_session_create(
+            allowed_domains=None,
+            yolo=False,
+            claude_args=None,
+            config_obj=None,
+        )
+
+        assert "PAUDE_GIT_USER_NAME" not in env
+        assert "PAUDE_GIT_USER_EMAIL" not in env
+        captured = capsys.readouterr()
+        assert "No git identity found" in captured.err
+
+    @patch(
+        "paude.git_remote.resolve_local_git_identity",
+        return_value=("Ada Lovelace", None),
+    )
+    def test_partial_identity_sets_only_known_field(self, mock_resolve, capsys):
+        """A name with no email sets only the name and does not warn."""
+        from paude.cli.helpers import _prepare_session_create
+
+        _domains, _args, env, _unrestricted = _prepare_session_create(
+            allowed_domains=None,
+            yolo=False,
+            claude_args=None,
+            config_obj=None,
+        )
+
+        assert env["PAUDE_GIT_USER_NAME"] == "Ada Lovelace"
+        assert "PAUDE_GIT_USER_EMAIL" not in env
+        captured = capsys.readouterr()
+        assert "No git identity found" not in captured.err

@@ -107,7 +107,43 @@ GitHub's GraphQL API uses POST for ALL operations, including reads (`gh pr list`
 
 Consider making this diagnostic durable — e.g. write it to a log file under `$HOME` that survives `clear`, or print it after `clear` runs, or fail loudly instead of silently falling back — so any future recurrence of this class of bug is diagnosable from the user's own terminal instead of requiring a live `podman exec` investigation.
 
+### RUNTIME-002: Remote config transfer failures silently degrade to empty mounts
+
+**Status**: Open
+**Priority**: Low
+**Discovered**: 2026-08-06 while fixing the missing git-identity bug for `--host` sessions
+
+In `src/paude/transport/config_sync.py`, `sync_configs_to_remote()` skips any
+source whose `_transfer_path()` returns `False` (missing local file or a failed
+`ssh cat`/`tar` pipe) — it simply never adds that source to `path_map`
+(config_sync.py:141-142). `remap_mounts()` then only rewrites entries present in
+`path_map` (config_sync.py:166), so a source that failed to transfer keeps its
+**local** path in the `-v` mount spec. On the remote host that path usually does
+not exist, and podman/Docker auto-creates an empty directory there when binding
+the mount, with no error. The result is a silent degradation: e.g. a gitconfig
+that failed to transfer becomes an empty bind mount and the user sees a missing
+identity/config downstream rather than a transfer error. The git-identity fix
+(resolve on host, inject `PAUDE_GIT_USER_NAME`/`EMAIL` env, fill in the
+entrypoint) makes identity robust to this specific case, but the general
+silent-degradation path remains. Consider surfacing a warning when a mount
+source that existed locally fails to transfer, or when a remapped source is
+missing on the remote.
+
 ## Test Suite
+
+### TEST-002: Single-file branch of `_transfer_path` is untested
+
+**Status**: Open
+**Priority**: Low
+**Discovered**: 2026-08-06 while fixing the missing git-identity bug for `--host` sessions
+
+`tests/test_config_sync.py`'s `TestTransferPath` only exercises the directory
+branch of `_transfer_path()` (`src/paude/transport/config_sync.py:72-96`, the
+`tar | ssh tar` pipe). The single-file branch (config_sync.py:62-71, which reads
+the file and pipes it through `ssh -- cat > remote_path`) has no coverage —
+notably the path most relevant to gitconfig syncing, since `~/.gitconfig` is a
+single file. Add a test that transfers a single file and asserts the correct
+`ssh … cat > remote_path` invocation and return value on success/failure.
 
 ### TEST-001: `test_proxy_shuts_down_on_sigterm` is flaky under full-suite load
 
@@ -172,3 +208,4 @@ Note: README's agent table/examples were not re-audited as part of the 2026-07-3
 **Discovered**: 2026-07-31 during docs/ audit (`docs/CONFIGURATION.md`)
 
 Gas City no longer contributes a standalone alias. Its resolved child-agent composition contributes the Claude/Gemini domains when those children are installed.
+
