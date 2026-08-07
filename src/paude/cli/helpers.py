@@ -25,6 +25,8 @@ if TYPE_CHECKING:
 def find_session_backend(
     session_name: str,
     connect_timeout: int | None = None,
+    *,
+    allow_offline: bool = False,
 ) -> tuple[BackendType, Backend] | None:
     """Find which backend contains the given session.
 
@@ -33,6 +35,10 @@ def find_session_backend(
 
     Args:
         session_name: Name of the session to find.
+        connect_timeout: Optional SSH connect timeout.
+        allow_offline: When True and the session can't be discovered live
+            (e.g. its container was removed mid-upgrade), reconstruct the
+            backend from the registry entry instead of returning None.
     Returns:
         Tuple of (backend_type, backend_instance) if found, None otherwise.
         The backend instance uses either Podman or Docker.
@@ -62,6 +68,21 @@ def find_session_backend(
             return (BackendType.docker, docker)
     except Exception:  # noqa: S110 - Docker may not be available
         pass
+
+    # Not discoverable live — rebuild from the registry entry if allowed. A
+    # malformed entry (unknown engine, unparseable ssh_host) must not escape as
+    # a traceback: honor the documented "returns None otherwise" contract.
+    if allow_offline and entry is not None:
+        try:
+            bt = BackendType(entry.engine)
+            return (
+                bt,
+                _get_backend_instance(
+                    bt, ssh_host=entry.ssh_host, ssh_key=entry.ssh_key
+                ),
+            )
+        except Exception:
+            return None
 
     return None
 

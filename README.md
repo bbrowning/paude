@@ -188,7 +188,10 @@ paude upgrade SESSION
 ```
 
 The command performs a fresh build with the latest stable agent tooling and
-migrates state from older containers before replacing them. See
+migrates state from older containers before replacing them. Upgrades are
+crash-safe: your `/pvc` data volume is reused in place and never removed, and if
+an upgrade is interrupted (e.g. `Ctrl-C`) you can simply re-run
+`paude upgrade SESSION` to finish it. See
 [Session Management](docs/SESSIONS.md) for the per-agent persistence paths.
 
 ### Your First Session

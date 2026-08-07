@@ -77,6 +77,27 @@ mutable state in addition to `/pvc/workspace`.
 The legacy `--rebuild` option is still accepted for compatibility, but is no
 longer necessary because upgrades always rebuild.
 
+### Crash-safe, resumable upgrades
+
+`upgrade` is safe to interrupt. Before tearing down the old container, it
+records the session's fully-resolved configuration to a durable manifest on the
+local host (`~/.config/paude/upgrades.json`, next to the session registry). The
+session's `/pvc` data volume is reused in place and never removed during an
+upgrade, so your workspace and agent state are never at risk.
+
+If an upgrade is interrupted (e.g. `Ctrl-C`) or fails part-way, the manifest is
+left in place and your data is intact. Simply re-run the same command to finish
+it:
+
+```bash
+paude upgrade SESSION   # resumes and completes an interrupted upgrade
+```
+
+Resuming works even if the old container was already removed (the config is
+read from the manifest instead of the container's labels) and for both local
+and remote/SSH sessions (the manifest always lives on the local host). The
+manifest is deleted automatically once the upgrade succeeds.
+
 ### Persisted agent state
 
 | Agent | PVC-backed home paths |
