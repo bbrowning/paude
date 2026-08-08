@@ -136,6 +136,25 @@ Pass `--provider openai` to use the plain `OPENAI_API_KEY` provider instead
 — no ChatGPT plan, no proxy-managed auth. The default Codex network policy
 allows `chatgpt.com` and `auth.openai.com` for the ChatGPT API and OAuth
 exchange.
+
+You can also switch an **existing** session's Codex auth in place with
+`paude upgrade` — no need to recreate it. Use `--agent-provider` to remap
+Codex's provider (or `--provider` if Codex is the session's primary agent):
+
+```bash
+# Swap Codex from ChatGPT-plan OAuth to the OpenAI API key
+export OPENAI_API_KEY=your-api-key
+paude upgrade my-project --agent-provider codex=openai
+```
+
+Export `OPENAI_API_KEY` **before** upgrading: it is read from your host
+environment and injected into the session's proxy (the same key must be present
+on later `start`/`connect`). The upgrade drops the `chatgpt` credential
+provider, clears the old ChatGPT `auth.json`, and reconfigures Codex's
+`config.toml` for the OpenAI API. To go back, run
+`paude upgrade my-project --agent-provider codex=chatgpt` and `codex login`
+inside the session again.
+
 Paude merges the required HTTP/SSE provider settings into the session's
 persistent Codex `config.toml` because the local MITM proxy does not support
 the Responses WebSocket transport. Existing model, MCP, project trust, and
@@ -191,7 +210,8 @@ The command performs a fresh build with the latest stable agent tooling and
 migrates state from older containers before replacing them. Upgrades are
 crash-safe: your `/pvc` data volume is reused in place and never removed, and if
 an upgrade is interrupted (e.g. `Ctrl-C`) you can simply re-run
-`paude upgrade SESSION` to finish it. See
+`paude upgrade SESSION` to finish it. `upgrade` can also add an agent to an
+existing session in place, e.g. `paude upgrade SESSION --add-agent codex`. See
 [Session Management](docs/SESSIONS.md) for the per-agent persistence paths.
 
 ### Your First Session

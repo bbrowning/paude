@@ -52,6 +52,10 @@ _SECTIONS: tuple[HelpSection, ...] = (
                 "paude upgrade NAME",
                 "Refresh agent tooling, preserving data; resumable if interrupted",
             ),
+            (
+                "paude upgrade NAME --add-agent codex",
+                "Add an agent to an existing session (preserves data)",
+            ),
             ("paude delete NAME --confirm", "Delete session permanently"),
             ("paude delete NAME --confirm --force", "Remove from local config only"),
         ),

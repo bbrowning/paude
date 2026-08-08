@@ -12,10 +12,12 @@ from typer.testing import CliRunner
 from paude.backends.base import Session
 from paude.backends.labels import (
     PAUDE_LABEL_AGENT,
+    PAUDE_LABEL_AGENT_PROVIDERS,
     PAUDE_LABEL_CREATED,
     PAUDE_LABEL_DOMAINS,
     PAUDE_LABEL_GPU,
     PAUDE_LABEL_OTEL_ENDPOINT,
+    PAUDE_LABEL_PROVIDERS,
     PAUDE_LABEL_PROXY_IMAGE,
     PAUDE_LABEL_SESSION,
     PAUDE_LABEL_WORKSPACE,
@@ -160,6 +162,152 @@ class TestUpgradeCommand:
             "claude": "anthropic",
             "codex": "openai",
         }
+
+    def _mock_podman_backend(self, mock_find: MagicMock) -> MagicMock:
+        """Wire find_session_backend to return a stopped 0.1.0 podman session."""
+        from paude.backends.podman.backend import PodmanBackend
+
+        backend = MagicMock()
+        backend.get_session.return_value = _make_session(
+            "test-session", version="0.1.0"
+        )
+        backend.__class__ = PodmanBackend
+        mock_find.return_value = ("podman", backend)
+        return backend
+
+    @patch("paude.cli.upgrade._upgrade_podman")
+    @patch("paude.cli.upgrade.find_session_backend")
+    def test_upgrade_add_agent_sets_override(
+        self, mock_find: MagicMock, mock_upgrade_podman: MagicMock
+    ) -> None:
+        self._mock_podman_backend(mock_find)
+
+        result = runner.invoke(app, ["upgrade", "test-session", "--add-agent", "codex"])
+
+        assert result.exit_code == 0
+        overrides = mock_upgrade_podman.call_args.args[3]
+        assert overrides.add_agents == ["codex"]
+        assert overrides.agents is None
+
+    @patch("paude.cli.upgrade._upgrade_podman")
+    @patch("paude.cli.upgrade.find_session_backend")
+    def test_upgrade_add_agent_comma_and_repeatable(
+        self, mock_find: MagicMock, mock_upgrade_podman: MagicMock
+    ) -> None:
+        self._mock_podman_backend(mock_find)
+
+        result = runner.invoke(
+            app,
+            ["upgrade", "test-session", "--add-agent", "codex,cursor"],
+        )
+        assert result.exit_code == 0
+        assert mock_upgrade_podman.call_args.args[3].add_agents == ["codex", "cursor"]
+
+        result = runner.invoke(
+            app,
+            [
+                "upgrade",
+                "test-session",
+                "--add-agent",
+                "codex",
+                "--add-agent",
+                "cursor",
+            ],
+        )
+        assert result.exit_code == 0
+        assert mock_upgrade_podman.call_args.args[3].add_agents == ["codex", "cursor"]
+
+    @patch("paude.cli.upgrade._upgrade_podman")
+    @patch("paude.cli.upgrade.find_session_backend")
+    def test_upgrade_agents_full_set_and_agent_alias(
+        self, mock_find: MagicMock, mock_upgrade_podman: MagicMock
+    ) -> None:
+        self._mock_podman_backend(mock_find)
+
+        result = runner.invoke(
+            app, ["upgrade", "test-session", "--agents", "claude,codex"]
+        )
+        assert result.exit_code == 0
+        assert mock_upgrade_podman.call_args.args[3].agents == ["claude", "codex"]
+
+        result = runner.invoke(app, ["upgrade", "test-session", "--agent", "codex"])
+        assert result.exit_code == 0
+        assert mock_upgrade_podman.call_args.args[3].agents == ["codex"]
+
+    def test_upgrade_add_agent_conflicts_with_agents(self) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "upgrade",
+                "test-session",
+                "--add-agent",
+                "codex",
+                "--agents",
+                "claude,codex",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "--add-agent or --agent/--agents" in result.output
+
+    def test_upgrade_agent_conflicts_with_agents(self) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "upgrade",
+                "test-session",
+                "--agent",
+                "claude",
+                "--agents",
+                "claude,codex",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "--agent or --agents" in result.output
+
+    @patch("paude.cli.upgrade._upgrade_podman")
+    @patch("paude.cli.upgrade.find_session_backend")
+    def test_upgrade_unknown_add_agent_fails_before_stop(
+        self, mock_find: MagicMock, mock_upgrade_podman: MagicMock
+    ) -> None:
+        """A typo'd agent name is rejected before the container is stopped."""
+        mock_backend = MagicMock()
+        mock_backend.get_session.return_value = _make_session(
+            "test-session", status="running", version="0.1.0"
+        )
+        from paude.backends.podman.backend import PodmanBackend
+
+        mock_backend.__class__ = PodmanBackend
+        mock_find.return_value = ("podman", mock_backend)
+
+        result = runner.invoke(
+            app, ["upgrade", "test-session", "--add-agent", "coddex"]
+        )
+
+        assert result.exit_code == 1
+        assert "Unknown agent" in result.output
+        # The running session must not be torn down for an obvious typo.
+        mock_backend.stop_session.assert_not_called()
+        mock_upgrade_podman.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("extra_args", "expected"),
+        [
+            (["--add-agent", "coddex"], "Unknown agent"),
+            (["--agents", "claude,bogus"], "Unknown agent"),
+            (["--agent", "nope"], "Unknown agent"),
+            (["--provider", "nope"], "Unknown provider"),
+            (["--providers", "nope"], "Unknown provider"),
+            (["--agent-provider", "claude=nope"], "Unknown provider"),
+        ],
+    )
+    def test_upgrade_rejects_unknown_names(
+        self, extra_args: list[str], expected: str
+    ) -> None:
+        """Unknown agent/provider names fail fast with a clear message."""
+        result = runner.invoke(app, ["upgrade", "test-session", *extra_args])
+
+        assert result.exit_code == 1
+        assert expected in result.output
 
 
 class TestUpgradePodman:
@@ -1120,6 +1268,14 @@ class TestUpgradeOverrides:
         overrides = UpgradeOverrides(gpu="")
         assert overrides.has_changes() is True
 
+    def test_has_changes_add_agents(self) -> None:
+        overrides = UpgradeOverrides(add_agents=["codex"])
+        assert overrides.has_changes() is True
+
+    def test_has_changes_agents(self) -> None:
+        overrides = UpgradeOverrides(agents=["claude", "codex"])
+        assert overrides.has_changes() is True
+
 
 class TestUpgradePodmanWithOverrides:
     """Tests for _upgrade_podman with config overrides."""
@@ -1348,3 +1504,202 @@ class TestUpgradePodmanWithOverrides:
 
         config = backend.create_session.call_args[0][0]
         assert config.gpu is None
+
+
+class TestUpgradePodmanAddAgent:
+    """Tests for _upgrade_podman agent-set and provider mutation.
+
+    Covers ``--add-agent`` / ``--agents`` (agent-set changes) and
+    ``--provider`` / ``--agent-provider`` (provider swaps) on an existing
+    session, exercised through a single mocked ``_upgrade_podman`` harness.
+    """
+
+    def _labels(
+        self,
+        specs: list[tuple[str, str]] | None = None,
+        agent: str = "claude",
+        providers: list[str] | None = None,
+    ) -> dict[str, str]:
+        """Container labels for a session, optionally with a full composition.
+
+        ``providers`` seeds the credential-provider label (used to model a
+        provider that is provisioned for the session but not mapped to any agent).
+        """
+        from paude.backends.podman.helpers import (
+            encode_agent_providers,
+            encode_providers,
+        )
+
+        labels: dict[str, str] = {
+            PAUDE_LABEL_AGENT: agent,
+            PAUDE_LABEL_WORKSPACE: encode_path(
+                Path("/home/user/project"), url_safe=True
+            ),
+            PAUDE_LABEL_SESSION: "test-session",
+            PAUDE_LABEL_CREATED: "2026-01-01T00:00:00+00:00",
+        }
+        if specs is not None:
+            labels[PAUDE_LABEL_AGENT_PROVIDERS] = encode_agent_providers(specs)
+        if providers is not None:
+            labels[PAUDE_LABEL_PROVIDERS] = encode_providers(providers)
+        return labels
+
+    def _run(self, labels: dict[str, str], overrides: UpgradeOverrides) -> object:
+        """Run _upgrade_podman with all I/O mocked; return the created config."""
+        from paude.backends.podman.backend import PodmanBackend
+        from paude.cli.upgrade import _upgrade_podman
+
+        with (
+            patch("paude.mounts.build_mounts", return_value=[]),
+            patch(
+                "paude.cli.helpers._prepare_session_create",
+                return_value=([], [], {}, False),
+            ),
+            patch("paude.container.ImageManager") as mock_image_manager_class,
+            patch("paude.config.detector.detect_config", return_value=None),
+            patch(
+                "paude.backends.podman.helpers.find_container_by_session_name",
+                return_value={"Labels": labels},
+            ),
+        ):
+            mock_image_manager = MagicMock()
+            mock_image_manager.ensure_default_image.return_value = "paude:latest"
+            mock_image_manager.ensure_proxy_image.return_value = "proxy:latest"
+            mock_image_manager_class.return_value = mock_image_manager
+
+            backend = MagicMock(spec=PodmanBackend)
+            backend._runner = MagicMock()
+            backend._runner.container_exists.return_value = False
+            backend._network_manager = MagicMock()
+            backend._volume_manager = MagicMock()
+            backend._engine = MagicMock()
+
+            _upgrade_podman("test-session", backend, rebuild=False, overrides=overrides)
+            return backend.create_session.call_args[0][0]
+
+    def test_add_agent_merges_composition_preserves_primary(self) -> None:
+        """--add-agent codex appends codex, keeping claude primary."""
+        config = self._run(self._labels(), UpgradeOverrides(add_agents=["codex"]))
+
+        assert config.agent == "claude"
+        assert config.agent_providers == [("claude", "vertex"), ("codex", "chatgpt")]
+        # The new agent's provider is unioned onto the existing credential set.
+        assert "vertex" in config.credential_providers
+        assert "chatgpt" in config.credential_providers
+
+    def test_add_agent_derives_provider_override(self) -> None:
+        """--agent-provider selects the added agent's provider."""
+        config = self._run(
+            self._labels(),
+            UpgradeOverrides(add_agents=["codex"], agent_providers={"codex": "openai"}),
+        )
+
+        assert ("codex", "openai") in config.agent_providers
+        assert "openai" in config.credential_providers
+
+    def test_add_existing_agent_is_noop(self) -> None:
+        """Re-adding the primary agent does not duplicate it."""
+        config = self._run(self._labels(), UpgradeOverrides(add_agents=["claude"]))
+
+        assert config.agent_providers == [("claude", "vertex")]
+
+    def test_add_agent_with_mapping_preserves_unmapped_credential(self) -> None:
+        """--add-agent X --agent-provider X=P keeps credential-only providers.
+
+        Regression: the combined add+remap workflow used to take the pure-remap
+        branch and replace the credential set with only the mapped providers,
+        silently dropping a provider that was provisioned but not mapped to any
+        agent. It must union like a bare --add-agent instead.
+        """
+        config = self._run(
+            # claude->vertex is mapped; openai is provisioned but unmapped.
+            self._labels([("claude", "vertex")], providers=["vertex", "openai"]),
+            UpgradeOverrides(
+                add_agents=["gemini"], agent_providers={"gemini": "google"}
+            ),
+        )
+
+        assert ("gemini", "google") in config.agent_providers
+        assert "google" in config.credential_providers
+        assert "vertex" in config.credential_providers
+        # The unmapped, deliberately-provisioned provider survives.
+        assert "openai" in config.credential_providers
+
+    def test_add_agent_invalid_provider_rejected(self) -> None:
+        """An unsupported agent/provider combo raises a friendly error."""
+        with pytest.raises(ValueError, match="does not support provider"):
+            self._run(
+                self._labels(),
+                UpgradeOverrides(
+                    add_agents=["codex"], agent_providers={"codex": "vertex"}
+                ),
+            )
+
+    def test_agent_provider_without_add_still_rejects_uninstalled(self) -> None:
+        """--agent-provider for an agent that is neither installed nor added fails."""
+        with pytest.raises(ValueError, match="are not installed"):
+            self._run(
+                self._labels(),
+                UpgradeOverrides(agent_providers={"codex": "openai"}),
+            )
+
+    def test_agents_full_set_reorder_changes_primary(self) -> None:
+        """--agents can reorder an existing set to change the primary."""
+        config = self._run(
+            self._labels([("claude", "vertex"), ("codex", "chatgpt")]),
+            UpgradeOverrides(agents=["codex", "claude"]),
+        )
+
+        assert config.agent == "codex"
+        assert config.agent_providers == [("codex", "chatgpt"), ("claude", "vertex")]
+
+    def test_agents_dropping_installed_agent_rejected(self) -> None:
+        """--agents that omits an installed agent is rejected (removal deferred)."""
+        with pytest.raises(ValueError, match="Removing agents is not yet supported"):
+            self._run(
+                self._labels([("claude", "vertex"), ("codex", "chatgpt")]),
+                UpgradeOverrides(agents=["codex"]),
+            )
+
+    def test_add_agent_round_trips_through_manifest(self) -> None:
+        """The merged agent set is captured in the crash-recovery manifest."""
+        from paude import upgrade_state
+
+        self._run(self._labels(), UpgradeOverrides(add_agents=["codex"]))
+
+        manifest = upgrade_state.load("test-session")
+        assert manifest is not None
+        assert manifest.agent_providers == [("claude", "vertex"), ("codex", "chatgpt")]
+
+    @pytest.mark.parametrize(
+        ("old", "new"), [("chatgpt", "openai"), ("openai", "chatgpt")]
+    )
+    def test_swap_codex_provider_in_place(self, old: str, new: str) -> None:
+        """--agent-provider codex=NEW remaps codex and drops the OLD credential.
+
+        Dropping the old provider (e.g. chatgpt) from the credential set is what
+        turns off the proxy's ChatGPT-OAuth mode at next start.
+        """
+        config = self._run(
+            self._labels([("claude", "vertex"), ("codex", old)]),
+            UpgradeOverrides(agent_providers={"codex": new}),
+        )
+
+        assert config.agent == "claude"  # primary unchanged
+        assert config.agent_providers == [("claude", "vertex"), ("codex", new)]
+        assert new in config.credential_providers
+        assert "vertex" in config.credential_providers
+        assert old not in config.credential_providers
+
+    def test_swap_via_provider_when_codex_primary(self) -> None:
+        """--provider remaps the primary agent (codex here) from chatgpt to openai."""
+        config = self._run(
+            self._labels([("codex", "chatgpt")], agent="codex"),
+            UpgradeOverrides(provider="openai"),
+        )
+
+        assert config.agent == "codex"
+        assert config.agent_providers == [("codex", "openai")]
+        assert config.provider == "openai"
+        assert "openai" in config.credential_providers
+        assert "chatgpt" not in config.credential_providers

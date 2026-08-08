@@ -21,7 +21,7 @@ paude
 | `stop` | Stops the container, preserves the volume |
 | `connect` | Attaches to running session |
 | `cp` | Copies files between local machine and session |
-| `upgrade` | Pulls current bases, rebuilds with the latest stable agent tooling, and recreates the session while preserving workspace and agent state; can also reconfigure options (`--otel-endpoint`, `--allowed-domains`, `--gpu`/`--no-gpu`, `--yolo`/`--no-yolo`, `--provider`) |
+| `upgrade` | Pulls current bases, rebuilds with the latest stable agent tooling, and recreates the session while preserving workspace and agent state; can also add agents (`--add-agent`, `--agents`) and reconfigure options (`--otel-endpoint`, `--allowed-domains`, `--gpu`/`--no-gpu`, `--yolo`/`--no-yolo`, `--provider`) |
 | `remote` | Manages git remotes for code sync |
 | `delete` | Removes all resources including volume |
 | `list` | Shows all sessions with version info |
@@ -60,6 +60,9 @@ pip install --upgrade paude
 paude list                         # Shows version and outdated indicator (*)
 paude upgrade my-project           # Rebuilds image, preserves all data
 
+# Add another agent to an existing session (preserves all data)
+paude upgrade my-project --add-agent codex
+
 # Delete session completely
 paude delete my-project --confirm
 
@@ -76,6 +79,32 @@ mutable state in addition to `/pvc/workspace`.
 
 The legacy `--rebuild` option is still accepted for compatibility, but is no
 longer necessary because upgrades always rebuild.
+
+### Adding agents to an existing session
+
+`upgrade` can add agents to a session that was created with a smaller set,
+without recreating it or losing the workspace and existing agent state:
+
+```bash
+# Add a codex agent to a session that only had claude
+paude upgrade my-project --add-agent codex
+
+# Pick the new agent's inference provider (default for codex is chatgpt)
+paude upgrade my-project --add-agent codex --agent-provider codex=openai
+
+# Redefine the full agent set (first is primary); can reorder to change which
+# agent launches by default
+paude upgrade my-project --agents claude,codex
+```
+
+`--add-agent` appends agents and always keeps the current primary agent (the one
+that launches by default). `--agents` redefines the whole set and makes the first
+entry primary; in this release it must still include every installed agent
+(removing agents is not yet supported). A newly added agent's provider defaults to
+that agent's usual provider unless you override it with `--agent-provider`; the
+provider is added to the session's credential set automatically. Provider logins
+that happen inside the container (for example codex's ChatGPT OAuth) still need to
+be completed on first use of the new agent.
 
 ### Crash-safe, resumable upgrades
 
