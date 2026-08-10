@@ -330,6 +330,21 @@ class TestGenerateWorkspaceDockerfile:
 
         assert "--allowerasing" in dockerfile
 
+    def test_pins_runtime_user_uid_gid(self):
+        """The runtime user is pinned to uid 1000 / gid 0 so a rebuild never
+        drifts the UID out from under an existing /pvc volume (which would make
+        the volume unwritable and break the agent with EACCES)."""
+        config = PaudeConfig()
+        dockerfile = generate_workspace_dockerfile(config)
+
+        assert "useradd --uid 1000 -M -d /home/paude -s /bin/bash -g 0 paude" in (
+            dockerfile
+        )
+        # The volume/home must be group-root so it matches gid 0 ownership.
+        assert "chown -R paude:0 /home/paude" in dockerfile
+        # A pre-existing base-image user is reused rather than recreated.
+        assert "id paude >/dev/null 2>&1" in dockerfile
+
     def test_dnf_and_yum_install_tmux_from_the_distribution(self):
         """dnf/yum images use the fixed distribution tmux package."""
         config = PaudeConfig()

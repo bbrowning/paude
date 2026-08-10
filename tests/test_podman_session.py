@@ -167,6 +167,47 @@ def _make_create_session_backend(
     return backend
 
 
+class TestPodmanBackendStartNoAttach:
+    """Tests for PodmanBackend.start_session_no_attach output."""
+
+    @patch("paude.backends.podman.backend.ContainerRunner")
+    def test_announces_start(
+        self, mock_runner_class: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """It prints a 'Starting session' line so create/upgrade don't leave
+        'created (stopped)' as the last status line for a running container."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = True
+        mock_runner.container_running.return_value = False
+        mock_runner_class.return_value = mock_runner
+
+        backend = _make_backend(mock_runner)
+        backend._setup = MagicMock()
+
+        backend.start_session_no_attach("test-session")
+
+        assert "Starting session 'test-session'..." in capsys.readouterr().err
+        backend._setup.start_session_containers.assert_called_once()
+
+    @patch("paude.backends.podman.backend.ContainerRunner")
+    def test_silent_when_already_running(
+        self, mock_runner_class: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """No start message when the container is already running (no-op)."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = True
+        mock_runner.container_running.return_value = True
+        mock_runner_class.return_value = mock_runner
+
+        backend = _make_backend(mock_runner)
+        backend._setup = MagicMock()
+
+        backend.start_session_no_attach("test-session")
+
+        assert "Starting session" not in capsys.readouterr().err
+        backend._setup.start_session_containers.assert_not_called()
+
+
 class TestPodmanBackendCreateSession:
     """Tests for PodmanBackend.create_session."""
 

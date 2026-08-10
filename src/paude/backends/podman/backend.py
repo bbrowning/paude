@@ -190,10 +190,13 @@ class PodmanBackend:
             self._volume_manager.remove_volume(vname, force=True)
 
     def start_session_no_attach(self, name: str) -> None:
-        """Start containers without attaching (for git setup, etc.)."""
+        """Start containers without attaching (used by create and upgrade)."""
         cname = require_session(self._runner, name)
         if self._runner.container_running(cname):
             return
+        # Balance create_session's "created (stopped)" line so it isn't the last
+        # status shown for a container that is in fact left running.
+        print(f"Starting session '{name}'...", file=sys.stderr)
         agent = self._setup.start_session_containers(name, cname, self._proxy)
         self._setup.start_agent_headless_in_container(cname, agent)
 

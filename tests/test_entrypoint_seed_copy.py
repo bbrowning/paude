@@ -111,6 +111,34 @@ class TestEntrypointContract:
             "chcon must use --reference=/pvc to inherit PVC SELinux context"
         )
 
+    def test_persist_config_dir_guards_against_dangling_symlink(self) -> None:
+        """The shipped persist_config_dir must contain the bail-out guard.
+
+        The behavioural test exercises a reimplementation (the real function
+        hardcodes /pvc), so this contract check is what catches the guard
+        regressing out of the actual entrypoint script.
+        """
+        content = ENTRYPOINT_LIB_CONFIG_PATH.read_text()
+        assert 'if [[ ! -d "$pvc_dir" ]]; then' in content, (
+            "persist_config_dir must guard on the PVC dir existing after mkdir"
+        )
+
+    def test_dockerfile_pins_runtime_user_uid_gid(self) -> None:
+        """The base image must pin the runtime user to uid 1000 / gid 0.
+
+        A `paude upgrade` rebuilds this image; an unpinned (e.g. `--system`)
+        useradd assigns a different UID than the one that owns the existing /pvc
+        volume, making the volume unwritable (EACCES on transcript writes).
+        """
+        content = DOCKERFILE_PATH.read_text()
+        assert "useradd --uid 1000 -M -d /home/paude -s /bin/bash -g 0 paude" in (
+            content
+        ), "base Dockerfile must pin the paude user to uid 1000 / gid 0"
+        assert "chown -R paude:0 /home/paude" in content
+        assert "useradd --system" not in content, (
+            "the runtime UID must be pinned, not assigned from the system range"
+        )
+
     def test_entrypoint_persists_composed_agent_configs(self) -> None:
         """Every configured agent directory/file is persisted to the PVC."""
         content = ENTRYPOINT_PATH.read_text()
@@ -467,6 +495,10 @@ def _persist_config_dir_bash_function(pvc_dir: str) -> str:
             fi
 
             mkdir -p "$pvc_dir" 2>/dev/null || true
+            if [[ ! -d "$pvc_dir" ]]; then
+                echo "persist_config_dir: cannot create $pvc_dir (is /pvc writable by $(id -un)?); leaving $home_dir in place" >&2
+                return 0
+            fi
             chmod g+rwX "$pvc_dir" 2>/dev/null || true
             chcon -R --reference="{pvc_dir}" "$pvc_dir" 2>/dev/null || true
 
@@ -625,6 +657,35 @@ class TestPersistAgentConfig:
         assert (home / ".claude").is_symlink()
         # Baked content was merged into PVC
         assert (pvc / ".claude" / "settings.json").read_text() == '{"baked": true}'
+
+    def test_leaves_home_dir_when_pvc_target_uncreatable(self, tmp_path: Path) -> None:
+        """When the PVC target can't be created (unwritable /pvc), the seeded
+        HOME dir survives and no dangling symlink is produced — the failure mode
+        behind the reported ~/.config/opencode -> /pvc/.config/opencode after an
+        upgrade that drifted the runtime UID."""
+        home = tmp_path / "home"
+        (home / ".config" / "opencode").mkdir(parents=True)
+        (home / ".config" / "opencode" / "config.json").write_text("{}")
+        pvc = tmp_path / "pvc"
+        pvc.mkdir()
+        # Block `mkdir -p pvc/.config/opencode` by making pvc/.config a file.
+        (pvc / ".config").write_text("not a dir")
+
+        persist_fn = _persist_config_dir_bash_function(str(pvc))
+        script = textwrap.dedent(f"""\
+            #!/bin/bash
+            export HOME="{home}"
+            {persist_fn}
+            persist_config_dir ".config/opencode"
+        """)
+        result = _run_script(script)
+        assert result.returncode == 0, result.stderr
+
+        opencode = home / ".config" / "opencode"
+        assert opencode.is_dir(), "seeded HOME dir must survive an unwritable PVC"
+        assert not opencode.is_symlink(), "must not create a dangling symlink"
+        assert (opencode / "config.json").exists()
+        assert "cannot create" in result.stderr
 
     def test_image_baked_config_does_not_replace_pvc_state(
         self, tmp_path: Path
