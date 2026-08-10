@@ -144,6 +144,13 @@ paude create --dry-run
 
 > **Backend values**: `podman` (default) or `docker`.
 
+> **Adding agents after create**: the agent set is normally fixed at create time,
+> but `paude upgrade` can add agents to an existing session in place with
+> `--add-agent AGENT` (additive; keeps the current primary) or `--agents A,B`
+> (redefines the full set; first is primary; removal not yet supported). Combine
+> with `--agent-provider AGENT=PROVIDER` to set a new agent's provider; its
+> provider is added to the session's credential set automatically.
+
 > **Platform auto-detection**: when unset, paude auto-detects the target architecture — the remote host's architecture (via SSH) when `--host` is used, otherwise the local machine's. Use `--platform` (e.g. `linux/amd64`, `linux/arm64`) to override.
 
 ## Network Domains

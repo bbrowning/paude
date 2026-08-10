@@ -56,6 +56,19 @@ The same "parse a `user@host[:port]` string with `parse_ssh_host()`, then constr
 
 The third occurrence was added while fixing SEC-003 rather than reusing `_build_transport()`, because `_build_transport()` lives in `src/paude/cli/` and importing it from `src/paude/git_remote/` (a lower-level package) would invert the existing dependency direction. Consolidating all three requires first giving this logic a home that both `cli/` and `git_remote/`/`backends/` can depend on without a layering inversion (e.g. a small helper in `src/paude/transport/ssh.py` itself, alongside `parse_ssh_host()`). Until then, any change to `SshTransport`'s constructor or `parse_ssh_host()`'s contract needs to be checked against all three call sites.
 
+### REFACTOR-006: Credential-provider reconciliation duplicated between upgrade and resolver
+
+**Status**: Open
+**Priority**: Low (drift-prone; identical user-facing error string in two places)
+**Discovered**: 2026-08-08 during a cleanup review of the `paude upgrade --add-agent` work
+
+`_apply_overrides()` in `src/paude/cli/upgrade.py` and `_resolve_agents_and_providers()` in `src/paude/config/resolver.py` independently implement the same "reconcile credential providers against the agent→provider mapping" logic:
+
+1. Deriving the mapped-provider set from a composition (`mapped_providers = list(dict.fromkeys(a.config.provider for a in composition.agents if a.config.provider))` in `upgrade.py` vs `_dedupe(provider for _, provider in result.agent_providers)` at `resolver.py:315`). The same idiom also appears as the fallback in `get_session_credential_providers()` at `src/paude/backends/podman/helpers.py:306-312`.
+2. Validating an explicit `--providers` set covers every mapped provider, including the **verbatim** error string `"Credential providers must include every mapped provider; missing: "` (`upgrade.py` ↔ `resolver.py:324`).
+
+This predates the `--add-agent` work (the `--providers` validation branch was already in `upgrade.py`); the cleanup pass left it in place because a proper fix reaches outside the changed code and is entangled with the resolver's `SettingValue`/provenance tracking. Consider extracting a shared `reconcile_credential_providers(agent_providers, explicit_providers) -> list[str]` (plus a `providers_from_composition(composition)` helper) next to `_derive_agent_providers` in `resolver.py`, and calling it from both `create` and `upgrade` so the invariant and error wording can't drift.
+
 ## Correctness Backlog
 
 Lower-severity correctness/robustness issues surfaced during code review.
@@ -75,6 +88,27 @@ Lower-severity correctness/robustness issues surfaced during code review.
 **Discovered**: 2026-08-07 during code review of the `--container-path`/`--repo` harvest work
 
 `build_podman_remote_url()` / `build_ssh_remote_url()` in `src/paude/git_remote/utils.py` interpolate `workspace_path` into the remote URL as `ext::… %S <workspace_path>`. Git's `ext::` helper splits its command line on whitespace and `exec`s the program directly (no shell is involved, so shell metacharacters are *not* an injection vector), but a `workspace_path` containing spaces would be word-split into separate argv entries and every fetch/push would fail. Now that `--container-path` accepts arbitrary paths (previously always the space-free `/pvc/workspace`), this is reachable, though container paths with spaces are highly unusual. Note that shell-quoting does not help here — there is no shell — so a fix would need `ext::`'s own (limited) escaping or a validation/rejection of whitespace in container paths.
+
+### UPGRADE-001: pure provider remap prunes deliberately-provisioned credential-only providers
+
+**Status**: Open
+**Severity**: Low
+**Discovered**: 2026-08-08 during code review of the `paude upgrade --add-agent` work
+
+`_apply_overrides()` in `src/paude/cli/upgrade.py` treats a *pure* remap
+(`--provider NEW` / `--agent-provider AGENT=NEW` with no `--add-agent`/`--agents`)
+by replacing the credential set with only the providers still referenced by an
+agent (the `elif remap` branch). This correctly drops the swapped agent's *old*
+provider (the intended "swap in place" behavior asserted by
+`test_swap_codex_provider_in_place`), but it also drops any **other**
+credential-only provider that was deliberately provisioned and is not mapped to a
+current agent (e.g. `--provider vertex` on a session created with
+`--providers vertex,openai` where `openai` was reserved for later use). The
+combined add+remap path was fixed to union instead (so it preserves such
+providers), but the pure-remap path still over-prunes because it cannot
+distinguish "displaced by this swap" from "provisioned on purpose." A fix would
+track which provider each remap displaces and prune only that, rather than
+pruning every unreferenced provider.
 
 ## Agent Limitations
 
@@ -178,6 +212,53 @@ The failure is timing/resource-contention related (SIGTERM delivery and socket
 teardown racing under concurrent full-suite load), not a product defect. Consider
 adding an explicit wait/retry on the shutdown assertion or isolating the test's
 port/socket allocation so it is deterministic under load.
+
+### TEST-003: No integration coverage for in-place agent-set / provider upgrades
+
+**Status**: Open (investigation task)
+**Priority**: Medium
+**Discovered**: 2026-08-08 while adding `--add-agent`/`--agents` to `paude upgrade`
+
+The new `paude upgrade` agent-set and provider-swap paths are covered by unit
+tests in `tests/test_upgrade.py` (`TestUpgradePodmanAddAgent`), but those mock
+the image build, container recreation, and start — so the *end-to-end* behavior
+is unverified: that a rebuilt image actually installs the added agent's binaries
+(e.g. `codex` + `codex-code-mode-host`), that `configure_codex` rewrites
+`config.toml` / clears `auth.json` on a chatgpt→openai swap at start, that the
+`/pvc` volume and existing agent state survive, and that labels/registry reflect
+the new set on a live container. These require a real container engine and only
+run in CI (`tests/integration/`, gated by the `integration`/`podman` markers;
+see `make test-integration` / `make test-podman`). Investigate what the existing
+podman integration suite covers for `upgrade` and add scenarios for: adding an
+agent in place, swapping a provider in place, and verifying persisted state is
+retained across the rebuild. (These cannot be run in the sandboxed dev
+environment — no container engine — so they must be authored against CI.)
+
+## Feature Backlog
+
+### FEATURE-001: `paude upgrade` cannot remove agents (only add)
+
+**Status**: Open (deferred follow-up)
+**Priority**: Low
+**Discovered**: 2026-08-08 while adding `--add-agent`/`--agents` to `paude upgrade`
+
+`paude upgrade` can now add agents to an existing session in place
+(`--add-agent AGENT`, or `--agents A,B` to redefine/reorder the set), but it
+cannot *remove* an agent. `_apply_overrides()` in `src/paude/cli/upgrade.py`
+rejects any `--agents` set that drops a currently-installed agent. Removal was
+deferred because it needs decisions/guards that additive changes don't:
+
+- Forbid removing the current primary agent (or require reassigning it), and
+  forbid emptying the agent set entirely.
+- Decide what happens to the removed agent's persisted state on `/pvc` (e.g.
+  `.codex`, `.agents`). `persistent_state_paths()` in
+  `src/paude/cli/upgrade_persistence.py` only enumerates agents still in the
+  composition, so a removed agent's directory is left orphaned (harmless but
+  confusing) rather than cleaned up.
+
+Implement a `--remove-agent AGENT` option (additive delta, symmetric with
+`--add-agent`) that enforces the guards above and decides the orphaned-state
+policy.
 
 ## Documentation Gaps
 

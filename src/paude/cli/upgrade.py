@@ -31,6 +31,8 @@ class UpgradeOverrides:
     provider: str | None = None
     providers: list[str] | None = None
     agent_providers: dict[str, str] | None = None
+    add_agents: list[str] | None = None  # additive: append, keep primary
+    agents: list[str] | None = None  # full-set replacement (first = primary)
 
     def has_changes(self) -> bool:
         """Return True if any override was specified."""
@@ -42,6 +44,8 @@ class UpgradeOverrides:
             or self.provider is not None
             or self.providers is not None
             or self.agent_providers is not None
+            or self.add_agents is not None
+            or self.agents is not None
         )
 
 
@@ -137,12 +141,42 @@ def session_upgrade(
             help="Replace mappings using AGENT=PROVIDER entries.",
         ),
     ] = None,
+    add_agent: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--add-agent",
+            help=(
+                "Add one or more agents to the session (comma-separated and/or "
+                "repeatable), e.g. --add-agent codex. The primary agent is "
+                "unchanged; already-present agents are ignored."
+            ),
+        ),
+    ] = None,
+    agent: Annotated[
+        str | None,
+        typer.Option(
+            "--agent",
+            help="Redefine the session's single agent (alias for --agents X).",
+        ),
+    ] = None,
+    agents: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--agents",
+            help=(
+                "Redefine the full agent set (comma-separated and/or repeatable); "
+                "the first is primary. Must include every installed agent "
+                "(removing agents is not yet supported)."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Upgrade a session to the current paude version.
 
-    Can also reconfigure session options (e.g., --otel-endpoint, --gpu)
-    without losing workspace or agent data. Upgrades always pull and rebuild
-    agent tooling, including when the Paude version is unchanged.
+    Can also reconfigure session options (e.g., --otel-endpoint, --gpu) and add
+    agents (--add-agent, --agents) without losing workspace or agent data.
+    Upgrades always pull and rebuild agent tooling, including when the Paude
+    version is unchanged.
     """
     from paude import __version__
     from paude.backends.podman.backend import PodmanBackend
@@ -174,6 +208,18 @@ def session_upgrade(
         typer.echo("Error: Specify --provider or --agent-provider, not both.", err=True)
         raise typer.Exit(1)
 
+    # Resolve the agent-set options. --agent is a one-item alias for --agents.
+    cli_add_agents = _split_list_option(add_agent)
+    if agent is not None and agents is not None:
+        typer.echo("Error: Specify --agent or --agents, not both.", err=True)
+        raise typer.Exit(1)
+    cli_agents = _split_list_option([agent] if agent is not None else agents)
+    if cli_add_agents is not None and cli_agents is not None:
+        typer.echo(
+            "Error: Specify --add-agent or --agent/--agents, not both.", err=True
+        )
+        raise typer.Exit(1)
+
     overrides = UpgradeOverrides(
         otel_endpoint=otel_endpoint,
         allowed_domains=allowed_domains,
@@ -182,7 +228,32 @@ def session_upgrade(
         provider=provider,
         providers=_split_list_option(providers),
         agent_providers=cli_agent_providers,
+        add_agents=cli_add_agents,
+        agents=cli_agents,
     )
+
+    # Validate agent/provider names up front, before finding the session or
+    # stopping a running container, so a typo (e.g. --add-agent coddex) fails
+    # fast instead of tearing down the session and leaving it stopped with no
+    # manifest to resume. Reuse the registry lookups so the error text matches
+    # the deeper validation. Agent/provider *compatibility* is still checked
+    # later, once the composition is resolved.
+    from paude.agents import get_agent
+    from paude.providers import get_provider
+
+    try:
+        for agent_name in (cli_add_agents or []) + (cli_agents or []):
+            get_agent(agent_name)
+        provider_names = list(overrides.providers or [])
+        if provider is not None:
+            provider_names.append(provider)
+        if cli_agent_providers is not None:
+            provider_names.extend(cli_agent_providers.values())
+        for provider_name in provider_names:
+            get_provider(provider_name)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
 
     from paude import upgrade_state
 
@@ -389,41 +460,74 @@ def _resolve_base_from_manifest(manifest: UpgradeManifest) -> _ResolvedUpgrade:
 
 
 def _apply_overrides(state: _ResolvedUpgrade, overrides: UpgradeOverrides) -> None:
-    """Apply CLI overrides to a resolved config in place, normalising provider."""
+    """Apply CLI overrides to a resolved config in place, normalising provider.
+
+    Agent-set changes (``--add-agent`` / ``--agents``) and provider remappings
+    (``--provider`` / ``--agent-provider``) funnel through a single composition
+    rebuild: a target name list is derived first, then a provider mapping seeded
+    from the existing per-agent providers and overlaid with CLI overrides, then
+    :func:`~paude.config.resolver._derive_agent_providers` validates and fills
+    defaults for any newly-added agent.
+    """
     from paude.agents import get_agents
+    from paude.config.resolver import _derive_agent_providers
 
-    if overrides.provider is not None:
-        state.provider_name = overrides.provider
-        specs = [
-            (item.config.name, item.config.provider or "")
-            for item in state.composition.agents
-        ]
-        specs[0] = (specs[0][0], state.provider_name)
-        state.composition = get_agents(
-            [agent for agent, _provider in specs],
-            providers={agent: provider for agent, provider in specs if provider},
-            include_bundled=False,
-        )
-    elif overrides.agent_providers is not None:
-        installed = [item.config.name for item in state.composition.agents]
-        unknown = [a for a in overrides.agent_providers if a not in installed]
-        if unknown:
+    existing_specs = [
+        (item.config.name, item.config.provider or "")
+        for item in state.composition.agents
+    ]
+    existing_names = [name for name, _provider in existing_specs]
+
+    if overrides.agents is not None:
+        # Full-set redefinition (first = primary). Removal is not yet supported,
+        # so the new set must retain every currently-installed agent.
+        target_names = list(dict.fromkeys(overrides.agents))
+        dropped = [name for name in existing_names if name not in target_names]
+        if dropped:
             raise ValueError(
-                "Provider mappings reference agents that are not installed: "
-                + ", ".join(unknown)
+                "Removing agents is not yet supported. --agents must include all "
+                f"installed agents ({', '.join(existing_names)}). "
+                "Use --add-agent to add agents."
             )
+    elif overrides.add_agents:
+        # Additive: preserve the existing order (and primary), append new agents.
+        target_names = list(existing_names)
+        for agent in overrides.add_agents:
+            if agent not in target_names:
+                target_names.append(agent)
+    else:
+        target_names = list(existing_names)
+
+    # Seed the provider mapping from current per-agent providers, then overlay
+    # CLI overrides so existing agents keep their resolved provider unless the
+    # user remaps them. Every existing agent is always in target_names (add
+    # appends to them; replace must retain them), so no membership filter is
+    # needed here.
+    mappings = {name: provider for name, provider in existing_specs if provider}
+    if overrides.provider is not None:
+        mappings[target_names[0]] = overrides.provider
+    if overrides.agent_providers is not None:
+        mappings.update(overrides.agent_providers)
+
+    remap = overrides.provider is not None or overrides.agent_providers is not None
+    agent_set_changed = overrides.agents is not None or bool(overrides.add_agents)
+    if remap or agent_set_changed:
+        # _derive_agent_providers validates every agent name and agent/provider
+        # combination, fills unmapped (e.g. newly-added) agents with their
+        # DEFAULT_PROVIDER, and raises "not installed" only for mappings that
+        # reference agents outside target_names — so a legitimately-added agent
+        # is accepted, while --agent-provider codex=... without --add-agent still
+        # correctly rejects codex.
+        agent_providers = _derive_agent_providers(target_names, mappings)
         state.composition = get_agents(
-            installed,
-            providers=overrides.agent_providers,
+            target_names,
+            providers=dict(agent_providers),
             include_bundled=False,
         )
 
-    mappings_changed = (
-        overrides.provider is not None or overrides.agent_providers is not None
-    )
     mapped_providers = list(
         dict.fromkeys(
-            item.config.provider or ""
+            item.config.provider
             for item in state.composition.agents
             if item.config.provider
         )
@@ -444,9 +548,24 @@ def _apply_overrides(state: _ResolvedUpgrade, overrides: UpgradeOverrides) -> No
                 "Credential providers must include every mapped provider; missing: "
                 + ", ".join(missing)
             )
-    elif mappings_changed:
+    elif agent_set_changed:
+        # Agent-set change (add, or reorder/redefine), possibly combined with a
+        # remap: union the composition's providers onto the existing credential
+        # set so a previously-provisioned provider is preserved. Checked before
+        # `remap` so the documented "add + set provider" workflow
+        # (--add-agent X --agent-provider X=P) does not drop credential-only
+        # providers.
+        state.credential_providers = list(
+            dict.fromkeys([*state.credential_providers, *mapped_providers])
+        )
+    elif remap:
+        # Pure remap (no agent-set change): replace the credential set with the
+        # mapped set, dropping any provider no longer referenced by an agent.
         state.credential_providers = mapped_providers
 
+    # Keep the primary-agent scalars in sync with the (possibly reordered or
+    # extended) composition, so a changed primary is reflected in labels/env.
+    state.agent_name = state.composition.primary.config.name
     state.provider_name = state.composition.primary.config.provider
     if overrides.gpu is not None:
         state.gpu = overrides.gpu if overrides.gpu != "" else None
