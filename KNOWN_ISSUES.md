@@ -183,6 +183,25 @@ silent-degradation path remains. Consider surfacing a warning when a mount
 source that existed locally fails to transfer, or when a remapped source is
 missing on the remote.
 
+### RUNTIME-003: Agent install scripts have no curl timeout — headless start can hang on a blocked network
+
+**Status**: Open
+**Priority**: Low
+**Discovered**: 2026-08-10 while designing podman integration tests for `paude upgrade`
+
+The codex install script (`src/paude/agents/codex.py` — the two `curl -fsSL`
+GitHub-release fetches) sets no `--connect-timeout`/`--max-time`. `install_agent`
+(`containers/paude/entrypoint-lib-install.sh`) runs the *primary* agent's install
+script synchronously at headless start. On a host where the target domain is not
+merely refused but silently dropped (e.g. a restrictive egress policy), curl can
+block on the TCP connect for a long OS-default timeout instead of failing fast,
+stalling `start_session_no_attach`. This surfaced while designing
+`tests/integration/test_upgrade_podman.py`: making codex the *primary* agent
+risked hanging CI, so those tests keep codex a secondary agent (only the primary
+is installed at headless start). Add `--connect-timeout`/`--max-time` to the
+agent install curls (codex, and any other curl-based installer) so a blocked
+network fails fast with a clear error rather than hanging startup.
+
 ## Test Suite
 
 ### TEST-002: Single-file branch of `_transfer_path` is untested
@@ -213,26 +232,34 @@ teardown racing under concurrent full-suite load), not a product defect. Conside
 adding an explicit wait/retry on the shutdown assertion or isolating the test's
 port/socket allocation so it is deterministic under load.
 
-### TEST-003: No integration coverage for in-place agent-set / provider upgrades
+### TEST-003: In-place agent-set / provider upgrades — integration coverage
 
-**Status**: Open (investigation task)
-**Priority**: Medium
+**Status**: Partially resolved (2026-08-10)
+**Priority**: Low
 **Discovered**: 2026-08-08 while adding `--add-agent`/`--agents` to `paude upgrade`
 
-The new `paude upgrade` agent-set and provider-swap paths are covered by unit
-tests in `tests/test_upgrade.py` (`TestUpgradePodmanAddAgent`), but those mock
-the image build, container recreation, and start — so the *end-to-end* behavior
-is unverified: that a rebuilt image actually installs the added agent's binaries
-(e.g. `codex` + `codex-code-mode-host`), that `configure_codex` rewrites
-`config.toml` / clears `auth.json` on a chatgpt→openai swap at start, that the
-`/pvc` volume and existing agent state survive, and that labels/registry reflect
-the new set on a live container. These require a real container engine and only
-run in CI (`tests/integration/`, gated by the `integration`/`podman` markers;
-see `make test-integration` / `make test-podman`). Investigate what the existing
-podman integration suite covers for `upgrade` and add scenarios for: adding an
-agent in place, swapping a provider in place, and verifying persisted state is
-retained across the rebuild. (These cannot be run in the sandboxed dev
-environment — no container engine — so they must be authored against CI.)
+**Resolved (2026-08-10):** `tests/integration/test_upgrade_podman.py`
+(`TestPodmanUpgradeReconfigure`) now covers the in-place reconfiguration paths
+end-to-end on a real container (gated by the `integration`/`podman` markers; run
+in CI via `make test-podman`): adding an agent in place (`--add-agent`, primary
+preserved, credential providers unioned), swapping a provider in place
+(chatgpt→openai and the reverse via `--agent-provider`), that `configure_codex`
+rewrites `config.toml` and clears `auth.json` at start, that the `/pvc` volume
+and existing agent state survive the recreate, and that labels reflect the new
+set. The image build is mocked (the CI base image ships no agents), and codex is
+kept a *secondary* agent to avoid its no-timeout install curl at headless start
+(see RUNTIME-003).
+
+**Still open (deliberately deferred):** verifying the *physical* agent-binary
+install from a real image rebuild — that a rebuilt layer actually places `codex`
++ `codex-code-mode-host` on `$PATH`. This needs an unmocked
+`ensure_default_image(force_rebuild=True)`, which downloads from GitHub's
+`latest` release (multi-minute, network/rate-limit flaky) — too costly for the
+PR-blocking `podman-integration` job. It is already enforced at image-build time
+by codex's own `test -x` verification (`agents/codex.py`, `agents/base.py`) and
+covered by image-build unit tests, so this is low-value to add to CI. If ever
+added, gate it behind an opt-in env var (e.g. `PAUDE_TEST_REAL_REBUILD=1`) so it
+stays out of the default `-m podman` run.
 
 ## Feature Backlog
 

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from paude.agents.base import AgentComposition
 from paude.agents.codex_config import (
+    CODEX_AUTH_TARGET,
     CODEX_CONFIG_TARGET,
     LEGACY_CODEX_PROFILE_TARGET,
     reconcile_codex_config,
@@ -39,7 +40,6 @@ from paude.backends.podman.helpers import (
     volume_name,
 )
 from paude.backends.proxy_config import (
-    CODEX_AUTH_TARGET,
     ProxyCredentials,
     derive_agent_ip,
 )

@@ -12,6 +12,12 @@ from tomlkit.exceptions import ParseError
 
 CODEX_CONFIG_TARGET = "/pvc/.codex/config.toml"
 LEGACY_CODEX_PROFILE_TARGET = "/pvc/.codex/paude-chatgpt-http.config.toml"
+# The on-volume auth.json that paude clears when a session leaves ChatGPT mode.
+# Target the /pvc path (not /home/paude/.codex) so the reset works even before
+# the entrypoint recreates the $HOME/.codex -> /pvc/.codex symlink: configure_codex()
+# runs before that symlink exists on a freshly recreated container (e.g. during
+# `paude upgrade`), so a $HOME-relative rm would miss the real file.
+CODEX_AUTH_TARGET = "/pvc/.codex/auth.json"
 CODEX_CHATGPT_PROVIDER_NAME = "paude-chatgpt-http"
 
 _MANAGED_PROVIDER_VALUES: dict[str, object] = {
