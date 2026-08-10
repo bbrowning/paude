@@ -52,11 +52,12 @@ PROXY_GCP_ADC_ENV = "GCP_ADC_JSON"
 # paude never pre-seeds `codex login` state either: doing so made Codex
 # believe it was already authenticated on a fresh session (skipping its own
 # login prompt) while paude-proxy had no real tokens yet for that session.
-# Codex's own login flow writes CODEX_AUTH_TARGET itself; paude-proxy swaps
+# Codex's own login flow writes its auth.json itself (under CODEX_HOME,
+# i.e. /home/paude/.codex, which is symlinked onto /pvc); paude-proxy swaps
 # in synthetic values at the token exchange so real tokens never land in the
-# agent container.
+# agent container. paude's reset of that auth.json lives with the other codex
+# on-volume paths as CODEX_AUTH_TARGET in agents/codex_config.py.
 PROXY_CHATGPT_AUTH_STATE_ENV = "PAUDE_PROXY_CHATGPT_AUTH_STATE_FILE"
-CODEX_AUTH_TARGET = "/home/paude/.codex/auth.json"
 
 
 @dataclass

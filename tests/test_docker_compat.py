@@ -500,6 +500,6 @@ class TestCodexConfigReconciliation:
 
         backend._setup._runner.exec_in_container.assert_called_once_with(
             "paude-test",
-            ["rm", "-f", "/home/paude/.codex/auth.json"],
+            ["rm", "-f", "/pvc/.codex/auth.json"],
             check=False,
         )
