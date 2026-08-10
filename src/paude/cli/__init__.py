@@ -12,6 +12,7 @@ from typing import Annotated
 import typer
 
 # Side-effect imports: each submodule registers @app.command() decorators.
+import paude.cli.backup as _backup  # noqa: F401
 import paude.cli.commands as _commands  # noqa: F401
 import paude.cli.create as _create  # noqa: F401
 import paude.cli.domains as _domains  # noqa: F401

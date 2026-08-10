@@ -34,6 +34,9 @@ class CursorAgent:
             config_dir_name=".cursor",
             extra_persistent_dir_names=[".config/cursor"],
             config_file_name=None,
+            # Cursor's auth.json (access/refresh tokens) is persisted on /pvc;
+            # keep it out of backup bundles (see KNOWN_ISSUES.md).
+            credential_file_names=[".config/cursor/auth.json"],
             activity_files=[],
             yolo_flag="--yolo",
             clear_command="/clear",

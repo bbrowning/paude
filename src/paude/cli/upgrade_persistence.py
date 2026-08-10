@@ -67,6 +67,25 @@ def persistent_state_paths(
     return directories, files
 
 
+def credential_exclude_globs(composition: AgentComposition) -> list[str]:
+    """Return HOME-relative credential files to exclude from a backup.
+
+    Sourced from each installed agent's ``credential_file_names`` so the set
+    stays agent-driven. ``paude backup`` passes these to ``tar --exclude`` so a
+    bundle never persists a live token to disk (see KNOWN_ISSUES.md for the
+    underlying Gemini/Cursor leak these guard against).
+    """
+    globs = list(
+        dict.fromkeys(
+            name
+            for agent in composition.agents
+            for name in agent.config.credential_file_names
+        )
+    )
+    _validate_relative_paths(globs)
+    return globs
+
+
 def migrate_legacy_state(
     runner: ContainerRunner,
     container_name: str,

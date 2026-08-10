@@ -35,6 +35,9 @@ class GeminiAgent:
             config_dir_name=".gemini",
             extra_persistent_dir_names=[".agents"],
             config_file_name=None,
+            # Gemini's google OAuth stores a real refresh token in-container;
+            # keep it out of backup bundles (see KNOWN_ISSUES.md).
+            credential_file_names=[".gemini/oauth_creds.json"],
             activity_files=[],
             yolo_flag="--yolo",
             clear_command="/clear",

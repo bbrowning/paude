@@ -24,6 +24,8 @@ paude
 | `upgrade` | Pulls current bases, rebuilds with the latest stable agent tooling, and recreates the session while preserving workspace and agent state; can also add agents (`--add-agent`, `--agents`) and reconfigure options (`--otel-endpoint`, `--allowed-domains`, `--gpu`/`--no-gpu`, `--yolo`/`--no-yolo`, `--provider`) |
 | `remote` | Manages git remotes for code sync |
 | `delete` | Removes all resources including volume |
+| `backup` | Snapshots a stopped session (volume + config) to a portable bundle |
+| `restore` | Rebuilds a session from a backup bundle (planned; currently a dry run) |
 | `list` | Shows all sessions with version info |
 | `status` | Shows enriched session status (activity, state, summary) |
 | `harvest` | Pulls agent changes into a local branch, optionally creates a PR |
@@ -142,6 +144,60 @@ manifest is deleted automatically once the upgrade succeeds.
 Shared writable Git and Dolt configuration is also stored on the session
 volume. Regenerable caches and image-installed binaries are rebuilt instead
 of persisted.
+
+## Backup & Restore
+
+`paude backup` snapshots a session so you can recover it later — for example if
+a long-running session's workspace is damaged, or you want a rollback point
+before an autonomous run.
+
+```bash
+# Stop first — backup refuses to run on a live session
+paude stop my-project
+paude backup my-project
+
+# Bundle is written to ~/.config/paude/backups/ by default
+# Override the destination (a bundle directory path, or a directory to put it in)
+paude backup my-project --output ~/backups/
+paude backup my-project -o /tmp/my-project.paude
+```
+
+A backup is a `<name>-<timestamp>.paude/` directory (mode `0700`) with two files:
+
+- `manifest.json` — the session's identity and configuration (agent/providers,
+  allowed domains, yolo, gpu, otel, workspace path, backend/engine, and SSH
+  details for remote sessions).
+- `pvc.tar.gz` — the session's `/pvc` data volume: the workspace plus all agent
+  state, history, and skills.
+
+A directory (rather than one wrapping tarball) means the multi-GB volume archive
+is written to disk only once, which matters for large volumes. Both files are
+mode `0600`. Before starting, backup estimates the volume size and, if the
+destination looks short on free space, asks you to re-run with `--force`.
+
+Only the data volume is irreplaceable, so that is all a backup captures. The
+proxy sidecar, network, CA/auth volumes, and credential secrets are rebuilt from
+your host environment on the next `start`, exactly as they are for a fresh
+`create`, so they are deliberately excluded.
+
+**Backups never store live credentials.** paude keeps real provider credentials
+on the proxy sidecar, not in the agent container, so `/pvc` normally holds no
+secrets. As a safeguard, `paude backup` also always strips known agent auth files
+(e.g. Gemini's `oauth_creds.json`, Cursor's `auth.json`). After a restore,
+re-login inside the session for any agent that authenticates via an in-container
+login flow.
+
+Backup requires the session to be **stopped** so nothing is writing to the
+workspace, git, or agent history databases while the snapshot is taken.
+
+`paude restore` is planned. It will recreate the `/pvc` volume from a bundle and
+rebuild the session around it (reusing the volume, then starting and registering
+it, mirroring how `upgrade` recreates a container). Today it validates a bundle
+and prints the restore it would perform:
+
+```bash
+paude restore ~/.config/paude/backups/my-project-20260810T101500Z.paude
+```
 
 ## Backend Selection
 
