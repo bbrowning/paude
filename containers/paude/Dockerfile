@@ -73,12 +73,17 @@ RUN curl -fsSL https://cli.github.com/packages/rpm/gh-cli.repo -o /etc/yum.repos
     dnf install -y gh && \
     dnf clean all
 
-# Create the fixed non-root runtime user
-RUN groupadd --system paude && \
-    useradd --system -M -d /home/paude -s /bin/bash -g paude paude && \
+# Create the fixed non-root runtime user.
+# UID/GID are pinned (1000:0) so the runtime identity is stable across image
+# rebuilds. A `paude upgrade` rebuilds this image; if the UID drifted, the
+# existing /pvc volume (owned by the original UID) would become unwritable and
+# the agent would fail with EACCES. gid 0 (root) matches volumes created before
+# the runtime user was pinned, and always exists so no groupadd is needed.
+# Keep these in sync with CONTAINER_RUNTIME_UID/GID in src/paude/constants.py.
+RUN useradd --uid 1000 -M -d /home/paude -s /bin/bash -g 0 paude && \
     umask 0002 && \
     mkdir -p /home/paude/.claude /home/paude/.config && \
-    chown -R paude:paude /home/paude
+    chown -R paude:0 /home/paude
 
 # NOTE: Claude Code is NOT installed here due to licensing restrictions.
 # It gets installed at user-side build time via a runtime layer.

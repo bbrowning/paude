@@ -17,6 +17,14 @@ persist_config_dir() {
     fi
 
     mkdir -p "$pvc_dir" 2>/dev/null || true
+    # If the PVC target could not be created (e.g. /pvc is not writable by this
+    # user because the runtime UID drifted from the volume's owner), do NOT
+    # remove the seeded $home_dir or point a symlink at a nonexistent target —
+    # that leaves a broken symlink. Leave $home_dir in place and warn instead.
+    if [[ ! -d "$pvc_dir" ]]; then
+        echo "persist_config_dir: cannot create $pvc_dir (is /pvc writable by $(id -un)?); leaving $home_dir in place" >&2
+        return 0
+    fi
     chmod g+rwX "$pvc_dir" 2>/dev/null || true
     chcon -R --reference=/pvc "$pvc_dir" 2>/dev/null || true
 

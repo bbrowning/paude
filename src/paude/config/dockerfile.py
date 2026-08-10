@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from paude.config.models import PaudeConfig
-from paude.constants import CONTAINER_ENTRYPOINT, CONTAINER_HOME
+from paude.constants import (
+    CONTAINER_ENTRYPOINT,
+    CONTAINER_HOME,
+    CONTAINER_RUNTIME_GID,
+    CONTAINER_RUNTIME_UID,
+)
 
 if TYPE_CHECKING:
     from paude.agents.base import Agent, AgentComposition
@@ -195,11 +200,20 @@ RUN if ! command -v tini >/dev/null 2>&1; then \\
             for directory in item.config.persistent_dir_names
         )
     )
+    # Pin the runtime user to CONTAINER_RUNTIME_UID:GID so the identity stays
+    # stable across rebuilds (see constants.py for why). Reuse a pre-existing
+    # `paude` user when the base image already ships one; fall back to adduser
+    # (busybox) if useradd is unavailable or the UID is already taken.
+    useradd = (
+        f"useradd --uid {CONTAINER_RUNTIME_UID} -M -d {CONTAINER_HOME} "
+        f"-s /bin/bash -g {CONTAINER_RUNTIME_GID} paude"
+    )
     lines.append(
-        "RUN (id paude >/dev/null 2>&1 || (groupadd paude 2>/dev/null && useradd -M -d /home/paude -s /bin/bash -g paude paude 2>/dev/null) || adduser -D -s /bin/bash paude) && "
+        f"RUN (id paude >/dev/null 2>&1 || {useradd} 2>/dev/null || "
+        "adduser -D -s /bin/bash paude) && "
         "umask 0002 && "
         f"mkdir -p {' '.join(f'{CONTAINER_HOME}/{directory}' for directory in config_dirs)} {CONTAINER_HOME}/.config {CONTAINER_HOME}/.paude && "
-        f"chown -R paude {CONTAINER_HOME}"
+        f"chown -R paude:{CONTAINER_RUNTIME_GID} {CONTAINER_HOME}"
     )
 
     # Copy patch script before agent install lines (agents may RUN it)

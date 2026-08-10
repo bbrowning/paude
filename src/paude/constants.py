@@ -2,6 +2,13 @@
 
 CONTAINER_WORKSPACE = "/pvc/workspace"
 CONTAINER_HOME = "/home/paude"
+# Runtime user identity. Pinned so an image rebuild (e.g. `paude upgrade`) never
+# drifts the UID out from under an existing /pvc volume, which would make the
+# volume unwritable (EACCES). gid 0 (root) matches volumes created before the
+# user was pinned and always exists. The static containers/paude/Dockerfile
+# hardcodes these same values (it can't import Python) — keep them in sync.
+CONTAINER_RUNTIME_UID = 1000
+CONTAINER_RUNTIME_GID = 0
 CONTAINER_GIT_CONFIG = "/pvc/.gitconfig"
 CONTAINER_ENTRYPOINT = "/usr/local/bin/entrypoint.sh"
 BASE_REF_NAME = "refs/paude/base"
