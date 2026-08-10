@@ -214,6 +214,24 @@ an upgrade is interrupted (e.g. `Ctrl-C`) you can simply re-run
 existing session in place, e.g. `paude upgrade SESSION --add-agent codex`. See
 [Session Management](docs/SESSIONS.md) for the per-agent persistence paths.
 
+### Backing up a session
+
+To guard a long-running session against loss, snapshot it to a portable bundle:
+
+```bash
+paude stop my-project        # backup refuses to run on a live session
+paude backup my-project      # writes ~/.config/paude/backups/<name>-<ts>.paude/
+```
+
+The bundle is a directory containing the session's `/pvc` data volume (workspace
++ agent state, as `pvc.tar.gz`) and a config manifest — everything needed to
+recreate the session. Reconstructible pieces (proxy, network, secrets) are
+excluded, and known agent credential files are always stripped, so a bundle
+never stores a live token. Backup checks free disk space first (`--force` to
+override). `paude restore BUNDLE` is planned; today it validates a bundle and
+prints the restore it would perform. See
+[Session Management](docs/SESSIONS.md#backup--restore) for details.
+
 ### Your First Session
 
 ```bash

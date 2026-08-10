@@ -38,6 +38,9 @@ class ClaudeAgent:
             passthrough_env_prefixes=creds.passthrough_env_prefixes,
             config_dir_name=".claude",
             config_file_name=".claude.json",
+            # Defensive: paude uses proxy-managed API-key/Vertex auth, not an
+            # in-container claude.ai login, so this file is not normally present.
+            credential_file_names=[".claude/.credentials.json"],
             activity_files=list(_CLAUDE_ACTIVITY_FILES),
             yolo_flag="--dangerously-skip-permissions",
             clear_command="/clear",

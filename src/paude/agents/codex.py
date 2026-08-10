@@ -62,6 +62,9 @@ class CodexAgent:
             config_dir_name=".codex",
             extra_persistent_dir_names=[".agents"],
             config_file_name=None,
+            # auth.json holds proxy-synthesized (not real) tokens; strip it from
+            # backups anyway so bundles never carry auth material.
+            credential_file_names=[".codex/auth.json"],
             activity_files=[],
             yolo_flag="--dangerously-bypass-approvals-and-sandbox",
             clear_command=None,

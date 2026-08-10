@@ -56,6 +56,30 @@ The same "parse a `user@host[:port]` string with `parse_ssh_host()`, then constr
 
 The third occurrence was added while fixing SEC-003 rather than reusing `_build_transport()`, because `_build_transport()` lives in `src/paude/cli/` and importing it from `src/paude/git_remote/` (a lower-level package) would invert the existing dependency direction. Consolidating all three requires first giving this logic a home that both `cli/` and `git_remote/`/`backends/` can depend on without a layering inversion (e.g. a small helper in `src/paude/transport/ssh.py` itself, alongside `parse_ssh_host()`). Until then, any change to `SshTransport`'s constructor or `parse_ssh_host()`'s contract needs to be checked against all three call sites.
 
+### REFACTOR-007: BackupManifest and UpgradeManifest duplicate the label-derived config block
+
+**Status**: Open
+**Priority**: Low (drift-prone; two dataclasses + two loaders must stay in sync)
+**Discovered**: 2026-08-10 during a cleanup review of the `paude backup` work
+
+`BackupManifest` (`src/paude/backup_state.py`) and `UpgradeManifest`
+(`src/paude/upgrade_state.py`) embed an identical ~9-field "label-derived session
+config" block (`agent`, `provider`, `agent_providers`, `credential_providers`,
+`gpu`, `yolo`, `otel_endpoint`, `allowed_domains`, `proxy_image`), and both
+`backup_state.loads()` and `upgrade_state.load()` re-implement the same
+JSON-list→tuple normalization for `agent_providers`. A new label (e.g. a future
+`env_profile`) must be added to both dataclasses and both loaders.
+
+Keeping the two *types* separate is correct — they have genuinely different
+lifecycles (`UpgradeManifest` is a durable `name`-keyed host file with
+save/load/delete; `BackupManifest` is a standalone, version-gated bundle member
+with integrity + registry/transport fields). Only the shared *core* should be
+extracted: a small serializable `LabelDerivedConfig` dataclass both manifests
+embed (or inherit), with the tuple-normalization living once beside it. This was
+left out of the backup work because it reaches into the stable upgrade path
+(`_manifest_from_state`/`_resolve_base_from_manifest` in `cli/upgrade.py`), which
+is out of scope for that feature.
+
 ### REFACTOR-006: Credential-provider reconciliation duplicated between upgrade and resolver
 
 **Status**: Open
@@ -148,6 +172,19 @@ Deferred items from the network egress security audit (2026-03-06).
 **Discovered**: 2026-03-06 during network egress security audit
 
 GitHub's GraphQL API uses POST for ALL operations, including reads (`gh pr list`, `gh issue list`). Blocking POST/PUT at the proxy level would break read-only `gh` CLI usage. The correct mitigation is using a read-only Personal Access Token (PAT) rather than proxy-level HTTP method filtering.
+
+### SEC-004: Gemini and Cursor persist real credentials onto the `/pvc` volume
+
+**Status**: Open
+**Severity**: Medium
+**Discovered**: 2026-08-10 while designing `paude backup`
+
+paude's credential model keeps real provider secrets on the proxy sidecar; the agent container and its `/pvc` volume normally hold only stubs or proxy-synthesized auth (e.g. `/pvc/.codex/auth.json` contains synthetic values — the real ChatGPT tokens live on the proxy-only auth volume). Two agents deviate and land a **real** token on `/pvc`:
+
+- **Gemini** (`google` OAuth) writes a real `refresh_token` to `~/.gemini/oauth_creds.json` → `/pvc/.gemini/oauth_creds.json` (the same file referenced by AGENT-001).
+- **Cursor**'s `auth.json` (access/refresh tokens) is persisted to `/pvc/.config/cursor/auth.json` — host-seeded on `--host` sessions (`src/paude/agents/cursor.py:117-126`) or written by an in-container `agent login`.
+
+Because `/pvc` is the durable session volume, these tokens sit at rest on disk, and on remote sessions the Cursor token is copied to the remote host. `paude backup` strips them (`AgentConfig.credential_file_names` → `credential_exclude_globs()` in `src/paude/cli/upgrade_persistence.py`) so bundles never carry a live token — but that is a stopgap for the backup path only. The real fix is to keep these tokens off the volume entirely (proxy-mediated OAuth like codex's ChatGPT flow, or a proxy-only auth volume), so the agent container never holds a real token. Until then, treat `/pvc` for Gemini/Cursor sessions as containing live credentials.
 
 ## Runtime Hardening Backlog
 

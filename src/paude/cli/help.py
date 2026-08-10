@@ -102,6 +102,22 @@ _SECTIONS: tuple[HelpSection, ...] = (
         ),
     ),
     HelpSection(
+        title="Backup & Restore",
+        rows=(
+            ("paude stop NAME", "Stop first — backup refuses a running session"),
+            ("paude backup NAME", "Snapshot the session volume + config to a bundle"),
+            ("paude backup NAME -o DIR/", "Write the bundle into a directory"),
+            ("paude restore BUNDLE", "Rebuild a session from a bundle (coming soon)"),
+        ),
+        text=(
+            "Bundles live in ~/.config/paude/backups/ by default and capture the"
+            " /pvc data volume (workspace + agent state) plus the config needed to"
+            " recreate the session.\n"
+            "Agent credential files are always stripped, so re-login inside the"
+            " session after restore for agents that authenticate in-container."
+        ),
+    ),
+    HelpSection(
         title="Egress Filtering",
         rows=(
             ("paude allowed-domains NAME", "Show current domains"),

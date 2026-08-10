@@ -29,6 +29,9 @@ class AgentConfig:
         extra_persistent_dir_names: Additional mutable directories under HOME
             that must survive container recreation.
         config_file_name: Config file under HOME (e.g., ".claude.json"), or None.
+        credential_file_names: HOME-relative files holding live credentials/tokens
+            (e.g. ".gemini/oauth_creds.json"). Excluded from `paude backup`
+            bundles so a backup never persists a live token to disk.
         activity_files: Paths (relative to config dir) for activity detection.
         yolo_flag: CLI flag to skip permissions
             (e.g., "--dangerously-skip-permissions").
@@ -58,6 +61,7 @@ class AgentConfig:
     config_dir_name: str = ".claude"
     extra_persistent_dir_names: list[str] = field(default_factory=list)
     config_file_name: str | None = ".claude.json"
+    credential_file_names: list[str] = field(default_factory=list)
     activity_files: list[str] = field(default_factory=list)
     yolo_flag: str | None = "--dangerously-skip-permissions"
     clear_command: str | None = "/clear"
