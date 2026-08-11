@@ -80,6 +80,39 @@ left out of the backup work because it reaches into the stable upgrade path
 (`_manifest_from_state`/`_resolve_base_from_manifest` in `cli/upgrade.py`), which
 is out of scope for that feature.
 
+### REFACTOR-008: streaming-subprocess lifecycle is duplicated between engine and SSH transport
+
+**Status**: Open
+**Priority**: Low (drift-prone; three copies of the same failure-translation idiom)
+**Discovered**: 2026-08-11 during a `/simplify` review of the streaming-backup work
+
+`ContainerEngine.stream_run` (`src/paude/container/engine.py:75-115`) owns a full
+piped-subprocess lifecycle: drain stderr on a background thread (so it can't
+fill its pipe and deadlock the stdout read), reap/kill on exception, and
+translate a non-zero exit into `RuntimeError(stderr or fallback)`. The
+`SshTransport` already implements that same drain/reap/`RuntimeError(detail or
+"…")` pattern twice internally — `copy_from_host` (`src/paude/transport/ssh.py:157-183`)
+and `_pipe_tar` (`ssh.py:194-208`) — so the "run a piped subprocess and turn
+failure+stderr into a RuntimeError" idiom now exists in **three** places, and
+the `bytes.decode(errors="replace").strip() or <fallback>` construction in **four**.
+
+Compounding it, the transport exposes `popen_binary` (`transport/base.py:29`,
+`local.py:41-52`, `ssh.py:94-108`) as a **raw** `Popen` whose stderr pipe will
+deadlock the stdout read unless the caller drains it concurrently — i.e. the
+transport publishes the *unsafe* primitive while keeping its *safe* version
+(the lifecycle above) private to two methods. A future streaming caller (restore
+stream, log tail) re-learns the drain/reap dance or deadlocks.
+
+Deeper fix (deferred — reaches well outside the backup diff into stable transfer
+code): have the **transport** own a managed binary-streaming context manager
+(it already knows the local-vs-SSH `ssh_base`/`shlex.join` wrapping and already
+implements the lifecycle), collapse `stream_run` to a thin `self.binary`-prepending
+pass-through symmetric with how `run()` delegates to `transport.run()`, and
+rebuild `_pipe_tar`/`copy_from_host` on the same primitive — retiring two of the
+three copies and removing the raw-`Popen` leak. Left out of the `/simplify` pass
+because rewiring `_pipe_tar`/`copy_from_host` changes pre-existing, well-tested
+SSH transfer paths untouched by the streaming-backup work.
+
 ### REFACTOR-006: Credential-provider reconciliation duplicated between upgrade and resolver
 
 **Status**: Open

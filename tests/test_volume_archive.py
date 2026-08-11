@@ -59,6 +59,8 @@ class TestExportVolume:
         args = list(mock_stream.call_args.args)
         assert args[0] == "run"
         assert args[args.index("--entrypoint") + 1] == "sh"
+        # Runs as root so tar can read files owned by any UID in the volume.
+        assert args[args.index("--user") + 1] == "root"
         assert "paude-s-workspace:/pvc:ro" in args
         assert "runtime:img" in args
 
@@ -133,6 +135,9 @@ class TestVolumeSizeBytes:
             )
             size = VolumeArchiver(engine).volume_size_bytes("vol", "img")
         assert size == 123456789
+        # Runs as root so du can traverse dirs owned by any UID (accurate size).
+        du_args = list(mock_run.call_args_list[0].args)
+        assert du_args[du_args.index("--user") + 1] == "root"
         # Cleanup still runs.
         assert list(mock_run.call_args_list[-1].args) == [
             "rm",

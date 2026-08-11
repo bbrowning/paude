@@ -65,19 +65,15 @@ class VolumeArchiver:
         This is the *uncompressed* size — a conservative upper bound for the
         resulting archive, suitable for a free-space preflight. Returns None if
         the size can't be determined (e.g. ``du`` unavailable in the image).
+
+        Runs as root (see :func:`_helper_run_args`) so ``du`` can traverse
+        directories owned by any UID — otherwise it would undercount, or error
+        out to ``None``, on state dirs the pinned runtime user can't enter,
+        defeating the preflight on exactly the volumes that need it.
         """
         with self._helper_container() as helper:
             result = self._engine.run(
-                "run",
-                "--name",
-                helper,
-                "--entrypoint",
-                "du",
-                "-v",
-                f"{volume}:/pvc:ro",
-                image,
-                "-sb",
-                "/pvc",
+                *_helper_run_args(helper, volume, image, "du", "-sb", "/pvc"),
                 check=False,
             )
         if result.returncode != 0:
@@ -96,7 +92,8 @@ class VolumeArchiver:
     ) -> str:
         """Export ``volume`` to ``local_tar_path`` as a gzipped tar.
 
-        Runs a throwaway container that mounts the volume read-only and tars its
+        Runs a throwaway container (as root, so tar can read files owned by any
+        UID in the volume) that mounts the volume read-only and tars its
         contents to stdout. The byte stream is piped to the client (over SSH for
         remote sessions), written to ``local_tar_path``, and hashed as it flows
         through — so nothing large ever touches the engine host and the archive
@@ -116,26 +113,19 @@ class VolumeArchiver:
             The archive's SHA-256 hex digest (computed on the client as the
             stream is written, so it also verifies transfer integrity).
         """
-        # `--entrypoint sh` overrides any entrypoint baked into the session
-        # image; the container tars the read-only volume to stdout, which we
-        # stream straight into the local file (no archive file on the engine
-        # host), hashing it in the same pass. stream_run owns the process
-        # lifecycle and raises if the container exits non-zero.
+        # tar the read-only volume to stdout and stream it straight into the
+        # local file (nothing large lands on the engine host), hashing in the
+        # same pass. `--entrypoint sh` overrides the image's own entrypoint, and
+        # _helper_run_args runs the helper as root so tar can read every file.
+        # stream_run owns the process lifecycle and raises on non-zero exit.
         hasher = hashlib.sha256()
         written = 0
         with (
             self._helper_container() as helper,
             self._engine.stream_run(
-                "run",
-                "--name",
-                helper,
-                "--entrypoint",
-                "sh",
-                "-v",
-                f"{volume}:/pvc:ro",
-                image,
-                "-c",
-                _tar_stream_script(exclude or []),
+                *_helper_run_args(
+                    helper, volume, image, "sh", "-c", _tar_stream_script(exclude or [])
+                )
             ) as stream,
             open(local_tar_path, "wb") as out,
         ):
@@ -146,6 +136,36 @@ class VolumeArchiver:
                 if progress is not None:
                     progress(written)
         return hasher.hexdigest()
+
+
+def _helper_run_args(
+    helper: str, volume: str, image: str, entrypoint: str, *trailing: str
+) -> list[str]:
+    """Build ``run`` args for a throwaway helper over the volume, as root.
+
+    Both helpers (``du`` sizing and ``tar`` export) mount the volume read-only
+    at ``/pvc`` and run as **root** so they can read/traverse files owned by any
+    UID it holds — root-owned ``0600`` agent state and pre-pin UID-drifted files
+    (the same drift ``ContainerRunner.reconcile_volume_ownership`` repairs).
+    Without root, ``tar`` exits 2 on the first unreadable file and aborts the
+    whole backup. The ``:ro`` mount grants only read access, and under rootless
+    podman container-root maps to the invoking host user — the same posture
+    ``reconcile_volume_ownership`` relies on. Centralizing the skeleton keeps
+    that security posture a single fact rather than a per-call-site invariant.
+    """
+    return [
+        "run",
+        "--name",
+        helper,
+        "--user",
+        "root",
+        "--entrypoint",
+        entrypoint,
+        "-v",
+        f"{volume}:/pvc:ro",
+        image,
+        *trailing,
+    ]
 
 
 def _tar_stream_script(exclude: list[str]) -> str:
