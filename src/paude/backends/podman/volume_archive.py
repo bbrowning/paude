@@ -66,9 +66,9 @@ class VolumeArchiver:
         resulting archive, suitable for a free-space preflight. Returns None if
         the size can't be determined (e.g. ``du`` unavailable in the image).
 
-        Runs as root (see :func:`_helper_run_args`) so ``du`` can traverse
-        directories owned by any UID — otherwise it would undercount, or error
-        out to ``None``, on state dirs the pinned runtime user can't enter,
+        Runs with full read access (see :func:`_helper_run_args`) so ``du`` can
+        traverse every directory — otherwise it would undercount, or error out
+        to ``None``, on state dirs the pinned runtime user can't enter,
         defeating the preflight on exactly the volumes that need it.
         """
         with self._helper_container() as helper:
@@ -92,9 +92,10 @@ class VolumeArchiver:
     ) -> str:
         """Export ``volume`` to ``local_tar_path`` as a gzipped tar.
 
-        Runs a throwaway container (as root, so tar can read files owned by any
-        UID in the volume) that mounts the volume read-only and tars its
-        contents to stdout. The byte stream is piped to the client (over SSH for
+        Runs a throwaway container (with full read access — see
+        :func:`_helper_run_args` — so tar can read every file in the volume)
+        that mounts the volume read-only and tars its contents to stdout. The
+        byte stream is piped to the client (over SSH for
         remote sessions), written to ``local_tar_path``, and hashed as it flows
         through — so nothing large ever touches the engine host and the archive
         is read exactly once. The helper is always removed, even on failure.
@@ -116,8 +117,9 @@ class VolumeArchiver:
         # tar the read-only volume to stdout and stream it straight into the
         # local file (nothing large lands on the engine host), hashing in the
         # same pass. `--entrypoint sh` overrides the image's own entrypoint, and
-        # _helper_run_args runs the helper as root so tar can read every file.
-        # stream_run owns the process lifecycle and raises on non-zero exit.
+        # _helper_run_args gives the helper the access it needs (root + SELinux
+        # label disabled) so tar can read every file. stream_run owns the
+        # process lifecycle and raises on non-zero exit.
         hasher = hashlib.sha256()
         written = 0
         with (
@@ -141,17 +143,28 @@ class VolumeArchiver:
 def _helper_run_args(
     helper: str, volume: str, image: str, entrypoint: str, *trailing: str
 ) -> list[str]:
-    """Build ``run`` args for a throwaway helper over the volume, as root.
+    """Build ``run`` args for a throwaway helper over the volume, unrestricted.
 
     Both helpers (``du`` sizing and ``tar`` export) mount the volume read-only
-    at ``/pvc`` and run as **root** so they can read/traverse files owned by any
-    UID it holds — root-owned ``0600`` agent state and pre-pin UID-drifted files
-    (the same drift ``ContainerRunner.reconcile_volume_ownership`` repairs).
-    Without root, ``tar`` exits 2 on the first unreadable file and aborts the
-    whole backup. The ``:ro`` mount grants only read access, and under rootless
-    podman container-root maps to the invoking host user — the same posture
-    ``reconcile_volume_ownership`` relies on. Centralizing the skeleton keeps
-    that security posture a single fact rather than a per-call-site invariant.
+    at ``/pvc`` and must read/traverse *every* file it holds, whoever wrote it.
+    Two independent access layers can otherwise block that, so both are lifted
+    for this read-only throwaway container:
+
+    - **DAC** — files owned by another UID (root-owned ``0600`` agent state,
+      pre-pin UID-drifted files, or nested-container state such as gascity's
+      ``0660`` runtime data) are unreadable by the pinned runtime user.
+      ``--user root`` bypasses the mode bits; under rootless podman
+      container-root maps to the invoking host user — the same posture
+      ``ContainerRunner.reconcile_volume_ownership`` relies on.
+    - **SELinux/MAC** — files a nested container wrote carry that container's
+      private MCS categories (e.g. ``container_file_t:s0:c401,c511``) that a
+      fresh helper's own category pair does not dominate, so the read is denied
+      *even as root*. ``--security-opt label=disable`` runs the helper
+      unconfined by SELinux; it is a no-op on non-SELinux hosts.
+
+    The ``:ro`` mount keeps this to read-only access to data the user already
+    owns. Centralizing the skeleton keeps that posture a single fact rather than
+    a per-call-site invariant.
     """
     return [
         "run",
@@ -159,6 +172,8 @@ def _helper_run_args(
         helper,
         "--user",
         "root",
+        "--security-opt",
+        "label=disable",
         "--entrypoint",
         entrypoint,
         "-v",
