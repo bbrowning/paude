@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,19 @@ class ContainerNotFoundError(Exception):
     """Container not found."""
 
     pass
+
+
+def echo_captured_stderr(result: subprocess.CompletedProcess[str]) -> None:
+    """Print a captured command's stderr to our own stderr, if it has any.
+
+    ``exec_in_container`` captures output, so container-side warnings and
+    progress lines (e.g. the migration script's per-path warnings or the
+    volume-reconcile progress line) would otherwise be invisible. The
+    ``isinstance`` check keeps mocked results — whose ``.stderr`` is a ``Mock``
+    — quiet in tests.
+    """
+    if isinstance(result.stderr, str) and result.stderr.strip():
+        print(result.stderr, file=sys.stderr, end="")
 
 
 class ContainerRunner:
@@ -267,9 +281,51 @@ class ContainerRunner:
         name: str,
         command: list[str],
         check: bool = True,
+        user: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        """Execute a command in a running container and capture output."""
-        return self._engine.run("exec", name, *command, check=check)
+        """Execute a command in a running container and capture output.
+
+        When ``user`` is set, the command runs as that container user (e.g.
+        ``"root"``); otherwise it runs as the image's default ``USER``.
+        """
+        args = ["exec"]
+        if user is not None:
+            args += ["--user", user]
+        args.append(name)
+        return self._engine.run(*args, *command, check=check)
+
+    def reconcile_volume_ownership(self, name: str) -> None:
+        """Chown ``/pvc`` to the image's runtime user if the volume drifted.
+
+        Volumes created before the runtime UID/GID was pinned (see
+        ``paude.constants``) are owned by a non-deterministic ``useradd
+        --system`` UID. When the image is rebuilt during ``paude upgrade`` the
+        new container can run as a different UID and can no longer read/write the
+        reused volume (EACCES), which breaks config persistence and agent
+        logins. Reconcile so the volume always matches whoever the image's
+        ``paude`` user actually is — resolved at runtime with ``id``, not
+        assumed, so this stays correct whether the rebuilt image pinned the UID
+        to 1000:0 or inherited an older one (chowning to a wrong hardcoded UID
+        would itself lock the container out of its own volume).
+
+        Runs as root (rootless podman maps container-root to the invoking host
+        user, which can chown within the user namespace). Guarded so the common
+        already-correct case skips the recursive walk, and tolerant of failure
+        (best effort) so it never aborts an upgrade on its own.
+        """
+        script = (
+            "owner=$(id -u paude 2>/dev/null):$(id -g paude 2>/dev/null); "
+            "cur=$(stat -c %u:%g /pvc 2>/dev/null || echo); "
+            'if [ "$owner" != ":" ] && [ "$cur" != "$owner" ]; then '
+            'echo "Reconciling /pvc ownership to $owner..." >&2; '
+            'chown -R "$owner" /pvc; fi'
+        )
+        result = self.exec_in_container(
+            name, ["sh", "-c", script], check=False, user="root"
+        )
+        # Surface the one-time "Reconciling..." progress line (only emitted when
+        # a chown actually ran).
+        echo_captured_stderr(result)
 
     def inject_file(
         self,

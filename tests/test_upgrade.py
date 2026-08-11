@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -413,6 +414,67 @@ class TestUpgradePodman:
         assert config.reuse_volume is True
         # start_session_no_attach called
         backend.start_session_no_attach.assert_called_once_with("test-session")
+
+    @patch("paude.transport.config_sync.remap_mounts")
+    @patch("paude.transport.config_sync.sync_configs_to_remote")
+    @patch("paude.mounts.build_mounts")
+    @patch("paude.cli.helpers._prepare_session_create")
+    @patch("paude.container.ImageManager")
+    @patch("paude.config.detector.detect_config", return_value=None)
+    @patch("paude.backends.podman.helpers.find_container_by_session_name")
+    def test_upgrade_remaps_remote_config_mounts(
+        self,
+        mock_find_container: MagicMock,
+        mock_detect_config: MagicMock,
+        mock_image_manager_class: MagicMock,
+        mock_prepare: MagicMock,
+        mock_build_mounts: MagicMock,
+        mock_sync: MagicMock,
+        mock_remap: MagicMock,
+    ) -> None:
+        """A --host upgrade transfers config to the remote host and remaps the
+        bind-mount sources, so podman on the remote isn't handed a local (e.g.
+        Mac) path that doesn't exist there ("statfs ...: no such file")."""
+        from paude.transport.ssh import SshTransport
+
+        mock_find_container.return_value = {"Labels": self._make_container_labels()}
+
+        mock_image_manager = MagicMock()
+        mock_image_manager.ensure_default_image.return_value = "paude:latest"
+        mock_image_manager_class.return_value = mock_image_manager
+        mock_prepare.return_value = ([], [], {}, True)
+
+        local_mounts = ["-v", "/Users/bob/.gitconfig:/home/paude/.gitconfig:ro"]
+        remote_mounts = [
+            "-v",
+            "/tmp/paude-config-x/0/.gitconfig:/home/paude/.gitconfig:ro",
+        ]
+        mock_build_mounts.return_value = local_mounts
+        mock_sync.return_value = MagicMock(
+            path_map={"/Users/bob/.gitconfig": "/tmp/paude-config-x/0/.gitconfig"}
+        )
+        mock_remap.return_value = remote_mounts
+
+        from paude.backends.podman.backend import PodmanBackend
+
+        backend = MagicMock(spec=PodmanBackend)
+        backend._runner = MagicMock()
+        backend._runner.container_exists.return_value = False
+        backend._network_manager = MagicMock()
+        backend._volume_manager = MagicMock()
+        backend._engine = MagicMock()
+        backend._engine.is_remote = True
+        backend._engine.transport = MagicMock(spec=SshTransport)
+
+        from paude.cli.upgrade import _upgrade_podman
+
+        _upgrade_podman("test-session", backend, rebuild=False, overrides=_NO_OVERRIDES)
+
+        mock_sync.assert_called_once()
+        mock_remap.assert_called_once()
+        # The recreated session uses the remapped (remote) mount sources.
+        session_config = backend.create_session.call_args[0][0]
+        assert session_config.mounts == remote_mounts
 
     @patch("paude.mounts.build_mounts", return_value=[])
     @patch("paude.cli.helpers._prepare_session_create")
@@ -1093,6 +1155,34 @@ class TestUpgradeResume:
         assert "safe" in output.lower()
         assert "retry" in output.lower()
         assert "paude upgrade test-session" in output
+
+    @patch("paude.cli.upgrade._upgrade_podman")
+    @patch("paude.cli.upgrade.find_session_backend")
+    def test_failure_surfaces_called_process_stderr(
+        self, mock_find: MagicMock, mock_upgrade_podman: MagicMock
+    ) -> None:
+        """A CalledProcessError escaping the upgrade must report its captured
+        stderr, not the opaque 'returned non-zero exit status' string that hid
+        the /pvc ownership migration failure."""
+        from paude.backends.podman.backend import PodmanBackend
+
+        mock_upgrade_podman.side_effect = subprocess.CalledProcessError(
+            1, ["podman", "exec"], stderr="cp: '/pvc/.codex': Permission denied"
+        )
+
+        mock_backend = MagicMock()
+        mock_backend.__class__ = PodmanBackend
+        mock_backend.get_session.return_value = _make_session(
+            "test-session", version="0.1.0"
+        )
+        mock_find.return_value = ("podman", mock_backend)
+
+        result = runner.invoke(app, ["upgrade", "test-session"])
+
+        assert result.exit_code == 1
+        output = result.stdout + (result.stderr or "")
+        assert "Permission denied" in output
+        assert "returned non-zero exit status" not in output
 
     def test_unregister_clears_manifest(self) -> None:
         """Deleting a session (via registry.unregister) removes its manifest,

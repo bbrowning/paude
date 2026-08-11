@@ -2,34 +2,42 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from paude.constants import CONTAINER_HOME
+from paude.container.runner import echo_captured_stderr
 
 if TYPE_CHECKING:
     from paude.agents.base import AgentComposition
     from paude.container.runner import ContainerRunner
 
 
+# Per-path writes are non-fatal: one un-writable path (e.g. a /pvc whose UID
+# drifted from the runtime user) must not abort the whole upgrade. Each mkdir/cp
+# is guarded and warns on stderr (which the caller surfaces); cp's own error is
+# left visible so the specific failing path is diagnosable. This mirrors the
+# runtime entrypoint's hardened persist_config_dir. set -e still guards the rest.
 _MIGRATE_SCRIPT = r"""
 set -e
+warn() { echo "migrate: could not fully migrate $1" >&2; }
 mode=dirs
 for relative in "$@"; do
     if [ "$relative" = "--files" ]; then mode=files; continue; fi
-    source_path="$HOME/$relative"
-    target_path="/pvc/$relative"
-    if [ -L "$source_path" ]; then continue; fi
-    if [ "$mode" = "dirs" ] && [ -d "$source_path" ]; then
-        mkdir -p "$target_path"
-        cp -dR --preserve=mode,timestamps "$source_path/." "$target_path/"
-        chmod -R g+rwX "$target_path" 2>/dev/null || true
-        chcon -R --reference=/pvc "$target_path" 2>/dev/null || true
-    elif [ "$mode" = "files" ] && [ -f "$source_path" ]; then
-        mkdir -p "$(dirname "$target_path")"
-        cp -f --preserve=mode,timestamps "$source_path" "$target_path"
-        chmod g+rw "$target_path" 2>/dev/null || true
-        chcon --reference=/pvc "$target_path" 2>/dev/null || true
+    src="$HOME/$relative"
+    dst="/pvc/$relative"
+    if [ -L "$src" ]; then continue; fi
+    if [ "$mode" = "dirs" ] && [ -d "$src" ]; then
+        mkdir -p "$dst" 2>/dev/null || { warn "$relative"; continue; }
+        cp -dR --preserve=mode,timestamps "$src/." "$dst/" || warn "$relative"
+        chmod -R g+rwX "$dst" 2>/dev/null || true
+        chcon -R --reference=/pvc "$dst" 2>/dev/null || true
+    elif [ "$mode" = "files" ] && [ -f "$src" ]; then
+        mkdir -p "$(dirname "$dst")" 2>/dev/null || { warn "$relative"; continue; }
+        cp -f --preserve=mode,timestamps "$src" "$dst" || warn "$relative"
+        chmod g+rw "$dst" 2>/dev/null || true
+        chcon --reference=/pvc "$dst" 2>/dev/null || true
     fi
 done
 """
@@ -98,7 +106,16 @@ def migrate_legacy_state(
         runner.stop_container_graceful(container_name)
     runner.start_container(container_name)
     try:
-        runner.exec_in_container(
+        # Run as the old container's default user (not root): the copy is a
+        # best-effort salvage into the volume that user already owns. Anything it
+        # can't read or write — e.g. a read-only host-mounted ~/.gitconfig owned
+        # by root on a remote session — is skipped with a warning by the hardened
+        # script instead of aborting the upgrade. Volume ownership is NOT
+        # reconciled here: the old container may run as a pre-pin UID that owns
+        # the volume, and chowning it to the pinned user would only take write
+        # access away. Final ownership is reconciled on the recreated container
+        # (SessionSetup.fix_volume_permissions), which runs as the pinned user.
+        result = runner.exec_in_container(
             container_name,
             [
                 "env",
@@ -112,6 +129,12 @@ def migrate_legacy_state(
                 *files,
             ],
         )
+        # Surface any non-fatal per-path warnings the hardened script emitted.
+        echo_captured_stderr(result)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(
+            f"migrating persistent agent state failed: {e.stderr or e.stdout or e}"
+        ) from e
     finally:
         if not was_running:
             runner.stop_container_graceful(container_name)

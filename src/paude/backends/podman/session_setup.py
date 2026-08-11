@@ -206,19 +206,16 @@ class SessionSetup:
             )
 
     def fix_volume_permissions(self, container_name: str) -> None:
-        """Fix /pvc volume ownership for Docker."""
-        if self._engine.supports_secrets:
-            return
-        self._engine.run(
-            "exec",
-            "--user",
-            "root",
-            container_name,
-            "chown",
-            "paude",
-            "/pvc",
-            check=False,
-        )
+        """Reconcile /pvc ownership before configure_codex and the entrypoint run.
+
+        Thin lifecycle hook over
+        ``ContainerRunner.reconcile_volume_ownership`` (see there for the
+        drifted-UID rationale and why the target is resolved at runtime rather
+        than assumed). Kept in the start path so a volume whose owner no longer
+        matches the possibly-rebuilt image is fixed up before anything reads or
+        writes it — on both podman and docker.
+        """
+        self._runner.reconcile_volume_ownership(container_name)
 
     def start_session_containers(
         self,

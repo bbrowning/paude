@@ -239,6 +239,95 @@ is installed at headless start). Add `--connect-timeout`/`--max-time` to the
 agent install curls (codex, and any other curl-based installer) so a blocked
 network fails fast with a clear error rather than hanging startup.
 
+### RUNTIME-004: `paude upgrade` aborted on an un-copyable migration source, and stranded pre-pin `/pvc` ownership
+
+**Status**: Resolved (2026-08-11)
+**Discovered**: 2026-08-11 while upgrading a remote codex/ChatGPT session
+(`0.20.0a8` → `0.20.0a10`)
+
+Two independent problems, both hit during one upgrade:
+
+1. **Crash (opaque):** the pre-upgrade state migration (`_MIGRATE_SCRIPT` in
+   `src/paude/cli/upgrade_persistence.py`) ran under `set -e` with an
+   **unguarded** `cp`, so the *first* un-copyable path aborted the whole
+   upgrade. In the reported case the runtime UID matched the `/pvc` owner
+   (both `997`), so it was **not** a `/pvc` write/EACCES problem — the copy
+   died trying to **read the source** `cp: cannot open '/home/paude/.gitconfig'
+   for reading: Permission denied`. For a `--host` (remote) session
+   `~/.gitconfig` is a **read-only host file bind-mounted** into the container,
+   owned by `root` (and, on an SELinux host, unreadable by the `997` runtime
+   user regardless of the `644` bits). The real error never reached the user
+   because the handler printed only `str(CalledProcessError)`, which drops
+   `.stderr`. Same class of swallowed-error as RUNTIME-001.
+
+2. **Stranded ownership (second-order):** pinning the runtime user to `1000:0`
+   (commit `8edd527`) left volumes created by the earlier `useradd --system`
+   UID (`~997`) owned by that stale UID. `paude upgrade` reuses the `/pvc`
+   named volume, and `fix_volume_permissions` never reconciled ownership on
+   podman (it early-returned, was non-recursive, and chowned to the *name*
+   `paude`, not `uid:gid`). So after upgrading to a `1000:0` image the recreated
+   container couldn't read `/pvc/.codex/auth.json` (mode `0600`, owner `~997`)
+   → Codex ChatGPT OAuth silently broke. Related to SEC-004 / AGENT-001
+   (auth on `/pvc`).
+
+**Fix**:
+- `_MIGRATE_SCRIPT` guards each `cp`/`mkdir` (warn-and-continue via a `warn`
+  helper), mirroring the runtime entrypoint's hardened `persist_config_dir`, so
+  one un-copyable path can no longer abort the upgrade. The copy runs as the old
+  container's default user (best-effort salvage) and leaves `cp`'s own error
+  visible.
+- Migration failures now re-raise with the captured `stderr`, and the generic
+  upgrade handler surfaces `CalledProcessError.stderr` instead of the opaque
+  exit-status string.
+- `ContainerRunner.reconcile_volume_ownership()` chowns `/pvc` to the image's
+  actual `paude` user — resolved at runtime with `id -u paude`/`id -g paude`,
+  **not** a hardcoded UID (a wrong hardcoded value would itself lock the
+  container out of its volume), guarded by a `stat` probe so the already-correct
+  case skips the recursive walk. It runs on the **recreated** container via the
+  now podman-capable `fix_volume_permissions`, before `configure_codex` and the
+  agent entrypoint — the sole, correctly-placed reconcile. (An earlier draft
+  reconciled *before* the migration copy too; that was removed because the old
+  container can own the volume at a pre-pin UID, so chowning it there would only
+  remove its own write access.)
+
+### RUNTIME-005: Remote sessions bind-mount `~/.gitconfig`, which SELinux can make unreadable
+
+**Status**: Open
+**Priority**: Medium (a fresh remote session on an SELinux host can silently end
+up with no global git config / identity)
+**Discovered**: 2026-08-11 while debugging a remote (`--host`) codex upgrade
+
+Config sync is engine-split: local engines copy host config into `/credentials/`
+via `podman cp` (`ConfigSyncer`, `src/paude/backends/podman/sync.py`), while SSH
+remotes skip that and rely on bind mounts instead (`sync.py:25`, early
+`return`). So on a remote session `build_mounts(include_config=True)`
+(`src/paude/mounts.py:73-79`) bind-mounts the host gitconfig read-only at
+`$HOME/.gitconfig` (the source is transferred to the remote's `/tmp` by
+`sync_configs_to_remote` and remapped). On an SELinux-enforcing host that
+bind-mounted file is owned by root (the host user maps to container-root under
+rootless podman) and carries a host SELinux label the container's confined
+`paude` process cannot read — despite `0644` mode bits. (The `podman cp` copy
+path used for local engines exists precisely to avoid this, per
+`mounts.py:48-50`.)
+
+The consequence surfaces on a **fresh** remote session: `setup_gitconfig`
+(`containers/paude/entrypoint-lib-credentials.sh:88-128`) seeds `/pvc/.gitconfig`
+by `cp`-ing from `$HOME/.gitconfig` when `/pvc/.gitconfig` doesn't yet exist. If
+SELinux blocks that read, the `cp` fails silently (`2>/dev/null || true`),
+`/pvc/.gitconfig` is never created, `GIT_CONFIG_GLOBAL` is never exported, and git
+falls back to the unreadable `~/.gitconfig` — leaving the session with no global
+git config or identity. Sessions that already have a populated `/pvc/.gitconfig`
+(e.g. an existing session being upgraded) are unaffected, because the seed step
+is skipped and `GIT_CONFIG_GLOBAL` still points at the readable PVC copy. Same
+class of silently-swallowed setup failure as RUNTIME-001.
+
+Fix directions: make the remote path copy gitconfig into `/credentials/` like the
+local path (so the entrypoint reads a readable, correctly-labeled source), or
+relabel the bind mount (`:z`/`:Z`), or have `setup_gitconfig` fall back to
+`touch`-ing `/pvc/.gitconfig` and filling identity from
+`PAUDE_GIT_USER_NAME`/`PAUDE_GIT_USER_EMAIL` when the source is unreadable, so
+`GIT_CONFIG_GLOBAL` is always set even when the seed copy fails.
+
 ## Test Suite
 
 ### TEST-002: Single-file branch of `_transfer_path` is untested

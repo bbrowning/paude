@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
@@ -347,7 +348,14 @@ def session_upgrade(
         )
         raise typer.Exit(130) from None
     except Exception as e:
-        typer.echo(f"Error upgrading session: {e}", err=True)
+        # str(CalledProcessError) omits captured stderr — surface it so a
+        # failing container command isn't reported as an opaque exit status.
+        detail = (
+            e.stderr.strip()
+            if isinstance(e, subprocess.CalledProcessError) and e.stderr
+            else str(e)
+        )
+        typer.echo(f"Error upgrading session: {detail}", err=True)
         typer.echo(
             f"The upgrade did not finish. Your workspace data is safe. "
             f"Run 'paude upgrade {name}' again to retry.",
@@ -734,6 +742,20 @@ def _upgrade_podman(
     # Build mounts and env
     home = Path.home()
     mounts = build_mounts(home, composition, include_config=engine.is_remote)
+
+    # For SSH remotes, transfer the local config files referenced by the bind
+    # mounts to the remote host and rewrite the mount sources to the remote
+    # paths — the local (e.g. Mac) source paths don't exist on the remote host,
+    # so podman would fail to create the container ("statfs ...: no such file").
+    # Mirrors the create path (see create_podman.py).
+    if engine.is_remote:
+        from paude.transport.config_sync import remap_mounts, sync_configs_to_remote
+        from paude.transport.ssh import SshTransport
+
+        if isinstance(engine.transport, SshTransport):
+            typer.echo("Syncing configuration to remote host...", err=True)
+            remote_config_paths = sync_configs_to_remote(engine.transport, mounts)
+            mounts = remap_mounts(mounts, remote_config_paths.path_map)
 
     # Expand domains — all sessions get a proxy.
     # allowed_domains=None (old sessions without proxy) is passed as-is to

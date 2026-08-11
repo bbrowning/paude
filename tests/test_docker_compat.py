@@ -299,38 +299,51 @@ class TestDockerListContainers:
 
 
 class TestDockerVolumePermissions:
-    """Tests for Docker volume permission fixing."""
+    """Tests for /pvc volume ownership reconciliation on start."""
+
+    def _reconcile_exec(self, mock_run: MagicMock) -> list[str]:
+        """Return the single guarded root-exec argv issued by the reconcile."""
+        exec_calls = [
+            c[0][0]
+            for c in mock_run.call_args_list
+            if "exec" in c[0][0] and "--user" in c[0][0]
+        ]
+        assert len(exec_calls) == 1, exec_calls
+        return exec_calls[0]
 
     @patch("subprocess.run")
-    def test_docker_fixes_volume_permissions_on_start(
+    def test_docker_reconciles_volume_ownership_on_start(
         self, mock_run: MagicMock
     ) -> None:
-        """Docker should chown /pvc after starting a container."""
+        """Docker should chown /pvc to the pinned runtime user via a root exec."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         engine = ContainerEngine("docker")
         backend = PodmanBackend(engine=engine)
         backend._setup.fix_volume_permissions("paude-test")
-        # Find the chown call
-        chown_calls = [c for c in mock_run.call_args_list if "chown" in c[0][0]]
-        assert len(chown_calls) == 1
-        cmd = chown_calls[0][0][0]
-        assert cmd == [
-            "docker",
-            "exec",
-            "--user",
-            "root",
-            "paude-test",
-            "chown",
-            "paude",
-            "/pvc",
-        ]
+        argv = self._reconcile_exec(mock_run)
+        assert argv[:5] == ["docker", "exec", "--user", "root", "paude-test"]
+        assert argv[5:7] == ["sh", "-c"]
+        script = argv[7]
+        # Ownership target is resolved at runtime (not hardcoded), and the
+        # recursive chown is guarded by a stat probe so the already-correct case
+        # skips the walk.
+        assert "id -u paude" in script
+        assert 'chown -R "$owner" /pvc' in script
+        assert "stat -c %u:%g /pvc" in script
 
-    def test_podman_skips_volume_permission_fix(self) -> None:
-        """Podman should skip volume permission fix (uses user namespaces)."""
+    @patch("subprocess.run")
+    def test_podman_reconciles_volume_ownership_on_start(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Podman no longer skips: a reused, UID-drifted volume must be fixed."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         engine = ContainerEngine("podman")
         backend = PodmanBackend(engine=engine)
-        # Should be a no-op, no subprocess call needed
         backend._setup.fix_volume_permissions("paude-test")
+        argv = self._reconcile_exec(mock_run)
+        assert argv[:5] == ["podman", "exec", "--user", "root", "paude-test"]
+        assert 'chown -R "$owner" /pvc' in argv[-1]
+        assert "id -u paude" in argv[-1]
 
 
 class TestDockerCredentialInjection:

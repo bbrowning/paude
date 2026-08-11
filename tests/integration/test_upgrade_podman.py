@@ -232,6 +232,91 @@ class TestPodmanUpgrade:
         finally:
             cleanup_session(backend, unique_session_name)
 
+    def test_upgrade_reconciles_drifted_volume_ownership(
+        self,
+        require_podman: None,
+        require_test_image: None,
+        require_proxy_image: None,
+        temp_workspace: Path,
+        unique_session_name: str,
+        podman_test_image: str,
+        podman_proxy_image: str,
+    ) -> None:
+        """A /pvc volume owned by a drifted (pre-pin) UID is reconciled to the
+        pinned runtime user when the container is recreated, so owner-only agent
+        credentials created before the UID pin stay readable after the upgrade.
+
+        Regression for the reported ``paude upgrade`` failure on a codex/chatgpt
+        session over a volume created before the UID/GID pin: without the
+        reconcile the recreated 1000:0 container cannot read /pvc/.codex/auth.json
+        (mode 600, owner ~997) and its OAuth login silently breaks.
+        """
+        backend = PodmanBackend()
+        container = f"paude-{unique_session_name}"
+
+        try:
+            with patch("paude.__version__", OLD_VERSION):
+                config = SessionConfig(
+                    name=unique_session_name,
+                    workspace=temp_workspace,
+                    image=podman_test_image,
+                    allowed_domains=["redhat.com"],
+                    proxy_image=podman_proxy_image,
+                    agent="gemini",
+                )
+                backend.create_session(config)
+
+            backend.start_session_no_attach(unique_session_name)
+            time.sleep(1)
+
+            # Seed an owner-only credential, then simulate a pre-pin volume by
+            # chowning /pvc to a UID the pinned runtime user (1000) doesn't own.
+            subprocess.run(
+                [
+                    "podman",
+                    "exec",
+                    "--user",
+                    "root",
+                    container,
+                    "sh",
+                    "-c",
+                    "mkdir -p /pvc/.codex && echo tok > /pvc/.codex/auth.json && "
+                    "chmod 600 /pvc/.codex/auth.json && chown -R 997:997 /pvc",
+                ],
+                check=True,
+                capture_output=True,
+            )
+
+            # The upgrade must complete (the hardened migration never aborts) and
+            # the recreated container must reconcile ownership.
+            _run_upgrade(
+                unique_session_name,
+                backend,
+                UpgradeOverrides(),
+                podman_test_image,
+                podman_proxy_image,
+            )
+
+            session = backend.get_session(unique_session_name)
+            assert session is not None
+            assert session.status == "running"
+
+            # /pvc and the owner-only auth.json are reconciled to the pinned user.
+            owner = _exec(container, "stat", "-c", "%u:%g", "/pvc")
+            assert owner.stdout.strip() == "1000:0", owner.stdout
+            auth_owner = _exec(
+                container, "stat", "-c", "%u:%g", "/pvc/.codex/auth.json"
+            )
+            assert auth_owner.stdout.strip() == "1000:0", auth_owner.stdout
+
+            # The runtime user (default exec user) can now read its own token.
+            auth = _exec(container, "cat", "/pvc/.codex/auth.json")
+            assert auth.returncode == 0
+            assert "tok" in auth.stdout
+
+        finally:
+            cleanup_session(backend, unique_session_name)
+
 
 class TestPodmanUpgradeReconfigure:
     """Integration coverage for `paude upgrade` add-agent / provider-swap.

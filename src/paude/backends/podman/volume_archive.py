@@ -16,8 +16,9 @@ and using ``transport.copy_from_host`` for SSH).
 
 Restore (future, ``import_volume``) is the mirror image: create the volume,
 push the tar in with :func:`copy_to_container`, and ``tar -xzf`` it into
-``/pvc`` from inside a helper container (on docker, ``chown paude /pvc`` first,
-matching ``SessionSetup.fix_volume_permissions``).
+``/pvc`` from inside a helper container, reconciling ownership to the pinned
+runtime user afterward (see ``SessionSetup.fix_volume_permissions`` /
+``ContainerRunner.reconcile_volume_ownership``).
 """
 
 from __future__ import annotations

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import subprocess
 from unittest.mock import MagicMock, call
 
 import pytest
 
 from paude.agents import get_agents
 from paude.cli.upgrade_persistence import (
+    _MIGRATE_SCRIPT,
     migrate_legacy_state,
     persistent_state_paths,
 )
@@ -64,12 +66,61 @@ def test_migration_quiesces_an_already_running_container() -> None:
     ]
 
 
-def test_migration_restops_container_when_copy_fails() -> None:
+def test_migration_does_not_reconcile_ownership() -> None:
+    """Migration must NOT chown the volume: the old container may own it at a
+    pre-pin UID, and reconciling to the pinned user here would remove its write
+    access. Ownership is reconciled on the recreated container instead."""
     runner = MagicMock()
     runner.container_running.return_value = False
-    runner.exec_in_container.side_effect = RuntimeError("copy failed")
 
-    with pytest.raises(RuntimeError, match="copy failed"):
-        migrate_legacy_state(runner, "paude-demo", get_agents(["opencode"]))
+    migrate_legacy_state(runner, "paude-demo", get_agents(["codex"]))
 
+    runner.reconcile_volume_ownership.assert_not_called()
+    # The copy runs as the container's default user, not root.
+    assert runner.exec_in_container.call_args.kwargs.get("user") is None
+
+
+def test_migration_surfaces_stderr_on_failure() -> None:
+    runner = MagicMock()
+    runner.container_running.return_value = False
+    runner.exec_in_container.side_effect = subprocess.CalledProcessError(
+        1, ["bash"], stderr="cp: cannot create '/pvc/.codex': Permission denied"
+    )
+
+    with pytest.raises(RuntimeError, match="Permission denied"):
+        migrate_legacy_state(runner, "paude-demo", get_agents(["codex"]))
+
+    # The container is still re-stopped even when the copy fails.
     runner.stop_container_graceful.assert_called_once_with("paude-demo")
+
+
+def test_migration_prints_nonfatal_warnings(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    runner = MagicMock()
+    runner.container_running.return_value = False
+    runner.exec_in_container.return_value = subprocess.CompletedProcess(
+        args=["bash"],
+        returncode=0,
+        stdout="",
+        stderr="migrate: could not fully migrate .codex\n",
+    )
+
+    migrate_legacy_state(runner, "paude-demo", get_agents(["codex"]))
+
+    assert "could not fully migrate .codex" in capsys.readouterr().err
+
+
+def test_migrate_script_guards_every_write() -> None:
+    """Each cp/mkdir in the migration script must be non-fatal and warn.
+
+    Guards the fix against regressing back to an unguarded ``set -e`` copy that
+    aborts the whole upgrade on one un-writable path (the reported failure).
+    """
+    # A warn helper emits per-path failures to stderr (surfaced by the caller).
+    assert "warn()" in _MIGRATE_SCRIPT
+    assert ">&2" in _MIGRATE_SCRIPT
+    for line in _MIGRATE_SCRIPT.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("cp ", "mkdir ")):
+            assert "||" in stripped, f"unguarded write: {stripped}"
