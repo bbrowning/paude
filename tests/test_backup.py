@@ -416,7 +416,7 @@ class TestWriteBundle:
         )
         output = tmp_path / "s.paude"
 
-        def fake_export(vol, image, local, exclude=None):
+        def fake_export(vol, image, local, exclude=None, progress=None):
             Path(local).write_bytes(b"PVCDATA")
             return "deadbeef"
 
@@ -436,6 +436,37 @@ class TestWriteBundle:
         assert manifest.archive_sha256 == "deadbeef"
         # No staging directory is left behind.
         assert list(tmp_path.glob(".paude-backup-*")) == []
+
+
+class TestArchiveProgress:
+    def test_noop_when_not_a_tty(self, capsys) -> None:
+        from paude.cli.backup import _ArchiveProgress
+
+        progress = _ArchiveProgress()
+        # Under pytest capture stderr is not a TTY, so nothing renders.
+        assert progress._enabled is False
+        progress.update(1024 * 1024)
+        progress.finish()
+        assert capsys.readouterr().err == ""
+
+    def test_renders_throughput_and_throttles(self, capsys) -> None:
+        from paude.cli.backup import _ArchiveProgress
+
+        progress = _ArchiveProgress()
+        progress._enabled = True  # force rendering off a TTY for the test
+
+        progress.update(2 * 1024 * 1024)
+        first = capsys.readouterr().err
+        assert "2.0MB written" in first
+        assert "/s" in first  # a throughput figure is shown
+
+        # A second update within the redraw interval is throttled.
+        progress.update(3 * 1024 * 1024)
+        assert capsys.readouterr().err == ""
+
+        # finish() ends the in-place line so later output starts fresh.
+        progress.finish()
+        assert capsys.readouterr().err == "\n"
 
 
 class TestPreflightDiskSpace:

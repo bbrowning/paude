@@ -178,8 +178,14 @@ A backup is a `<name>-<timestamp>.paude/` directory (mode `0700`) with two files
   state, history, and skills.
 
 A directory (rather than one wrapping tarball) means the multi-GB volume archive
-is written to disk only once, which matters for large volumes. Both files are
-mode `0600`. Before starting, backup estimates the volume size and, if the
+is written to disk only once, which matters for large volumes. The archive is
+produced by a throwaway container that tars the read-only volume to its stdout,
+and that stream is piped straight into `pvc.tar.gz` (over SSH for remote
+sessions) and hashed as it flows through — so nothing large is ever staged on
+the engine host, which is what makes backing up a big *remote* session reliable
+even when the remote host's `/tmp` or container storage is small. Live progress
+(bytes archived, throughput, elapsed) is shown as it runs. Both files are mode
+`0600`. Before starting, backup estimates the volume size and, if the
 destination looks short on free space, asks you to re-run with `--force`.
 
 Only the data volume is irreplaceable, so that is all a backup captures. The

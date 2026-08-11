@@ -3,36 +3,39 @@
 The whole durable state of a paude session lives in one named volume mounted at
 ``/pvc`` (workspace + agent state). ``paude backup`` captures it; a future
 ``paude restore`` will repopulate it. Both work for **podman and docker** and
-for **local and SSH-remote** sessions by reusing the transport-aware copy
-helpers in :mod:`paude.backends.podman.file_copy`.
+for **local and SSH-remote** sessions.
 
 Why a helper container rather than ``podman volume export``: ``volume export``
-is podman-only (docker has no equivalent), and streaming a tar through
-``ContainerEngine.run`` would corrupt it because the transport runs in text
-mode. Instead a throwaway container tars the volume to a file *on the engine
-host* (hashing it in the same pass so the multi-GB archive isn't read twice),
-and :func:`copy_from_container` pulls the bytes back (staging on the remote host
-and using ``transport.copy_from_host`` for SSH).
+is podman-only (docker has no equivalent). Instead a throwaway container tars the
+read-only volume to its **stdout**, and that byte stream is piped straight to the
+client (over SSH for remote sessions) where it is written to the bundle and
+hashed as it flows through. Streaming this way means the multi-GB archive is
+never materialized on the engine host — critical for remote hosts whose ``/tmp``
+or container storage is far smaller than the volume — and lets the client report
+live progress. The stream is handled in **binary** mode via
+:meth:`ContainerEngine.stream_run` (not the text-mode ``run``, which would
+corrupt the gzip bytes).
 
 Restore (future, ``import_volume``) is the mirror image: create the volume,
-push the tar in with :func:`copy_to_container`, and ``tar -xzf`` it into
-``/pvc`` from inside a helper container, reconciling ownership to the pinned
-runtime user afterward (see ``SessionSetup.fix_volume_permissions`` /
+push the tar in with :func:`paude.backends.podman.file_copy.copy_to_container`,
+and ``tar -xzf`` it into ``/pvc`` from inside a helper container, reconciling
+ownership to the pinned runtime user afterward (see
+``SessionSetup.fix_volume_permissions`` /
 ``ContainerRunner.reconcile_volume_ownership``).
 """
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 import shlex
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
-from paude.backends.podman.file_copy import copy_from_container
 from paude.container.engine import ContainerEngine
 
-# Where the helper container writes the archive inside its own filesystem.
-CONTAINER_ARCHIVE_PATH = "/tmp/pvc.tar.gz"  # noqa: S108
+# Read the archive stream one MiB at a time.
+_CHUNK_SIZE = 1024 * 1024
 
 
 class VolumeArchiver:
@@ -43,7 +46,12 @@ class VolumeArchiver:
 
     @contextmanager
     def _helper_container(self) -> Iterator[str]:
-        """Yield a unique helper-container name, force-removing it on exit."""
+        """Yield a unique helper-container name, force-removing it on exit.
+
+        The helper is removed even if the client interrupts a stream mid-flight,
+        so an aborted backup never leaves a stopped container behind on the
+        (possibly remote) engine host.
+        """
         helper = f"paude-backup-{secrets.token_hex(6)}"
         try:
             yield helper
@@ -84,13 +92,15 @@ class VolumeArchiver:
         local_tar_path: str,
         *,
         exclude: list[str] | None = None,
+        progress: Callable[[int], None] | None = None,
     ) -> str:
         """Export ``volume`` to ``local_tar_path`` as a gzipped tar.
 
-        Runs a throwaway container that mounts the volume read-only, tars its
-        contents, and hashes the archive in the same pass (so the multi-GB file
-        isn't read a second time), then pulls the archive to the local machine.
-        The helper is always removed, even on failure.
+        Runs a throwaway container that mounts the volume read-only and tars its
+        contents to stdout. The byte stream is piped to the client (over SSH for
+        remote sessions), written to ``local_tar_path``, and hashed as it flows
+        through — so nothing large ever touches the engine host and the archive
+        is read exactly once. The helper is always removed, even on failure.
 
         Args:
             volume: Named volume to export (mounted at ``/pvc``).
@@ -99,15 +109,23 @@ class VolumeArchiver:
             local_tar_path: Destination path on the local machine.
             exclude: HOME-relative ``tar --exclude`` globs (e.g. credential
                 files) to omit from the archive.
+            progress: Optional callback invoked with the cumulative number of
+                bytes written so far, for a live progress display.
 
         Returns:
-            The archive's SHA-256 hex digest (computed inside the container).
+            The archive's SHA-256 hex digest (computed on the client as the
+            stream is written, so it also verifies transfer integrity).
         """
-        with self._helper_container() as helper:
-            # `--entrypoint sh` overrides any entrypoint baked into the session
-            # image; the container tars the read-only volume into its own
-            # writable layer and prints the archive's digest to stdout.
-            result = self._engine.run(
+        # `--entrypoint sh` overrides any entrypoint baked into the session
+        # image; the container tars the read-only volume to stdout, which we
+        # stream straight into the local file (no archive file on the engine
+        # host), hashing it in the same pass. stream_run owns the process
+        # lifecycle and raises if the container exits non-zero.
+        hasher = hashlib.sha256()
+        written = 0
+        with (
+            self._helper_container() as helper,
+            self._engine.stream_run(
                 "run",
                 "--name",
                 helper,
@@ -117,19 +135,23 @@ class VolumeArchiver:
                 f"{volume}:/pvc:ro",
                 image,
                 "-c",
-                _tar_and_hash_script(exclude or []),
-            )
-            copy_from_container(
-                self._engine, helper, CONTAINER_ARCHIVE_PATH, local_tar_path
-            )
-        return result.stdout.strip()
+                _tar_stream_script(exclude or []),
+            ) as stream,
+            open(local_tar_path, "wb") as out,
+        ):
+            for chunk in iter(lambda: stream.read(_CHUNK_SIZE), b""):
+                out.write(chunk)
+                hasher.update(chunk)
+                written += len(chunk)
+                if progress is not None:
+                    progress(written)
+        return hasher.hexdigest()
 
 
-def _tar_and_hash_script(exclude: list[str]) -> str:
-    """Build a ``sh -c`` script that tars ``/pvc`` then prints the sha256 hex."""
-    archive = shlex.quote(CONTAINER_ARCHIVE_PATH)
-    parts = ["tar", "-czf", archive]
+def _tar_stream_script(exclude: list[str]) -> str:
+    """Build a ``sh -c`` script that tars ``/pvc`` to stdout."""
+    parts = ["tar", "-czf", "-"]
     for pattern in exclude:
         parts.extend(["--exclude", shlex.quote(pattern)])
     parts.extend(["-C", "/pvc", "."])
-    return f"{' '.join(parts)} && sha256sum {archive} | cut -d' ' -f1"
+    return " ".join(parts)

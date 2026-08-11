@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import tempfile
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
@@ -294,6 +296,55 @@ def _human(num_bytes: int) -> str:
     return f"{size:.1f}TB"
 
 
+def _format_clock(seconds: float) -> str:
+    """Format a duration as a ``M:SS`` (or ``H:MM:SS`` past an hour) clock."""
+    total = int(seconds)
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+class _ArchiveProgress:
+    """Render live archive progress to a TTY: bytes written, rate, elapsed.
+
+    Deliberately shows no percentage or ETA — the gzip ratio isn't known up
+    front, so a percentage against the uncompressed volume size would mislead.
+    Throughput plus a running total honestly answers "is it alive and how fast".
+    A no-op when stderr isn't a TTY, to keep piped/redirected output clean.
+    """
+
+    _MIN_INTERVAL = 0.5  # seconds between redraws
+
+    def __init__(self) -> None:
+        self._enabled = sys.stderr.isatty()
+        self._start = time.monotonic()
+        self._last_render = 0.0  # nonzero once we've drawn a line
+
+    def update(self, written: int) -> None:
+        """Progress callback: ``written`` is the cumulative byte count so far."""
+        if not self._enabled:
+            return
+        now = time.monotonic()
+        if now - self._last_render < self._MIN_INTERVAL:
+            return
+        self._last_render = now
+        elapsed = now - self._start
+        rate = written / elapsed if elapsed > 0 else 0.0
+        # \033[K clears any leftover chars from a previous, longer line.
+        line = (
+            f"\r  {_human(written)} written • "
+            f"{_human(int(rate))}/s • {_format_clock(elapsed)}\033[K"
+        )
+        print(line, end="", file=sys.stderr, flush=True)
+
+    def finish(self) -> None:
+        """End the progress line so later output starts on a fresh line."""
+        if self._last_render:
+            print(file=sys.stderr)
+
+
 def _write_bundle(
     archiver: VolumeArchiver,
     vname: str,
@@ -312,11 +363,16 @@ def _write_bundle(
     try:
         typer.echo(f"Archiving volume {vname}...", err=True)
         pvc_tar = tmp_dir / VOLUME_ARCHIVE_FILENAME
-        # export_volume hashes the archive in the same pass it creates it, so the
-        # multi-GB file isn't read a second time just to checksum it.
-        manifest.archive_sha256 = archiver.export_volume(
-            vname, image, str(pvc_tar), exclude=exclude
-        )
+        # export_volume streams the archive straight to pvc_tar, hashing it in
+        # the same pass — the multi-GB file is never staged on the engine host
+        # nor read a second time just to checksum it.
+        progress = _ArchiveProgress()
+        try:
+            manifest.archive_sha256 = archiver.export_volume(
+                vname, image, str(pvc_tar), exclude=exclude, progress=progress.update
+            )
+        finally:
+            progress.finish()
         os.chmod(pvc_tar, 0o600)
 
         manifest_path = tmp_dir / MANIFEST_FILENAME

@@ -2,11 +2,34 @@
 
 from __future__ import annotations
 
+import io
 import subprocess
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from paude.container.engine import ContainerEngine
 from paude.transport import LocalTransport, SshTransport
+
+
+class _FakePopen:
+    """Minimal stand-in for a streaming ``subprocess.Popen[bytes]``."""
+
+    def __init__(
+        self, stdout: bytes = b"", stderr: bytes = b"", returncode: int = 0
+    ) -> None:
+        self.stdout = io.BytesIO(stdout)
+        self.stderr = io.BytesIO(stderr)
+        self._returncode = returncode
+
+    def wait(self) -> int:
+        return self._returncode
+
+    def poll(self) -> int:
+        return self._returncode
+
+    def kill(self) -> None:  # pragma: no cover - only for interrupted streams
+        pass
 
 
 class TestContainerEngineInit:
@@ -59,6 +82,33 @@ class TestContainerEngineRun:
             input=None,
             timeout=None,
         )
+
+    def test_stream_run_prepends_binary_and_yields_stdout(self) -> None:
+        engine = ContainerEngine("podman")
+        fake = _FakePopen(stdout=b"payload-bytes")
+        with patch.object(
+            engine._transport, "popen_binary", return_value=fake
+        ) as mock_pb:
+            with engine.stream_run("run", "--rm", "img") as stream:
+                data = stream.read()
+        assert data == b"payload-bytes"
+        mock_pb.assert_called_once_with(["podman", "run", "--rm", "img"])
+
+    def test_stream_run_raises_with_stderr_on_nonzero_exit(self) -> None:
+        engine = ContainerEngine("podman")
+        fake = _FakePopen(stderr=b"tar: fatal error\n", returncode=2)
+        with patch.object(engine._transport, "popen_binary", return_value=fake):
+            with pytest.raises(RuntimeError, match="tar: fatal error"):
+                with engine.stream_run("run", "img") as stream:
+                    stream.read()
+
+    def test_stream_run_falls_back_to_exit_code_without_stderr(self) -> None:
+        engine = ContainerEngine("podman")
+        fake = _FakePopen(returncode=2)
+        with patch.object(engine._transport, "popen_binary", return_value=fake):
+            with pytest.raises(RuntimeError, match="exit 2"):
+                with engine.stream_run("run", "img") as stream:
+                    stream.read()
 
     @patch("paude.transport.local.subprocess.run")
     def test_run_docker_binary(self, mock_run: MagicMock) -> None:

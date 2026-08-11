@@ -228,8 +228,10 @@ The bundle is a directory containing the session's `/pvc` data volume (workspace
 recreate the session. Reconstructible pieces (proxy, network, secrets) are
 excluded, and known agent credential files are always stripped, so a bundle
 never stores a live token. Backup checks free disk space first (`--force` to
-override). `paude restore BUNDLE` is planned; today it validates a bundle and
-prints the restore it would perform. See
+override) and shows live progress (bytes archived, throughput, elapsed) as it
+runs. The archive is streamed straight to the bundle, so backing up a remote
+session never needs scratch space on the remote host. `paude restore BUNDLE` is
+planned; today it validates a bundle and prints the restore it would perform. See
 [Session Management](docs/SESSIONS.md#backup--restore) for details.
 
 ### Your First Session

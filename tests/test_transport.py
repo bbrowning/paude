@@ -54,6 +54,16 @@ class TestLocalTransport:
         mock_run.assert_called_once_with(["bash"])
         assert rc == 0
 
+    @patch("paude.transport.local.subprocess.Popen")
+    def test_popen_binary_pipes_stdout_and_stderr(self, mock_popen: MagicMock) -> None:
+        transport = LocalTransport()
+        transport.popen_binary(["podman", "run", "img"])
+        mock_popen.assert_called_once_with(
+            ["podman", "run", "img"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
     def test_is_remote(self) -> None:
         assert LocalTransport().is_remote is False
 
@@ -146,6 +156,24 @@ class TestSshTransport:
         assert "--" in args
         # Command should be shell-quoted as a single string
         assert args[-1] == "docker exec -it ctr bash"
+
+    @patch("paude.transport.ssh.subprocess.Popen")
+    def test_popen_binary_wraps_command_in_ssh(self, mock_popen: MagicMock) -> None:
+        transport = SshTransport("user@host")
+        transport.popen_binary(
+            ["podman", "run", "-v", "vol:/pvc:ro", "img", "-c", "tar -czf - -C /pvc ."]
+        )
+        args = mock_popen.call_args.args[0]
+        assert args[0] == "ssh"
+        assert "user@host" in args
+        assert args[-2] == "--"
+        # The whole command is a single shell-quoted string; the tar script (with
+        # spaces) is quoted so it survives the remote shell intact.
+        assert args[-1] == ("podman run -v vol:/pvc:ro img -c 'tar -czf - -C /pvc .'")
+        assert mock_popen.call_args.kwargs == {
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+        }
 
     def test_is_remote(self) -> None:
         assert SshTransport("user@host").is_remote is True

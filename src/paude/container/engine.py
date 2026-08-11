@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import subprocess
-from typing import TYPE_CHECKING
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import IO, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from paude.transport.base import Transport
@@ -68,6 +71,48 @@ class ContainerEngine:
         """
         cmd = [self.binary, *args]
         return self._transport.run_interactive(cmd)
+
+    @contextmanager
+    def stream_run(self, *args: str) -> Iterator[IO[bytes]]:
+        """Run a command and yield its stdout as a binary stream.
+
+        Unlike :meth:`run`, the output is not captured up front — the caller gets
+        a readable stdout stream so a large payload (e.g. a ``tar`` archive) can
+        be consumed incrementally without buffering it in memory or staging it on
+        the engine host. Works transparently for local and SSH transports.
+
+        This owns the process lifecycle so callers only handle bytes: stderr is
+        drained concurrently (so it can't fill its pipe and deadlock the stdout
+        read), the process is always reaped — killed if the caller's block raises,
+        so a stalled stdout pipe can't hang — and a non-zero exit is surfaced as a
+        ``RuntimeError`` carrying the command's stderr.
+        """
+        proc = self._transport.popen_binary([self.binary, *args])
+        stderr_chunks: list[bytes] = []
+
+        def _drain_stderr() -> None:
+            if proc.stderr is not None:  # pragma: no cover - always piped
+                stderr_chunks.append(proc.stderr.read())
+
+        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+        stderr_thread.start()
+
+        assert proc.stdout is not None  # noqa: S101 - popen_binary always pipes it
+        try:
+            yield proc.stdout
+            returncode = proc.wait()
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+            stderr_thread.join()
+            for stream in (proc.stdout, proc.stderr):
+                if stream is not None:
+                    stream.close()
+
+        if returncode != 0:
+            detail = b"".join(stderr_chunks).decode(errors="replace").strip()
+            raise RuntimeError(detail or f"command failed (exit {returncode})")
 
     @property
     def is_remote(self) -> bool:

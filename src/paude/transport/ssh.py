@@ -91,6 +91,22 @@ class SshTransport:
         result = subprocess.run(full)
         return result.returncode
 
+    def popen_binary(self, cmd: list[str]) -> subprocess.Popen[bytes]:
+        """Start a remote command with binary stdout/stderr pipes for streaming.
+
+        The command runs over SSH (no TTY, binary-safe) so its stdout can be
+        consumed incrementally on the client — e.g. a multi-GB tar stream that
+        must never land on the remote host's disk. Mirrors the tar-pipe shape
+        used by :meth:`copy_from_host`. The caller owns draining both pipes and
+        awaiting the process.
+        """
+        full = [*self.ssh_base(), "--", shlex.join(cmd)]
+        return subprocess.Popen(
+            full,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
     def copy_to_host(self, local_path: str, host_path: str) -> None:
         """Copy a local path to a path on the SSH host."""
         contents = copies_directory_contents(local_path)
