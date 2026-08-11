@@ -79,6 +79,13 @@ older container writable layers into the session volume. This preserves agent
 configuration, logins, conversation history, installed skills, and other
 mutable state in addition to `/pvc/workspace`.
 
+When the new container starts, `upgrade` reconciles ownership of the reused
+`/pvc` volume to the pinned runtime user, so a volume created before the runtime
+UID was pinned stays readable and writable and agent logins survive the upgrade.
+State migration is also best-effort: a source it cannot copy (for example a
+read-only, host-mounted `~/.gitconfig` on a remote session) is skipped with a
+warning instead of aborting the upgrade.
+
 The legacy `--rebuild` option is still accepted for compatibility, but is no
 longer necessary because upgrades always rebuild.
 
