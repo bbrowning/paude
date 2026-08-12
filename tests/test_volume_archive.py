@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import subprocess
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from unittest.mock import patch
@@ -13,6 +14,7 @@ import pytest
 
 from paude.backends.podman.volume_archive import VolumeArchiver
 from paude.container.engine import ContainerEngine
+from paude.transport.ssh import SshTransport
 
 
 @contextmanager
@@ -154,3 +156,122 @@ class TestVolumeSizeBytes:
                 args=[], returncode=1, stdout="", stderr="du: cannot access"
             )
             assert VolumeArchiver(engine).volume_size_bytes("vol", "img") is None
+
+
+def _ssh_engine() -> tuple[ContainerEngine, SshTransport]:
+    """A ContainerEngine wired to a (mockable) SshTransport."""
+    transport = SshTransport("user@host")
+    return ContainerEngine(transport=transport), transport
+
+
+class TestExportVolumeToRemoteFile:
+    def test_reuses_stdout_tar_script_and_redirects_on_remote_host(self) -> None:
+        engine, transport = _ssh_engine()
+        with (
+            patch.object(transport, "run_with_remote_redirect") as mock_redirect,
+            patch.object(transport, "run") as mock_run,
+        ):
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout="deadbeef  /remote/tmp/pvc.tar.gz\n",
+                stderr="",
+            )
+            digest = VolumeArchiver(engine).export_volume_to_remote_file(
+                "paude-s-workspace",
+                "runtime:img",
+                "/remote/tmp/pvc.tar.gz",
+                exclude=[".gemini/oauth_creds.json"],
+            )
+
+        assert digest == "deadbeef"
+
+        cmd, remote_path = mock_redirect.call_args.args
+        assert remote_path == "/remote/tmp/pvc.tar.gz"
+        assert cmd[0] == "podman"
+        assert cmd[1] == "run"
+        assert cmd[cmd.index("--entrypoint") + 1] == "sh"
+        assert cmd[cmd.index("--user") + 1] == "root"
+        assert cmd[cmd.index("--security-opt") + 1] == "label=disable"
+        assert "paude-s-workspace:/pvc:ro" in cmd
+        assert "runtime:img" in cmd
+
+        # Same stdout-tar script export_volume uses -- no bind mount, no
+        # in-container chmod/sha256sum.
+        script = cmd[cmd.index("-c") + 1]
+        assert "tar -czf -" in script
+        assert "-C /pvc ." in script
+        assert ".gemini/oauth_creds.json" in script
+        assert "sha256sum" not in script
+        assert "chmod" not in script
+
+        # chmod + sha256sum happen afterward, combined into one round trip.
+        calls = [c.args[0] for c in mock_run.call_args_list]
+        combined = next(c for c in calls if c[0] == "sh" and "chmod" in c[2])
+        assert "chmod 0600 /remote/tmp/pvc.tar.gz" in combined[2]
+        assert "sha256sum /remote/tmp/pvc.tar.gz" in combined[2]
+
+        # The helper container is still cleaned up via engine.run -> transport.run.
+        helper = cmd[cmd.index("--name") + 1]
+        assert ["podman", "rm", "-f", helper] in calls
+
+    def test_requires_ssh_backed_engine(self) -> None:
+        engine = ContainerEngine()  # defaults to LocalTransport
+        with pytest.raises(RuntimeError, match="SSH-backed"):
+            VolumeArchiver(engine).export_volume_to_remote_file(
+                "vol", "img", "/remote/pvc.tar.gz"
+            )
+
+    def test_error_propagates_and_helper_is_still_removed(self) -> None:
+        engine, transport = _ssh_engine()
+        with (
+            patch.object(
+                transport,
+                "run_with_remote_redirect",
+                side_effect=RuntimeError("tar failed"),
+            ) as mock_redirect,
+            patch.object(transport, "run") as mock_run,
+        ):
+            with pytest.raises(RuntimeError, match="tar failed"):
+                VolumeArchiver(engine).export_volume_to_remote_file(
+                    "vol", "img", "/remote/pvc.tar.gz"
+                )
+
+        cmd = mock_redirect.call_args.args[0]
+        helper = cmd[cmd.index("--name") + 1]
+        calls = [c.args[0] for c in mock_run.call_args_list]
+        assert ["podman", "rm", "-f", helper] in calls
+        # The archive step failed, so no chmod/sha256sum follow-up ran.
+        assert not any(c[0] == "chmod" for c in calls)
+        assert not any(c[0] == "sha256sum" for c in calls)
+
+    def test_progress_receives_polled_remote_sizes(self) -> None:
+        engine, transport = _ssh_engine()
+        sizes = iter([0, 500, 1500, 1500, 1500])
+
+        def fake_run(cmd, **kwargs):
+            if cmd[0] == "sh":  # the `wc -c` poll
+                return subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=str(next(sizes, 1500)), stderr=""
+                )
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="deadbeef  /r/pvc.tar.gz\n", stderr=""
+            )
+
+        def slow_redirect(cmd, remote_path, **kwargs):
+            time.sleep(0.05)
+
+        seen: list[int] = []
+        with (
+            patch.object(
+                transport, "run_with_remote_redirect", side_effect=slow_redirect
+            ),
+            patch.object(transport, "run", side_effect=fake_run),
+            patch("paude.backends.podman.volume_archive._REMOTE_POLL_INTERVAL", 0.01),
+        ):
+            VolumeArchiver(engine).export_volume_to_remote_file(
+                "vol", "img", "/r/pvc.tar.gz", progress=seen.append
+            )
+
+        assert seen  # at least one poll happened before the archive finished
+        assert all(isinstance(x, int) for x in seen)

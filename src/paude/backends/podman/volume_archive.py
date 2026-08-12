@@ -30,12 +30,17 @@ import hashlib
 import secrets
 import shlex
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import contextmanager
 
 from paude.container.engine import ContainerEngine
+from paude.transport.ssh import SshTransport
 
 # Read the archive stream one MiB at a time.
 _CHUNK_SIZE = 1024 * 1024
+
+# How often to sample the remote archive's partial size for progress.
+_REMOTE_POLL_INTERVAL = 2.0
 
 
 class VolumeArchiver:
@@ -138,6 +143,70 @@ class VolumeArchiver:
                 if progress is not None:
                     progress(written)
         return hasher.hexdigest()
+
+    def export_volume_to_remote_file(
+        self,
+        volume: str,
+        image: str,
+        remote_tar_path: str,
+        *,
+        exclude: list[str] | None = None,
+        progress: Callable[[int], None] | None = None,
+    ) -> str:
+        """Export ``volume`` to ``remote_tar_path`` on the engine's own remote host.
+
+        Unlike :meth:`export_volume`, nothing is streamed back to the client.
+        The same tar-to-stdout helper container runs completely unchanged, but
+        its stdout is redirected straight to a file on the remote host by the
+        remote shell (:meth:`SshTransport.run_with_remote_redirect`) rather
+        than piped back over SSH — so a multi-GB archive never crosses the
+        link. Since the client no longer sees the bytes as they flow,
+        progress is instead sampled by periodically checking the partial
+        file's size with a separate, lightweight SSH call.
+
+        Args:
+            volume: Named volume to export (mounted at ``/pvc``).
+            image: Container image to run the helper with.
+            remote_tar_path: Destination path on the engine's remote host.
+            exclude: HOME-relative ``tar --exclude`` globs to omit from the
+                archive.
+            progress: Optional callback invoked with the approximate
+                cumulative bytes written so far (sampled, not exact).
+
+        Returns:
+            The archive's SHA-256 hex digest, computed on the remote host
+            after the archive completes.
+        """
+        transport = self._engine.transport
+        if not isinstance(transport, SshTransport):
+            raise RuntimeError(
+                "export_volume_to_remote_file requires an SSH-backed engine"
+            )
+
+        with self._helper_container() as helper:
+            args = _helper_run_args(
+                helper, volume, image, "sh", "-c", _tar_stream_script(exclude or [])
+            )
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(
+                    self._engine.run_with_remote_redirect,
+                    *args,
+                    remote_output_path=remote_tar_path,
+                )
+                while not future.done():
+                    wait([future], timeout=_REMOTE_POLL_INTERVAL)
+                    if progress is not None and not future.done():
+                        size = transport.file_size(remote_tar_path)
+                        if size is not None:
+                            progress(size)
+                future.result()
+
+        # One remote round trip for both -- separate calls would each pay a
+        # full SSH connection on a link this feature exists to go easy on.
+        quoted = shlex.quote(remote_tar_path)
+        script = f"chmod 0600 {quoted} && sha256sum {quoted}"
+        result = transport.run(["sh", "-c", script])
+        return result.stdout.split()[0]
 
 
 def _helper_run_args(

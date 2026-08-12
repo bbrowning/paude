@@ -15,12 +15,14 @@ are always stripped so a bundle never persists a live token to disk.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated
 
 import typer
@@ -33,6 +35,7 @@ from paude.backup_state import (
     BackupManifest,
 )
 from paude.cli.app import BackendType, app
+from paude.transport.ssh import SshTransport
 
 if TYPE_CHECKING:
     from paude.backends.podman.backend import PodmanBackend
@@ -46,6 +49,11 @@ def _default_backups_dir() -> Path:
     return _paude_config_dir() / "backups"
 
 
+def _default_bundle_name(name: str, now: datetime) -> str:
+    """Return the default ``<name>-<timestamp>.paude`` bundle name."""
+    return f"{name}-{now.strftime('%Y%m%dT%H%M%SZ')}.paude"
+
+
 def _resolve_output_path(output: str | None, name: str, now: datetime) -> Path:
     """Resolve the bundle *directory* path, defaulting name/dir as needed.
 
@@ -53,7 +61,7 @@ def _resolve_output_path(output: str | None, name: str, now: datetime) -> Path:
     existing directory, the default-named bundle is created inside it; otherwise
     ``output`` is treated as the exact bundle directory path to create.
     """
-    default_name = f"{name}-{now.strftime('%Y%m%dT%H%M%SZ')}.paude"
+    default_name = _default_bundle_name(name, now)
     if output is None:
         dest_dir = _default_backups_dir()
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -62,6 +70,36 @@ def _resolve_output_path(output: str | None, name: str, now: datetime) -> Path:
     if output_path.is_dir():
         output_path = output_path / default_name
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    return output_path
+
+
+def _resolve_remote_output_path(
+    transport: SshTransport, output: str | None, name: str, now: datetime
+) -> str:
+    """Resolve the bundle *directory* path on the engine's remote host.
+
+    Mirrors :func:`_resolve_output_path`, but every filesystem check is a
+    small SSH round-trip against the remote host instead of a local ``Path``
+    call — used for ``paude backup --remote-only``, where the bundle is never
+    downloaded to the client. Round-trips are combined where possible (e.g.
+    resolving the default directory and creating it in one call): this
+    feature exists to go easy on a slow link, so each extra SSH connection
+    has a real cost.
+    """
+    default_name = _default_bundle_name(name, now)
+    if output is None:
+        script = (
+            'dir="${XDG_CONFIG_HOME:-$HOME/.config}/paude/backups"; '
+            'mkdir -p "$dir" && printf "%s" "$dir"'
+        )
+        result = transport.run(["sh", "-c", script])
+        dest_dir = result.stdout.strip()
+        return f"{dest_dir}/{default_name}"
+
+    is_dir = transport.run(["test", "-d", output], check=False).returncode == 0
+    output_path = f"{output.rstrip('/')}/{default_name}" if is_dir else output
+    parent = str(PurePosixPath(output_path).parent)
+    transport.run(["mkdir", "-p", parent])
     return output_path
 
 
@@ -158,27 +196,34 @@ def session_backup(
             help="Proceed even if the destination looks low on free disk space.",
         ),
     ] = False,
+    remote_only: Annotated[
+        bool,
+        typer.Option(
+            "--remote-only",
+            help=(
+                "Keep the bundle on the session's remote host instead of "
+                "downloading it (requires a session created with --host)."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Back up a stopped session to a portable bundle.
 
     Captures the session's ``/pvc`` data volume (workspace + agent state) and a
     config manifest into a ``<name>-<timestamp>.paude/`` directory. The session
     must be stopped first (``paude stop NAME``) so the snapshot is consistent.
-    Agent credential files are always excluded.
+    Agent credential files are always excluded. ``--remote-only`` writes the
+    bundle on the session's remote host instead, so nothing large crosses the
+    SSH link back to this machine.
     """
-    from paude.backends import PodmanBackend, SessionNotFoundError
-    from paude.backends.podman.helpers import (
-        container_name,
-        get_session_composition,
-        volume_name,
-    )
+    from paude.backends import PodmanBackend
+    from paude.backends.podman.helpers import container_name, volume_name
     from paude.backends.podman.volume_archive import VolumeArchiver
     from paude.cli.helpers import (
         _auto_select_session,
         _get_backend_instance,
         find_session_backend,
     )
-    from paude.cli.upgrade_persistence import credential_exclude_globs
 
     # Resolve the session + backend (mirrors stop/cp conventions).
     if name is None:
@@ -228,19 +273,33 @@ def session_backup(
         raise typer.Exit(1)
 
     now = datetime.now(UTC)
-    output_path = _resolve_output_path(output, name, now)
-    if output_path.exists():
-        typer.echo(f"Backup destination already exists: {output_path}", err=True)
-        raise typer.Exit(1)
-
     archiver = VolumeArchiver(backend_obj._engine)
-    _preflight_disk_space(archiver, vname, image, output_path.parent, force=force)
+    backup_fn = _run_remote_backup if remote_only else _run_local_backup
+    backup_fn(name, backend_obj, archiver, vname, image, output, force, now)
+
+
+def _finalize_backup(
+    backend_obj: PodmanBackend,
+    name: str,
+    image: str,
+    now: datetime,
+    location_label: str,
+    write: Callable[[BackupManifest, list[str]], None],
+) -> None:
+    """Build the manifest + exclude list, run ``write``, and print the result.
+
+    Shared between the local and remote-only backup paths so manifest
+    building, error translation, and the success message aren't duplicated.
+    """
+    from paude.backends import SessionNotFoundError
+    from paude.backends.podman.helpers import get_session_composition
+    from paude.cli.upgrade_persistence import credential_exclude_globs
 
     try:
         composition = get_session_composition(backend_obj._runner, name)
         exclude = credential_exclude_globs(composition)
         manifest = _build_manifest(backend_obj, name, image, now)
-        _write_bundle(archiver, vname, image, exclude, manifest, output_path)
+        write(manifest, exclude)
     except SessionNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
@@ -248,13 +307,84 @@ def session_backup(
         typer.echo(f"Error backing up session: {e}", err=True)
         raise typer.Exit(1) from None
 
-    typer.echo(f"Backed up session '{name}' to {output_path}")
+    typer.echo(f"Backed up session '{name}' to {location_label}")
     if exclude:
         typer.echo(
             "  Credential files were excluded; re-login inside the session after "
             "restore for agents that authenticate in-container (e.g. Gemini, "
             "Cursor).",
         )
+
+
+def _run_local_backup(
+    name: str,
+    backend_obj: PodmanBackend,
+    archiver: VolumeArchiver,
+    vname: str,
+    image: str,
+    output: str | None,
+    force: bool,
+    now: datetime,
+) -> None:
+    """Resolve, preflight, and write a bundle on the local machine."""
+    output_path = _resolve_output_path(output, name, now)
+    if output_path.exists():
+        typer.echo(f"Backup destination already exists: {output_path}", err=True)
+        raise typer.Exit(1)
+
+    _preflight_disk_space(archiver, vname, image, output_path.parent, force=force)
+    _finalize_backup(
+        backend_obj,
+        name,
+        image,
+        now,
+        str(output_path),
+        lambda manifest, exclude: _write_bundle(
+            archiver, vname, image, exclude, manifest, output_path
+        ),
+    )
+
+
+def _run_remote_backup(
+    name: str,
+    backend_obj: PodmanBackend,
+    archiver: VolumeArchiver,
+    vname: str,
+    image: str,
+    output: str | None,
+    force: bool,
+    now: datetime,
+) -> None:
+    """Resolve, preflight, and write a bundle on the session's remote host."""
+    transport = backend_obj._engine.transport
+    if not backend_obj._engine.is_remote or not isinstance(transport, SshTransport):
+        typer.echo(
+            f"Session '{name}' does not run on a remote host; --remote-only "
+            "requires a session created with --host.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    remote_path = _resolve_remote_output_path(transport, output, name, now)
+    location_label = f"{transport.host_label}:{remote_path}"
+    if transport.run(["test", "-e", remote_path], check=False).returncode == 0:
+        typer.echo(f"Backup destination already exists: {location_label}", err=True)
+        raise typer.Exit(1)
+
+    remote_dest_dir = str(PurePosixPath(remote_path).parent)
+    _preflight_disk_space_remote(
+        archiver, vname, image, transport, remote_dest_dir, force=force
+    )
+    _finalize_backup(
+        backend_obj,
+        name,
+        image,
+        now,
+        location_label,
+        lambda manifest, exclude: _write_bundle_remote(
+            archiver, transport, vname, image, exclude, manifest, remote_path
+        ),
+    )
 
 
 def _preflight_disk_space(
@@ -276,14 +406,51 @@ def _preflight_disk_space(
     if raw is None:
         return
     free = shutil.disk_usage(dest_dir).free
-    if free < raw:
-        typer.echo(
-            f"Not enough free space at {dest_dir}: volume is ~{_human(raw)} "
-            f"(uncompressed) but only {_human(free)} is free. The compressed "
-            "backup will likely be smaller. Re-run with --force to proceed.",
-            err=True,
-        )
-        raise typer.Exit(1)
+    _require_enough_space(raw, free, str(dest_dir), remote=False)
+
+
+def _preflight_disk_space_remote(
+    archiver: VolumeArchiver,
+    vname: str,
+    image: str,
+    transport: SshTransport,
+    remote_dest_dir: str,
+    *,
+    force: bool,
+) -> None:
+    """Remote-host counterpart to :func:`_preflight_disk_space`.
+
+    Free space comes from ``df`` on the engine's remote host instead of
+    ``shutil.disk_usage``, since the bundle for ``--remote-only`` never lands
+    on the local filesystem.
+    """
+    if force:
+        return
+    raw = archiver.volume_size_bytes(vname, image)
+    if raw is None:
+        return
+    free = transport.free_bytes(remote_dest_dir)
+    if free is None:
+        return
+    _require_enough_space(
+        raw, free, f"{transport.host_label}:{remote_dest_dir}", remote=True
+    )
+
+
+def _require_enough_space(
+    raw: int, free: int, location_label: str, *, remote: bool
+) -> None:
+    """Shared "is there enough room" check for the local/remote preflights."""
+    if free >= raw:
+        return
+    where = " on the remote host" if remote else ""
+    typer.echo(
+        f"Not enough free space at {location_label}: volume is ~{_human(raw)} "
+        f"(uncompressed) but only {_human(free)} is free{where}. The compressed "
+        "backup will likely be smaller. Re-run with --force to proceed.",
+        err=True,
+    )
+    raise typer.Exit(1)
 
 
 def _human(num_bytes: int) -> str:
@@ -321,6 +488,11 @@ class _ArchiveProgress:
         self._enabled = sys.stderr.isatty()
         self._start = time.monotonic()
         self._last_render = 0.0  # nonzero once we've drawn a line
+
+    @property
+    def enabled(self) -> bool:
+        """Whether progress will actually render (stderr is a TTY)."""
+        return self._enabled
 
     def update(self, written: int) -> None:
         """Progress callback: ``written`` is the cumulative byte count so far."""
@@ -383,6 +555,69 @@ def _write_bundle(
         os.replace(tmp_dir, output_path)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _write_bundle_remote(
+    archiver: VolumeArchiver,
+    transport: SshTransport,
+    vname: str,
+    image: str,
+    exclude: list[str],
+    manifest: BackupManifest,
+    remote_output_path: str,
+) -> None:
+    """Remote-host counterpart to :func:`_write_bundle`.
+
+    Builds the bundle directory atomically on the engine's remote host, the
+    same way :func:`_write_bundle` does locally, so nothing large ever
+    crosses the SSH link back to the client. Round-trips are combined where
+    the shell allows it (e.g. writing the manifest and chmod-ing it in one
+    call): each is a full SSH connection on a link this feature exists to go
+    easy on.
+    """
+    parent = str(PurePosixPath(remote_output_path).parent)
+    mktemp_result = transport.run(["mktemp", "-d", f"{parent}/.paude-backup-XXXXXX"])
+    tmp_dir = mktemp_result.stdout.strip()
+    try:
+        typer.echo(f"Archiving volume {vname} on {transport.host_label}...", err=True)
+        pvc_tar = f"{tmp_dir}/{VOLUME_ARCHIVE_FILENAME}"
+        progress = _ArchiveProgress()
+        try:
+            # Polling for progress is itself an SSH round-trip, unlike the
+            # local path's free in-process callback -- skip it when nothing
+            # will render (piped/redirected output).
+            manifest.archive_sha256 = archiver.export_volume_to_remote_file(
+                vname,
+                image,
+                pvc_tar,
+                exclude=exclude,
+                progress=progress.update if progress.enabled else None,
+            )
+        finally:
+            progress.finish()
+
+        manifest_path = f"{tmp_dir}/{MANIFEST_FILENAME}"
+        quoted_manifest = shlex.quote(manifest_path)
+        transport.run(
+            ["sh", "-c", f"cat > {quoted_manifest} && chmod 0600 {quoted_manifest}"],
+            input=manifest.to_json(),
+        )
+
+        quoted_tmp_dir = shlex.quote(tmp_dir)
+        transport.run(
+            [
+                "sh",
+                "-c",
+                f"chmod 0700 {quoted_tmp_dir} && "
+                f"mv {quoted_tmp_dir} {shlex.quote(remote_output_path)}",
+            ]
+        )
+    except Exception:
+        # Only reachable if something above failed before the mv -- on
+        # success tmp_dir no longer exists, so there's nothing to clean up
+        # (and no reason to pay for the round trip).
+        transport.run(["rm", "-rf", tmp_dir], check=False)
+        raise
 
 
 def _read_manifest(bundle_dir: Path) -> BackupManifest:

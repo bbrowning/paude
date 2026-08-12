@@ -188,6 +188,27 @@ even when the remote host's `/tmp` or container storage is small. Live progress
 `0600`. Before starting, backup estimates the volume size and, if the
 destination looks short on free space, asks you to re-run with `--force`.
 
+For a remote session, add `--remote-only` to keep the bundle on the session's
+own host instead of downloading it — useful when you're on a slow or
+high-latency connection (e.g. hotel wifi) to a session that lives on a fast
+one:
+
+```bash
+paude backup my-project --remote-only
+
+# Choose where on the remote host the bundle lands
+paude backup my-project --remote-only --output /srv/backups/
+```
+
+The volume is still tarred to stdout by the same throwaway container as a
+local backup, but the remote shell redirects that stdout straight to a file on
+its own disk instead of piping it back over SSH — so nothing large ever
+crosses the link. The default destination mirrors the local convention
+(`${XDG_CONFIG_HOME:-~/.config}/paude/backups/` on the remote host). Progress
+is estimated by periodically polling the partial archive's size over a small
+SSH call rather than counting bytes as they stream, since the client never
+sees them. `--remote-only` requires a session created with `--host`.
+
 Only the data volume is irreplaceable, so that is all a backup captures. The
 proxy sidecar, network, CA/auth volumes, and credential secrets are rebuilt from
 your host environment on the next `start`, exactly as they are for a fresh

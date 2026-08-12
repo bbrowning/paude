@@ -72,6 +72,25 @@ class ContainerEngine:
         cmd = [self.binary, *args]
         return self._transport.run_interactive(cmd)
 
+    def run_with_remote_redirect(
+        self, *args: str, remote_output_path: str, check: bool = True
+    ) -> subprocess.CompletedProcess[str]:
+        """Run a command with its stdout redirected to a file on the remote host.
+
+        Mirrors :meth:`run`'s "prepend the binary, delegate to the transport"
+        shape, but for :meth:`SshTransport.run_with_remote_redirect` — only
+        valid when this engine's transport is SSH-backed, since the redirect
+        happens on the remote host and nothing crosses back to the client.
+        """
+        from paude.transport.ssh import SshTransport
+
+        if not isinstance(self._transport, SshTransport):
+            raise RuntimeError("run_with_remote_redirect requires an SSH-backed engine")
+        cmd = [self.binary, *args]
+        return self._transport.run_with_remote_redirect(
+            cmd, remote_output_path, check=check
+        )
+
     @contextmanager
     def stream_run(self, *args: str) -> Iterator[IO[bytes]]:
         """Run a command and yield its stdout as a binary stream.

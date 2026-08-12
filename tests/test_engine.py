@@ -146,6 +146,29 @@ class TestContainerEngineRun:
         )
 
 
+class TestContainerEngineRunWithRemoteRedirect:
+    """Tests for ContainerEngine.run_with_remote_redirect method."""
+
+    def test_prepends_binary_and_delegates_to_transport(self) -> None:
+        transport = SshTransport("user@host")
+        engine = ContainerEngine("podman", transport=transport)
+        with patch.object(transport, "run_with_remote_redirect") as mock_redirect:
+            mock_redirect.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
+            engine.run_with_remote_redirect(
+                "run", "img", remote_output_path="/remote/out.tar.gz"
+            )
+        mock_redirect.assert_called_once_with(
+            ["podman", "run", "img"], "/remote/out.tar.gz", check=True
+        )
+
+    def test_requires_ssh_backed_transport(self) -> None:
+        engine = ContainerEngine("podman", transport=LocalTransport())
+        with pytest.raises(RuntimeError, match="SSH-backed"):
+            engine.run_with_remote_redirect("run", "img", remote_output_path="/out")
+
+
 class TestContainerEngineImageExists:
     """Tests for ContainerEngine.image_exists method."""
 

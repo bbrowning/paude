@@ -107,6 +107,60 @@ class SshTransport:
             stderr=subprocess.PIPE,
         )
 
+    def run_with_remote_redirect(
+        self, cmd: list[str], remote_output_path: str, *, check: bool = True
+    ) -> subprocess.CompletedProcess[str]:
+        """Run ``cmd`` on the remote host with its stdout redirected to a file.
+
+        Unlike :meth:`run`, whose argv is shell-escaped as literal arguments,
+        this appends a real ``>`` redirect that the remote shell evaluates —
+        so a large command's stdout (e.g. a tar stream) is written straight to
+        remote disk and never crosses the SSH channel back to the client. This
+        is the same "let the remote shell do it" trick :meth:`_pipe_tar` uses,
+        just redirecting to a static path instead of piping into a second
+        process. Built as an ``sh -c`` wrapper around :meth:`run` (rather than
+        a second, hand-rolled ``subprocess.run`` call) so it shares one place
+        for the actual SSH invocation.
+        """
+        inner = f"{shlex.join(cmd)} > {shlex.quote(remote_output_path)}"
+        result = self.run(["sh", "-c", inner], check=False)
+        _raise_on_failure(
+            check and result.returncode != 0,
+            result.stderr,
+            f"command failed (exit {result.returncode})",
+        )
+        return result
+
+    def file_size(self, remote_path: str) -> int | None:
+        """Best-effort size in bytes of a file on the remote host, or None.
+
+        Uses ``wc -c`` (not ``stat -c%s``/``stat -f%z``) so it works unmodified
+        whether the remote host is Linux or macOS.
+        """
+        result = self.run(
+            ["sh", "-c", f"wc -c < {shlex.quote(remote_path)} 2>/dev/null || echo 0"],
+            check=False,
+        )
+        text = result.stdout.strip()
+        return int(text) if text.isdigit() else None
+
+    def free_bytes(self, remote_path: str) -> int | None:
+        """Best-effort free space in bytes for a directory on the remote host.
+
+        Uses ``df -Pk`` (POSIX-portable output) rather than GNU-only flags like
+        ``--output``, since the remote host isn't necessarily Linux.
+        """
+        result = self.run(["df", "-Pk", remote_path], check=False)
+        if result.returncode != 0:
+            return None
+        lines = result.stdout.strip().splitlines()
+        if len(lines) < 2:
+            return None
+        fields = lines[-1].split()
+        if len(fields) < 4 or not fields[3].isdigit():
+            return None
+        return int(fields[3]) * 1024
+
     def copy_to_host(self, local_path: str, host_path: str) -> None:
         """Copy a local path to a path on the SSH host."""
         contents = copies_directory_contents(local_path)
@@ -203,9 +257,11 @@ class SshTransport:
             tar_process.stdout.close()
         _stdout, stderr = remote_process.communicate()
         tar_returncode = tar_process.wait()
-        if tar_returncode != 0 or remote_process.returncode != 0:
-            detail = stderr.decode(errors="replace").strip() if stderr else ""
-            raise RuntimeError(detail or "SSH file transfer failed")
+        _raise_on_failure(
+            tar_returncode != 0 or remote_process.returncode != 0,
+            stderr.decode(errors="replace") if stderr else "",
+            "SSH file transfer failed",
+        )
 
     @property
     def is_remote(self) -> bool:
@@ -242,6 +298,12 @@ class SshTransport:
         if result.returncode != 0:
             raise RuntimeError(f"Could not determine architecture of {self._host}")
         return result.stdout.strip()
+
+
+def _raise_on_failure(failed: bool, stderr: str, fallback: str) -> None:
+    """Raise ``RuntimeError(stderr or fallback)`` if ``failed``."""
+    if failed:
+        raise RuntimeError(stderr.strip() or fallback)
 
 
 def _remote_extract_command(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -17,6 +18,7 @@ from paude.backup_state import (
     BackupManifest,
 )
 from paude.cli import app
+from paude.transport.ssh import SshTransport
 
 runner = CliRunner()
 
@@ -38,15 +40,29 @@ def _make_session(name: str = "s", status: str = "stopped") -> Session:
 
 
 def _mock_backend(
-    *, exists: bool = True, running: bool = False, image: str | None = "runtime:img"
+    *,
+    exists: bool = True,
+    running: bool = False,
+    image: str | None = "runtime:img",
+    remote: bool = False,
 ) -> PodmanBackend:
-    """A real PodmanBackend (so isinstance passes) with a mocked runner."""
+    """A real PodmanBackend (so isinstance passes) with a mocked runner.
+
+    ``remote=True`` wires ``_engine`` to look like an SSH-backed session:
+    ``is_remote`` is true and ``transport`` is a real (but unconnected)
+    ``SshTransport`` so ``isinstance`` checks in the ``--remote-only`` path
+    pass. Callers that exercise that path still need to mock/patch the
+    transport's ``run`` for whichever calls they don't stub out at a higher
+    level.
+    """
     backend = PodmanBackend(engine=MagicMock())
     backend._runner = MagicMock()
     backend._runner.container_exists.return_value = exists
     backend._runner.container_running.return_value = running
     backend._runner.get_container_image.return_value = image
     backend.get_session = MagicMock(return_value=_make_session())  # type: ignore[method-assign]
+    backend._engine.is_remote = remote
+    backend._engine.transport = SshTransport("user@host") if remote else MagicMock()
     return backend
 
 
@@ -243,6 +259,142 @@ class TestBackupCommand:
         )
         assert result.exit_code == 0, _out(result)
         assert mock_write.call_args.args[5] == target
+
+
+class TestRemoteOnlyBackupCommand:
+    def _run(
+        self,
+        backend,
+        args,
+        *,
+        exists_remote: bool = False,
+        build_manifest: BackupManifest | None = None,
+    ):
+        manifest = build_manifest or BackupManifest(
+            name="s",
+            workspace="/some/project",
+            created_at="2026-08-10T00:00:00+00:00",
+            source_paude_version="0.0.0",
+        )
+        transport = backend._engine.transport
+        exists_rc = 0 if exists_remote else 1
+        with (
+            patch(
+                "paude.cli.helpers.find_session_backend",
+                return_value=("podman", backend),
+            ),
+            patch.object(
+                transport,
+                "run",
+                return_value=subprocess.CompletedProcess(
+                    args=[], returncode=exists_rc, stdout="", stderr=""
+                ),
+            ),
+            patch(
+                "paude.cli.backup._resolve_remote_output_path",
+                return_value="/home/user/.config/paude/backups/s-2026.paude",
+            ) as mock_resolve,
+            patch("paude.cli.backup._preflight_disk_space_remote"),
+            patch(
+                "paude.backends.podman.helpers.get_session_composition",
+                return_value=_gemini_composition(),
+            ),
+            patch(
+                "paude.cli.backup._build_manifest", return_value=manifest
+            ) as mock_build,
+            patch("paude.cli.backup._write_bundle_remote") as mock_write,
+        ):
+            result = runner.invoke(app, args)
+        return result, mock_resolve, mock_build, mock_write
+
+    def test_rejects_local_session(self) -> None:
+        backend = _mock_backend(remote=False)
+        result, _, _, mock_write = self._run(backend, ["backup", "s", "--remote-only"])
+        assert result.exit_code == 1
+        assert "does not run on a remote host" in _out(result)
+        mock_write.assert_not_called()
+
+    def test_writes_bundle_on_remote_host(self) -> None:
+        backend = _mock_backend(remote=True)
+        result, mock_resolve, _, mock_write = self._run(
+            backend, ["backup", "s", "--remote-only"]
+        )
+        assert result.exit_code == 0, _out(result)
+
+        # _resolve_remote_output_path(transport, output, name, now)
+        assert mock_resolve.call_args.args[0] is backend._engine.transport
+        assert mock_resolve.call_args.args[1] is None
+        assert mock_resolve.call_args.args[2] == "s"
+
+        # _write_bundle_remote(archiver, transport, vname, image, exclude, manifest, path)
+        call = mock_write.call_args
+        assert call.args[1] is backend._engine.transport
+        assert call.args[6] == "/home/user/.config/paude/backups/s-2026.paude"
+
+        assert (
+            "Backed up session 's' to "
+            "user@host:/home/user/.config/paude/backups/s-2026.paude" in _out(result)
+        )
+
+    def test_preflight_receives_parent_directory_not_bundle_path(self) -> None:
+        """Regression: the preflight must check the bundle's parent dir.
+
+        Passing the not-yet-existing bundle *file* path instead would make
+        `df` always fail against a nonexistent path, silently disabling the
+        free-space check on every --remote-only backup.
+        """
+        backend = _mock_backend(remote=True)
+        manifest = BackupManifest(
+            name="s",
+            workspace="/some/project",
+            created_at="t",
+            source_paude_version="v",
+        )
+        transport = backend._engine.transport
+        with (
+            patch(
+                "paude.cli.helpers.find_session_backend",
+                return_value=("podman", backend),
+            ),
+            patch.object(
+                transport,
+                "run",
+                return_value=subprocess.CompletedProcess(
+                    args=[], returncode=1, stdout="", stderr=""
+                ),
+            ),
+            patch(
+                "paude.cli.backup._resolve_remote_output_path",
+                return_value="/home/user/.config/paude/backups/s-2026.paude",
+            ),
+            patch("paude.cli.backup._preflight_disk_space_remote") as mock_preflight,
+            patch(
+                "paude.backends.podman.helpers.get_session_composition",
+                return_value=_gemini_composition(),
+            ),
+            patch("paude.cli.backup._build_manifest", return_value=manifest),
+            patch("paude.cli.backup._write_bundle_remote"),
+        ):
+            result = runner.invoke(app, ["backup", "s", "--remote-only"])
+
+        assert result.exit_code == 0, _out(result)
+        assert mock_preflight.call_args.args[4] == "/home/user/.config/paude/backups"
+
+    def test_destination_already_exists_on_remote(self) -> None:
+        backend = _mock_backend(remote=True)
+        result, _, _, mock_write = self._run(
+            backend, ["backup", "s", "--remote-only"], exists_remote=True
+        )
+        assert result.exit_code == 1
+        assert "already exists" in _out(result)
+        mock_write.assert_not_called()
+
+    def test_passes_output_through_to_remote_resolver(self) -> None:
+        backend = _mock_backend(remote=True)
+        _, mock_resolve, _, _ = self._run(
+            backend, ["backup", "s", "--remote-only", "-o", "/srv/backups"]
+        )
+        assert mock_resolve.call_args.args[1] == "/srv/backups"
 
 
 class TestRestoreCommand:
@@ -505,6 +657,257 @@ class TestPreflightDiskSpace:
         usage = MagicMock(free=100 * 1024**3)
         with patch("paude.cli.backup.shutil.disk_usage", return_value=usage):
             _preflight_disk_space(archiver, "vol", "img", tmp_path, force=False)
+
+
+class TestResolveRemoteOutputPath:
+    def test_default_dir_resolved_via_ssh_and_mkdir_p(self) -> None:
+        from datetime import UTC, datetime
+
+        from paude.cli.backup import _resolve_remote_output_path
+
+        transport = SshTransport("user@host")
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[0] == "sh":
+                return subprocess.CompletedProcess(
+                    args=[],
+                    returncode=0,
+                    stdout="/home/u/.config/paude/backups",
+                    stderr="",
+                )
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
+
+        with patch.object(transport, "run", side_effect=fake_run):
+            path = _resolve_remote_output_path(
+                transport, None, "s", datetime(2026, 8, 10, tzinfo=UTC)
+            )
+
+        assert path == "/home/u/.config/paude/backups/s-20260810T000000Z.paude"
+        # Resolving the default dir and creating it are combined into a
+        # single round trip -- each SSH connection has a real cost on the
+        # slow link this feature targets.
+        assert len(calls) == 1
+        assert calls[0][0] == "sh"
+        assert "mkdir -p" in calls[0][2]
+
+    def test_existing_directory_gets_default_name(self) -> None:
+        from datetime import UTC, datetime
+
+        from paude.cli.backup import _resolve_remote_output_path
+
+        transport = SshTransport("user@host")
+
+        def fake_run(cmd, **kwargs):
+            if cmd[0] == "test":
+                return subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout="", stderr=""
+                )
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
+
+        with patch.object(transport, "run", side_effect=fake_run):
+            path = _resolve_remote_output_path(
+                transport, "/srv/backups", "s", datetime(2026, 8, 10, tzinfo=UTC)
+            )
+        assert path == "/srv/backups/s-20260810T000000Z.paude"
+
+    def test_explicit_non_directory_path_used_verbatim(self) -> None:
+        from datetime import UTC, datetime
+
+        from paude.cli.backup import _resolve_remote_output_path
+
+        transport = SshTransport("user@host")
+
+        def fake_run(cmd, **kwargs):
+            if cmd[0] == "test":
+                return subprocess.CompletedProcess(
+                    args=[], returncode=1, stdout="", stderr=""
+                )
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
+
+        with patch.object(transport, "run", side_effect=fake_run):
+            path = _resolve_remote_output_path(
+                transport, "/srv/mine.paude", "s", datetime(2026, 8, 10, tzinfo=UTC)
+            )
+        assert path == "/srv/mine.paude"
+
+
+class TestPreflightDiskSpaceRemote:
+    _DF_SHORT = (
+        "Filesystem     1024-blocks      Used   Available Capacity Mounted on\n"
+        "/dev/sda1        104857600 100000000     1048576      99% /\n"
+    )
+    _DF_ENOUGH = (
+        "Filesystem     1024-blocks    Used    Available Capacity Mounted on\n"
+        "/dev/sda1       1073741824   10000   1000000000       1% /\n"
+    )
+
+    def test_blocks_when_space_short(self) -> None:
+        from paude.cli.backup import _preflight_disk_space_remote
+
+        transport = SshTransport("user@host")
+        archiver = MagicMock()
+        archiver.volume_size_bytes.return_value = 100 * 1024**3
+        with (
+            patch.object(
+                transport,
+                "run",
+                return_value=subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=self._DF_SHORT, stderr=""
+                ),
+            ),
+            pytest.raises(typer.Exit),
+        ):
+            _preflight_disk_space_remote(
+                archiver, "vol", "img", transport, "/remote/dir", force=False
+            )
+
+    def test_force_skips_check(self) -> None:
+        from paude.cli.backup import _preflight_disk_space_remote
+
+        transport = SshTransport("user@host")
+        archiver = MagicMock()
+        _preflight_disk_space_remote(
+            archiver, "vol", "img", transport, "/remote/dir", force=True
+        )
+        archiver.volume_size_bytes.assert_not_called()
+
+    def test_unknown_remote_free_space_is_noop(self) -> None:
+        from paude.cli.backup import _preflight_disk_space_remote
+
+        transport = SshTransport("user@host")
+        archiver = MagicMock()
+        archiver.volume_size_bytes.return_value = 1024
+        with patch.object(
+            transport,
+            "run",
+            return_value=subprocess.CompletedProcess(
+                args=[], returncode=1, stdout="", stderr="df: not found"
+            ),
+        ):
+            _preflight_disk_space_remote(
+                archiver, "vol", "img", transport, "/remote/dir", force=False
+            )
+
+    def test_enough_space_passes(self) -> None:
+        from paude.cli.backup import _preflight_disk_space_remote
+
+        transport = SshTransport("user@host")
+        archiver = MagicMock()
+        archiver.volume_size_bytes.return_value = 1 * 1024**3
+        with patch.object(
+            transport,
+            "run",
+            return_value=subprocess.CompletedProcess(
+                args=[], returncode=0, stdout=self._DF_ENOUGH, stderr=""
+            ),
+        ):
+            _preflight_disk_space_remote(
+                archiver, "vol", "img", transport, "/remote/dir", force=False
+            )
+
+
+class TestWriteBundleRemote:
+    def test_assembles_bundle_on_remote_host(self) -> None:
+        from paude.cli.backup import _write_bundle_remote
+
+        manifest = BackupManifest(
+            name="s", workspace="/w", created_at="t", source_paude_version="v"
+        )
+        transport = SshTransport("user@host")
+        calls: list[list[str]] = []
+        tmp_dir = "/home/u/backups/.paude-backup-abcd"
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[0] == "mktemp":
+                return subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=f"{tmp_dir}\n", stderr=""
+                )
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
+
+        archiver = MagicMock()
+        archiver.export_volume_to_remote_file.return_value = "deadbeef"
+
+        with patch.object(transport, "run", side_effect=fake_run):
+            _write_bundle_remote(
+                archiver,
+                transport,
+                "vol",
+                "img",
+                [],
+                manifest,
+                "/home/u/backups/s.paude",
+            )
+
+        assert manifest.archive_sha256 == "deadbeef"
+        # The archive is written directly into the remote temp dir -- no local
+        # staging, no second copy.
+        archive_call = archiver.export_volume_to_remote_file.call_args
+        assert archive_call.args[2] == f"{tmp_dir}/pvc.tar.gz"
+
+        # Writing the manifest + chmod-ing it, and chmod-ing + moving the temp
+        # dir, are each combined into a single round trip.
+        sh_calls = [c[2] for c in calls if c[0] == "sh"]
+        manifest_path = f"{tmp_dir}/manifest.json"
+        assert any(
+            "cat >" in c and f"chmod 0600 {manifest_path}" in c for c in sh_calls
+        )
+        assert any(
+            f"chmod 0700 {tmp_dir}" in c and f"mv {tmp_dir}" in c for c in sh_calls
+        )
+
+        # No cleanup round trip after a successful mv -- it would accomplish
+        # nothing but still cost a full SSH connection.
+        assert not any(c[0] == "rm" for c in calls)
+
+    def test_cleans_up_temp_dir_on_failure(self) -> None:
+        from paude.cli.backup import _write_bundle_remote
+
+        manifest = BackupManifest(
+            name="s", workspace="/w", created_at="t", source_paude_version="v"
+        )
+        transport = SshTransport("user@host")
+        calls: list[list[str]] = []
+        tmp_dir = "/tmp/.paude-backup-xyz"  # noqa: S108
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[0] == "mktemp":
+                return subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=f"{tmp_dir}\n", stderr=""
+                )
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
+
+        archiver = MagicMock()
+        archiver.export_volume_to_remote_file.side_effect = RuntimeError("boom")
+
+        with (
+            patch.object(transport, "run", side_effect=fake_run),
+            pytest.raises(RuntimeError, match="boom"),
+        ):
+            _write_bundle_remote(
+                archiver,
+                transport,
+                "vol",
+                "img",
+                [],
+                manifest,
+                "/tmp/s.paude",  # noqa: S108
+            )
+
+        assert ["rm", "-rf", tmp_dir] in calls
 
 
 class TestBackupHelp:

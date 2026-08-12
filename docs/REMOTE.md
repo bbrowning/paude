@@ -62,6 +62,10 @@ paude cp ./input.txt user@gpu-box-session:/pvc/workspace/input.txt
 Paude stages the transfer briefly on the remote host and removes the staging
 directory after the copy completes.
 
+`paude backup --remote-only` keeps a remote session's backup bundle on that
+same host instead of downloading it — see [Backup &
+Restore](SESSIONS.md#backup--restore) for details.
+
 ### Limitations
 
 - `--host` and `--ssh-key` are CLI-only flags (not stored in user defaults)

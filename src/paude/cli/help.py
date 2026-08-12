@@ -107,6 +107,10 @@ _SECTIONS: tuple[HelpSection, ...] = (
             ("paude stop NAME", "Stop first — backup refuses a running session"),
             ("paude backup NAME", "Snapshot the session volume + config to a bundle"),
             ("paude backup NAME -o DIR/", "Write the bundle into a directory"),
+            (
+                "paude backup NAME --remote-only",
+                "Keep the bundle on the remote host (no download)",
+            ),
             ("paude restore BUNDLE", "Rebuild a session from a bundle (coming soon)"),
         ),
         text=(

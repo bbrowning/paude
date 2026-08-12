@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -174,6 +175,96 @@ class TestSshTransport:
             "stdout": subprocess.PIPE,
             "stderr": subprocess.PIPE,
         }
+
+    @patch("paude.transport.ssh.subprocess.run")
+    def test_run_with_remote_redirect_appends_real_redirect(
+        self, mock_run: MagicMock
+    ) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+        transport = SshTransport("user@host")
+        cmd = ["podman", "run", "img", "sh", "-c", "tar -czf - -C /pvc ."]
+        path = "/home/user/backups/pvc.tar.gz"
+        transport.run_with_remote_redirect(cmd, path)
+        args = mock_run.call_args.args[0]
+        assert args[0] == "ssh"
+        assert args[-2] == "--"
+        # Built via run()'s own sh -c wrapping (not a hand-rolled second
+        # subprocess.run) with a real `>` redirect the remote shell evaluates
+        # -- not a literal argument escaped into the command. Compare against
+        # shlex's own output rather than a hand-written literal, since the
+        # nested quoting isn't meant to be eyeballed.
+        inner = f"{shlex.join(cmd)} > {shlex.quote(path)}"
+        assert args[-1] == shlex.join(["sh", "-c", inner])
+
+    @patch("paude.transport.ssh.subprocess.run")
+    def test_run_with_remote_redirect_quotes_destination(
+        self, mock_run: MagicMock
+    ) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+        transport = SshTransport("user@host")
+        transport.run_with_remote_redirect(["true"], "/tmp/has space/pvc.tar.gz")
+        args = mock_run.call_args.args[0]
+        assert "'/tmp/has space/pvc.tar.gz'" in args[-1]
+
+    @patch("paude.transport.ssh.subprocess.run")
+    def test_run_with_remote_redirect_raises_on_failure(
+        self, mock_run: MagicMock
+    ) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="tar: /pvc: Permission denied\n"
+        )
+        transport = SshTransport("user@host")
+        with pytest.raises(RuntimeError, match="Permission denied"):
+            transport.run_with_remote_redirect(["tar", "-czf", "-"], "/tmp/out.tar.gz")
+
+    @patch("paude.transport.ssh.subprocess.run")
+    def test_run_with_remote_redirect_check_false_suppresses_raise(
+        self, mock_run: MagicMock
+    ) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="boom"
+        )
+        transport = SshTransport("user@host")
+        result = transport.run_with_remote_redirect(
+            ["false"], "/tmp/out.tar.gz", check=False
+        )
+        assert result.returncode == 1
+
+    @patch("paude.transport.ssh.subprocess.run")
+    def test_file_size_parses_digit_output(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="12345\n", stderr=""
+        )
+        assert SshTransport("user@host").file_size("/r/pvc.tar.gz") == 12345
+
+    @patch("paude.transport.ssh.subprocess.run")
+    def test_file_size_non_digit_output_is_none(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+        assert SshTransport("user@host").file_size("/r/pvc.tar.gz") is None
+
+    @patch("paude.transport.ssh.subprocess.run")
+    def test_free_bytes_parses_df_output(self, mock_run: MagicMock) -> None:
+        df_output = (
+            "Filesystem     1024-blocks   Used   Available Capacity Mounted on\n"
+            "/dev/sda1       1073741824  10000  1000000000       1% /\n"
+        )
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=df_output, stderr=""
+        )
+        assert SshTransport("user@host").free_bytes("/remote/dir") == 1000000000 * 1024
+
+    @patch("paude.transport.ssh.subprocess.run")
+    def test_free_bytes_failure_is_none(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="df: no such file or directory"
+        )
+        assert SshTransport("user@host").free_bytes("/nope") is None
 
     def test_is_remote(self) -> None:
         assert SshTransport("user@host").is_remote is True

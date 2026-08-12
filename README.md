@@ -230,7 +230,9 @@ excluded, and known agent credential files are always stripped, so a bundle
 never stores a live token. Backup checks free disk space first (`--force` to
 override) and shows live progress (bytes archived, throughput, elapsed) as it
 runs. The archive is streamed straight to the bundle, so backing up a remote
-session never needs scratch space on the remote host. `paude restore BUNDLE` is
+session never needs scratch space on the remote host. Add `--remote-only` to
+keep the bundle on the remote session's own host instead of downloading it —
+handy on a slow connection to a fast remote session. `paude restore BUNDLE` is
 planned; today it validates a bundle and prints the restore it would perform. See
 [Session Management](docs/SESSIONS.md#backup--restore) for details.
 
