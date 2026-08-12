@@ -22,6 +22,8 @@ Technical debt identified during codebase analysis. Address these before adding 
 - `workflow.py` — 467 lines
 - `container/runner.py` — 442 lines
 - `container/image.py` — 531 lines
+- `cli/backup.py` — 703 lines (grew past the limit adding `--remote-only`
+  streaming backup support; needs splitting into a package)
 
 **Still open — methods exceeding 50-line limit:**
 - `workflow.py` — `harvest_session()` (~102 lines), `status_sessions()` (~84), `reset_session()` (~72)

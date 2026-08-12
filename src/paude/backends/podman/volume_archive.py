@@ -29,11 +29,12 @@ from __future__ import annotations
 import hashlib
 import secrets
 import shlex
+import subprocess
 from collections.abc import Callable, Iterator
-from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import contextmanager
 
 from paude.container.engine import ContainerEngine
+from paude.subprocess_utils import drain_pipe, raise_on_nonzero, reap
 from paude.transport.ssh import SshTransport
 
 # Read the archive stream one MiB at a time.
@@ -158,11 +159,11 @@ class VolumeArchiver:
         Unlike :meth:`export_volume`, nothing is streamed back to the client.
         The same tar-to-stdout helper container runs completely unchanged, but
         its stdout is redirected straight to a file on the remote host by the
-        remote shell (:meth:`SshTransport.run_with_remote_redirect`) rather
-        than piped back over SSH — so a multi-GB archive never crosses the
-        link. Since the client no longer sees the bytes as they flow,
-        progress is instead sampled by periodically checking the partial
-        file's size with a separate, lightweight SSH call.
+        remote shell (:meth:`SshTransport.popen_remote_redirect`) rather than
+        piped back over SSH — so a multi-GB archive never crosses the link.
+        Since the client no longer sees the bytes as they flow, progress is
+        instead sampled by periodically checking the partial file's size with
+        a separate, lightweight SSH call.
 
         Args:
             volume: Named volume to export (mounted at ``/pvc``).
@@ -187,19 +188,33 @@ class VolumeArchiver:
             args = _helper_run_args(
                 helper, volume, image, "sh", "-c", _tar_stream_script(exclude or [])
             )
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(
-                    self._engine.run_with_remote_redirect,
-                    *args,
-                    remote_output_path=remote_tar_path,
-                )
-                while not future.done():
-                    wait([future], timeout=_REMOTE_POLL_INTERVAL)
-                    if progress is not None and not future.done():
-                        size = transport.file_size(remote_tar_path)
-                        if size is not None:
-                            progress(size)
-                future.result()
+            # A plain Popen (not a background thread) so KeyboardInterrupt
+            # actually reaches the polling loop below instead of getting
+            # trapped in an unkillable worker thread -- see the `except
+            # BaseException` branch. The helper container's own removal (this
+            # method's caller's `finally`, above) is what actually stops the
+            # remote-side transfer if we bail out early; killing this local
+            # SSH client just stops us from waiting on it.
+            proc = self._engine.popen_with_remote_redirect(
+                *args, remote_output_path=remote_tar_path
+            )
+            stderr_chunks: list[bytes] = []
+            stderr_thread = drain_pipe(proc.stderr, stderr_chunks)
+            try:
+                while True:
+                    try:
+                        proc.wait(timeout=_REMOTE_POLL_INTERVAL)
+                        break
+                    except subprocess.TimeoutExpired:
+                        if progress is not None:
+                            size = transport.file_size(remote_tar_path)
+                            if size is not None:
+                                progress(size)
+            except BaseException:
+                reap(proc, stderr_thread)
+                raise
+            returncode = reap(proc, stderr_thread)
+            raise_on_nonzero(returncode, stderr_chunks)
 
         # One remote round trip for both -- separate calls would each pay a
         # full SSH connection on a link this feature exists to go easy on.

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -10,26 +9,7 @@ import pytest
 
 from paude.container.engine import ContainerEngine
 from paude.transport import LocalTransport, SshTransport
-
-
-class _FakePopen:
-    """Minimal stand-in for a streaming ``subprocess.Popen[bytes]``."""
-
-    def __init__(
-        self, stdout: bytes = b"", stderr: bytes = b"", returncode: int = 0
-    ) -> None:
-        self.stdout = io.BytesIO(stdout)
-        self.stderr = io.BytesIO(stderr)
-        self._returncode = returncode
-
-    def wait(self) -> int:
-        return self._returncode
-
-    def poll(self) -> int:
-        return self._returncode
-
-    def kill(self) -> None:  # pragma: no cover - only for interrupted streams
-        pass
+from tests.fakes import FakePopen
 
 
 class TestContainerEngineInit:
@@ -85,7 +65,7 @@ class TestContainerEngineRun:
 
     def test_stream_run_prepends_binary_and_yields_stdout(self) -> None:
         engine = ContainerEngine("podman")
-        fake = _FakePopen(stdout=b"payload-bytes")
+        fake = FakePopen(stdout=b"payload-bytes")
         with patch.object(
             engine._transport, "popen_binary", return_value=fake
         ) as mock_pb:
@@ -96,7 +76,7 @@ class TestContainerEngineRun:
 
     def test_stream_run_raises_with_stderr_on_nonzero_exit(self) -> None:
         engine = ContainerEngine("podman")
-        fake = _FakePopen(stderr=b"tar: fatal error\n", returncode=2)
+        fake = FakePopen(stderr=b"tar: fatal error\n", returncode=2)
         with patch.object(engine._transport, "popen_binary", return_value=fake):
             with pytest.raises(RuntimeError, match="tar: fatal error"):
                 with engine.stream_run("run", "img") as stream:
@@ -104,11 +84,28 @@ class TestContainerEngineRun:
 
     def test_stream_run_falls_back_to_exit_code_without_stderr(self) -> None:
         engine = ContainerEngine("podman")
-        fake = _FakePopen(returncode=2)
+        fake = FakePopen(returncode=2)
         with patch.object(engine._transport, "popen_binary", return_value=fake):
             with pytest.raises(RuntimeError, match="exit 2"):
                 with engine.stream_run("run", "img") as stream:
                     stream.read()
+
+    def test_stream_run_kills_process_still_running_after_normal_return(self) -> None:
+        """A caller that returns without draining to EOF must not hang forever."""
+        engine = ContainerEngine("podman")
+        fake = FakePopen(stdout=b"partial-data", pending_waits=1)
+        with patch.object(engine._transport, "popen_binary", return_value=fake):
+            with engine.stream_run("run", "img") as stream:
+                stream.read(3)
+        assert fake.killed is True
+
+    def test_stream_run_does_not_kill_process_that_exits_within_grace(self) -> None:
+        engine = ContainerEngine("podman")
+        fake = FakePopen(stdout=b"payload-bytes")
+        with patch.object(engine._transport, "popen_binary", return_value=fake):
+            with engine.stream_run("run", "img") as stream:
+                stream.read()
+        assert fake.killed is False
 
     @patch("paude.transport.local.subprocess.run")
     def test_run_docker_binary(self, mock_run: MagicMock) -> None:
@@ -146,27 +143,28 @@ class TestContainerEngineRun:
         )
 
 
-class TestContainerEngineRunWithRemoteRedirect:
-    """Tests for ContainerEngine.run_with_remote_redirect method."""
+class TestContainerEnginePopenWithRemoteRedirect:
+    """Tests for ContainerEngine.popen_with_remote_redirect method."""
 
     def test_prepends_binary_and_delegates_to_transport(self) -> None:
         transport = SshTransport("user@host")
         engine = ContainerEngine("podman", transport=transport)
-        with patch.object(transport, "run_with_remote_redirect") as mock_redirect:
-            mock_redirect.return_value = subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="", stderr=""
-            )
-            engine.run_with_remote_redirect(
+        fake_proc = MagicMock()
+        with patch.object(
+            transport, "popen_remote_redirect", return_value=fake_proc
+        ) as mock_redirect:
+            result = engine.popen_with_remote_redirect(
                 "run", "img", remote_output_path="/remote/out.tar.gz"
             )
         mock_redirect.assert_called_once_with(
-            ["podman", "run", "img"], "/remote/out.tar.gz", check=True
+            ["podman", "run", "img"], "/remote/out.tar.gz"
         )
+        assert result is fake_proc
 
     def test_requires_ssh_backed_transport(self) -> None:
         engine = ContainerEngine("podman", transport=LocalTransport())
         with pytest.raises(RuntimeError, match="SSH-backed"):
-            engine.run_with_remote_redirect("run", "img", remote_output_path="/out")
+            engine.popen_with_remote_redirect("run", "img", remote_output_path="/out")
 
 
 class TestContainerEngineImageExists:

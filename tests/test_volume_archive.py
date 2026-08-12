@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import io
 import subprocess
-import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from unittest.mock import patch
@@ -15,6 +14,7 @@ import pytest
 from paude.backends.podman.volume_archive import VolumeArchiver
 from paude.container.engine import ContainerEngine
 from paude.transport.ssh import SshTransport
+from tests.fakes import FakePopen
 
 
 @contextmanager
@@ -167,8 +167,11 @@ def _ssh_engine() -> tuple[ContainerEngine, SshTransport]:
 class TestExportVolumeToRemoteFile:
     def test_reuses_stdout_tar_script_and_redirects_on_remote_host(self) -> None:
         engine, transport = _ssh_engine()
+        fake_proc = FakePopen()
         with (
-            patch.object(transport, "run_with_remote_redirect") as mock_redirect,
+            patch.object(
+                transport, "popen_remote_redirect", return_value=fake_proc
+            ) as mock_redirect,
             patch.object(transport, "run") as mock_run,
         ):
             mock_run.return_value = subprocess.CompletedProcess(
@@ -214,6 +217,7 @@ class TestExportVolumeToRemoteFile:
         # The helper container is still cleaned up via engine.run -> transport.run.
         helper = cmd[cmd.index("--name") + 1]
         assert ["podman", "rm", "-f", helper] in calls
+        assert fake_proc.killed is False
 
     def test_requires_ssh_backed_engine(self) -> None:
         engine = ContainerEngine()  # defaults to LocalTransport
@@ -224,11 +228,10 @@ class TestExportVolumeToRemoteFile:
 
     def test_error_propagates_and_helper_is_still_removed(self) -> None:
         engine, transport = _ssh_engine()
+        fake_proc = FakePopen(stderr=b"tar failed", returncode=1)
         with (
             patch.object(
-                transport,
-                "run_with_remote_redirect",
-                side_effect=RuntimeError("tar failed"),
+                transport, "popen_remote_redirect", return_value=fake_proc
             ) as mock_redirect,
             patch.object(transport, "run") as mock_run,
         ):
@@ -258,16 +261,11 @@ class TestExportVolumeToRemoteFile:
                 args=[], returncode=0, stdout="deadbeef  /r/pvc.tar.gz\n", stderr=""
             )
 
-        def slow_redirect(cmd, remote_path, **kwargs):
-            time.sleep(0.05)
-
+        fake_proc = FakePopen(pending_waits=4)
         seen: list[int] = []
         with (
-            patch.object(
-                transport, "run_with_remote_redirect", side_effect=slow_redirect
-            ),
+            patch.object(transport, "popen_remote_redirect", return_value=fake_proc),
             patch.object(transport, "run", side_effect=fake_run),
-            patch("paude.backends.podman.volume_archive._REMOTE_POLL_INTERVAL", 0.01),
         ):
             VolumeArchiver(engine).export_volume_to_remote_file(
                 "vol", "img", "/r/pvc.tar.gz", progress=seen.append
@@ -275,3 +273,42 @@ class TestExportVolumeToRemoteFile:
 
         assert seen  # at least one poll happened before the archive finished
         assert all(isinstance(x, int) for x in seen)
+        assert fake_proc.killed is False
+
+    def test_keyboard_interrupt_kills_local_process(self) -> None:
+        """Ctrl+C must kill the local SSH client, not block until it exits."""
+
+        class _InterruptingProc(FakePopen):
+            """Raises KeyboardInterrupt on the first wait() call (simulating
+            Ctrl+C landing in the main polling loop), then behaves like a
+            normal still-running process for reap()'s own wait() calls."""
+
+            def __init__(self) -> None:
+                super().__init__(pending_waits=1)
+                self._interrupted_once = False
+
+            def wait(self, timeout: float | None = None) -> int:
+                if not self._interrupted_once:
+                    self._interrupted_once = True
+                    raise KeyboardInterrupt
+                return super().wait(timeout)
+
+        engine, transport = _ssh_engine()
+        fake_proc = _InterruptingProc()
+        with (
+            patch.object(
+                transport, "popen_remote_redirect", return_value=fake_proc
+            ) as mock_redirect,
+            patch.object(transport, "run") as mock_run,
+        ):
+            with pytest.raises(KeyboardInterrupt):
+                VolumeArchiver(engine).export_volume_to_remote_file(
+                    "vol", "img", "/r/pvc.tar.gz"
+                )
+
+        assert fake_proc.killed is True
+        # The helper container is still cleaned up despite the interrupt.
+        cmd = mock_redirect.call_args.args[0]
+        helper = cmd[cmd.index("--name") + 1]
+        calls = [c.args[0] for c in mock_run.call_args_list]
+        assert ["podman", "rm", "-f", helper] in calls

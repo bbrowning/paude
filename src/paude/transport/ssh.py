@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import secrets
 import shlex
 import subprocess
 import tempfile
@@ -36,6 +38,8 @@ class SshTransport:
         self._key = key
         self._port = port
         self._connect_timeout = connect_timeout
+        socket_name = f"paude-ssh-{os.getpid()}-{secrets.token_hex(4)}.sock"
+        self._control_path = os.path.join(tempfile.gettempdir(), socket_name)
 
     @property
     def host(self) -> str:
@@ -49,6 +53,10 @@ class SshTransport:
     def port(self) -> int | None:
         return self._port
 
+    @property
+    def control_path(self) -> str:
+        return self._control_path
+
     def ssh_base(self) -> list[str]:
         cmd = [
             "ssh",
@@ -58,6 +66,19 @@ class SshTransport:
             "StrictHostKeyChecking=accept-new",
             "-o",
             f"ConnectTimeout={self._connect_timeout}",
+            # Multiplex repeated connections to the same host over one TCP
+            # connection -- e.g. remote-backup progress polling, which would
+            # otherwise pay a full SSH handshake every couple of seconds for
+            # the whole transfer's duration. ControlPersist=no is set
+            # explicitly (it's already OpenSSH's default) so a user's own
+            # ~/.ssh/config can't override it and leave a master process
+            # running after the last connection closes.
+            "-o",
+            "ControlMaster=auto",
+            "-o",
+            f"ControlPath={self._control_path}",
+            "-o",
+            "ControlPersist=no",
         ]
         if self._key:
             cmd.extend(["-i", self._key])
@@ -107,10 +128,10 @@ class SshTransport:
             stderr=subprocess.PIPE,
         )
 
-    def run_with_remote_redirect(
-        self, cmd: list[str], remote_output_path: str, *, check: bool = True
-    ) -> subprocess.CompletedProcess[str]:
-        """Run ``cmd`` on the remote host with its stdout redirected to a file.
+    def popen_remote_redirect(
+        self, cmd: list[str], remote_output_path: str
+    ) -> subprocess.Popen[bytes]:
+        """Start ``cmd`` on the remote host with its stdout redirected to a file.
 
         Unlike :meth:`run`, whose argv is shell-escaped as literal arguments,
         this appends a real ``>`` redirect that the remote shell evaluates —
@@ -118,27 +139,33 @@ class SshTransport:
         remote disk and never crosses the SSH channel back to the client. This
         is the same "let the remote shell do it" trick :meth:`_pipe_tar` uses,
         just redirecting to a static path instead of piping into a second
-        process. Built as an ``sh -c`` wrapper around :meth:`run` (rather than
-        a second, hand-rolled ``subprocess.run`` call) so it shares one place
-        for the actual SSH invocation.
+        process.
+
+        Returns the live process rather than blocking on it, so a caller doing
+        long-running progress polling can kill the local SSH client
+        immediately on interrupt instead of blocking until the remote command
+        finishes on its own. stdout is discarded (the real output already
+        went to ``remote_output_path`` via the shell redirect, so there's
+        nothing to read); stderr is piped for error reporting.
         """
         inner = f"{shlex.join(cmd)} > {shlex.quote(remote_output_path)}"
-        result = self.run(["sh", "-c", inner], check=False)
-        _raise_on_failure(
-            check and result.returncode != 0,
-            result.stderr,
-            f"command failed (exit {result.returncode})",
+        full = [*self.ssh_base(), "--", shlex.join(["sh", "-c", inner])]
+        return subprocess.Popen(
+            full,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
         )
-        return result
 
     def file_size(self, remote_path: str) -> int | None:
         """Best-effort size in bytes of a file on the remote host, or None.
 
         Uses ``wc -c`` (not ``stat -c%s``/``stat -f%z``) so it works unmodified
-        whether the remote host is Linux or macOS.
+        whether the remote host is Linux or macOS. Returns None (not 0) when
+        ``remote_path`` doesn't exist yet -- ``wc`` then fails, so stdout is
+        empty rather than a digit string.
         """
         result = self.run(
-            ["sh", "-c", f"wc -c < {shlex.quote(remote_path)} 2>/dev/null || echo 0"],
+            ["sh", "-c", f"wc -c < {shlex.quote(remote_path)} 2>/dev/null"],
             check=False,
         )
         text = result.stdout.strip()

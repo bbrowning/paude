@@ -88,8 +88,19 @@ class TestSshTransport:
             "StrictHostKeyChecking=accept-new",
             "-o",
             "ConnectTimeout=10",
+            "-o",
+            "ControlMaster=auto",
+            "-o",
+            f"ControlPath={transport.control_path}",
+            "-o",
+            "ControlPersist=no",
             "user@host",
         ]
+
+    def test_control_path_is_unique_per_instance(self) -> None:
+        first = SshTransport("user@host").control_path
+        second = SshTransport("user@host").control_path
+        assert first != second
 
     def test_ssh_base_with_key(self) -> None:
         transport = SshTransport("user@host", key="/path/to/key")
@@ -176,63 +187,38 @@ class TestSshTransport:
             "stderr": subprocess.PIPE,
         }
 
-    @patch("paude.transport.ssh.subprocess.run")
-    def test_run_with_remote_redirect_appends_real_redirect(
-        self, mock_run: MagicMock
+    @patch("paude.transport.ssh.subprocess.Popen")
+    def test_popen_remote_redirect_appends_real_redirect(
+        self, mock_popen: MagicMock
     ) -> None:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="", stderr=""
-        )
         transport = SshTransport("user@host")
         cmd = ["podman", "run", "img", "sh", "-c", "tar -czf - -C /pvc ."]
         path = "/home/user/backups/pvc.tar.gz"
-        transport.run_with_remote_redirect(cmd, path)
-        args = mock_run.call_args.args[0]
+        transport.popen_remote_redirect(cmd, path)
+        args = mock_popen.call_args.args[0]
         assert args[0] == "ssh"
         assert args[-2] == "--"
-        # Built via run()'s own sh -c wrapping (not a hand-rolled second
-        # subprocess.run) with a real `>` redirect the remote shell evaluates
-        # -- not a literal argument escaped into the command. Compare against
-        # shlex's own output rather than a hand-written literal, since the
-        # nested quoting isn't meant to be eyeballed.
+        # Built the same way popen_binary is; a real `>` redirect the remote
+        # shell evaluates -- not a literal argument escaped into the command.
+        # Compare against shlex's own output rather than a hand-written
+        # literal, since the nested quoting isn't meant to be eyeballed.
         inner = f"{shlex.join(cmd)} > {shlex.quote(path)}"
         assert args[-1] == shlex.join(["sh", "-c", inner])
+        # stdout is discarded -- the real output already went to `path` via
+        # the shell redirect -- and stderr is piped for error reporting.
+        assert mock_popen.call_args.kwargs == {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.PIPE,
+        }
 
-    @patch("paude.transport.ssh.subprocess.run")
-    def test_run_with_remote_redirect_quotes_destination(
-        self, mock_run: MagicMock
+    @patch("paude.transport.ssh.subprocess.Popen")
+    def test_popen_remote_redirect_quotes_destination(
+        self, mock_popen: MagicMock
     ) -> None:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="", stderr=""
-        )
         transport = SshTransport("user@host")
-        transport.run_with_remote_redirect(["true"], "/tmp/has space/pvc.tar.gz")
-        args = mock_run.call_args.args[0]
+        transport.popen_remote_redirect(["true"], "/tmp/has space/pvc.tar.gz")
+        args = mock_popen.call_args.args[0]
         assert "'/tmp/has space/pvc.tar.gz'" in args[-1]
-
-    @patch("paude.transport.ssh.subprocess.run")
-    def test_run_with_remote_redirect_raises_on_failure(
-        self, mock_run: MagicMock
-    ) -> None:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=1, stdout="", stderr="tar: /pvc: Permission denied\n"
-        )
-        transport = SshTransport("user@host")
-        with pytest.raises(RuntimeError, match="Permission denied"):
-            transport.run_with_remote_redirect(["tar", "-czf", "-"], "/tmp/out.tar.gz")
-
-    @patch("paude.transport.ssh.subprocess.run")
-    def test_run_with_remote_redirect_check_false_suppresses_raise(
-        self, mock_run: MagicMock
-    ) -> None:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=1, stdout="", stderr="boom"
-        )
-        transport = SshTransport("user@host")
-        result = transport.run_with_remote_redirect(
-            ["false"], "/tmp/out.tar.gz", check=False
-        )
-        assert result.returncode == 1
 
     @patch("paude.transport.ssh.subprocess.run")
     def test_file_size_parses_digit_output(self, mock_run: MagicMock) -> None:
@@ -247,6 +233,18 @@ class TestSshTransport:
             args=[], returncode=0, stdout="", stderr=""
         )
         assert SshTransport("user@host").file_size("/r/pvc.tar.gz") is None
+
+    @patch.object(SshTransport, "run")
+    def test_file_size_command_does_not_default_missing_file_to_zero(
+        self, mock_run: MagicMock
+    ) -> None:
+        """A missing file must surface as None, not as a false '0 bytes'."""
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+        SshTransport("user@host").file_size("/r/pvc.tar.gz")
+        cmd = mock_run.call_args.args[0]
+        assert "|| echo 0" not in cmd[-1]
 
     @patch("paude.transport.ssh.subprocess.run")
     def test_free_bytes_parses_df_output(self, mock_run: MagicMock) -> None:
