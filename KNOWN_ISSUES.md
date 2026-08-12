@@ -361,6 +361,25 @@ relabel the bind mount (`:z`/`:Z`), or have `setup_gitconfig` fall back to
 `PAUDE_GIT_USER_NAME`/`PAUDE_GIT_USER_EMAIL` when the source is unreadable, so
 `GIT_CONFIG_GLOBAL` is always set even when the seed copy fails.
 
+### RUNTIME-006: Root is required for backup, volume-ownership reconciliation, and in-container config writes
+
+**Status**: Open
+**Priority**: Medium (contradicts paude's non-root security posture; no known exploit, but the largest gap between documented and actual privilege)
+**Discovered**: 2026-08-12 during a security-model audit of `paude backup`'s root usage
+
+The agent's own runtime process always executes as the non-root `paude` user — every session command runs unprivileged. But three helper code paths invoke podman/docker `--user root` (or `exec --user root`) against volumes/containers that are otherwise never touched as root:
+
+1. `volume_archive.py`'s `_helper_run_args()` — `--user root` **and** `--security-opt label=disable` on a throwaway container that `tar`/`du`s the entire `/pvc` volume for `paude backup`/`volume_size_bytes`. Needed because the volume can hold root-owned `0600` agent state, nested-container files with foreign SELinux MCS categories, and pre-UID-pin drift artifacts — a non-root, SELinux-confined read fails partway through with "Permission denied," and `paude backup` is designed to fail loudly rather than silently produce an incomplete archive. This is the single most privileged operation in the codebase (root plus SELinux confinement disabled), though scoped by a read-only mount and a throwaway container.
+2. `runner.py`'s `reconcile_volume_ownership()` — `exec --user root` to migrate volumes created before the 2026-08-10 UID pin (`8edd527`) onto the current pinned `1000:0` identity. Not itself a security-relevant read/write escalation (it acts on a volume the user's own container already controls, and the actual `chown -R` only fires when ownership has drifted), but the root `exec` call runs unconditionally on every container start/upgrade — forever, not just for the legacy volumes it exists to fix.
+3. `container/files.py`'s `replace_file()`, `runner.py`'s `inject_file()`, and `backends/podman/sync.py`'s `ConfigSyncer` — `exec --user root` for one-shot config/credential writes (CA cert, `/credentials/` staging), immediately chowned back to `paude`.
+
+Ideas worth investigating for closing this out (none attempted yet — this is a goal, not a plan):
+- Replace full `--user root` on the backup helper with a narrower Linux capability (e.g. `--cap-drop=all --cap-add=DAC_READ_SEARCH`) if that's sufficient to bypass DAC permission checks for a read-only `tar`/`du` without full root. The SELinux/MAC side (foreign MCS categories) would still need `label=disable` or an equivalent relabel regardless — capabilities don't touch MAC enforcement.
+- Gate `reconcile_volume_ownership()` behind a one-time marker (e.g. a stamp file or manifest field) so the root `exec` itself stops running once a volume is confirmed to already be on the pinned UID, instead of checking on every start/upgrade indefinitely.
+- For the config-write helpers, investigate execing as the file's existing owner when known, falling back to root only when the owner is unknown or the file doesn't yet exist.
+
+No path forward here is trivial — SELinux MAC enforcement and `podman exec`'s user model are real constraints, not oversights — but the goal is for paude to never invoke any podman/docker operation as root.
+
 ## Test Suite
 
 ### TEST-002: Single-file branch of `_transfer_path` is untested
