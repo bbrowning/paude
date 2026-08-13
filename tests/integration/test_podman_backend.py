@@ -753,6 +753,23 @@ class TestPodmanProxySetup:
             )
             assert result.returncode == 0, "Internal network should exist"
 
+            # Podman internal networks are created with --disable-dns (see
+            # session_setup.py), so the agent container can't resolve the
+            # proxy by name -- HTTP_PROXY points at its real IP instead.
+            result = subprocess.run(
+                [
+                    "podman",
+                    "inspect",
+                    "--format",
+                    f'{{{{(index .NetworkSettings.Networks "{network_name}").IPAddress}}}}',
+                    proxy_name,
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            proxy_ip = result.stdout.strip()
+
             # Verify main container has HTTP_PROXY env var set
             result = subprocess.run(
                 [
@@ -765,7 +782,7 @@ class TestPodmanProxySetup:
                 capture_output=True,
                 text=True,
             )
-            assert f"HTTP_PROXY=http://{proxy_name}:3128" in result.stdout, (
+            assert f"HTTP_PROXY=http://{proxy_ip}:3128" in result.stdout, (
                 "Main container should have HTTP_PROXY pointing to proxy"
             )
 

@@ -28,6 +28,16 @@ These exfiltration paths have been tested and confirmed blocked:
 | Modify cloud credentials | Blocked | Real credentials never reach the agent's container (see gcloud credentials, above); stored only on the proxy sidecar — see [Remote Hosts & Docker Backend](REMOTE.md) for how this differs between Podman and Docker |
 | Escape container | Blocked | Non-root user; standard Podman isolation |
 
+## Root-Privileged Helper Operations
+
+The long-running agent container itself always runs as the non-root `paude` user (see "Escape container" above) — the agent's shell and every session command execute as `paude`, never root. A small number of short-lived, narrowly-scoped helper operations do run as root; they're listed here for transparency, and tracked as [RUNTIME-006](../KNOWN_ISSUES.md#runtime-006-root-is-required-for-backup-volume-ownership-reconciliation-and-in-container-config-writes) for further reduction.
+
+| Operation | Why root is needed | Scope limits |
+|-----------|--------------------|---------------|
+| Backup archive helper (`volume_archive.py`) | `/pvc` accumulates files from multiple owners over a session's life — root-owned `0600` agent state, nested-container files carrying another container's SELinux MCS category, pre-UID-pin drift artifacts. A non-root, SELinux-confined read fails partway through a multi-GB backup with "Permission denied"; `paude backup` is designed to fail loudly rather than silently produce an incomplete archive | Read-only (`:ro`) volume mount; throwaway container destroyed after use; no capabilities added beyond `--user root` and disabling SELinux confinement |
+| Volume ownership reconciliation (`reconcile_volume_ownership`) | Migrates volumes created before the runtime UID was pinned to `1000:0` (2026-08-10) onto the current pinned identity | Runs inside a container the invoking user already controls; target UID/GID is resolved at runtime via `id -u/-g paude`, never hardcoded; the actual `chown -R` only fires when ownership has actually drifted |
+| Config/credential file writes (`inject_file`, `replace_file`, `ConfigSyncer`) | `podman exec` only runs as the container's default user unless overridden; writing a file the agent doesn't yet own (proxy CA cert, `/credentials/` staging) needs root for one atomic write | Root scope lasts for a single `exec` call; file ownership is corrected (chowned back to `paude`) immediately after |
+
 ## When is `--yolo` Safe?
 
 ```bash

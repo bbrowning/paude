@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import subprocess
-from typing import TYPE_CHECKING
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import IO, TYPE_CHECKING
+
+from paude.subprocess_utils import drain_pipe, raise_on_nonzero, reap
 
 if TYPE_CHECKING:
     from paude.transport.base import Transport
+
+# How long stream_run gives a fully-drained process to exit naturally before
+# killing it -- long enough that a legitimately finishing process never gets
+# clobbered, short enough that a caller who didn't drain to EOF isn't left
+# hanging.
+_REAP_GRACE_SECONDS = 5.0
 
 
 class ContainerEngine:
@@ -68,6 +78,66 @@ class ContainerEngine:
         """
         cmd = [self.binary, *args]
         return self._transport.run_interactive(cmd)
+
+    def popen_with_remote_redirect(
+        self, *args: str, remote_output_path: str
+    ) -> subprocess.Popen[bytes]:
+        """Start a command with its stdout redirected to a file on the remote host.
+
+        Mirrors :meth:`run`'s "prepend the binary, delegate to the transport"
+        shape, but for :meth:`SshTransport.popen_remote_redirect` — only valid
+        when this engine's transport is SSH-backed, since the redirect happens
+        on the remote host and nothing crosses back to the client. Returns the
+        live process rather than blocking, so a caller doing long-running
+        progress polling (see
+        :meth:`~paude.backends.podman.volume_archive.VolumeArchiver.export_volume_to_remote_file`)
+        can kill it immediately on interrupt instead of blocking until the
+        remote command finishes on its own.
+        """
+        from paude.transport.ssh import SshTransport
+
+        if not isinstance(self._transport, SshTransport):
+            raise RuntimeError(
+                "popen_with_remote_redirect requires an SSH-backed engine"
+            )
+        cmd = [self.binary, *args]
+        return self._transport.popen_remote_redirect(cmd, remote_output_path)
+
+    @contextmanager
+    def stream_run(self, *args: str) -> Iterator[IO[bytes]]:
+        """Run a command and yield its stdout as a binary stream.
+
+        Unlike :meth:`run`, the output is not captured up front — the caller gets
+        a readable stdout stream so a large payload (e.g. a ``tar`` archive) can
+        be consumed incrementally without buffering it in memory or staging it on
+        the engine host. Works transparently for local and SSH transports.
+
+        This owns the process lifecycle so callers only handle bytes: stderr is
+        drained concurrently (so it can't fill its pipe and deadlock the stdout
+        read), the process is always reaped — killed immediately if the
+        caller's block raises, or after a short grace period if it returns
+        without draining stdout to EOF, so a stalled stdout pipe can't hang —
+        and a non-zero exit is surfaced as a ``RuntimeError`` carrying the
+        command's stderr.
+        """
+        proc = self._transport.popen_binary([self.binary, *args])
+        stderr_chunks: list[bytes] = []
+        stderr_thread = drain_pipe(proc.stderr, stderr_chunks)
+
+        assert proc.stdout is not None  # noqa: S101 - popen_binary always pipes it
+        try:
+            yield proc.stdout
+        except BaseException:
+            reap(proc, stderr_thread)
+            raise
+        else:
+            returncode = reap(proc, stderr_thread, grace=_REAP_GRACE_SECONDS)
+        finally:
+            for stream in (proc.stdout, proc.stderr):
+                if stream is not None:
+                    stream.close()
+
+        raise_on_nonzero(returncode, stderr_chunks)
 
     @property
     def is_remote(self) -> bool:

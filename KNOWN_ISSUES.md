@@ -22,6 +22,8 @@ Technical debt identified during codebase analysis. Address these before adding 
 - `workflow.py` — 467 lines
 - `container/runner.py` — 442 lines
 - `container/image.py` — 531 lines
+- `cli/backup.py` — 703 lines (grew past the limit adding `--remote-only`
+  streaming backup support; needs splitting into a package)
 
 **Still open — methods exceeding 50-line limit:**
 - `workflow.py` — `harvest_session()` (~102 lines), `status_sessions()` (~84), `reset_session()` (~72)
@@ -79,6 +81,39 @@ embed (or inherit), with the tuple-normalization living once beside it. This was
 left out of the backup work because it reaches into the stable upgrade path
 (`_manifest_from_state`/`_resolve_base_from_manifest` in `cli/upgrade.py`), which
 is out of scope for that feature.
+
+### REFACTOR-008: streaming-subprocess lifecycle is duplicated between engine and SSH transport
+
+**Status**: Open
+**Priority**: Low (drift-prone; three copies of the same failure-translation idiom)
+**Discovered**: 2026-08-11 during a `/simplify` review of the streaming-backup work
+
+`ContainerEngine.stream_run` (`src/paude/container/engine.py:75-115`) owns a full
+piped-subprocess lifecycle: drain stderr on a background thread (so it can't
+fill its pipe and deadlock the stdout read), reap/kill on exception, and
+translate a non-zero exit into `RuntimeError(stderr or fallback)`. The
+`SshTransport` already implements that same drain/reap/`RuntimeError(detail or
+"…")` pattern twice internally — `copy_from_host` (`src/paude/transport/ssh.py:157-183`)
+and `_pipe_tar` (`ssh.py:194-208`) — so the "run a piped subprocess and turn
+failure+stderr into a RuntimeError" idiom now exists in **three** places, and
+the `bytes.decode(errors="replace").strip() or <fallback>` construction in **four**.
+
+Compounding it, the transport exposes `popen_binary` (`transport/base.py:29`,
+`local.py:41-52`, `ssh.py:94-108`) as a **raw** `Popen` whose stderr pipe will
+deadlock the stdout read unless the caller drains it concurrently — i.e. the
+transport publishes the *unsafe* primitive while keeping its *safe* version
+(the lifecycle above) private to two methods. A future streaming caller (restore
+stream, log tail) re-learns the drain/reap dance or deadlocks.
+
+Deeper fix (deferred — reaches well outside the backup diff into stable transfer
+code): have the **transport** own a managed binary-streaming context manager
+(it already knows the local-vs-SSH `ssh_base`/`shlex.join` wrapping and already
+implements the lifecycle), collapse `stream_run` to a thin `self.binary`-prepending
+pass-through symmetric with how `run()` delegates to `transport.run()`, and
+rebuild `_pipe_tar`/`copy_from_host` on the same primitive — retiring two of the
+three copies and removing the raw-`Popen` leak. Left out of the `/simplify` pass
+because rewiring `_pipe_tar`/`copy_from_host` changes pre-existing, well-tested
+SSH transfer paths untouched by the streaming-backup work.
 
 ### REFACTOR-006: Credential-provider reconciliation duplicated between upgrade and resolver
 
@@ -327,6 +362,25 @@ relabel the bind mount (`:z`/`:Z`), or have `setup_gitconfig` fall back to
 `touch`-ing `/pvc/.gitconfig` and filling identity from
 `PAUDE_GIT_USER_NAME`/`PAUDE_GIT_USER_EMAIL` when the source is unreadable, so
 `GIT_CONFIG_GLOBAL` is always set even when the seed copy fails.
+
+### RUNTIME-006: Root is required for backup, volume-ownership reconciliation, and in-container config writes
+
+**Status**: Open
+**Priority**: Medium (contradicts paude's non-root security posture; no known exploit, but the largest gap between documented and actual privilege)
+**Discovered**: 2026-08-12 during a security-model audit of `paude backup`'s root usage
+
+The agent's own runtime process always executes as the non-root `paude` user — every session command runs unprivileged. But three helper code paths invoke podman/docker `--user root` (or `exec --user root`) against volumes/containers that are otherwise never touched as root:
+
+1. `volume_archive.py`'s `_helper_run_args()` — `--user root` **and** `--security-opt label=disable` on a throwaway container that `tar`/`du`s the entire `/pvc` volume for `paude backup`/`volume_size_bytes`. Needed because the volume can hold root-owned `0600` agent state, nested-container files with foreign SELinux MCS categories, and pre-UID-pin drift artifacts — a non-root, SELinux-confined read fails partway through with "Permission denied," and `paude backup` is designed to fail loudly rather than silently produce an incomplete archive. This is the single most privileged operation in the codebase (root plus SELinux confinement disabled), though scoped by a read-only mount and a throwaway container.
+2. `runner.py`'s `reconcile_volume_ownership()` — `exec --user root` to migrate volumes created before the 2026-08-10 UID pin (`8edd527`) onto the current pinned `1000:0` identity. Not itself a security-relevant read/write escalation (it acts on a volume the user's own container already controls, and the actual `chown -R` only fires when ownership has drifted), but the root `exec` call runs unconditionally on every container start/upgrade — forever, not just for the legacy volumes it exists to fix.
+3. `container/files.py`'s `replace_file()`, `runner.py`'s `inject_file()`, and `backends/podman/sync.py`'s `ConfigSyncer` — `exec --user root` for one-shot config/credential writes (CA cert, `/credentials/` staging), immediately chowned back to `paude`.
+
+Ideas worth investigating for closing this out (none attempted yet — this is a goal, not a plan):
+- Replace full `--user root` on the backup helper with a narrower Linux capability (e.g. `--cap-drop=all --cap-add=DAC_READ_SEARCH`) if that's sufficient to bypass DAC permission checks for a read-only `tar`/`du` without full root. The SELinux/MAC side (foreign MCS categories) would still need `label=disable` or an equivalent relabel regardless — capabilities don't touch MAC enforcement.
+- Gate `reconcile_volume_ownership()` behind a one-time marker (e.g. a stamp file or manifest field) so the root `exec` itself stops running once a volume is confirmed to already be on the pinned UID, instead of checking on every start/upgrade indefinitely.
+- For the config-write helpers, investigate execing as the file's existing owner when known, falling back to root only when the owner is unknown or the file doesn't yet exist.
+
+No path forward here is trivial — SELinux MAC enforcement and `podman exec`'s user model are real constraints, not oversights — but the goal is for paude to never invoke any podman/docker operation as root.
 
 ## Test Suite
 

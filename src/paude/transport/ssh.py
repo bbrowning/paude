@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import secrets
 import shlex
 import subprocess
 import tempfile
@@ -36,6 +38,8 @@ class SshTransport:
         self._key = key
         self._port = port
         self._connect_timeout = connect_timeout
+        socket_name = f"paude-ssh-{os.getpid()}-{secrets.token_hex(4)}.sock"
+        self._control_path = os.path.join(tempfile.gettempdir(), socket_name)
 
     @property
     def host(self) -> str:
@@ -49,6 +53,10 @@ class SshTransport:
     def port(self) -> int | None:
         return self._port
 
+    @property
+    def control_path(self) -> str:
+        return self._control_path
+
     def ssh_base(self) -> list[str]:
         cmd = [
             "ssh",
@@ -58,6 +66,19 @@ class SshTransport:
             "StrictHostKeyChecking=accept-new",
             "-o",
             f"ConnectTimeout={self._connect_timeout}",
+            # Multiplex repeated connections to the same host over one TCP
+            # connection -- e.g. remote-backup progress polling, which would
+            # otherwise pay a full SSH handshake every couple of seconds for
+            # the whole transfer's duration. ControlPersist=no is set
+            # explicitly (it's already OpenSSH's default) so a user's own
+            # ~/.ssh/config can't override it and leave a master process
+            # running after the last connection closes.
+            "-o",
+            "ControlMaster=auto",
+            "-o",
+            f"ControlPath={self._control_path}",
+            "-o",
+            "ControlPersist=no",
         ]
         if self._key:
             cmd.extend(["-i", self._key])
@@ -90,6 +111,82 @@ class SshTransport:
         full = [*self.ssh_base(), "-t", "--", shlex.join(cmd)]
         result = subprocess.run(full)
         return result.returncode
+
+    def popen_binary(self, cmd: list[str]) -> subprocess.Popen[bytes]:
+        """Start a remote command with binary stdout/stderr pipes for streaming.
+
+        The command runs over SSH (no TTY, binary-safe) so its stdout can be
+        consumed incrementally on the client — e.g. a multi-GB tar stream that
+        must never land on the remote host's disk. Mirrors the tar-pipe shape
+        used by :meth:`copy_from_host`. The caller owns draining both pipes and
+        awaiting the process.
+        """
+        full = [*self.ssh_base(), "--", shlex.join(cmd)]
+        return subprocess.Popen(
+            full,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    def popen_remote_redirect(
+        self, cmd: list[str], remote_output_path: str
+    ) -> subprocess.Popen[bytes]:
+        """Start ``cmd`` on the remote host with its stdout redirected to a file.
+
+        Unlike :meth:`run`, whose argv is shell-escaped as literal arguments,
+        this appends a real ``>`` redirect that the remote shell evaluates —
+        so a large command's stdout (e.g. a tar stream) is written straight to
+        remote disk and never crosses the SSH channel back to the client. This
+        is the same "let the remote shell do it" trick :meth:`_pipe_tar` uses,
+        just redirecting to a static path instead of piping into a second
+        process.
+
+        Returns the live process rather than blocking on it, so a caller doing
+        long-running progress polling can kill the local SSH client
+        immediately on interrupt instead of blocking until the remote command
+        finishes on its own. stdout is discarded (the real output already
+        went to ``remote_output_path`` via the shell redirect, so there's
+        nothing to read); stderr is piped for error reporting.
+        """
+        inner = f"{shlex.join(cmd)} > {shlex.quote(remote_output_path)}"
+        full = [*self.ssh_base(), "--", shlex.join(["sh", "-c", inner])]
+        return subprocess.Popen(
+            full,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+
+    def file_size(self, remote_path: str) -> int | None:
+        """Best-effort size in bytes of a file on the remote host, or None.
+
+        Uses ``wc -c`` (not ``stat -c%s``/``stat -f%z``) so it works unmodified
+        whether the remote host is Linux or macOS. Returns None (not 0) when
+        ``remote_path`` doesn't exist yet -- ``wc`` then fails, so stdout is
+        empty rather than a digit string.
+        """
+        result = self.run(
+            ["sh", "-c", f"wc -c < {shlex.quote(remote_path)} 2>/dev/null"],
+            check=False,
+        )
+        text = result.stdout.strip()
+        return int(text) if text.isdigit() else None
+
+    def free_bytes(self, remote_path: str) -> int | None:
+        """Best-effort free space in bytes for a directory on the remote host.
+
+        Uses ``df -Pk`` (POSIX-portable output) rather than GNU-only flags like
+        ``--output``, since the remote host isn't necessarily Linux.
+        """
+        result = self.run(["df", "-Pk", remote_path], check=False)
+        if result.returncode != 0:
+            return None
+        lines = result.stdout.strip().splitlines()
+        if len(lines) < 2:
+            return None
+        fields = lines[-1].split()
+        if len(fields) < 4 or not fields[3].isdigit():
+            return None
+        return int(fields[3]) * 1024
 
     def copy_to_host(self, local_path: str, host_path: str) -> None:
         """Copy a local path to a path on the SSH host."""
@@ -187,9 +284,11 @@ class SshTransport:
             tar_process.stdout.close()
         _stdout, stderr = remote_process.communicate()
         tar_returncode = tar_process.wait()
-        if tar_returncode != 0 or remote_process.returncode != 0:
-            detail = stderr.decode(errors="replace").strip() if stderr else ""
-            raise RuntimeError(detail or "SSH file transfer failed")
+        _raise_on_failure(
+            tar_returncode != 0 or remote_process.returncode != 0,
+            stderr.decode(errors="replace") if stderr else "",
+            "SSH file transfer failed",
+        )
 
     @property
     def is_remote(self) -> bool:
@@ -226,6 +325,12 @@ class SshTransport:
         if result.returncode != 0:
             raise RuntimeError(f"Could not determine architecture of {self._host}")
         return result.stdout.strip()
+
+
+def _raise_on_failure(failed: bool, stderr: str, fallback: str) -> None:
+    """Raise ``RuntimeError(stderr or fallback)`` if ``failed``."""
+    if failed:
+        raise RuntimeError(stderr.strip() or fallback)
 
 
 def _remote_extract_command(

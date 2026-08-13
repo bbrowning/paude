@@ -178,9 +178,36 @@ A backup is a `<name>-<timestamp>.paude/` directory (mode `0700`) with two files
   state, history, and skills.
 
 A directory (rather than one wrapping tarball) means the multi-GB volume archive
-is written to disk only once, which matters for large volumes. Both files are
-mode `0600`. Before starting, backup estimates the volume size and, if the
+is written to disk only once, which matters for large volumes. The archive is
+produced by a throwaway container that tars the read-only volume to its stdout,
+and that stream is piped straight into `pvc.tar.gz` (over SSH for remote
+sessions) and hashed as it flows through — so nothing large is ever staged on
+the engine host, which is what makes backing up a big *remote* session reliable
+even when the remote host's `/tmp` or container storage is small. Live progress
+(bytes archived, throughput, elapsed) is shown as it runs. Both files are mode
+`0600`. Before starting, backup estimates the volume size and, if the
 destination looks short on free space, asks you to re-run with `--force`.
+
+For a remote session, add `--remote-only` to keep the bundle on the session's
+own host instead of downloading it — useful when you're on a slow or
+high-latency connection (e.g. hotel wifi) to a session that lives on a fast
+one:
+
+```bash
+paude backup my-project --remote-only
+
+# Choose where on the remote host the bundle lands
+paude backup my-project --remote-only --output /srv/backups/
+```
+
+The volume is still tarred to stdout by the same throwaway container as a
+local backup, but the remote shell redirects that stdout straight to a file on
+its own disk instead of piping it back over SSH — so nothing large ever
+crosses the link. The default destination mirrors the local convention
+(`${XDG_CONFIG_HOME:-~/.config}/paude/backups/` on the remote host). Progress
+is estimated by periodically polling the partial archive's size over a small
+SSH call rather than counting bytes as they stream, since the client never
+sees them. `--remote-only` requires a session created with `--host`.
 
 Only the data volume is irreplaceable, so that is all a backup captures. The
 proxy sidecar, network, CA/auth volumes, and credential secrets are rebuilt from

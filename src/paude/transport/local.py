@@ -38,6 +38,19 @@ class LocalTransport:
         result = subprocess.run(cmd)
         return result.returncode
 
+    def popen_binary(self, cmd: list[str]) -> subprocess.Popen[bytes]:
+        """Start a command with binary stdout/stderr pipes for streaming.
+
+        Unlike :meth:`run`, this returns immediately so the caller can consume
+        stdout incrementally (e.g. a multi-GB tar stream). The caller owns
+        draining both pipes and awaiting the process.
+        """
+        return subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
     def machine(self) -> str:
         """Return the local machine's CPU architecture."""
         import platform as plat
