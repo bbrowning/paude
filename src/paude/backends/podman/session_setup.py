@@ -330,10 +330,12 @@ class SessionSetup:
             credentials=proxy_creds,
         )
         if proxy_ip is None:
+            # Reached only on DNS-enabled networks (Docker); create_proxy()
+            # raises on --disable-dns networks (Podman) where the hostname
+            # wouldn't resolve. Source-IP filtering and proxy DNS are skipped.
             print(
-                "WARNING: Could not determine proxy IP; "
-                "container DNS will not use the proxy "
-                "for resolution.",
+                "WARNING: Could not determine proxy IP; falling back to the "
+                "proxy hostname (source-IP filtering disabled).",
                 file=sys.stderr,
             )
         proxy.start_proxy(session_name)

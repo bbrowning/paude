@@ -52,6 +52,7 @@ def _make_backend(
     mock_runner: MagicMock | None = None,
     mock_network_manager: MagicMock | None = None,
     mock_volume_manager: MagicMock | None = None,
+    engine_binary: str = "podman",
 ) -> PodmanBackend:
     """Create a PodmanBackend with mocked runner, network, and volume manager."""
     backend = PodmanBackend()
@@ -60,10 +61,13 @@ def _make_backend(
         if not hasattr(mock_runner.engine, "binary") or isinstance(
             mock_runner.engine.binary, MagicMock
         ):
-            mock_runner.engine.binary = "podman"
-            mock_runner.engine.is_podman = True
-            mock_runner.engine.supports_multi_network_create = True
-            mock_runner.engine.default_bridge_network = "podman"
+            is_podman = engine_binary != "docker"
+            mock_runner.engine.binary = engine_binary
+            mock_runner.engine.is_podman = is_podman
+            mock_runner.engine.supports_multi_network_create = is_podman
+            mock_runner.engine.default_bridge_network = (
+                "podman" if is_podman else "bridge"
+            )
             mock_runner.engine.is_remote = False
             mock_runner.engine.run.return_value = MagicMock(
                 returncode=0, stdout="", stderr=""
@@ -1185,12 +1189,20 @@ class TestPodmanBackendCreateSessionWithProxy:
         assert call_kwargs["dns"] == ["10.89.0.2"]
         assert call_kwargs["network"] == "paude-net-dns-session"
 
+    @patch("paude.backends.podman.proxy.time.sleep")
     @patch("paude.backends.podman.proxy.get_podman_machine_dns")
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_no_dns_false_when_no_proxy_ip(
-        self, mock_runner_class: MagicMock, mock_dns: MagicMock
+        self,
+        mock_runner_class: MagicMock,
+        mock_dns: MagicMock,
+        mock_sleep: MagicMock,
     ) -> None:
-        """Network keeps plain name when proxy IP cannot be determined."""
+        """On Docker, the network keeps its plain name when the proxy IP
+        cannot be determined: the DNS-enabled network makes the hostname
+        fallback legitimate. Podman aborts instead — see
+        tests/test_podman_proxy.py.
+        """
         mock_runner = MagicMock()
         mock_runner.container_exists.return_value = False
         mock_runner_class.return_value = mock_runner
@@ -1198,7 +1210,7 @@ class TestPodmanBackendCreateSessionWithProxy:
         mock_network = MagicMock()
         mock_network.get_network_gateway.return_value = None
 
-        backend = _make_backend(mock_runner, mock_network)
+        backend = _make_backend(mock_runner, mock_network, engine_binary="docker")
 
         config = SessionConfig(
             name="no-ip-session",

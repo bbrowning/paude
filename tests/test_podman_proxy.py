@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from paude.backends.podman.proxy import (
+    _PROXY_IP_POLL_ATTEMPTS,
     CA_CERT_CONTAINER_PATH,
     PodmanProxyManager,
     _get_host_dns,
@@ -14,6 +15,7 @@ from paude.backends.podman.proxy import (
     ca_volume_name,
 )
 from paude.backends.proxy_config import derive_agent_ip
+from paude.container.proxy_runner import ProxyStartError
 
 
 def _make_mock_runner(engine_binary: str = "podman") -> MagicMock:
@@ -155,13 +157,14 @@ class TestProxyManagerFixedIp:
         assert nname == "paude-net-test-session"
         assert proxy_ip == "10.89.0.2"
 
+    @patch("paude.backends.podman.proxy.time.sleep")
     @patch("paude.backends.podman.proxy.get_podman_machine_dns")
-    def test_create_proxy_returns_none_ip_when_no_gateway(
-        self, mock_dns: MagicMock
+    def test_create_proxy_docker_returns_none_ip_when_no_gateway(
+        self, mock_dns: MagicMock, mock_sleep: MagicMock
     ) -> None:
-        """create_proxy returns None for proxy_ip when gateway unavailable."""
+        """On Docker, create_proxy returns None IP (hostname fallback is ok)."""
         mock_dns.return_value = None
-        mock_runner = _make_mock_runner()
+        mock_runner = _make_mock_runner("docker")
         mock_runner.container_exists.return_value = False
         mock_network = MagicMock()
         mock_network.get_network_gateway.return_value = None
@@ -175,6 +178,29 @@ class TestProxyManagerFixedIp:
 
         assert nname == "paude-net-test-session"
         assert proxy_ip is None
+        mock_network.remove_network.assert_not_called()
+
+    @patch("paude.backends.podman.proxy.time.sleep")
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    def test_create_proxy_raises_on_podman_when_ip_unavailable(
+        self, mock_dns: MagicMock, mock_sleep: MagicMock
+    ) -> None:
+        """On Podman, create_proxy aborts and removes the network if no IP."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = False
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = None
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        with pytest.raises(ProxyStartError):
+            manager.create_proxy(
+                session_name="test-session",
+                proxy_image="proxy:latest",
+                allowed_domains=[".googleapis.com"],
+            )
+
+        mock_network.remove_network.assert_called_once_with("paude-net-test-session")
 
     @patch("paude.backends.podman.proxy.get_podman_machine_dns")
     def test_create_proxy_passes_ip_to_proxy_runner(self, mock_dns: MagicMock) -> None:
@@ -204,6 +230,178 @@ class TestProxyManagerFixedIp:
         net_indices = [i for i, a in enumerate(call_args) if a == "--network"]
         assert len(net_indices) == 2
         assert "ip=172.28.0.2" in call_args[net_indices[0] + 1]
+
+
+class TestResolveProxyIpGuard:
+    """Direct tests for the shared _resolve_proxy_ip reachability guard."""
+
+    @patch("paude.backends.podman.proxy.time.sleep")
+    def test_raises_and_removes_network_when_owned(self, mock_sleep: MagicMock) -> None:
+        """On disable-dns with no IP, raise and remove a just-created network."""
+        mock_runner = _make_mock_runner()
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = None
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        with pytest.raises(ProxyStartError):
+            manager._resolve_proxy_ip(
+                "paude-net-test", disable_dns=True, remove_network_on_failure=True
+            )
+
+        mock_network.remove_network.assert_called_once_with("paude-net-test")
+
+    @patch("paude.backends.podman.proxy.time.sleep")
+    def test_raises_without_removing_live_network(self, mock_sleep: MagicMock) -> None:
+        """A live network is not torn down on a transient inspect failure."""
+        mock_runner = _make_mock_runner()
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = None
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        with pytest.raises(ProxyStartError):
+            manager._resolve_proxy_ip(
+                "paude-net-test", disable_dns=True, remove_network_on_failure=False
+            )
+
+        mock_network.remove_network.assert_not_called()
+
+    @patch("paude.backends.podman.proxy.time.sleep")
+    def test_returns_none_without_raising_when_dns_enabled(
+        self, mock_sleep: MagicMock
+    ) -> None:
+        """With DNS the hostname fallback is legitimate, so None passes through."""
+        mock_runner = _make_mock_runner("docker")
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = None
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        result = manager._resolve_proxy_ip(
+            "paude-net-test", disable_dns=False, remove_network_on_failure=True
+        )
+
+        assert result is None
+        mock_network.remove_network.assert_not_called()
+
+    def test_returns_derived_ip_on_success(self) -> None:
+        """The happy path returns the derived proxy IP."""
+        mock_runner = _make_mock_runner()
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        result = manager._resolve_proxy_ip(
+            "paude-net-test", disable_dns=True, remove_network_on_failure=True
+        )
+
+        assert result == "10.89.0.2"
+        mock_network.remove_network.assert_not_called()
+
+    @patch("paude.backends.podman.proxy.time.sleep")
+    @patch("paude.backends.podman.proxy._get_host_dns")
+    def test_start_if_needed_raises_on_podman_when_ip_unavailable(
+        self, mock_dns: MagicMock, mock_sleep: MagicMock
+    ) -> None:
+        """Recreating a missing proxy aborts + removes the network if no IP."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        # Proxy container is gone -> recreate path
+        mock_runner.container_exists.return_value = False
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = None
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        with patch.object(
+            manager,
+            "get_config_from_labels",
+            return_value=("proxy:latest", [".googleapis.com"], []),
+        ):
+            with pytest.raises(ProxyStartError):
+                manager.start_if_needed(session_name="test-session")
+
+        mock_network.remove_network.assert_called_once_with("paude-net-test-session")
+        # A silently-broken proxy must never be created
+        create_calls = [
+            c
+            for c in mock_runner.engine.run.call_args_list
+            if c[0] and c[0][0] == "create"
+        ]
+        assert not create_calls
+
+    @patch("paude.backends.podman.proxy.time.sleep")
+    @patch("paude.backends.podman.proxy._get_host_dns")
+    def test_update_domains_raises_on_podman_when_ip_unavailable(
+        self, mock_dns: MagicMock, mock_sleep: MagicMock
+    ) -> None:
+        """update_domains aborts without tearing down the live network."""
+        mock_dns.return_value = None
+        mock_runner = _make_mock_runner()
+        mock_runner.container_exists.return_value = True
+        mock_runner.get_container_image.return_value = "proxy:latest"
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = None
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        with pytest.raises(ProxyStartError):
+            manager.update_domains(
+                session_name="test-session",
+                domains=[".googleapis.com"],
+            )
+
+        # The live network must survive a transient inspect failure
+        mock_network.remove_network.assert_not_called()
+
+
+class TestProxyIpRetry:
+    """Tests for the bounded retry in PodmanProxyManager._get_proxy_ip."""
+
+    @patch("paude.backends.podman.proxy.time.sleep")
+    def test_get_proxy_ip_retries_until_gateway_available(
+        self, mock_sleep: MagicMock
+    ) -> None:
+        """A transient empty inspect is retried until the gateway appears."""
+        mock_runner = _make_mock_runner()
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.side_effect = [None, None, "10.89.0.1"]
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        result = manager._get_proxy_ip("paude-net-test")
+
+        assert result == "10.89.0.2"
+        assert mock_network.get_network_gateway.call_count == 3
+        assert mock_sleep.call_count == 2
+        mock_sleep.assert_called_with(0.25)
+
+    @patch("paude.backends.podman.proxy.time.sleep")
+    def test_get_proxy_ip_returns_none_after_exhausting_attempts(
+        self, mock_sleep: MagicMock
+    ) -> None:
+        """After all attempts fail, _get_proxy_ip returns None."""
+        mock_runner = _make_mock_runner()
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = None
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        result = manager._get_proxy_ip("paude-net-test")
+
+        assert result is None
+        assert mock_network.get_network_gateway.call_count == _PROXY_IP_POLL_ATTEMPTS
+        assert mock_sleep.call_count == _PROXY_IP_POLL_ATTEMPTS - 1
+
+    @patch("paude.backends.podman.proxy.time.sleep")
+    def test_get_proxy_ip_no_sleep_on_first_success(
+        self, mock_sleep: MagicMock
+    ) -> None:
+        """The happy path returns on the first attempt without sleeping."""
+        mock_runner = _make_mock_runner()
+        mock_network = MagicMock()
+        mock_network.get_network_gateway.return_value = "10.89.0.1"
+
+        manager = PodmanProxyManager(mock_runner, mock_network)
+        result = manager._get_proxy_ip("paude-net-test")
+
+        assert result == "10.89.0.2"
+        assert mock_network.get_network_gateway.call_count == 1
+        mock_sleep.assert_not_called()
 
 
 class TestProxyManagerDisableDns:
@@ -909,13 +1107,18 @@ class TestSourceIpFiltering:
         env_vals = [call_args[i + 1] for i in env_indices]
         assert "PAUDE_PROXY_ALLOWED_CLIENTS=10.89.0.3" in env_vals
 
+    @patch("paude.backends.podman.proxy.time.sleep")
     @patch("paude.backends.podman.proxy.get_podman_machine_dns")
     def test_create_proxy_no_allowed_clients_when_no_gateway(
-        self, mock_dns: MagicMock
+        self, mock_dns: MagicMock, mock_sleep: MagicMock
     ) -> None:
-        """create_proxy omits allowed_clients when gateway is unavailable."""
+        """create_proxy omits allowed_clients when gateway is unavailable.
+
+        Uses Docker, where a missing IP is a legitimate hostname fallback;
+        on Podman create_proxy raises instead (see TestProxyManagerFixedIp).
+        """
         mock_dns.return_value = None
-        mock_runner = _make_mock_runner()
+        mock_runner = _make_mock_runner("docker")
         mock_runner.container_exists.return_value = False
         mock_network = MagicMock()
         mock_network.get_network_gateway.return_value = None
