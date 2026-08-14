@@ -128,6 +128,34 @@ SSH transfer paths untouched by the streaming-backup work.
 
 This predates the `--add-agent` work (the `--providers` validation branch was already in `upgrade.py`); the cleanup pass left it in place because a proper fix reaches outside the changed code and is entangled with the resolver's `SettingValue`/provenance tracking. Consider extracting a shared `reconcile_credential_providers(agent_providers, explicit_providers) -> list[str]` (plus a `providers_from_composition(composition)` helper) next to `_derive_agent_providers` in `resolver.py`, and calling it from both `create` and `upgrade` so the invariant and error wording can't drift.
 
+### REFACTOR-009: Proxy IP is inspected back from an auto-allocated subnet instead of being chosen deterministically
+
+**Status**: Open
+**Priority**: Low (bounded retry makes it reliable today; deterministic subnet is the deeper fix)
+**Discovered**: 2026-08-14 during a `/simplify` review of the proxy-IP race fix
+
+`PodmanProxyManager.create_proxy` (`src/paude/backends/podman/proxy.py`) lets
+Podman auto-allocate the session network's subnet (`create_internal_network`
+with no `--subnet`), then discovers the gateway/proxy IP by running `podman
+network inspect` (`_get_proxy_ip` → `NetworkManager.get_network_gateway`) and
+deriving `gateway + 1`. The inspect can race the create — on a `--disable-dns`
+network run under CI load, `network inspect` occasionally returns before the
+subnet/IPAM is populated, so the proxy IP comes back `None`. The current fix is
+a bounded retry poll in `_get_proxy_ip` (5 attempts, 0.25s apart) plus a
+Podman-gated hard error when the IP still can't be determined.
+
+The retry is a reasonable, low-risk interim measure, but it is a workaround for
+a design that could be deterministic: passing an explicit `--subnet` at network
+create time makes the gateway/proxy IP known *without inspecting at all*,
+eliminating the whole race class — and with it the retry poll, the `None`
+return, the hard-error gate, and the Docker hostname-fallback branch in
+`session_setup.py`. The catch (why it's deferred): an explicit subnet trades the
+inspect race for a subnet-allocation/collision problem — concurrent sessions
+would each need a distinct, non-colliding subnet within a private range, which
+Podman's auto-allocator currently handles for free. That's a meaningful new
+subsystem. If this race keeps recurring, the deterministic subnet is the actual
+fix and should be prioritized over widening the retry budget.
+
 ## Correctness Backlog
 
 Lower-severity correctness/robustness issues surfaced during code review.

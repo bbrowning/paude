@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from collections.abc import Mapping
 
 from paude.backends.labels import (
@@ -28,9 +29,15 @@ from paude.backends.proxy_config import (
 )
 from paude.container.engine import ContainerEngine
 from paude.container.network import NetworkManager
-from paude.container.proxy_runner import ProxyRunner
+from paude.container.proxy_runner import ProxyRunner, ProxyStartError
 from paude.container.runner import ContainerRunner
 from paude.platform import get_podman_machine_dns, is_macos
+
+# Bounded poll for deriving the proxy IP from a freshly-created network;
+# see _get_proxy_ip for the inspect-vs-create race this compensates for.
+# The happy path returns on the first attempt with no added latency.
+_PROXY_IP_POLL_ATTEMPTS = 5
+_PROXY_IP_POLL_INTERVAL = 0.25  # seconds (<=4 sleeps -> ~1s worst case)
 
 
 def _get_host_dns(engine: ContainerEngine) -> str | None:
@@ -175,11 +182,12 @@ class PodmanProxyManager:
         if not volume_mgr.volume_exists(auth_vol):
             volume_mgr.create_volume(auth_vol)
 
-        self._network_manager.create_internal_network(
-            nname, disable_dns=self._runner.engine.is_podman
-        )
+        disable_dns = self._runner.engine.is_podman
+        self._network_manager.create_internal_network(nname, disable_dns=disable_dns)
 
-        proxy_ip = self._get_proxy_ip(nname)
+        proxy_ip = self._resolve_proxy_ip(
+            nname, disable_dns, remove_network_on_failure=True
+        )
         agent_ip = derive_agent_ip(proxy_ip) if proxy_ip else None
         dns = _get_host_dns(self._runner.engine)
         secret_refs = self._create_credential_secrets(session_name, credentials)
@@ -235,11 +243,57 @@ class PodmanProxyManager:
         derive_proxy_ip() adds 1 → 10.89.2.2. The proxy is then
         explicitly assigned this IP via --network net:ip=10.89.2.2,
         so container creation order does not matter.
+
+        The gateway lookup is polled a few times because
+        ``network inspect`` run right after ``network create`` can briefly
+        report the network before its subnet/IPAM is populated (a race that
+        widens under CI load). Returns None only if no gateway/subnet shows
+        up within the bounded retry budget.
         """
-        gateway = self._network_manager.get_network_gateway(nname)
-        if not gateway:
-            return None
-        return NetworkManager.derive_proxy_ip(gateway)
+        for attempt in range(_PROXY_IP_POLL_ATTEMPTS):
+            gateway = self._network_manager.get_network_gateway(nname)
+            if gateway:
+                return NetworkManager.derive_proxy_ip(gateway)
+            if attempt < _PROXY_IP_POLL_ATTEMPTS - 1:
+                time.sleep(_PROXY_IP_POLL_INTERVAL)
+        return None
+
+    def _resolve_proxy_ip(
+        self,
+        nname: str,
+        disable_dns: bool,
+        *,
+        remove_network_on_failure: bool,
+    ) -> str | None:
+        """Derive the proxy IP, failing loudly when it would be unreachable.
+
+        On a --disable-dns network the agent container can't resolve the
+        proxy by name, so a None IP means the proxy is genuinely
+        unreachable. Raise ProxyStartError instead of silently degrading to
+        an unusable session. With DNS the hostname fallback is legitimate,
+        so None passes through unchanged.
+
+        This invariant is a property of the network, not of any one caller,
+        so every path that derives a proxy IP routes through here rather
+        than re-implementing (and drifting from) the guard.
+
+        Args:
+            remove_network_on_failure: Remove the network before raising.
+                Callers that just created the network pass True; callers
+                operating on a live network (update_domains) pass False so
+                a transient inspect failure doesn't tear down a working
+                session's network.
+        """
+        proxy_ip = self._get_proxy_ip(nname)
+        if proxy_ip is None and disable_dns:
+            if remove_network_on_failure:
+                self._network_manager.remove_network(nname)
+            raise ProxyStartError(
+                f"Could not determine proxy IP for network {nname}; the "
+                "proxy would be unreachable on a --disable-dns network. "
+                "Aborting."
+            )
+        return proxy_ip
 
     def create_proxy(
         self,
@@ -259,11 +313,17 @@ class PodmanProxyManager:
             raise ValueError("proxy_image is required to create a proxy")
 
         nname = network_name(session_name)
-        self._network_manager.create_internal_network(
-            nname, disable_dns=self._runner.engine.is_podman
-        )
+        # `disable_dns` is the single fact that decides whether a hostname
+        # fallback is viable: with DNS the agent can resolve the proxy by
+        # name, without it only the IP works. Derive it once and reuse it for
+        # both the network create and the reachability guard in
+        # _resolve_proxy_ip so the two can't drift.
+        disable_dns = self._runner.engine.is_podman
+        self._network_manager.create_internal_network(nname, disable_dns=disable_dns)
 
-        proxy_ip = self._get_proxy_ip(nname)
+        proxy_ip = self._resolve_proxy_ip(
+            nname, disable_dns, remove_network_on_failure=True
+        )
 
         # Create a named volume for the CA certificate
         from paude.container.volume import VolumeManager
@@ -370,7 +430,14 @@ class PodmanProxyManager:
         nname = network_name(session_name)
         ca_vol = ca_volume_name(session_name)
         auth_vol = auth_volume_name(session_name)
-        proxy_ip = self._get_proxy_ip(nname)
+        # The network is already live here, so don't remove it on a
+        # transient inspect failure — that would tear down a working
+        # session's network.
+        proxy_ip = self._resolve_proxy_ip(
+            nname,
+            self._runner.engine.is_podman,
+            remove_network_on_failure=False,
+        )
         agent_ip = derive_agent_ip(proxy_ip) if proxy_ip else None
         dns = _get_host_dns(self._runner.engine)
 

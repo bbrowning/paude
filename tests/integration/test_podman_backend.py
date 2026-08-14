@@ -769,6 +769,7 @@ class TestPodmanProxySetup:
                 check=True,
             )
             proxy_ip = result.stdout.strip()
+            assert proxy_ip, "Proxy IP should be resolvable on the internal network"
 
             # Verify main container has HTTP_PROXY env var set
             result = subprocess.run(
