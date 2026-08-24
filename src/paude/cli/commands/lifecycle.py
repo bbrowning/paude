@@ -12,6 +12,7 @@ from paude.cli.helpers import (
     _auto_select_session,
     _get_backend_instance,
     _parse_forward_ports,
+    called_process_stderr,
     find_session_backend,
 )
 from paude.session_discovery import resolve_session_for_backend
@@ -53,8 +54,15 @@ def session_start(
             try:
                 exit_code = backend_obj.start_session(name, forward_ports)
                 raise typer.Exit(exit_code)
+            except typer.Exit:
+                # A clean start raises typer.Exit(exit_code); let it propagate
+                # instead of being caught by the broad handler below and
+                # reported as a failure.
+                raise
             except Exception as e:
                 typer.echo(f"Error starting session: {e}", err=True)
+                if detail := called_process_stderr(e):
+                    typer.echo(detail, err=True)
                 raise typer.Exit(1) from None
         else:
             typer.echo(f"Session '{name}' not found.", err=True)
@@ -85,11 +93,17 @@ def session_start(
     try:
         exit_code = backend_instance.start_session(name, forward_ports)
         raise typer.Exit(exit_code)
+    except typer.Exit:
+        # A clean start raises typer.Exit(exit_code); let it propagate instead
+        # of being caught by the broad handler below and reported as a failure.
+        raise
     except SessionNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
     except Exception as e:
         typer.echo(f"Error starting session: {e}", err=True)
+        if detail := called_process_stderr(e):
+            typer.echo(detail, err=True)
         raise typer.Exit(1) from None
 
 

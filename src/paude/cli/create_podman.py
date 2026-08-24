@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -14,6 +13,7 @@ from paude.cli.helpers import (
     _detect_dev_script_dir,
     _finalize_session_create,
     _run_setup_command,
+    called_process_stderr,
 )
 from paude.config.models import PaudeConfig
 
@@ -141,8 +141,8 @@ def create_podman_session(
         raise typer.Exit(1) from None
     except Exception as e:
         typer.echo(f"Error creating session: {e}", err=True)
-        if isinstance(e, subprocess.CalledProcessError) and e.stderr:
-            typer.echo(e.stderr.strip(), err=True)
+        if detail := called_process_stderr(e):
+            typer.echo(detail, err=True)
         try:
             backend_instance.delete_session(session.name, confirm=True)
         except Exception:  # noqa: S110 - best-effort cleanup

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -142,6 +143,45 @@ def test_forward_port_invalid_spec_errors(command):
     # Error goes to stderr, which typer may redirect to stdout
     output = result.stdout + (result.stderr or "")
     assert "invalid port spec" in output
+
+
+@pytest.mark.parametrize("exit_code", [0, 2])
+def test_start_autodetect_propagates_exit_code(exit_code):
+    """A clean start propagates start_session's exit code as-is.
+
+    Regression: start_session's result was raised via typer.Exit *inside* a
+    try/except Exception. Since typer.Exit subclasses Exception, a successful
+    exit was caught and reported as "Error starting session: 0" with exit 1.
+    """
+    from paude.cli.app import BackendType
+
+    backend_obj = MagicMock()
+    backend_obj.start_session.return_value = exit_code
+    with patch(
+        "paude.cli.commands.lifecycle.find_session_backend",
+        return_value=(BackendType.podman, backend_obj),
+    ):
+        result = runner.invoke(app, ["start", "my-session"])
+    assert result.exit_code == exit_code
+    output = result.stdout + (result.stderr or "")
+    assert "Error starting session" not in output
+    backend_obj.start_session.assert_called_once()
+
+
+@pytest.mark.parametrize("exit_code", [0, 2])
+def test_start_explicit_backend_propagates_exit_code(exit_code):
+    """Same regression guard for the explicit --backend try/except site."""
+    backend_obj = MagicMock()
+    backend_obj.start_session.return_value = exit_code
+    with patch(
+        "paude.cli.commands.lifecycle._get_backend_instance",
+        return_value=backend_obj,
+    ):
+        result = runner.invoke(app, ["start", "my-session", "--backend", "podman"])
+    assert result.exit_code == exit_code
+    output = result.stdout + (result.stderr or "")
+    assert "Error starting session" not in output
+    backend_obj.start_session.assert_called_once()
 
 
 @pytest.mark.parametrize(
@@ -1099,6 +1139,24 @@ class TestStartMultiBackend:
             side_effect=Exception("docker not available"),
         ):
             yield
+
+
+class TestStartErrorReporting:
+    """Tests for surfacing the real error when a session fails to start."""
+
+    @patch("paude.cli.commands.lifecycle.find_session_backend")
+    def test_start_surfaces_podman_stderr(self, mock_find_backend: MagicMock):
+        """A CalledProcessError's captured stderr is echoed, not swallowed."""
+        mock_backend = MagicMock()
+        mock_backend.start_session.side_effect = subprocess.CalledProcessError(
+            125, ["podman", "start", "paude-my-session"], "", "no such network"
+        )
+        mock_find_backend.return_value = ("podman", mock_backend)
+
+        result = runner.invoke(app, ["start", "my-session"])
+
+        assert result.exit_code == 1
+        assert "no such network" in result.output
 
 
 class TestStopMultiBackend:

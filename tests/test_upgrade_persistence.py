@@ -94,6 +94,24 @@ def test_migration_surfaces_stderr_on_failure() -> None:
     runner.stop_container_graceful.assert_called_once_with("paude-demo")
 
 
+def test_migration_skips_salvage_when_container_wont_start(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An old container that can't even start (e.g. a stale network
+    reference) must not block the upgrade — salvage is best-effort and
+    everything already persisted to the session volume is unaffected."""
+    runner = MagicMock()
+    runner.container_running.return_value = False
+    runner.start_container.side_effect = subprocess.CalledProcessError(
+        125, ["podman", "start", "paude-demo"], stderr="no such network"
+    )
+
+    migrate_legacy_state(runner, "paude-demo", get_agents(["codex"]))
+
+    runner.exec_in_container.assert_not_called()
+    assert "skipping salvage" in capsys.readouterr().err
+
+
 def test_migration_prints_nonfatal_warnings(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
