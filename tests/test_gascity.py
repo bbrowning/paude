@@ -49,6 +49,17 @@ class TestGascityAgentConfig:
             "GC_DISABLE_USAGE_METRICS": "1",
         }
 
+    def test_env_vars_anthropic_oauth_omits_vertex(self) -> None:
+        # Under the anthropic-oauth provider, Claude Code talks to
+        # api.anthropic.com via the proxy-injected OAuth token, so the
+        # Vertex-only env var must not be set — but the sentinel still must.
+        cfg = GascityAgent("anthropic-oauth").config
+        assert cfg.env_vars["CLAUDE_CODE_OAUTH_TOKEN"] == "paude-proxy-managed"  # noqa: S105
+        assert "CLAUDE_CODE_USE_VERTEX" not in cfg.env_vars
+        # Gas City-specific env vars are still present regardless of provider.
+        assert cfg.env_vars["GC_DISABLE_USAGE_METRICS"] == "1"
+        assert cfg.env_vars["NODE_USE_ENV_PROXY"] == "1"
+
     def test_passthrough_vars(self) -> None:
         cfg = GascityAgent().config
         assert "ANTHROPIC_VERTEX_PROJECT_ID" in cfg.passthrough_env_vars

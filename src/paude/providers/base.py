@@ -58,6 +58,16 @@ _PROVIDERS: dict[str, ProviderConfig] = {
         secret_env_vars=["ANTHROPIC_API_KEY"],
         domain_aliases=["claude"],
     ),
+    "anthropic-oauth": ProviderConfig(
+        name="anthropic-oauth",
+        display_name="Anthropic (Max OAuth)",
+        # The host provides a long-lived `claude setup-token`; paude delivers it
+        # to paude-proxy as a secret and the proxy injects it as an
+        # `Authorization: Bearer` header. The agent only ever sees the
+        # `paude-proxy-managed` sentinel (set per-agent via extra_env_vars).
+        secret_env_vars=["CLAUDE_CODE_OAUTH_TOKEN"],
+        domain_aliases=["claude"],
+    ),
     "cursor": ProviderConfig(
         name="cursor",
         display_name="Cursor",

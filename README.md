@@ -104,6 +104,49 @@ paude create --agent openclaw --provider anthropic ...
 </details>
 
 <details>
+<summary><strong>Anthropic Max plan (OAuth)</strong> (Claude Code, Gas City)</summary>
+
+Use an Anthropic subscription (Max plan) instead of an API key or Vertex. On the
+**host**, mint a long-lived token with the official Claude Code client and export
+it, then pass `--provider anthropic-oauth`:
+
+```bash
+export CLAUDE_CODE_OAUTH_TOKEN="$(claude setup-token)"
+paude create --agent claude --provider anthropic-oauth --git my-project
+```
+
+`claude setup-token` produces a static (~1-year) OAuth token. paude reads it from
+your host environment and injects it into the session's proxy sidecar, which
+adds it as the `Authorization: Bearer` header on requests to `api.anthropic.com`;
+the real token never reaches the agent container (the agent only sees a
+`paude-proxy-managed` sentinel). Because the token does not rotate, one token can
+be shared across all your sessions — the same value must be present on later
+`start`/`connect`/`upgrade`. When it expires, re-run `claude setup-token`, export
+the new value, and upgrade (or recreate) the session.
+
+The token is used only by the official `claude` binary running in the session
+(including when Gas City's `gc` spawns it). Sharing one subscription seat across
+many parallel sessions is subject to that plan's fair-use limits.
+
+You can switch an **existing** session in place with `paude upgrade`:
+
+```bash
+export CLAUDE_CODE_OAUTH_TOKEN="$(claude setup-token)"
+# e.g. move a gascity,claude,codex session off Vertex, keeping Codex on ChatGPT
+paude upgrade my-project \
+    --agent-provider claude=anthropic-oauth \
+    --agent-provider gascity=anthropic-oauth
+```
+
+For a session where both a standalone `claude` agent **and** `gascity` are
+installed, remap **both** to `anthropic-oauth`. They share one container's
+environment, so leaving `claude` on its Vertex default would set
+`CLAUDE_CODE_USE_VERTEX=1` for the whole container and reach the Claude Code that
+`gc` launches.
+
+</details>
+
+<details>
 <summary><strong>OpenAI API key</strong> (Codex CLI, OpenClaw, OpenCode)</summary>
 
 ```bash

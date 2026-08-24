@@ -31,6 +31,9 @@ AGENT_PROVIDERS: dict[str, dict[str, AgentProviderConfig]] = {
             extra_env_vars={"CLAUDE_CODE_USE_VERTEX": "1"},
         ),
         "anthropic": AgentProviderConfig(),
+        "anthropic-oauth": AgentProviderConfig(
+            extra_env_vars={"CLAUDE_CODE_OAUTH_TOKEN": "paude-proxy-managed"},
+        ),
     },
     "codex": {
         "openai": AgentProviderConfig(),
@@ -64,6 +67,11 @@ AGENT_PROVIDERS: dict[str, dict[str, AgentProviderConfig]] = {
                 "CLAUDE_CODE_USE_VERTEX": "1",
                 "CLAUDE_CODE_OAUTH_TOKEN": "paude-proxy-managed",
             },
+        ),
+        # No CLAUDE_CODE_USE_VERTEX here: the bundled Claude Code talks to
+        # api.anthropic.com via the proxy-injected OAuth token, not Vertex.
+        "anthropic-oauth": AgentProviderConfig(
+            extra_env_vars={"CLAUDE_CODE_OAUTH_TOKEN": "paude-proxy-managed"},
         ),
     },
     "gemini": {
