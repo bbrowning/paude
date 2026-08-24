@@ -185,8 +185,12 @@ class PodmanProxyManager:
         disable_dns = self._runner.engine.is_podman
         self._network_manager.create_internal_network(nname, disable_dns=disable_dns)
 
+        # This network may already have the session's long-lived agent
+        # container attached (created once at `paude create` time), so unlike
+        # create_proxy's brand-new network it must not be torn down on a
+        # transient IP-resolution failure — see _resolve_proxy_ip's docstring.
         proxy_ip = self._resolve_proxy_ip(
-            nname, disable_dns, remove_network_on_failure=True
+            nname, disable_dns, remove_network_on_failure=False
         )
         agent_ip = derive_agent_ip(proxy_ip) if proxy_ip else None
         dns = _get_host_dns(self._runner.engine)

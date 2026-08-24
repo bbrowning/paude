@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
+from paude.cli.helpers import called_process_stderr
 from paude.constants import CONTAINER_HOME
 from paude.container.runner import echo_captured_stderr
 
@@ -104,7 +106,21 @@ def migrate_legacy_state(
     was_running = runner.container_running(container_name)
     if was_running:
         runner.stop_container_graceful(container_name)
-    runner.start_container(container_name)
+    try:
+        runner.start_container(container_name)
+    except subprocess.CalledProcessError as e:
+        # Salvage is best-effort: an old container that can't even start
+        # (e.g. a stale network reference from a previous bug) has nothing
+        # new to offer beyond what's already persisted to the session
+        # volume, so skip it with a warning instead of blocking the upgrade.
+        detail = called_process_stderr(e) or str(e)
+        print(
+            f"migrate: could not start {container_name} to migrate legacy "
+            f"state ({detail}); skipping salvage. State already persisted "
+            "to the session volume is unaffected.",
+            file=sys.stderr,
+        )
+        return
     try:
         # Run as the old container's default user (not root): the copy is a
         # best-effort salvage into the volume that user already owns. Anything it

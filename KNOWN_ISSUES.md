@@ -197,6 +197,14 @@ distinguish "displaced by this swap" from "provisioned on purpose." A fix would
 track which provider each remap displaces and prune only that, rather than
 pruning every unreferenced provider.
 
+### NET-001: `NetworkManager.remove_network` silently swallows failures
+
+**Status**: Open
+**Severity**: Low
+**Discovered**: 2026-08-24 while fixing the `start_if_needed` stale-network bug (see git history for the fix that stopped the risky call site from invoking this)
+
+`remove_network()` in `src/paude/container/network.py` runs `podman network rm <name>` with `check=False` and doesn't inspect the `CompletedProcess` result at all, so a failed removal (e.g. the network still has a container attached) is indistinguishable from success. The one call site that removed a network still in active use by a live agent container (`PodmanProxyManager.start_if_needed`'s recreate-missing-proxy branch) has been fixed to no longer call this in that situation, but the underlying swallow-everything behavior in `remove_network` itself is still present for any future caller. A fix would capture the result and at least log a warning on non-zero exit (mirroring the pattern already used for `echo_captured_stderr`).
+
 ## Agent Limitations
 
 Issues caused by upstream agent behavior, not paude bugs.

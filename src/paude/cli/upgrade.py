@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
@@ -11,7 +10,7 @@ import typer
 
 from paude.backends import SessionNotFoundError
 from paude.cli.app import BackendType, app
-from paude.cli.helpers import find_session_backend
+from paude.cli.helpers import called_process_stderr, find_session_backend
 
 if TYPE_CHECKING:
     from paude.agents.base import AgentComposition
@@ -350,11 +349,7 @@ def session_upgrade(
     except Exception as e:
         # str(CalledProcessError) omits captured stderr — surface it so a
         # failing container command isn't reported as an opaque exit status.
-        detail = (
-            e.stderr.strip()
-            if isinstance(e, subprocess.CalledProcessError) and e.stderr
-            else str(e)
-        )
+        detail = called_process_stderr(e) or str(e)
         typer.echo(f"Error upgrading session: {detail}", err=True)
         typer.echo(
             f"The upgrade did not finish. Your workspace data is safe. "

@@ -301,7 +301,9 @@ class TestResolveProxyIpGuard:
     def test_start_if_needed_raises_on_podman_when_ip_unavailable(
         self, mock_dns: MagicMock, mock_sleep: MagicMock
     ) -> None:
-        """Recreating a missing proxy aborts + removes the network if no IP."""
+        """Recreating a missing proxy aborts without IP, but leaves the
+        network alone since the session's agent container may still be
+        attached to it."""
         mock_dns.return_value = None
         mock_runner = _make_mock_runner()
         # Proxy container is gone -> recreate path
@@ -318,7 +320,7 @@ class TestResolveProxyIpGuard:
             with pytest.raises(ProxyStartError):
                 manager.start_if_needed(session_name="test-session")
 
-        mock_network.remove_network.assert_called_once_with("paude-net-test-session")
+        mock_network.remove_network.assert_not_called()
         # A silently-broken proxy must never be created
         create_calls = [
             c
