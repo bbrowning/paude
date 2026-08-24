@@ -173,6 +173,23 @@ class TestGatherProxyCredentials:
         assert "ANTHROPIC_API_KEY" in creds
         assert creds["ANTHROPIC_API_KEY"] == "test-key-value"  # noqa: S105
 
+    def test_includes_anthropic_oauth_token(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The setup-token is gathered from the host for anthropic-oauth."""
+        monkeypatch.delenv("PAUDE_GITHUB_TOKEN", raising=False)
+        agent = ClaudeAgent(provider="anthropic-oauth")
+        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-real")  # noqa: S105
+
+        creds = gather_proxy_credentials(agent.config)
+
+        # The real token is delivered to the proxy...
+        assert creds["CLAUDE_CODE_OAUTH_TOKEN"] == "sk-ant-oat01-real"  # noqa: S105
+        # ...while the agent itself only ever sees the sentinel.
+        assert (
+            agent.config.env_vars["CLAUDE_CODE_OAUTH_TOKEN"] == "paude-proxy-managed"  # noqa: S105
+        )
+
     def test_includes_gh_token_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """GH_TOKEN is picked up from PAUDE_GITHUB_TOKEN env var."""
         monkeypatch.setenv("PAUDE_GITHUB_TOKEN", "test-token-value")  # noqa: S105

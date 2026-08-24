@@ -32,6 +32,12 @@ class TestProviderRegistry:
         p = get_provider("anthropic")
         assert "ANTHROPIC_API_KEY" in p.secret_env_vars
 
+    def test_get_provider_anthropic_oauth(self) -> None:
+        p = get_provider("anthropic-oauth")
+        assert p.name == "anthropic-oauth"
+        assert p.secret_env_vars == ["CLAUDE_CODE_OAUTH_TOKEN"]
+        assert "claude" in p.domain_aliases
+
     def test_get_provider_cursor(self) -> None:
         p = get_provider("cursor")
         assert "CURSOR_API_KEY" in p.secret_env_vars
@@ -85,6 +91,15 @@ class TestAgentProviderResolution:
     def test_resolve_claude_anthropic(self) -> None:
         provider, agent_cfg = resolve_agent_provider("claude", "anthropic")
         assert provider.name == "anthropic"
+        assert "CLAUDE_CODE_USE_VERTEX" not in agent_cfg.extra_env_vars
+
+    def test_resolve_claude_anthropic_oauth(self) -> None:
+        provider, agent_cfg = resolve_agent_provider("claude", "anthropic-oauth")
+        assert provider.name == "anthropic-oauth"
+        assert (
+            agent_cfg.extra_env_vars.get("CLAUDE_CODE_OAUTH_TOKEN")
+            == "paude-proxy-managed"
+        )
         assert "CLAUDE_CODE_USE_VERTEX" not in agent_cfg.extra_env_vars
 
     def test_resolve_claude_default(self) -> None:
@@ -150,6 +165,16 @@ class TestAgentProviderResolution:
         provider, agent_cfg = resolve_agent_provider("gascity", "vertex")
         assert provider.name == "vertex"
         assert agent_cfg.extra_env_vars.get("CLAUDE_CODE_USE_VERTEX") == "1"
+
+    def test_resolve_gascity_anthropic_oauth(self) -> None:
+        provider, agent_cfg = resolve_agent_provider("gascity", "anthropic-oauth")
+        assert provider.name == "anthropic-oauth"
+        assert (
+            agent_cfg.extra_env_vars.get("CLAUDE_CODE_OAUTH_TOKEN")
+            == "paude-proxy-managed"
+        )
+        # The Vertex-only env var must NOT be set under the OAuth provider.
+        assert "CLAUDE_CODE_USE_VERTEX" not in agent_cfg.extra_env_vars
 
     def test_resolve_gascity_default(self) -> None:
         provider, _ = resolve_agent_provider("gascity")
@@ -217,6 +242,7 @@ class TestSupportedProviders:
         providers = supported_providers("claude")
         assert "vertex" in providers
         assert "anthropic" in providers
+        assert "anthropic-oauth" in providers
 
     def test_opencode_providers(self) -> None:
         providers = supported_providers("opencode")
@@ -238,6 +264,7 @@ class TestSupportedProviders:
     def test_gascity_providers(self) -> None:
         providers = supported_providers("gascity")
         assert "vertex" in providers
+        assert "anthropic-oauth" in providers
 
     def test_unknown_agent_returns_empty(self) -> None:
         assert supported_providers("nonexistent") == []

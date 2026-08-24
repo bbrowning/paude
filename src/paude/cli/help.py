@@ -236,7 +236,11 @@ _SECTIONS: tuple[HelpSection, ...] = (
                 "Map an installed agent to a provider; repeatable",
             ),
             ("--provider vertex", "Vertex AI (default for claude, openclaw)"),
-            ("--provider anthropic", "Anthropic API"),
+            ("--provider anthropic", "Anthropic API key"),
+            (
+                "--provider anthropic-oauth",
+                "Anthropic Max plan via `claude setup-token` (claude, gascity)",
+            ),
             ("--provider chatgpt", "Codex ChatGPT-plan OAuth, HTTP/SSE (default)"),
             ("--provider openai", "OpenAI API (Codex API-key mode)"),
             ("--provider cursor", "Cursor API (default for cursor)"),
@@ -244,6 +248,10 @@ _SECTIONS: tuple[HelpSection, ...] = (
             (
                 "codex login",
                 "Run inside a codex session to authenticate (ChatGPT plan)",
+            ),
+            (
+                "claude setup-token",
+                "Run on host; export CLAUDE_CODE_OAUTH_TOKEN for anthropic-oauth",
             ),
         ),
     ),

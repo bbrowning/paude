@@ -393,6 +393,59 @@ class TestCodexChatgptProvider:
         assert result.exit_code != 0
 
 
+class TestAnthropicOAuthProvider:
+    """Tests for the `anthropic-oauth` (Anthropic Max plan) provider."""
+
+    def test_claude_anthropic_oauth_dry_run(self):
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--agent",
+                "claude",
+                "--provider",
+                "anthropic-oauth",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "provider: anthropic-oauth" in _strip_ansi(result.stdout)
+
+    def test_gascity_claude_codex_swap_to_anthropic_oauth(self):
+        """The user's flow: claude + gascity on anthropic-oauth, codex on chatgpt."""
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--agents",
+                "gascity,claude,codex",
+                "--agent-provider",
+                "gascity=anthropic-oauth,claude=anthropic-oauth,codex=chatgpt",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        out = _strip_ansi(result.stdout)
+        assert "gascity -> anthropic-oauth" in out
+        assert "claude -> anthropic-oauth" in out
+        assert "codex -> chatgpt" in out
+
+    def test_codex_anthropic_oauth_rejected(self):
+        """anthropic-oauth is not a valid provider for codex."""
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--agent",
+                "codex",
+                "--provider",
+                "anthropic-oauth",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code != 0
+
+
 class TestAgentsProvidersLists:
     """Tests for the list-valued --agents/--providers options."""
 
