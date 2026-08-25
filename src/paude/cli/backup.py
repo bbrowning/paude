@@ -38,6 +38,7 @@ from paude.cli.app import BackendType, app
 from paude.transport.ssh import SshTransport
 
 if TYPE_CHECKING:
+    from paude.backends.labels import LabeledSession
     from paude.backends.podman.backend import PodmanBackend
     from paude.backends.podman.volume_archive import VolumeArchiver
 
@@ -104,61 +105,36 @@ def _resolve_remote_output_path(
 
 
 def _build_manifest(
-    backend: PodmanBackend,
+    view: LabeledSession,
     name: str,
     image: str,
     now: datetime,
+    backend_type: str,
 ) -> BackupManifest:
     """Assemble the backup manifest from the session's labels and registry entry."""
     from paude import __version__
-    from paude.backends.labels import (
-        PAUDE_LABEL_DOMAINS,
-        PAUDE_LABEL_GPU,
-        PAUDE_LABEL_OTEL_ENDPOINT,
-        PAUDE_LABEL_PROXY_IMAGE,
-        PAUDE_LABEL_YOLO,
-    )
-    from paude.backends.podman.helpers import (
-        build_session_from_container,
-        find_container_by_session_name,
-    )
     from paude.registry import SessionRegistry
-
-    # Fetch the container once and derive both the Session and its labels from
-    # it, rather than round-tripping to the backend twice (matters on SSH).
-    container = find_container_by_session_name(backend._runner, name)
-    if container is None:
-        raise RuntimeError(f"Session '{name}' not found.")
-    labels = container.get("Labels", {}) or {}
-    session = build_session_from_container(
-        name, container, backend._runner, backend.backend_type
-    )
-
-    domains_label = labels.get(PAUDE_LABEL_DOMAINS)
-    allowed_domains: list[str] | None = None
-    if domains_label is not None:
-        allowed_domains = domains_label.split(",") if domains_label else []
 
     entry = SessionRegistry().get(name)
 
     return BackupManifest(
         name=name,
-        workspace=str(session.workspace),
+        workspace=str(view.workspace or Path("/")),
         created_at=now.isoformat(),
         source_paude_version=__version__,
-        session_created_at=session.created_at or None,
-        agent=session.agent,
-        provider=session.provider,
-        agent_providers=list(session.agent_providers),
-        credential_providers=list(session.credential_providers),
-        gpu=labels.get(PAUDE_LABEL_GPU) or None,
-        yolo=labels.get(PAUDE_LABEL_YOLO) == "1",
-        otel_endpoint=labels.get(PAUDE_LABEL_OTEL_ENDPOINT) or None,
-        allowed_domains=allowed_domains,
-        proxy_image=labels.get(PAUDE_LABEL_PROXY_IMAGE) or None,
+        session_created_at=view.created_at or None,
+        agent=view.spec.agent,
+        provider=view.spec.provider,
+        agent_providers=list(view.spec.agent_providers),
+        credential_providers=list(view.spec.credential_providers),
+        gpu=view.spec.gpu,
+        yolo=view.spec.yolo,
+        otel_endpoint=view.spec.otel_endpoint,
+        allowed_domains=view.spec.allowed_domains,
+        proxy_image=view.spec.proxy_image,
         image=image,
-        backend_type=session.backend_type,
-        engine=entry.engine if entry else session.backend_type,
+        backend_type=backend_type,
+        engine=entry.engine if entry else backend_type,
         ssh_host=entry.ssh_host if entry else None,
         ssh_key=entry.ssh_key if entry else None,
         remote_config_dir=entry.remote_config_dir if entry else None,
@@ -217,7 +193,7 @@ def session_backup(
     SSH link back to this machine.
     """
     from paude.backends import PodmanBackend
-    from paude.backends.podman.helpers import container_name, volume_name
+    from paude.backends.podman.helpers import volume_name
     from paude.backends.podman.volume_archive import VolumeArchiver
     from paude.cli.helpers import (
         _auto_select_session,
@@ -248,23 +224,22 @@ def session_backup(
         typer.echo("Unsupported backend for backup.", err=True)
         raise typer.Exit(1)
 
-    cname = container_name(name)
     vname = volume_name(name)
 
-    if not backend_obj._runner.container_exists(cname):
+    if not backend_obj.resources.exists(name):
         typer.echo(f"Session '{name}' not found.", err=True)
         raise typer.Exit(1)
 
     # Refuse to back up a running session: a live container may be writing to
     # git/sqlite/dolt, which would tear the snapshot. No auto-stop.
-    if backend_obj._runner.container_running(cname):
+    if backend_obj.resources.running(name):
         typer.echo(
             f"Session '{name}' is running. Stop it first: paude stop {name}",
             err=True,
         )
         raise typer.Exit(1)
 
-    image = backend_obj._runner.get_container_image(cname)
+    image = backend_obj.resources.image(name)
     if not image:
         typer.echo(
             f"Could not determine the container image for session '{name}'.",
@@ -273,7 +248,7 @@ def session_backup(
         raise typer.Exit(1)
 
     now = datetime.now(UTC)
-    archiver = VolumeArchiver(backend_obj._engine)
+    archiver = VolumeArchiver(backend_obj.engine)
     backup_fn = _run_remote_backup if remote_only else _run_local_backup
     backup_fn(name, backend_obj, archiver, vname, image, output, force, now)
 
@@ -292,13 +267,17 @@ def _finalize_backup(
     building, error translation, and the success message aren't duplicated.
     """
     from paude.backends import SessionNotFoundError
-    from paude.backends.podman.helpers import get_session_composition
+    from paude.backends.podman.helpers import composition_for_spec
     from paude.backends.podman.legacy_state import credential_exclude_globs
 
     try:
-        composition = get_session_composition(backend_obj._runner, name)
-        exclude = credential_exclude_globs(composition)
-        manifest = _build_manifest(backend_obj, name, image, now)
+        # One container fetch feeds both the exclude list and the manifest;
+        # on a --host session each one is an SSH round trip.
+        view = backend_obj.resources.labels(name)
+        if view is None:
+            raise RuntimeError(f"Session '{name}' not found.")
+        exclude = credential_exclude_globs(composition_for_spec(view.spec))
+        manifest = _build_manifest(view, name, image, now, backend_obj.backend_type)
         write(manifest, exclude)
     except SessionNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
@@ -356,8 +335,8 @@ def _run_remote_backup(
     now: datetime,
 ) -> None:
     """Resolve, preflight, and write a bundle on the session's remote host."""
-    transport = backend_obj._engine.transport
-    if not backend_obj._engine.is_remote or not isinstance(transport, SshTransport):
+    transport = backend_obj.engine.transport
+    if not backend_obj.engine.is_remote or not isinstance(transport, SshTransport):
         typer.echo(
             f"Session '{name}' does not run on a remote host; --remote-only "
             "requires a session created with --host.",

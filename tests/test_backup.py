@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import subprocess
+from dataclasses import MISSING, fields
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -12,6 +14,26 @@ from click.testing import Result
 from typer.testing import CliRunner
 
 from paude.backends import PodmanBackend, Session
+from paude.backends.labels import (
+    PAUDE_LABEL_AGENT,
+    PAUDE_LABEL_AGENT_PROVIDERS,
+    PAUDE_LABEL_CREATED,
+    PAUDE_LABEL_DOMAINS,
+    PAUDE_LABEL_GPU,
+    PAUDE_LABEL_OTEL_ENDPOINT,
+    PAUDE_LABEL_PROVIDER,
+    PAUDE_LABEL_PROVIDERS,
+    PAUDE_LABEL_PROXY_IMAGE,
+    PAUDE_LABEL_SESSION,
+    PAUDE_LABEL_WORKSPACE,
+    PAUDE_LABEL_YOLO,
+    LabeledSession,
+    SessionSpec,
+    encode_agent_providers,
+    encode_providers,
+    read_labels,
+)
+from paude.backends.session_env import encode_path
 from paude.backup_state import (
     BACKUP_FORMAT_VERSION,
     MANIFEST_FILENAME,
@@ -41,8 +63,22 @@ def _make_session(name: str = "s", status: str = "stopped") -> Session:
     )
 
 
+def _session_container(name: str = "s", agent: str = "gemini") -> dict[str, object]:
+    """A container dict find_container_by_session_name will match."""
+    return {
+        "Id": "abc123",
+        "Labels": {
+            PAUDE_LABEL_SESSION: name,
+            PAUDE_LABEL_AGENT: agent,
+            PAUDE_LABEL_WORKSPACE: encode_path(Path("/some/project"), url_safe=True),
+            PAUDE_LABEL_CREATED: "2026-01-01T00:00:00Z",
+        },
+    }
+
+
 def _mock_backend(
     *,
+    name: str = "s",
     exists: bool = True,
     running: bool = False,
     image: str | None = "runtime:img",
@@ -63,16 +99,13 @@ def _mock_backend(
         container_exists=exists,
         container_running=running,
         get_container_image=image,
+        # Backup reads the session's labels off its container, so the double
+        # has to have one to find.
+        list_containers=[_session_container(name)],
     )
     backend = make_backend(runner)
     backend.get_session = MagicMock(return_value=_make_session())  # type: ignore[method-assign]
     return backend
-
-
-def _gemini_composition():
-    from paude.agents import get_agent, get_agent_composition
-
-    return get_agent_composition(get_agent("gemini"))
 
 
 class TestBackupCommand:
@@ -91,10 +124,6 @@ class TestBackupCommand:
             patch(
                 "paude.cli.helpers.find_session_backend",
                 return_value=("podman", backend),
-            ),
-            patch(
-                "paude.backends.podman.helpers.get_session_composition",
-                return_value=_gemini_composition(),
             ),
             patch("paude.cli.backup._preflight_disk_space"),
             patch(
@@ -121,7 +150,7 @@ class TestBackupCommand:
         assert "re-login" in _out(result)
 
     def test_backup_auto_selects_when_name_omitted(self) -> None:
-        backend = _mock_backend()
+        backend = _mock_backend(name="auto")
         session = _make_session(name="auto")
         manifest = BackupManifest(
             name="auto", workspace="/w", created_at="t", source_paude_version="v"
@@ -130,10 +159,6 @@ class TestBackupCommand:
             patch(
                 "paude.cli.helpers._auto_select_session",
                 return_value=(session, backend),
-            ),
-            patch(
-                "paude.backends.podman.helpers.get_session_composition",
-                return_value=_gemini_composition(),
             ),
             patch("paude.cli.backup._preflight_disk_space"),
             patch("paude.cli.backup._build_manifest", return_value=manifest),
@@ -150,10 +175,6 @@ class TestBackupCommand:
         )
         with (
             patch("paude.cli.helpers._get_backend_instance", return_value=backend),
-            patch(
-                "paude.backends.podman.helpers.get_session_composition",
-                return_value=_gemini_composition(),
-            ),
             patch("paude.cli.backup._preflight_disk_space"),
             patch("paude.cli.backup._build_manifest", return_value=manifest),
             patch("paude.cli.backup._write_bundle") as mock_write,
@@ -193,10 +214,6 @@ class TestBackupCommand:
             patch(
                 "paude.cli.helpers.find_session_backend",
                 return_value=("podman", backend),
-            ),
-            patch(
-                "paude.backends.podman.helpers.get_session_composition",
-                return_value=_gemini_composition(),
             ),
             patch(
                 "paude.backends.podman.volume_archive.VolumeArchiver.volume_size_bytes",
@@ -299,10 +316,6 @@ class TestRemoteOnlyBackupCommand:
             ) as mock_resolve,
             patch("paude.cli.backup._preflight_disk_space_remote"),
             patch(
-                "paude.backends.podman.helpers.get_session_composition",
-                return_value=_gemini_composition(),
-            ),
-            patch(
                 "paude.cli.backup._build_manifest", return_value=manifest
             ) as mock_build,
             patch("paude.cli.backup._write_bundle_remote") as mock_write,
@@ -371,10 +384,6 @@ class TestRemoteOnlyBackupCommand:
                 return_value="/home/user/.config/paude/backups/s-2026.paude",
             ),
             patch("paude.cli.backup._preflight_disk_space_remote") as mock_preflight,
-            patch(
-                "paude.backends.podman.helpers.get_session_composition",
-                return_value=_gemini_composition(),
-            ),
             patch("paude.cli.backup._build_manifest", return_value=manifest),
             patch("paude.cli.backup._write_bundle_remote"),
         ):
@@ -458,36 +467,28 @@ class TestRestoreCommand:
 
 
 class TestBuildManifest:
-    def test_maps_labels_and_registry_fields(self) -> None:
-        from paude.backends.labels import (
-            PAUDE_LABEL_DOMAINS,
-            PAUDE_LABEL_GPU,
-            PAUDE_LABEL_OTEL_ENDPOINT,
-            PAUDE_LABEL_PROXY_IMAGE,
-            PAUDE_LABEL_YOLO,
+    """The manifest is assembled from one label read plus the registry entry."""
+
+    def _view(self, **labels: str) -> LabeledSession:
+        return read_labels(
+            {
+                PAUDE_LABEL_SESSION: "s",
+                PAUDE_LABEL_AGENT: "claude",
+                PAUDE_LABEL_PROVIDER: "vertex",
+                PAUDE_LABEL_AGENT_PROVIDERS: encode_agent_providers(
+                    [("claude", "vertex")]
+                ),
+                PAUDE_LABEL_PROVIDERS: encode_providers(["vertex"]),
+                PAUDE_LABEL_WORKSPACE: encode_path(Path("/w"), url_safe=True),
+                PAUDE_LABEL_CREATED: "c",
+                **labels,
+            }
         )
+
+    def test_captures_labels_and_registry_fields(self) -> None:
         from paude.cli.backup import _build_manifest
         from paude.registry import RegistryEntry
 
-        backend = make_backend()
-        session = Session(
-            name="s",
-            status="stopped",
-            workspace=Path("/w"),
-            created_at="c",
-            backend_type="podman",
-            agent="claude",
-            provider="vertex",
-            agent_providers=[("claude", "vertex")],
-            credential_providers=["vertex"],
-        )
-        labels = {
-            PAUDE_LABEL_GPU: "all",
-            PAUDE_LABEL_YOLO: "1",
-            PAUDE_LABEL_DOMAINS: "a,b",
-            PAUDE_LABEL_OTEL_ENDPOINT: "http://collector:4318",
-            PAUDE_LABEL_PROXY_IMAGE: "proxy:1",
-        }
         entry = RegistryEntry(
             name="s",
             backend_type="podman",
@@ -499,22 +500,20 @@ class TestBuildManifest:
             ssh_key="/k",
             remote_config_dir="/tmp/cfg",
         )
-        from datetime import UTC, datetime
-
+        view = self._view(
+            **{
+                PAUDE_LABEL_GPU: "all",
+                PAUDE_LABEL_YOLO: "1",
+                PAUDE_LABEL_DOMAINS: "a,b",
+                PAUDE_LABEL_OTEL_ENDPOINT: "http://collector:4318",
+                PAUDE_LABEL_PROXY_IMAGE: "proxy:1",
+            }
+        )
         now = datetime(2026, 8, 10, tzinfo=UTC)
-        with (
-            patch(
-                "paude.backends.podman.helpers.find_container_by_session_name",
-                return_value={"Labels": labels},
-            ),
-            patch(
-                "paude.backends.podman.helpers.build_session_from_container",
-                return_value=session,
-            ),
-            patch("paude.registry.SessionRegistry") as mock_reg,
-        ):
+
+        with patch("paude.registry.SessionRegistry") as mock_reg:
             mock_reg.return_value.get.return_value = entry
-            manifest = _build_manifest(backend, "s", "runtime:img", now)
+            manifest = _build_manifest(view, "s", "runtime:img", now, "podman")
 
         assert manifest.gpu == "all"
         assert manifest.yolo is True
@@ -523,6 +522,8 @@ class TestBuildManifest:
         assert manifest.proxy_image == "proxy:1"
         assert manifest.image == "runtime:img"
         assert manifest.agent_providers == [("claude", "vertex")]
+        assert manifest.workspace == "/w"
+        assert manifest.session_created_at == "c"
         # Registry-only fields the labels don't carry.
         assert manifest.engine == "docker"
         assert manifest.ssh_host == "user@box"
@@ -531,30 +532,54 @@ class TestBuildManifest:
     def test_absent_domains_label_means_none(self) -> None:
         from paude.cli.backup import _build_manifest
 
-        backend = make_backend()
-        from datetime import UTC, datetime
-
-        with (
-            patch(
-                "paude.backends.podman.helpers.find_container_by_session_name",
-                return_value={"Labels": {}},
-            ),
-            patch(
-                "paude.backends.podman.helpers.build_session_from_container",
-                return_value=_make_session(),
-            ),
-            patch("paude.registry.SessionRegistry") as mock_reg,
-        ):
+        with patch("paude.registry.SessionRegistry") as mock_reg:
             mock_reg.return_value.get.return_value = None
             manifest = _build_manifest(
-                backend, "s", "img", datetime(2026, 8, 10, tzinfo=UTC)
+                read_labels({}), "s", "img", datetime(2026, 8, 10, tzinfo=UTC), "podman"
             )
 
         assert manifest.allowed_domains is None
         assert manifest.gpu is None
         assert manifest.yolo is False
-        # No registry entry: engine falls back to the session's backend type.
+        # No registry entry: engine falls back to the backend type.
         assert manifest.engine == "podman"
+        # No workspace label: the placeholder, not a crash.
+        assert manifest.workspace == "/"
+
+    def test_every_spec_field_reaches_the_manifest(self) -> None:
+        """The BackupManifest half of the REFACTOR-007 drift guard.
+
+        Inheriting SessionSpec dedupes the schema, not the copying: a tenth
+        label would persist as its default until _build_manifest carried it.
+        """
+        from paude.cli.backup import _build_manifest
+
+        view = self._view(
+            **{
+                PAUDE_LABEL_AGENT: "codex",
+                PAUDE_LABEL_GPU: "all",
+                PAUDE_LABEL_YOLO: "1",
+                PAUDE_LABEL_DOMAINS: "a,b",
+                PAUDE_LABEL_OTEL_ENDPOINT: "http://collector:4318",
+                PAUDE_LABEL_PROXY_IMAGE: "proxy:1",
+            }
+        )
+
+        with patch("paude.registry.SessionRegistry") as mock_reg:
+            mock_reg.return_value.get.return_value = None
+            manifest = _build_manifest(
+                view, "s", "img", datetime(2026, 8, 10, tzinfo=UTC), "podman"
+            )
+
+        for spec_field in fields(SessionSpec):
+            default = (
+                spec_field.default_factory()
+                if spec_field.default_factory is not MISSING
+                else spec_field.default
+            )
+            assert getattr(manifest, spec_field.name) != default, (
+                f"_build_manifest does not carry SessionSpec.{spec_field.name}"
+            )
 
 
 class TestWriteBundle:

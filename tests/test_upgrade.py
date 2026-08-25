@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
 
-from paude.backends import SessionConfig
+from paude.backends import PodmanBackend, SessionConfig
 from paude.backends.base import Session
 from paude.backends.labels import (
     PAUDE_LABEL_AGENT,
@@ -28,7 +29,10 @@ from paude.backends.labels import (
 from paude.backends.session_env import encode_path
 from paude.cli import app
 from paude.cli.upgrade import UpgradeOverrides
+from paude.container.network import NetworkManager
+from paude.container.volume import VolumeManager
 from paude.registry import RegistryEntry, SessionRegistry
+from tests.fakes import FakeTransport, make_backend, make_engine, make_runner
 
 _NO_OVERRIDES = UpgradeOverrides()
 
@@ -312,6 +316,67 @@ class TestUpgradeCommand:
         assert expected in result.output
 
 
+@dataclass
+class _Upgrade:
+    """A backend built from the shared factory, plus the doubles behind it.
+
+    Replaces the ``MagicMock(spec=PodmanBackend)`` plus four private-attribute
+    assignments this file used to need for every ``_upgrade_podman`` test.
+    Those mirrored cli/upgrade.py reaching into the backend's collaborators
+    (KNOWN_ISSUES TEST-004); now that it goes through ``backend.resources``,
+    a real backend works and assertions land on the doubles the test injected
+    rather than on attributes read back out of the system under test.
+    """
+
+    backend: PodmanBackend
+    runner: MagicMock
+    volumes: MagicMock
+    networks: MagicMock
+    create_session: MagicMock
+    start: MagicMock
+
+    @property
+    def config(self) -> SessionConfig:
+        """The SessionConfig the rebuild handed to create_session."""
+        created: SessionConfig = self.create_session.call_args[0][0]
+        return created
+
+
+def _upgrade_backend(
+    labels: dict[str, str] | None = None,
+    *,
+    container_exists: bool = False,
+    remote: bool = False,
+) -> _Upgrade:
+    """Build a backend whose every collaborator is observable and inert."""
+    from paude.transport.ssh import SshTransport
+
+    transport = SshTransport("user@host") if remote else FakeTransport()
+    runner = make_runner(
+        make_engine(transport=transport, is_remote=remote),
+        container_exists=container_exists,
+        list_containers=[{"Labels": labels}] if labels is not None else [],
+    )
+    volumes = MagicMock(spec=VolumeManager)
+    networks = MagicMock(spec=NetworkManager)
+    backend = make_backend(runner, network_manager=networks, volume_manager=volumes)
+    create_session = MagicMock(return_value=_upgraded_session())
+    start = MagicMock()
+    backend.create_session = create_session  # type: ignore[method-assign]
+    backend.start_session_no_attach = start  # type: ignore[method-assign]
+    return _Upgrade(backend, runner, volumes, networks, create_session, start)
+
+
+def _upgraded_session(name: str = "test-session") -> Session:
+    return Session(
+        name=name,
+        status="stopped",
+        workspace=Path("/home/user/project"),
+        created_at="2026-01-01T00:00:00+00:00",
+        backend_type="podman",
+    )
+
+
 class TestUpgradePodman:
     """Tests for _upgrade_podman internal function."""
 
@@ -345,10 +410,8 @@ class TestUpgradePodman:
     @patch("paude.cli.helpers._prepare_session_create")
     @patch("paude.container.ImageManager")
     @patch("paude.config.detector.detect_config", return_value=None)
-    @patch("paude.backends.podman.helpers.find_container_by_session_name")
     def test_upgrade_podman_preserves_volume(
         self,
-        mock_find_container: MagicMock,
         mock_detect_config: MagicMock,
         mock_image_manager_class: MagicMock,
         mock_prepare: MagicMock,
@@ -356,7 +419,6 @@ class TestUpgradePodman:
     ) -> None:
         """After upgrade, old container is removed but volume is NOT removed."""
         labels = self._make_container_labels()
-        mock_find_container.return_value = {"Labels": labels}
 
         mock_image_manager = MagicMock()
         mock_image_manager.ensure_default_image.return_value = "paude:latest"
@@ -364,32 +426,25 @@ class TestUpgradePodman:
 
         mock_prepare.return_value = ([], [], {}, True)
 
-        from paude.backends.podman.backend import PodmanBackend
-
-        backend = MagicMock(spec=PodmanBackend)
-        backend._runner = MagicMock()
-        backend._runner.container_exists.return_value = False
-        backend._network_manager = MagicMock()
-        backend._volume_manager = MagicMock()
-        backend._engine = MagicMock()
+        up = _upgrade_backend(labels)
 
         from paude.cli.upgrade import _upgrade_podman
 
-        _upgrade_podman("test-session", backend, rebuild=False, overrides=_NO_OVERRIDES)
+        _upgrade_podman(
+            "test-session", up.backend, rebuild=False, overrides=_NO_OVERRIDES
+        )
 
         # Old container and proxy container removed
-        backend._runner.remove_container.assert_any_call(
-            "paude-test-session", force=True
-        )
-        backend._runner.remove_container.assert_any_call(
+        up.runner.remove_container.assert_any_call("paude-test-session", force=True)
+        up.runner.remove_container.assert_any_call(
             "paude-proxy-test-session", force=True
         )
         # create_session called with reuse_volume=True
-        backend.create_session.assert_called_once()
-        config = backend.create_session.call_args[0][0]
+        up.create_session.assert_called_once()
+        config = up.config
         assert config.reuse_volume is True
         # start_session_no_attach called
-        backend.start_session_no_attach.assert_called_once_with("test-session")
+        up.start.assert_called_once_with("test-session")
 
     @patch("paude.transport.config_sync.remap_mounts")
     @patch("paude.transport.config_sync.sync_configs_to_remote")
@@ -397,10 +452,8 @@ class TestUpgradePodman:
     @patch("paude.cli.helpers._prepare_session_create")
     @patch("paude.container.ImageManager")
     @patch("paude.config.detector.detect_config", return_value=None)
-    @patch("paude.backends.podman.helpers.find_container_by_session_name")
     def test_upgrade_remaps_remote_config_mounts(
         self,
-        mock_find_container: MagicMock,
         mock_detect_config: MagicMock,
         mock_image_manager_class: MagicMock,
         mock_prepare: MagicMock,
@@ -411,9 +464,6 @@ class TestUpgradePodman:
         """A --host upgrade transfers config to the remote host and remaps the
         bind-mount sources, so podman on the remote isn't handed a local (e.g.
         Mac) path that doesn't exist there ("statfs ...: no such file")."""
-        from paude.transport.ssh import SshTransport
-
-        mock_find_container.return_value = {"Labels": self._make_container_labels()}
 
         mock_image_manager = MagicMock()
         mock_image_manager.ensure_default_image.return_value = "paude:latest"
@@ -431,35 +481,26 @@ class TestUpgradePodman:
         )
         mock_remap.return_value = remote_mounts
 
-        from paude.backends.podman.backend import PodmanBackend
-
-        backend = MagicMock(spec=PodmanBackend)
-        backend._runner = MagicMock()
-        backend._runner.container_exists.return_value = False
-        backend._network_manager = MagicMock()
-        backend._volume_manager = MagicMock()
-        backend._engine = MagicMock()
-        backend._engine.is_remote = True
-        backend._engine.transport = MagicMock(spec=SshTransport)
+        up = _upgrade_backend(self._make_container_labels(), remote=True)
 
         from paude.cli.upgrade import _upgrade_podman
 
-        _upgrade_podman("test-session", backend, rebuild=False, overrides=_NO_OVERRIDES)
+        _upgrade_podman(
+            "test-session", up.backend, rebuild=False, overrides=_NO_OVERRIDES
+        )
 
         mock_sync.assert_called_once()
         mock_remap.assert_called_once()
         # The recreated session uses the remapped (remote) mount sources.
-        session_config = backend.create_session.call_args[0][0]
+        session_config = up.config
         assert session_config.mounts == remote_mounts
 
     @patch("paude.mounts.build_mounts", return_value=[])
     @patch("paude.cli.helpers._prepare_session_create")
     @patch("paude.container.ImageManager")
     @patch("paude.config.detector.detect_config", return_value=None)
-    @patch("paude.backends.podman.helpers.find_container_by_session_name")
     def test_upgrade_podman_reads_labels(
         self,
-        mock_find_container: MagicMock,
         mock_detect_config: MagicMock,
         mock_image_manager_class: MagicMock,
         mock_prepare: MagicMock,
@@ -473,7 +514,6 @@ class TestUpgradePodman:
             domains=".googleapis.com,.pypi.org",
             proxy_image="proxy:latest",
         )
-        mock_find_container.return_value = {"Labels": labels}
 
         mock_image_manager = MagicMock()
         mock_image_manager.ensure_custom_image.return_value = "paude:custom"
@@ -487,20 +527,15 @@ class TestUpgradePodman:
             False,
         )
 
-        from paude.backends.podman.backend import PodmanBackend
-
-        backend = MagicMock(spec=PodmanBackend)
-        backend._runner = MagicMock()
-        backend._runner.container_exists.return_value = False
-        backend._network_manager = MagicMock()
-        backend._volume_manager = MagicMock()
-        backend._engine = MagicMock()
+        up = _upgrade_backend(labels)
 
         from paude.cli.upgrade import _upgrade_podman
 
-        _upgrade_podman("test-session", backend, rebuild=False, overrides=_NO_OVERRIDES)
+        _upgrade_podman(
+            "test-session", up.backend, rebuild=False, overrides=_NO_OVERRIDES
+        )
 
-        config = backend.create_session.call_args[0][0]
+        config = up.config
         assert config.agent == "gemini"
         assert config.gpu == "all"
         assert config.yolo is True
@@ -510,10 +545,8 @@ class TestUpgradePodman:
     @patch("paude.cli.helpers._prepare_session_create")
     @patch("paude.container.ImageManager")
     @patch("paude.config.detector.detect_config", return_value=None)
-    @patch("paude.backends.podman.helpers.find_container_by_session_name")
     def test_upgrade_podman_rebuilds_image(
         self,
-        mock_find_container: MagicMock,
         mock_detect_config: MagicMock,
         mock_image_manager_class: MagicMock,
         mock_prepare: MagicMock,
@@ -521,7 +554,6 @@ class TestUpgradePodman:
     ) -> None:
         """Image is rebuilt using ImageManager."""
         labels = self._make_container_labels()
-        mock_find_container.return_value = {"Labels": labels}
 
         mock_image_manager = MagicMock()
         mock_image_manager.ensure_default_image.return_value = "paude:latest"
@@ -529,18 +561,13 @@ class TestUpgradePodman:
 
         mock_prepare.return_value = ([], [], {}, True)
 
-        from paude.backends.podman.backend import PodmanBackend
-
-        backend = MagicMock(spec=PodmanBackend)
-        backend._runner = MagicMock()
-        backend._runner.container_exists.return_value = False
-        backend._network_manager = MagicMock()
-        backend._volume_manager = MagicMock()
-        backend._engine = MagicMock()
+        up = _upgrade_backend(labels)
 
         from paude.cli.upgrade import _upgrade_podman
 
-        _upgrade_podman("test-session", backend, rebuild=False, overrides=_NO_OVERRIDES)
+        _upgrade_podman(
+            "test-session", up.backend, rebuild=False, overrides=_NO_OVERRIDES
+        )
 
         mock_image_manager.ensure_default_image.assert_called_once_with(
             force_rebuild=True
@@ -550,10 +577,8 @@ class TestUpgradePodman:
     @patch("paude.cli.helpers._prepare_session_create")
     @patch("paude.container.ImageManager")
     @patch("paude.config.detector.detect_config", return_value=None)
-    @patch("paude.backends.podman.helpers.find_container_by_session_name")
     def test_upgrade_podman_removes_proxy(
         self,
-        mock_find_container: MagicMock,
         mock_detect_config: MagicMock,
         mock_image_manager_class: MagicMock,
         mock_prepare: MagicMock,
@@ -564,7 +589,6 @@ class TestUpgradePodman:
             domains=".googleapis.com",
             proxy_image="proxy:latest",
         )
-        mock_find_container.return_value = {"Labels": labels}
 
         mock_image_manager = MagicMock()
         mock_image_manager.ensure_default_image.return_value = "paude:latest"
@@ -573,35 +597,27 @@ class TestUpgradePodman:
 
         mock_prepare.return_value = ([".googleapis.com"], [], {}, False)
 
-        from paude.backends.podman.backend import PodmanBackend
-
-        backend = MagicMock(spec=PodmanBackend)
-        backend._runner = MagicMock()
-        backend._network_manager = MagicMock()
-        backend._volume_manager = MagicMock()
-        backend._engine = MagicMock()
+        up = _upgrade_backend(labels)
 
         from paude.cli.upgrade import _upgrade_podman
 
-        _upgrade_podman("test-session", backend, rebuild=False, overrides=_NO_OVERRIDES)
+        _upgrade_podman(
+            "test-session", up.backend, rebuild=False, overrides=_NO_OVERRIDES
+        )
 
         # Proxy container removed
-        backend._runner.remove_container.assert_any_call(
+        up.runner.remove_container.assert_any_call(
             "paude-proxy-test-session", force=True
         )
         # Network removed
-        backend._network_manager.remove_network.assert_called_once_with(
-            "paude-net-test-session"
-        )
+        up.networks.remove_network.assert_called_once_with("paude-net-test-session")
 
     @patch("paude.mounts.build_mounts", return_value=[])
     @patch("paude.cli.helpers._prepare_session_create")
     @patch("paude.container.ImageManager")
     @patch("paude.config.detector.detect_config", return_value=None)
-    @patch("paude.backends.podman.helpers.find_container_by_session_name")
     def test_upgrade_podman_build_failure_is_retryable(
         self,
-        mock_find_container: MagicMock,
         mock_detect_config: MagicMock,
         mock_image_manager_class: MagicMock,
         mock_prepare: MagicMock,
@@ -613,33 +629,24 @@ class TestUpgradePodman:
         from paude import upgrade_state
         from paude.cli.upgrade import _upgrade_podman
 
-        mock_find_container.return_value = {"Labels": self._make_container_labels()}
-
         mock_image_manager = MagicMock()
         mock_image_manager.ensure_default_image.side_effect = RuntimeError("boom")
         mock_image_manager_class.return_value = mock_image_manager
 
         mock_prepare.return_value = ([], [], {}, True)
 
-        from paude.backends.podman.backend import PodmanBackend
-
-        backend = MagicMock(spec=PodmanBackend)
-        backend._runner = MagicMock()
-        backend._runner.container_exists.return_value = False
-        backend._network_manager = MagicMock()
-        backend._volume_manager = MagicMock()
-        backend._engine = MagicMock()
+        up = _upgrade_backend(self._make_container_labels())
 
         # A plain error (typer.Exit is not a RuntimeError), so this asserts the
         # failure is routed to session_upgrade's "data is safe / retry" handler.
         with pytest.raises(RuntimeError):
             _upgrade_podman(
-                "test-session", backend, rebuild=False, overrides=_NO_OVERRIDES
+                "test-session", up.backend, rebuild=False, overrides=_NO_OVERRIDES
             )
 
         # The manifest (written before the build) survives, so a re-run resumes.
         assert upgrade_state.load("test-session") is not None
-        backend.create_session.assert_not_called()
+        up.create_session.assert_not_called()
 
 
 class TestUpgradeResume:
@@ -669,10 +676,8 @@ class TestUpgradeResume:
     @patch("paude.cli.helpers._prepare_session_create")
     @patch("paude.container.ImageManager")
     @patch("paude.config.detector.detect_config", return_value=None)
-    @patch("paude.backends.podman.helpers.find_container_by_session_name")
     def test_manifest_written_before_teardown(
         self,
-        mock_find_container: MagicMock,
         mock_detect_config: MagicMock,
         mock_image_manager_class: MagicMock,
         mock_prepare: MagicMock,
@@ -683,30 +688,19 @@ class TestUpgradeResume:
         from paude import upgrade_state
         from paude.cli.upgrade import _upgrade_podman
 
-        mock_find_container.return_value = {
-            "Labels": self._labels(gpu="all", yolo=True)
-        }
-
         mock_image_manager = MagicMock()
         mock_image_manager.ensure_default_image.return_value = "paude:latest"
         mock_image_manager.ensure_proxy_image.return_value = "proxy:rebuilt"
         mock_image_manager_class.return_value = mock_image_manager
         mock_prepare.return_value = ([], [], {}, True)
 
-        from paude.backends.podman.backend import PodmanBackend
-
-        backend = MagicMock(spec=PodmanBackend)
-        backend._runner = MagicMock()
-        backend._runner.container_exists.return_value = False
+        up = _upgrade_backend(self._labels(gpu="all", yolo=True))
         # Interrupt exactly at the first destructive removal.
-        backend._runner.remove_container.side_effect = KeyboardInterrupt
-        backend._network_manager = MagicMock()
-        backend._volume_manager = MagicMock()
-        backend._engine = MagicMock()
+        up.runner.remove_container.side_effect = KeyboardInterrupt
 
         with pytest.raises(KeyboardInterrupt):
             _upgrade_podman(
-                "test-session", backend, rebuild=False, overrides=_NO_OVERRIDES
+                "test-session", up.backend, rebuild=False, overrides=_NO_OVERRIDES
             )
 
         # Config was captured durably before teardown was attempted.
@@ -716,16 +710,14 @@ class TestUpgradeResume:
         assert manifest.gpu == "all"
         assert manifest.yolo is True
         # The replacement was never created (we were interrupted first).
-        backend.create_session.assert_not_called()
+        up.create_session.assert_not_called()
 
     @patch("paude.mounts.build_mounts", return_value=[])
     @patch("paude.cli.helpers._prepare_session_create")
     @patch("paude.container.ImageManager")
     @patch("paude.config.detector.detect_config", return_value=None)
-    @patch("paude.backends.podman.helpers.find_container_by_session_name")
     def test_resume_uses_manifest_when_container_gone(
         self,
-        mock_find_container: MagicMock,
         mock_detect_config: MagicMock,
         mock_image_manager_class: MagicMock,
         mock_prepare: MagicMock,
@@ -749,7 +741,6 @@ class TestUpgradeResume:
                 allowed_domains=[".googleapis.com"],
             )
         )
-        mock_find_container.return_value = None  # container already removed
 
         mock_image_manager = MagicMock()
         mock_image_manager.ensure_default_image.return_value = "paude:latest"
@@ -757,25 +748,20 @@ class TestUpgradeResume:
         mock_image_manager_class.return_value = mock_image_manager
         mock_prepare.return_value = ([".googleapis.com"], [], {}, False)
 
-        from paude.backends.podman.backend import PodmanBackend
+        up = _upgrade_backend()  # container already removed
 
-        backend = MagicMock(spec=PodmanBackend)
-        backend._runner = MagicMock()
-        backend._runner.container_exists.return_value = False
-        backend._network_manager = MagicMock()
-        backend._volume_manager = MagicMock()
-        backend._engine = MagicMock()
+        _upgrade_podman(
+            "test-session", up.backend, rebuild=False, overrides=_NO_OVERRIDES
+        )
 
-        _upgrade_podman("test-session", backend, rebuild=False, overrides=_NO_OVERRIDES)
-
-        config = backend.create_session.call_args[0][0]
+        config = up.config
         assert config.agent == "gemini"
         assert config.gpu == "all"
         assert config.yolo is True
         assert config.reuse_volume is True
         # Config came from the manifest, never from the (gone) container labels.
-        mock_find_container.assert_not_called()
-        backend.start_session_no_attach.assert_called_once_with("test-session")
+        up.runner.list_containers.assert_not_called()
+        up.start.assert_called_once_with("test-session")
 
     @patch("paude.cli.upgrade._upgrade_podman")
     @patch("paude.cli.upgrade.find_session_backend")
@@ -1370,10 +1356,8 @@ class TestUpgradePodmanWithOverrides:
     @patch("paude.cli.helpers._prepare_session_create")
     @patch("paude.container.ImageManager")
     @patch("paude.config.detector.detect_config", return_value=None)
-    @patch("paude.backends.podman.helpers.find_container_by_session_name")
     def test_upgrade_adds_otel_endpoint(
         self,
-        mock_find_container: MagicMock,
         mock_detect_config: MagicMock,
         mock_image_manager_class: MagicMock,
         mock_prepare: MagicMock,
@@ -1383,7 +1367,6 @@ class TestUpgradePodmanWithOverrides:
         labels = self._make_container_labels(
             domains=".googleapis.com",
         )
-        mock_find_container.return_value = {"Labels": labels}
 
         mock_image_manager = MagicMock()
         mock_image_manager.ensure_default_image.return_value = "paude:latest"
@@ -1392,20 +1375,14 @@ class TestUpgradePodmanWithOverrides:
 
         mock_prepare.return_value = ([".googleapis.com"], [], {}, False)
 
-        from paude.backends.podman.backend import PodmanBackend
-
-        backend = MagicMock(spec=PodmanBackend)
-        backend._runner = MagicMock()
-        backend._network_manager = MagicMock()
-        backend._volume_manager = MagicMock()
-        backend._engine = MagicMock()
+        up = _upgrade_backend(labels)
 
         from paude.cli.upgrade import _upgrade_podman
 
         overrides = UpgradeOverrides(otel_endpoint="http://collector:4318")
-        _upgrade_podman("test-session", backend, rebuild=False, overrides=overrides)
+        _upgrade_podman("test-session", up.backend, rebuild=False, overrides=overrides)
 
-        config = backend.create_session.call_args[0][0]
+        config = up.config
         assert config.otel_endpoint == "http://collector:4318"
         assert config.otel_ports == [4318]
 
@@ -1413,10 +1390,8 @@ class TestUpgradePodmanWithOverrides:
     @patch("paude.cli.helpers._prepare_session_create")
     @patch("paude.container.ImageManager")
     @patch("paude.config.detector.detect_config", return_value=None)
-    @patch("paude.backends.podman.helpers.find_container_by_session_name")
     def test_upgrade_clears_otel_endpoint(
         self,
-        mock_find_container: MagicMock,
         mock_detect_config: MagicMock,
         mock_image_manager_class: MagicMock,
         mock_prepare: MagicMock,
@@ -1427,7 +1402,6 @@ class TestUpgradePodmanWithOverrides:
             domains=".googleapis.com",
             otel_endpoint="http://old-collector:4318",
         )
-        mock_find_container.return_value = {"Labels": labels}
 
         mock_image_manager = MagicMock()
         mock_image_manager.ensure_default_image.return_value = "paude:latest"
@@ -1436,20 +1410,14 @@ class TestUpgradePodmanWithOverrides:
 
         mock_prepare.return_value = ([".googleapis.com"], [], {}, False)
 
-        from paude.backends.podman.backend import PodmanBackend
-
-        backend = MagicMock(spec=PodmanBackend)
-        backend._runner = MagicMock()
-        backend._network_manager = MagicMock()
-        backend._volume_manager = MagicMock()
-        backend._engine = MagicMock()
+        up = _upgrade_backend(labels)
 
         from paude.cli.upgrade import _upgrade_podman
 
         overrides = UpgradeOverrides(otel_endpoint="")
-        _upgrade_podman("test-session", backend, rebuild=False, overrides=overrides)
+        _upgrade_podman("test-session", up.backend, rebuild=False, overrides=overrides)
 
-        config = backend.create_session.call_args[0][0]
+        config = up.config
         assert config.otel_endpoint is None
         assert config.otel_ports == []
 
@@ -1457,10 +1425,8 @@ class TestUpgradePodmanWithOverrides:
     @patch("paude.cli.helpers._prepare_session_create")
     @patch("paude.container.ImageManager")
     @patch("paude.config.detector.detect_config", return_value=None)
-    @patch("paude.backends.podman.helpers.find_container_by_session_name")
     def test_upgrade_preserves_existing_otel(
         self,
-        mock_find_container: MagicMock,
         mock_detect_config: MagicMock,
         mock_image_manager_class: MagicMock,
         mock_prepare: MagicMock,
@@ -1471,7 +1437,6 @@ class TestUpgradePodmanWithOverrides:
             domains=".googleapis.com",
             otel_endpoint="http://existing:4318",
         )
-        mock_find_container.return_value = {"Labels": labels}
 
         mock_image_manager = MagicMock()
         mock_image_manager.ensure_default_image.return_value = "paude:latest"
@@ -1480,65 +1445,49 @@ class TestUpgradePodmanWithOverrides:
 
         mock_prepare.return_value = ([".googleapis.com"], [], {}, False)
 
-        from paude.backends.podman.backend import PodmanBackend
-
-        backend = MagicMock(spec=PodmanBackend)
-        backend._runner = MagicMock()
-        backend._network_manager = MagicMock()
-        backend._volume_manager = MagicMock()
-        backend._engine = MagicMock()
+        up = _upgrade_backend(labels)
 
         from paude.cli.upgrade import _upgrade_podman
 
-        _upgrade_podman("test-session", backend, rebuild=False, overrides=_NO_OVERRIDES)
+        _upgrade_podman(
+            "test-session", up.backend, rebuild=False, overrides=_NO_OVERRIDES
+        )
 
-        config = backend.create_session.call_args[0][0]
+        config = up.config
         assert config.otel_endpoint == "http://existing:4318"
         assert config.otel_ports == [4318]
 
     @patch("paude.mounts.build_mounts", return_value=[])
     @patch("paude.container.ImageManager")
     @patch("paude.config.detector.detect_config", return_value=None)
-    @patch("paude.backends.podman.helpers.find_container_by_session_name")
     def test_upgrade_overrides_gpu(
         self,
-        mock_find_container: MagicMock,
         mock_detect_config: MagicMock,
         mock_image_manager_class: MagicMock,
         mock_build_mounts: MagicMock,
     ) -> None:
         """Upgrade with --gpu overrides label value."""
         labels = self._make_container_labels()
-        mock_find_container.return_value = {"Labels": labels}
 
         mock_image_manager = MagicMock()
         mock_image_manager.ensure_default_image.return_value = "paude:latest"
         mock_image_manager_class.return_value = mock_image_manager
 
-        from paude.backends.podman.backend import PodmanBackend
-
-        backend = MagicMock(spec=PodmanBackend)
-        backend._runner = MagicMock()
-        backend._runner.container_exists.return_value = False
-        backend._network_manager = MagicMock()
-        backend._volume_manager = MagicMock()
-        backend._engine = MagicMock()
+        up = _upgrade_backend(labels)
 
         from paude.cli.upgrade import _upgrade_podman
 
         overrides = UpgradeOverrides(gpu="all")
-        _upgrade_podman("test-session", backend, rebuild=False, overrides=overrides)
+        _upgrade_podman("test-session", up.backend, rebuild=False, overrides=overrides)
 
-        config = backend.create_session.call_args[0][0]
+        config = up.config
         assert config.gpu == "all"
 
     @patch("paude.mounts.build_mounts", return_value=[])
     @patch("paude.container.ImageManager")
     @patch("paude.config.detector.detect_config", return_value=None)
-    @patch("paude.backends.podman.helpers.find_container_by_session_name")
     def test_upgrade_disables_gpu(
         self,
-        mock_find_container: MagicMock,
         mock_detect_config: MagicMock,
         mock_image_manager_class: MagicMock,
         mock_build_mounts: MagicMock,
@@ -1548,27 +1497,19 @@ class TestUpgradePodmanWithOverrides:
 
         labels = self._make_container_labels()
         labels[PAUDE_LABEL_GPU] = "all"  # Had GPU before
-        mock_find_container.return_value = {"Labels": labels}
 
         mock_image_manager = MagicMock()
         mock_image_manager.ensure_default_image.return_value = "paude:latest"
         mock_image_manager_class.return_value = mock_image_manager
 
-        from paude.backends.podman.backend import PodmanBackend
-
-        backend = MagicMock(spec=PodmanBackend)
-        backend._runner = MagicMock()
-        backend._runner.container_exists.return_value = False
-        backend._network_manager = MagicMock()
-        backend._volume_manager = MagicMock()
-        backend._engine = MagicMock()
+        up = _upgrade_backend(labels)
 
         from paude.cli.upgrade import _upgrade_podman
 
         overrides = UpgradeOverrides(gpu="")
-        _upgrade_podman("test-session", backend, rebuild=False, overrides=overrides)
+        _upgrade_podman("test-session", up.backend, rebuild=False, overrides=overrides)
 
-        config = backend.create_session.call_args[0][0]
+        config = up.config
         assert config.gpu is None
 
 
@@ -1614,7 +1555,6 @@ class TestUpgradePodmanAddAgent:
         self, labels: dict[str, str], overrides: UpgradeOverrides
     ) -> SessionConfig:
         """Run _upgrade_podman with all I/O mocked; return the created config."""
-        from paude.backends.podman.backend import PodmanBackend
         from paude.cli.upgrade import _upgrade_podman
 
         with (
@@ -1635,15 +1575,12 @@ class TestUpgradePodmanAddAgent:
             mock_image_manager.ensure_proxy_image.return_value = "proxy:latest"
             mock_image_manager_class.return_value = mock_image_manager
 
-            backend = MagicMock(spec=PodmanBackend)
-            backend._runner = MagicMock()
-            backend._runner.container_exists.return_value = False
-            backend._network_manager = MagicMock()
-            backend._volume_manager = MagicMock()
-            backend._engine = MagicMock()
+            up = _upgrade_backend(labels)
 
-            _upgrade_podman("test-session", backend, rebuild=False, overrides=overrides)
-            config: SessionConfig = backend.create_session.call_args[0][0]
+            _upgrade_podman(
+                "test-session", up.backend, rebuild=False, overrides=overrides
+            )
+            config: SessionConfig = up.config
             return config
 
     def test_add_agent_merges_composition_preserves_primary(self) -> None:

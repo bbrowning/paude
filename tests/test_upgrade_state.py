@@ -181,22 +181,24 @@ class TestManifestCarriesTheWholeSpec:
     """
 
     def test_every_spec_field_reaches_the_manifest(self) -> None:
-        from paude.agents import get_agents
-        from paude.cli.upgrade import _manifest_from_state, _ResolvedUpgrade
+        from paude.backends.podman.helpers import composition_for_spec
+        from paude.cli.upgrade import ResolvedSession, _manifest_from_state
 
-        state = _ResolvedUpgrade(
-            agent_name="codex",
-            provider_name="openai",
-            composition=get_agents(
-                ["codex"], providers={"codex": "openai"}, include_bundled=False
-            ),
+        spec = SessionSpec(
+            agent="codex",
+            provider="openai",
+            agent_providers=[("codex", "openai")],
             credential_providers=["openai"],
-            workspace=Path("/home/user/project"),
             gpu="all",
             yolo=True,
             otel_endpoint="http://collector:4318",
             allowed_domains=[".pypi.org"],
-            proxy_image_label="proxy:latest",
+            proxy_image="proxy:latest",
+        )
+        state = ResolvedSession(
+            spec=spec,
+            composition=composition_for_spec(spec),
+            workspace=Path("/home/user/project"),
         )
 
         manifest = _manifest_from_state("s", state, "0.21.0", "2026-08-25T00:00:00Z")
