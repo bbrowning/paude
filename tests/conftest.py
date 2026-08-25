@@ -76,3 +76,11 @@ def _no_poll_sleep(request, monkeypatch):
     for name in _POLL_SLEEP_MODULES:
         module = importlib.import_module(name)
         monkeypatch.setattr(module, "time", _InstantSleep(module.time))
+
+
+@pytest.fixture
+def backend():
+    """A ``PodmanBackend`` with every collaborator replaced by a double."""
+    from tests.fakes import make_backend
+
+    return make_backend()
