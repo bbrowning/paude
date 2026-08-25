@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from paude.backends import PodmanBackend, Session
+from tests.fakes import make_backend
 
 
 class TestSession:
@@ -48,31 +49,21 @@ class TestPodmanBackend:
         backend = PodmanBackend()
         assert backend is not None
 
-    @patch("paude.backends.podman.backend.ContainerRunner")
-    def test_list_sessions_returns_empty(self, mock_runner_class: MagicMock) -> None:
+    def test_list_sessions_returns_empty(self) -> None:
         """list_sessions returns empty list for Podman when no sessions exist."""
         mock_runner = MagicMock()
         mock_runner.list_containers.return_value = []
-        mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
+        backend = make_backend(mock_runner)
 
         sessions = backend.list_sessions()
         assert sessions == []
 
-    @patch("paude.backends.podman.backend.ContainerRunner")
-    def test_stop_container_delegates_to_runner(
-        self, mock_runner_class: MagicMock
-    ) -> None:
+    def test_stop_container_delegates_to_runner(self) -> None:
         """stop_container calls runner.stop_container."""
         mock_runner = MagicMock()
-        mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
+        backend = make_backend(mock_runner)
 
         backend.stop_container("container-name")
 
@@ -84,11 +75,7 @@ class TestPodmanExecInSession:
 
     def _make_backend(self) -> tuple[PodmanBackend, MagicMock]:
         mock_runner = MagicMock()
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
-        backend._setup._runner = mock_runner
-        return backend, mock_runner
+        return make_backend(mock_runner), mock_runner
 
     def test_exec_in_session_success(self) -> None:
         """exec_in_session returns (returncode, stdout, stderr) on success."""
