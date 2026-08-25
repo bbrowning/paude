@@ -32,8 +32,9 @@ Technical debt identified during codebase analysis. Address these before adding 
 ### REFACTOR-004: Duplicated Dockerfile between static file and generated code
 
 **Status**: Open
-**Priority**: Medium (every new container script requires updates in multiple places)
+**Priority**: High (has now caused two real build failures; every new container script requires updates in four places)
 **Discovered**: 2026-03-28 while adding entrypoint-lib-openclaw.sh
+**Recurred**: 2026-08-25 with patch-gemini-otel-proxy.sh (see AGENT-003)
 
 The static `containers/paude/Dockerfile` and the programmatic Dockerfile generator in `src/paude/config/dockerfile.py` must be kept in sync manually. Adding a new script to the container requires changes in four places:
 
@@ -42,7 +43,11 @@ The static `containers/paude/Dockerfile` and the programmatic Dockerfile generat
 3. `src/paude/container/build_context.py` — `copy_entrypoints()` file list
 4. `pyproject.toml` — `force-include` for production wheel packaging
 
-This caused a bug where the new OpenClaw helper script was added to the static Dockerfile but not to generated images. Consider having a single source of truth for the list of container scripts (e.g., a constant in `build_context.py`) that all four locations reference, or generating the static Dockerfile from the same code path.
+This caused a bug where the new OpenClaw helper script was added to the static Dockerfile but not to generated images. **It has since recurred**: `patch-gemini-otel-proxy.sh` is present in locations 1, 3 and 4 but missing from location 2, so `generate_workspace_dockerfile` emits a `RUN` referencing a script it never COPYs and the build fails (see AGENT-003 for the reproduction and trigger conditions).
+
+Two recurrences of the same defect mean the manual-sync approach has been falsified. Fix by giving the list of container scripts a single source of truth (e.g. a constant in `build_context.py`) that all four locations derive from, or by generating the static Dockerfile from the same code path.
+
+Whatever the fix, add a guard test — none exists today. The cheapest one that would have caught both bugs: assert that every `/usr/local/bin/*.sh` referenced by a `RUN` line in each generator's output also has a matching `COPY` in that same output. `tests/test_build_context.py:141,156,177` only checks that scripts reach the *build context*, which both bugs passed.
 
 ### REFACTOR-005: SSH transport construction (`ssh_host` string → `SshTransport`) duplicated in three places
 
@@ -208,6 +213,59 @@ pruning every unreferenced provider.
 ## Agent Limitations
 
 Issues caused by upstream agent behavior, not paude bugs.
+
+### AGENT-003: Remove the Gemini agent entirely (deprecated upstream)
+
+**Status**: Open
+**Priority**: Medium (supersedes AGENT-001 and AGENT-002, and resolves a live build bug)
+**Discovered**: 2026-08-25 during a codebase maintenance review
+
+Google has deprecated the Gemini CLI, so paude should drop the agent rather than
+keep carrying workarounds for it. This supersedes **AGENT-001** (idle-session
+OAuth token expiry) and **AGENT-002** (proxy support broken in 0.36.0+, which is
+why `src/paude/agents/gemini.py` has been pinned to `@google/gemini-cli@0.35.3`
+since 2026-05-12); both entries can be deleted along with the agent.
+
+**Decide this first — it is the actual blocker.** `src/paude/agents/gascity.py`
+declares `bundled_agents=["claude", "gemini"]`, so removing gemini forces a
+decision about what gascity bundles. Everything else is mechanical.
+
+**Removal surface (~34 files).** Source: `agents/gemini.py`, `agents/__init__.py`
+(import + `_AGENTS`), `agents/gascity.py` (`bundled_agents`),
+`providers/agent_providers.py` (`AGENT_PROVIDERS` **and** `DEFAULT_PROVIDER` —
+the default provider is stored in both), `domains.py` (`DOMAIN_ALIASES`),
+`otel.py` (`builders`), `hash.py`, `registry.py`, `cli/create.py`,
+`cli/help.py`, `container/build_context.py`. Containers:
+`containers/paude/Dockerfile` (COPY line) and
+`containers/paude/patch-gemini-otel-proxy.sh` (delete). Packaging:
+`pyproject.toml` `force-include`. Docs: `README.md`, `docs/SESSIONS.md`. Plus
+~19 test files, of which `tests/test_gascity.py` and `tests/test_agents.py` need
+real edits rather than deletions.
+
+Note that existing sessions created with gemini will still carry a
+`paude.io/agent=gemini` label, so `paude list` / `paude upgrade` need to degrade
+sensibly (or fail with a clear message) rather than raising a bare `ValueError`
+from `get_agent()`.
+
+**A live bug that removal also fixes.** `generate_workspace_dockerfile`
+(`src/paude/config/dockerfile.py:219-231`) COPYs `patch-proxy-fetch.sh` and the
+two OpenClaw patch scripts, but **not** `patch-gemini-otel-proxy.sh` — while
+`agents/gemini.py:59-61` emits
+
+```
+RUN npm install -g @google/gemini-cli@latest && /usr/local/bin/patch-gemini-otel-proxy.sh --force 2>&1
+```
+
+so the generated Dockerfile references a file it never copied and the build
+fails. Reproduced against `generate_workspace_dockerfile(cfg, agent=get_agent("gemini"))`:
+`REFERENCED BUT NEVER COPIED: ['patch-gemini-otel-proxy.sh']`.
+
+Trigger: a `paude.json` setting `base_image` or `dockerfile` (so
+`_resolve_custom_base` returns `using_default=False`, `container/image.py:357-366`)
+plus gemini in the agent set — directly or via gascity. The default-image path
+(`generate_pip_install_dockerfile`) is unaffected only because its base was built
+from the *static* `containers/paude/Dockerfile:101`, which does have the COPY.
+This is REFACTOR-004 recurring on a third script; see that entry.
 
 ### AGENT-001: Gemini CLI token expiry in long-running sessions
 
