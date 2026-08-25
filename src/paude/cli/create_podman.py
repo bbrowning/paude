@@ -10,6 +10,7 @@ import typer
 from paude.agents import get_agents
 from paude.backends import PodmanBackend, SessionConfig, SessionExistsError
 from paude.backends.labels import SessionSpec
+from paude.backends.podman.helpers import agent_specs_for
 from paude.cli.helpers import (
     _finalize_session_create,
     _run_setup_command,
@@ -38,7 +39,6 @@ def create_podman_session(
     config: PaudeConfig | None,
     env: dict[str, str],
     expanded_domains: list[str],
-    unrestricted: bool,
     parsed_args: list[str],
     yolo: bool,
     git: bool,
@@ -95,7 +95,7 @@ def create_podman_session(
         images=images,
         env=env,
         mounts=prepared.mounts,
-        allowed_domains=expanded_domains,
+        expanded_domains=expanded_domains,
         otel_ports=otel_ports or [],
         args=parsed_args,
         workdir=str(workspace),
@@ -137,9 +137,9 @@ def _resolve_composition_and_spec(
 ) -> tuple[AgentComposition, SessionSpec]:
     """Resolve the requested agents and gather the session's declared config.
 
-    ``credential_providers`` may legitimately be empty here; the spec records
-    what was asked for, and session_config_from_spec fills in the agents' own
-    providers when nothing was.
+    The spec is normalised here rather than downstream: unspecified credential
+    providers mean "whatever the agents map to", and that default belongs with
+    the caller that knows it, not inside the shared session builder.
     """
     specs = agent_providers or [(agent_name, provider_name or "")]
     composition = get_agents(
@@ -147,10 +147,13 @@ def _resolve_composition_and_spec(
         providers={name: provider for name, provider in specs if provider},
         include_bundled=False,
     )
+    resolved_specs = agent_specs_for(composition)
     spec = SessionSpec(
         agent=agent_name,
         provider=provider_name,
-        credential_providers=credential_providers or [],
+        agent_providers=resolved_specs,
+        credential_providers=credential_providers
+        or [provider for _agent, provider in resolved_specs],
         gpu=gpu,
         yolo=yolo,
         otel_endpoint=otel_endpoint,

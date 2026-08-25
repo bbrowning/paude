@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-from dataclasses import MISSING, fields
 from pathlib import Path
 
 from paude import upgrade_state
 from paude.backends.labels import SessionSpec
 from paude.upgrade_state import UpgradeManifest
+from tests.fakes import assert_carries_every_spec_field
 
 
 def _manifest(name: str = "test-session") -> UpgradeManifest:
@@ -203,12 +203,4 @@ class TestManifestCarriesTheWholeSpec:
 
         manifest = _manifest_from_state("s", state, "0.21.0", "2026-08-25T00:00:00Z")
 
-        for spec_field in fields(SessionSpec):
-            default = (
-                spec_field.default_factory()
-                if spec_field.default_factory is not MISSING
-                else spec_field.default
-            )
-            assert getattr(manifest, spec_field.name) != default, (
-                f"_manifest_from_state does not carry SessionSpec.{spec_field.name}"
-            )
+        assert_carries_every_spec_field(manifest, "_manifest_from_state")

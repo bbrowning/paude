@@ -138,7 +138,6 @@ def _create(**overrides: Any) -> None:
         "config": None,
         "env": {"PAUDE_AGENT": "claude"},
         "expanded_domains": ["github.com", "pypi.org"],
-        "unrestricted": False,
         "parsed_args": ["--verbose"],
         "yolo": False,
         "git": False,
@@ -230,17 +229,11 @@ class TestSessionConfig:
 
 
 class TestImageSelection:
-    """Which image build runs, and whether it is forced."""
+    """What create forwards into the image build.
 
-    def test_plain_config_builds_the_default_image(self) -> None:
-        with _pipeline() as p:
-            _create(config=PaudeConfig())
-
-        p.image_manager.ensure_default_image.assert_called_once_with(
-            force_rebuild=False
-        )
-        p.image_manager.ensure_custom_image.assert_not_called()
-        assert p.config.image == "paude:latest"
+    Which image the build then selects belongs to
+    tests/test_session_rebuild.py, which owns build_session_images.
+    """
 
     def test_customized_config_builds_a_custom_image(self) -> None:
         config = PaudeConfig(packages=["ripgrep"])
@@ -262,24 +255,11 @@ class TestImageSelection:
 
 
 class TestMounts:
-    """Local engines copy configs in; SSH remotes bind-mount synced copies."""
+    """What create does with the mounts it gets back.
 
-    def test_local_engine_skips_config_bind_mounts(self) -> None:
-        with _pipeline() as p:
-            _create()
-
-        assert p.build_mounts.call_args.kwargs["include_config"] is False
-        p.sync.assert_not_called()
-        p.remap.assert_not_called()
-
-    def test_ssh_remote_syncs_configs_and_remaps_mounts(self) -> None:
-        with _pipeline() as p:
-            _create(**_remote_kwargs())
-
-        assert p.build_mounts.call_args.kwargs["include_config"] is True
-        p.sync.assert_called_once()
-        p.remap.assert_called_once()
-        assert p.config.mounts == ["-v", "/remote/cfg:/home/paude/.cfg:ro"]
+    Which mounts those are -- local vs SSH, sync and remap -- belongs to
+    tests/test_session_rebuild.py, which owns prepare_session_mounts.
+    """
 
     def test_ssh_remote_records_the_config_dir_in_the_registry(self) -> None:
         with _pipeline() as p:

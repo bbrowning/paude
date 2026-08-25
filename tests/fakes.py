@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import io
 import subprocess
+from dataclasses import MISSING, fields
 from typing import cast
 from unittest.mock import MagicMock
 
+from paude.backends.labels import SessionSpec
 from paude.backends.podman.backend import PodmanBackend
 from paude.backends.podman.proxy import PodmanProxyManager
 from paude.backends.podman.resources import SessionResources
@@ -219,3 +221,23 @@ def make_backend(
     )
     backend._port_forward = MagicMock()
     return backend
+
+
+def assert_carries_every_spec_field(manifest: SessionSpec, built_by: str) -> None:
+    """Assert every ``SessionSpec`` field survived the copy into ``manifest``.
+
+    Both manifests inherit ``SessionSpec``, which dedupes the *schema* but not
+    the *copying* -- each builder still assigns the fields explicitly so mypy
+    can check them. A tenth label would therefore persist as its default until
+    someone updated both builders. This fails by name instead, so long as the
+    manifest was built from a spec whose fields are all non-default.
+    """
+    for spec_field in fields(SessionSpec):
+        default = (
+            spec_field.default_factory()
+            if spec_field.default_factory is not MISSING
+            else spec_field.default
+        )
+        assert getattr(manifest, spec_field.name) != default, (
+            f"{built_by} does not carry SessionSpec.{spec_field.name}"
+        )

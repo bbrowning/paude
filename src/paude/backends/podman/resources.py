@@ -9,18 +9,18 @@ backend, rather than assembled ad hoc from the CLI layer.
 Three teardowns live side by side, and they are not the same operation. The
 differences are the whole reason this module exists:
 
-===========================  ==========  ==============  ===================
-step                         cleanup_all  rollback_create  teardown_for_rebuild
-===========================  ==========  ==============  ===================
-remove proxy container       verified     force            force
-remove agent container       (caller)     --               force
-remove network               yes          if proxy_image   yes
-remove CA volume             if exists    --               force
-remove **auth** volume       yes          --               **no**
-remove **credential secrets** yes         --               **no**
-remove **workspace volume**  verified     if not reused    **no**
-remove GCP ADC secret        yes          --               --
-===========================  ==========  ==============  ===================
+==========================  ============  ================  ====================
+step                        cleanup_all   rollback_create   teardown_for_rebuild
+==========================  ============  ================  ====================
+proxy container             verified      if proxy_image    force
+agent container             (caller)      --                force
+network                     yes           if proxy_image    yes
+CA volume                   if exists     --                force
+**auth volume**             yes           --                **no**
+**credential secrets**      yes           --                **no**
+**workspace volume**        verified      if not reused     **no**
+GCP ADC secret              yes           --                --
+==========================  ============  ================  ====================
 
 Collapsing them behind flags would put "delete the user's workspace" one wrong
 default away from the upgrade path, so they stay three named verbs sharing only

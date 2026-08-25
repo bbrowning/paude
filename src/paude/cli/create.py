@@ -334,7 +334,7 @@ def session_create(
             raise typer.Exit(1) from None
 
     # Shared pre-create: parse args, build env, expand domains, show warnings
-    expanded_domains, parsed_args, env, unrestricted = _prepare_session_create(
+    expanded_domains, parsed_args, env, _unrestricted = _prepare_session_create(
         allowed_domains=r_allowed_domains,
         yolo=r_yolo,
         claude_args=claude_args,
@@ -361,7 +361,6 @@ def session_create(
         config=config,
         env=env,
         expanded_domains=expanded_domains,
-        unrestricted=unrestricted,
         parsed_args=parsed_args,
         yolo=r_yolo,
         git=r_git,

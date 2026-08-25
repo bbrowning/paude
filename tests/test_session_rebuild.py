@@ -8,6 +8,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from paude.agents import get_agents
+from paude.agents.base import AgentComposition
+from paude.backends.base import SessionConfig
 from paude.backends.labels import SessionSpec
 from paude.cli.session_rebuild import (
     ImageBuildError,
@@ -24,7 +26,7 @@ from tests.fakes import FakeTransport, make_engine
 WORKSPACE = Path("/home/user/project")
 
 
-def _composition(*names: str):
+def _composition(*names: str) -> AgentComposition:
     return get_agents(list(names) or ["claude"], providers={}, include_bundled=False)
 
 
@@ -38,23 +40,29 @@ class TestBuildSessionImages:
         manager.ensure_proxy_image.return_value = "paude-proxy:latest"
         return manager
 
-    def _build(self, manager: MagicMock, **kwargs: object) -> SessionImages:
+    def _build(
+        self,
+        manager: MagicMock,
+        *,
+        config: PaudeConfig | None = None,
+        force_rebuild: bool = False,
+        platform: str | None = None,
+    ) -> tuple[SessionImages, MagicMock]:
         with patch("paude.container.ImageManager", return_value=manager) as cls:
             images = build_session_images(
                 engine=make_engine(),
                 composition=_composition(),
-                config=kwargs.pop("config", None),  # type: ignore[arg-type]
+                config=config,
                 workspace=WORKSPACE,
-                force_rebuild=bool(kwargs.pop("force_rebuild", False)),
-                platform=kwargs.pop("platform", None),  # type: ignore[arg-type]
+                force_rebuild=force_rebuild,
+                platform=platform,
             )
-        self.manager_cls = cls
-        return images
+        return images, cls
 
     def test_plain_config_builds_the_default_image(self) -> None:
         manager = self._manager()
 
-        images = self._build(manager, config=PaudeConfig())
+        images, _ = self._build(manager, config=PaudeConfig())
 
         assert images == SessionImages(agent="paude:latest", proxy="paude-proxy:latest")
         manager.ensure_custom_image.assert_not_called()
@@ -63,7 +71,7 @@ class TestBuildSessionImages:
         manager = self._manager()
         config = PaudeConfig(packages=["ripgrep"])
 
-        images = self._build(manager, config=config)
+        images, _ = self._build(manager, config=config)
 
         assert images.agent == "paude-custom:latest"
         manager.ensure_custom_image.assert_called_once_with(
@@ -81,9 +89,9 @@ class TestBuildSessionImages:
     def test_platform_reaches_the_image_manager(self) -> None:
         manager = self._manager()
 
-        self._build(manager, platform="linux/amd64")
+        _, manager_cls = self._build(manager, platform="linux/amd64")
 
-        assert self.manager_cls.call_args.kwargs["platform"] == "linux/amd64"
+        assert manager_cls.call_args.kwargs["platform"] == "linux/amd64"
 
     def test_agent_build_failure_names_its_stage(self) -> None:
         manager = self._manager()
@@ -165,19 +173,26 @@ class TestPrepareSessionMounts:
 class TestSessionConfigFromSpec:
     """The spec plus this build's outputs become a SessionConfig."""
 
-    def _config(self, spec: SessionSpec, **kwargs: object):
-        composition = kwargs.pop("composition", None) or _composition()
+    def _config(
+        self,
+        spec: SessionSpec,
+        *,
+        composition: AgentComposition | None = None,
+        args: list[str] | None = None,
+        workdir: str | None = None,
+    ) -> SessionConfig:
         return session_config_from_spec(
             spec,
             name="s",
             workspace=WORKSPACE,
-            composition=composition,  # type: ignore[arg-type]
+            composition=composition or _composition(),
             images=SessionImages(agent="img:1", proxy="proxy:1"),
             env={"FOO": "bar"},
             mounts=["-v", "/a:/b"],
-            allowed_domains=["github.com"],
+            expanded_domains=["github.com"],
             otel_ports=[4317],
-            **kwargs,  # type: ignore[arg-type]
+            args=args,
+            workdir=workdir,
         )
 
     def test_carries_the_spec_onto_the_config(self) -> None:
@@ -205,34 +220,22 @@ class TestSessionConfigFromSpec:
         assert config.allowed_domains == ["github.com"]
         assert config.otel_ports == [4317]
 
-    def test_agent_providers_come_from_the_composition(self) -> None:
-        """Not from the spec: an upgrade may have just changed the agent set."""
-        config = self._config(
-            SessionSpec(), composition=_composition("claude", "codex")
+    def test_agent_and_credential_providers_are_read_verbatim(self) -> None:
+        """No caller-specific defaults live here.
+
+        Both callers normalise their spec first -- create fills in the agents'
+        own providers, upgrade derives them for a session predating the
+        providers label -- so this reads what it is given.
+        """
+        spec = SessionSpec(
+            agent_providers=[("claude", "vertex"), ("codex", "chatgpt")],
+            credential_providers=["vertex", "chatgpt"],
         )
 
-        assert [name for name, _p in config.agent_providers] == ["claude", "codex"]
+        config = self._config(spec, composition=_composition("claude", "codex"))
 
-    def test_credential_providers_fall_back_to_the_agents_own(self) -> None:
-        config = self._config(SessionSpec(), composition=_composition("claude"))
-
-        assert config.credential_providers == ["vertex"]
-
-    def test_recorded_proxy_image_is_the_fallback(self) -> None:
-        """A rebuild whose proxy build produced nothing keeps the old label."""
-        config = session_config_from_spec(
-            SessionSpec(proxy_image="recorded:1"),
-            name="s",
-            workspace=WORKSPACE,
-            composition=_composition(),
-            images=SessionImages(agent="img:1", proxy=None),
-            env={},
-            mounts=[],
-            allowed_domains=[],
-            otel_ports=[],
-        )
-
-        assert config.proxy_image == "recorded:1"
+        assert config.agent_providers == [("claude", "vertex"), ("codex", "chatgpt")]
+        assert config.credential_providers == ["vertex", "chatgpt"]
 
     def test_args_workdir_and_reuse_volume_default_off(self) -> None:
         config = self._config(SessionSpec())

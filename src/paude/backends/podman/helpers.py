@@ -271,6 +271,18 @@ def composition_for_spec(spec: SessionSpec) -> AgentComposition:
     return get_agent_composition(get_agent(spec.agent, provider=spec.provider))
 
 
+def agent_specs_for(composition: AgentComposition) -> list[tuple[str, str]]:
+    """Project a composition back into ordered (agent, provider) pairs.
+
+    The inverse of :func:`composition_for_spec`'s first branch, and the one
+    place that projection is written -- it feeds container labels, the upgrade
+    manifest and the rebuilt SessionConfig, which must not disagree.
+    """
+    return [
+        (item.config.name, item.config.provider or "") for item in composition.agents
+    ]
+
+
 def credential_providers_for_spec(spec: SessionSpec) -> list[str]:
     """Credential providers for a session, derived for legacy sessions.
 

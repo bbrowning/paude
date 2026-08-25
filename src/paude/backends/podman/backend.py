@@ -12,6 +12,7 @@ from paude.backends.base import Session, SessionConfig
 from paude.backends.labels import (
     PAUDE_LABEL_APP,
     PAUDE_LABEL_SESSION,
+    SessionSpec,
 )
 from paude.backends.podman.exceptions import (
     SessionExistsError,
@@ -24,6 +25,7 @@ from paude.backends.podman.file_copy import (
 from paude.backends.podman.helpers import (
     _generate_session_name,
     build_session_from_container,
+    composition_for_spec,
     container_name,
     find_container_by_session_name,
     get_session_agent,
@@ -117,22 +119,13 @@ class PodmanBackend:
             print(f"Creating volume {vname}...", file=sys.stderr)
             self._volume_manager.create_volume(vname, labels=labels)
 
-        from paude.agents import get_agent, get_agent_composition, get_agents
-
-        if config.agent_providers:
-            composition = get_agents(
-                [agent for agent, _provider in config.agent_providers],
-                providers={
-                    agent: provider
-                    for agent, provider in config.agent_providers
-                    if provider
-                },
-                include_bundled=False,
+        composition = composition_for_spec(
+            SessionSpec(
+                agent=config.agent,
+                provider=config.provider,
+                agent_providers=config.agent_providers,
             )
-        else:
-            composition = get_agent_composition(
-                get_agent(config.agent, provider=config.provider)
-            )
+        )
         network, proxy_ip = self._create_session_proxy(
             config, name, composition, vname, volume_reused
         )

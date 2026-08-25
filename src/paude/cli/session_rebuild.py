@@ -7,24 +7,28 @@ down first) and in how they report failure. This module owns the steps; the two
 callers own the order and the error UX, which is why these are three named
 functions rather than one ``rebuild_session()`` with hooks.
 
-Every collaborator is imported *inside* the function that uses it, from the
-module that defines it. That is not style: the create and upgrade test suites
-patch ``paude.container.ImageManager``, ``paude.mounts.build_mounts`` and
-``paude.transport.config_sync.*`` at those paths, and a module-level import here
-would bind the name once at import time and silently stop those patches from
-applying.
+``ImageManager``, ``build_mounts`` and the ``config_sync`` helpers are imported
+inside the functions that use them, from the modules that define them, and must
+stay that way for now: the create and upgrade suites patch them at those
+*definition* paths, so a module-level import here would bind the name at import
+time and silently defeat the patch. That is a property of the tests, not a
+design goal -- patching the lookup site (``paude.cli.session_rebuild.X``), or
+injecting the image manager the way ``engine`` already is, would free these.
+Everything else is imported normally.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-if TYPE_CHECKING:
-    from pathlib import Path
+import typer
 
+from paude.backends.base import SessionConfig
+
+if TYPE_CHECKING:
     from paude.agents.base import AgentComposition
-    from paude.backends.base import SessionConfig
     from paude.backends.labels import SessionSpec
     from paude.config.models import PaudeConfig
     from paude.container.engine import ContainerEngine
@@ -50,7 +54,7 @@ class SessionImages:
     """The images a session runs: its agent container and its proxy sidecar."""
 
     agent: str
-    proxy: str | None
+    proxy: str
 
 
 @dataclass(frozen=True)
@@ -124,15 +128,11 @@ def prepare_session_mounts(
     the files are transferred and the mount sources rewritten -- otherwise
     podman there fails with "statfs ...: no such file".
     """
-    from pathlib import Path
-
     from paude.mounts import build_mounts
 
     mounts = build_mounts(Path.home(), composition, include_config=engine.is_remote)
     if not engine.is_remote:
         return SessionMounts(mounts=mounts, remote_config=None)
-
-    import typer
 
     from paude.transport.config_sync import remap_mounts, sync_configs_to_remote
     from paude.transport.ssh import SshTransport
@@ -157,18 +157,17 @@ def session_config_from_spec(
     images: SessionImages,
     env: dict[str, str],
     mounts: list[str],
-    allowed_domains: list[str],
+    expanded_domains: list[str],
     otel_ports: list[int],
     args: list[str] | None = None,
     workdir: str | None = None,
     reuse_volume: bool = False,
 ) -> SessionConfig:
-    """Turn a resolved spec plus this build's outputs into a SessionConfig."""
-    from paude.backends import SessionConfig
+    """Turn a resolved spec plus this build's outputs into a SessionConfig.
 
-    agent_specs = [
-        (item.config.name, item.config.provider or "") for item in composition.agents
-    ]
+    Reads the spec verbatim: both callers normalise theirs first, so no
+    caller-specific default lives here.
+    """
     return SessionConfig(
         name=name,
         workspace=workspace,
@@ -177,18 +176,16 @@ def session_config_from_spec(
         mounts=mounts,
         args=args or [],
         workdir=workdir,
-        allowed_domains=allowed_domains,
+        # The expanded set, deliberately not spec.allowed_domains: the spec
+        # records what was declared (or None for a session predating the
+        # always-on proxy), the container needs what that expands to.
+        allowed_domains=expanded_domains,
         yolo=spec.yolo,
-        # A rebuild falls back to the recorded label when its own proxy build
-        # produced nothing; a fresh create has no recorded label to fall back to.
-        proxy_image=images.proxy or spec.proxy_image,
+        proxy_image=images.proxy,
         agent=spec.agent,
         provider=spec.provider,
-        agent_providers=agent_specs,
-        # Create may be handed none, in which case the agents' own providers are
-        # what needs credentials. Upgrade always resolves them beforehand.
-        credential_providers=spec.credential_providers
-        or [provider for _agent, provider in agent_specs],
+        agent_providers=list(spec.agent_providers),
+        credential_providers=list(spec.credential_providers),
         gpu=spec.gpu,
         reuse_volume=reuse_volume,
         ports=composition.exposed_ports,

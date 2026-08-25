@@ -377,6 +377,50 @@ def _upgraded_session(name: str = "test-session") -> Session:
     )
 
 
+class TestResolveBaseFromView:
+    """Reading a session's config off its labels, before any override."""
+
+    def test_legacy_session_without_a_providers_label_derives_them(self) -> None:
+        """The spec carries the raw label; upgrade needs the derived set.
+
+        A session created before the providers label existed has none, and
+        rebuilding it with an empty credential set would provision nothing.
+        The derivation also dedupes, which the raw agent-provider projection
+        does not -- a gascity session maps two of its three agents to vertex.
+        """
+        from paude.backends.labels import LabeledSession, spec_from_labels
+        from paude.cli.upgrade import _resolve_base_from_view
+
+        view = LabeledSession(
+            spec=spec_from_labels({PAUDE_LABEL_AGENT: "gascity"}),
+            workspace=Path("/home/user/project"),
+            created_at="2026-01-01T00:00:00+00:00",
+            version=None,
+        )
+
+        state = _resolve_base_from_view(view)
+
+        assert view.spec.credential_providers == []
+        assert state.spec.credential_providers == ["vertex", "google"]
+
+    def test_the_views_spec_is_copied_not_aliased(self) -> None:
+        """LabeledSession is frozen; _apply_overrides mutates what it is given."""
+        from paude.backends.labels import LabeledSession, spec_from_labels
+        from paude.cli.upgrade import _resolve_base_from_view
+
+        view = LabeledSession(
+            spec=spec_from_labels({PAUDE_LABEL_AGENT: "claude"}),
+            workspace=Path("/w"),
+            created_at="",
+            version=None,
+        )
+
+        state = _resolve_base_from_view(view)
+        state.spec.gpu = "all"
+
+        assert view.spec.gpu is None
+
+
 class TestUpgradePodman:
     """Tests for _upgrade_podman internal function."""
 

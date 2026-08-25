@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
@@ -10,7 +10,11 @@ import typer
 
 from paude.backends import SessionNotFoundError
 from paude.backends.labels import SessionSpec
-from paude.backends.podman.helpers import composition_for_spec
+from paude.backends.podman.helpers import (
+    agent_specs_for,
+    composition_for_spec,
+    credential_providers_for_spec,
+)
 from paude.cli.app import BackendType, app
 from paude.cli.helpers import find_session_backend
 from paude.subprocess_utils import called_process_stderr
@@ -391,7 +395,14 @@ class ResolvedSession:
 def _resolve_base_from_view(view: LabeledSession) -> ResolvedSession:
     """Read the session's configuration from its container labels."""
     return ResolvedSession(
-        spec=view.spec,
+        # Copied, not aliased: LabeledSession is frozen but its spec is not,
+        # and _apply_overrides mutates what it is handed. Credential providers
+        # are derived rather than read raw, so a session created before the
+        # providers label existed keeps the set its agents imply.
+        spec=replace(
+            view.spec,
+            credential_providers=credential_providers_for_spec(view.spec),
+        ),
         composition=composition_for_spec(view.spec),
         # A session created before the workspace label existed: the current
         # directory is the only guess available, and it is what upgrade has
@@ -532,6 +543,7 @@ def _apply_overrides(state: ResolvedSession, overrides: UpgradeOverrides) -> Non
     # extended) composition, so a changed primary is reflected in labels/env.
     state.spec.agent = state.composition.primary.config.name
     state.spec.provider = state.composition.primary.config.provider
+    state.spec.agent_providers = agent_specs_for(state.composition)
     if overrides.gpu is not None:
         state.spec.gpu = overrides.gpu if overrides.gpu != "" else None
     if overrides.yolo is not None:
@@ -552,10 +564,6 @@ def _manifest_from_state(
     """Capture a resolved config as a durable manifest for crash recovery."""
     from paude.upgrade_state import UpgradeManifest
 
-    agent_specs = [
-        (item.config.name, item.config.provider or "")
-        for item in state.composition.agents
-    ]
     return UpgradeManifest(
         name=name,
         to_version=to_version,
@@ -563,7 +571,7 @@ def _manifest_from_state(
         workspace=str(state.workspace),
         agent=state.spec.agent,
         provider=state.spec.provider,
-        agent_providers=agent_specs,
+        agent_providers=list(state.spec.agent_providers),
         credential_providers=list(state.spec.credential_providers),
         gpu=state.spec.gpu,
         yolo=state.spec.yolo,
@@ -683,7 +691,7 @@ def _recreate_session(
             images=images,
             env=env,
             mounts=prepared.mounts,
-            allowed_domains=expanded_domains,
+            expanded_domains=expanded_domains,
             otel_ports=otel_ports,
             reuse_volume=True,
         )

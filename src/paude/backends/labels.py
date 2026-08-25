@@ -6,12 +6,7 @@ configured. Three things need to read that record back -- ``paude upgrade``
 ``paude list`` (to describe a session) -- so the parse lives here, once,
 instead of once per caller.
 
-:class:`SessionSpec` is the typed form of that label set. The line it draws:
-*declared configuration* belongs in the spec; *build outputs* (the resolved
-image tag) and *identity* (name, workspace, created_at) do not. That is why
-``image`` is a ``BackupManifest`` field rather than a spec field -- upgrade
-always rebuilds and has nothing to pin -- and why ``workspace`` stays out, its
-"missing" default differing per caller.
+:class:`SessionSpec` is the typed form of that label set.
 """
 
 from __future__ import annotations
@@ -45,15 +40,23 @@ PAUDE_LABEL_OTEL_ENDPOINT = "paude.io/otel-endpoint"
 
 @dataclass(kw_only=True)
 class SessionSpec:
-    """A session's declared configuration, as carried by its container labels.
+    """The session configuration both durable manifests serialize.
 
-    ``UpgradeManifest`` and ``BackupManifest`` both inherit this, so the field
-    set is declared once and ``asdict()`` stays flat -- an embedded ``spec``
-    field would nest the manifest JSON and strand in-flight upgrades written by
-    an earlier version.
+    The field set is not a design principle, it is a schema constraint: these
+    are exactly the nine fields ``UpgradeManifest`` and ``BackupManifest``
+    already wrote to disk, kept verbatim so existing ``upgrades.json`` files
+    and backup bundles stay readable. Adding a field here changes both
+    schemas; that, not a rule about "declared configuration", is the test to
+    apply. (``proxy_image`` is in it despite being a build output, and
+    ``workspace`` is out despite being declared configuration -- both because
+    of what was already on disk. ``workspace`` also has no single type here:
+    the manifests store ``str`` where the rest of the code uses ``Path``.)
 
-    ``kw_only`` is what makes that inheritance legal: every field here has a
-    default, and both subclasses add required fields after them.
+    Both manifests inherit this, so ``asdict()`` stays flat -- an embedded
+    ``spec`` field would nest the JSON and strand in-flight upgrades written by
+    an earlier version. ``kw_only`` is what makes that inheritance legal: every
+    field here has a default, and both subclasses add required fields after
+    them.
     """
 
     agent: str = "claude"

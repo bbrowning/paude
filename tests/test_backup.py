@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import subprocess
-from dataclasses import MISSING, fields
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -28,7 +27,6 @@ from paude.backends.labels import (
     PAUDE_LABEL_WORKSPACE,
     PAUDE_LABEL_YOLO,
     LabeledSession,
-    SessionSpec,
     encode_agent_providers,
     encode_providers,
     read_labels,
@@ -42,7 +40,13 @@ from paude.backup_state import (
 )
 from paude.cli import app
 from paude.transport.ssh import SshTransport
-from tests.fakes import FakeTransport, make_backend, make_engine, make_runner
+from tests.fakes import (
+    FakeTransport,
+    assert_carries_every_spec_field,
+    make_backend,
+    make_engine,
+    make_runner,
+)
 
 runner = CliRunner()
 
@@ -571,15 +575,7 @@ class TestBuildManifest:
                 view, "s", "img", datetime(2026, 8, 10, tzinfo=UTC), "podman"
             )
 
-        for spec_field in fields(SessionSpec):
-            default = (
-                spec_field.default_factory()
-                if spec_field.default_factory is not MISSING
-                else spec_field.default
-            )
-            assert getattr(manifest, spec_field.name) != default, (
-                f"_build_manifest does not carry SessionSpec.{spec_field.name}"
-            )
+        assert_carries_every_spec_field(manifest, "_build_manifest")
 
 
 class TestWriteBundle:

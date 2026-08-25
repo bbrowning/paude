@@ -25,7 +25,7 @@ after the session-rebuild consolidation):
 - `container/image.py` — 531 lines
 - `cli/helpers.py` — 515 lines
 - `container/runner.py` — 460 lines
-- `backends/podman/backend.py` — 455 lines (was 479; two teardowns moved to
+- `backends/podman/backend.py` — 448 lines (was 479; two teardowns moved to
   `backends/podman/resources.py`)
 
 `cli/commands.py` is no longer listed: it is now a package (`cli/commands/`)
@@ -36,7 +36,7 @@ whose largest module is 168 lines.
 - `cli/commands/cp.py` — `session_cp()` (~75 lines)
 - `cli/create_podman.py` — `create_podman_session()` (65 lines, down from 157).
   Nearly all of what remains is keyword arguments being forwarded from a
-  23-parameter signature to three collaborators; an attempt to extract a
+  22-parameter signature to three collaborators; an attempt to extract a
   fourth helper needed 10 forwarded parameters to remove 4 lines and was
   reverted as parameter-plumbing rather than decomposition. The real fix is
   fewer parameters, not another helper.
@@ -176,6 +176,50 @@ Podman's auto-allocator currently handles for free. That's a meaningful new
 subsystem. If this race keeps recurring, the deterministic subnet is the actual
 fix and should be prioritized over widening the retry budget.
 
+### PERF-001: the same container labels are fetched up to four times per command
+
+**Status**: Open
+**Priority**: Medium (every fetch is an SSH round trip on a `--host` session)
+**Discovered**: 2026-08-25 during a `/simplify` review of the session-rebuild
+consolidation
+
+Measured by instrumenting `Transport.run` and driving the real paths.
+`ControlPersist` is off (`transport/ssh.py`), so sequential calls do not share
+an SSH master -- each is a full handshake.
+
+- `backend.start_session_no_attach` issues 21 engine round trips, **four** of
+  them the byte-identical `podman ps --format json -a --filter label=app=paude`.
+  Two pairs cause it: `SessionSetup.sync_sandbox_config` calls
+  `get_session_labels` then `get_session_composition` (which re-fetches), and
+  `start_session_containers` calls `get_session_composition` then
+  `get_session_credential_providers`. `connect_session` and
+  `update_allowed_domains` repeat the pattern.
+- `paude backup` pays three `inspect`-style calls (`resources.exists`,
+  `.running`, `.image`) before the `ps` that `resources.labels` makes, for
+  facts that one `ps` record already carries (`State`, `Image`).
+
+The consolidation built exactly the pieces that fix the first one --
+`spec_from_labels` + `composition_for_spec` + `credential_providers_for_spec`
+are pure and I/O-free -- and applied them to `upgrade` and `backup` only.
+One `spec = spec_from_labels(get_session_labels(runner, name))` per command,
+then the two pure derivations, takes `start`/`connect`/`domains --set` from
+four fetches to one. Left out of the consolidation because those call sites are
+outside its diff.
+
+The backup half needs care rather than a mechanical swap: `resources.exists`
+keys off the *container name* while `resources.labels` keys off the *session
+label*, so they are not the same predicate, and `get_container_image` uses
+`ContainerEngine.image_name_format` (`{{.ImageName}}` vs `{{.Config.Image}}`),
+which is not verified to equal `ps`'s `Image` field on both engines. Collapsing
+them wants a `describe()` returning existence, state, image and labels from one
+fetch, checked against both engines.
+
+Separately, `build_session_images` runs the agent and proxy builds
+sequentially though they share no inputs; `paude upgrade` always rebuilds both.
+Parallelising is the largest raw saving here, but both stream progress with
+`capture=False`, so it is only worth doing alongside capturing and replaying
+the proxy pull's output.
+
 ### RESTORE-001: `paude restore` is still a stub, and needs a volume-import primitive
 
 **Status**: Open
@@ -208,6 +252,40 @@ UPGRADE-002), and whether the bundle's recorded `image` is reused or rebuilt.
 ## Correctness Backlog
 
 Lower-severity correctness/robustness issues surfaced during code review.
+
+### TEST-005: the rebuild suites patch definition sites, which pins production import style
+
+**Status**: Open
+**Priority**: Low
+**Discovered**: 2026-08-25 during a `/simplify` review of the session-rebuild
+consolidation
+
+`tests/test_create_podman.py`, `tests/test_upgrade.py` and
+`tests/test_session_rebuild.py` patch `paude.container.ImageManager`,
+`paude.mounts.build_mounts` and `paude.transport.config_sync.*` at the modules
+that *define* them rather than where they are looked up. That works only
+because `cli/session_rebuild.py` imports them inside the functions that use
+them, so the module docstring has to warn future editors not to hoist those
+imports -- a test artifact constraining production code.
+
+Two fixes, ascending: patch the lookup site
+(`paude.cli.session_rebuild.ImageManager`), which frees the imports; or, better
+and in line with the project's own "wrap external commands in testable classes"
+rule, inject the `ImageManager` into `build_session_images` the way `engine`
+already is, so there is nothing to patch. The second touches all three suites,
+which the consolidation had just rewritten, so it was deferred.
+
+Related, and larger: `SessionSpec`'s natural sibling is `SessionConfig` in
+`backends/base.py` -- they are the same domain family and
+`session_config_from_spec` is the conversion between them, currently owned by a
+third package (`cli/`). Moving the spec there and making the conversion
+`SessionConfig.from_spec` would put two durable JSON schemas in a module named
+for domain types rather than one named for container-label constants. Deferred:
+a rename touching many imports, with no behaviour change to show for it.
+`cli/helpers._detect_dev_script_dir` is similarly misplaced -- after the
+consolidation its only caller is `cli/session_rebuild.py`, and it is an
+`ImageManager` concern, not a CLI one, yet its path arithmetic is hardcoded to
+living in `cli/`.
 
 ### UPGRADE-002: upgrading an SSH session leaks its remote config directory
 
