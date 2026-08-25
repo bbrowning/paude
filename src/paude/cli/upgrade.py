@@ -20,6 +20,8 @@ if TYPE_CHECKING:
     from paude.backends.base import Session
     from paude.backends.labels import LabeledSession
     from paude.backends.podman.backend import PodmanBackend
+    from paude.cli.session_rebuild import SessionImages
+    from paude.config.models import PaudeConfig
     from paude.upgrade_state import UpgradeManifest
 
 
@@ -580,119 +582,81 @@ def _upgrade_podman(
     """Upgrade a Podman/Docker session in place.
 
     The whole flow is idempotent and resumable: the resolved configuration is
-    written to a durable manifest before anything is torn down, teardown uses
-    force/tolerant removals, and ``create_session(reuse_volume=True)`` rebuilds
-    from a clean slate while preserving the workspace volume. Re-running after
-    an interruption reads the manifest and converges to a single healthy
-    session.
+    written to a durable manifest before anything is torn down, the images are
+    built before that teardown so a build failure changes nothing, teardown
+    uses force/tolerant removals, and ``create_session(reuse_volume=True)``
+    rebuilds from a clean slate while preserving the workspace volume.
+    Re-running after an interruption reads the manifest and converges to a
+    single healthy session.
     """
-    from datetime import UTC, datetime
-
     from paude import __version__, upgrade_state
-    from paude.cli.helpers import (
-        _detect_dev_script_dir,
-        _prepare_session_create,
-    )
+    from paude.cli.session_rebuild import ImageBuildError, build_session_images
     from paude.config.detector import detect_config
     from paude.config.parser import parse_config
-    from paude.container import ImageManager
-    from paude.mounts import build_mounts
 
-    # Resolve the session config from a manifest (resume) or labels (fresh).
-    manifest = upgrade_state.load(name)
-    if manifest is not None:
-        state = _resolve_base_from_manifest(manifest)
-        created_at = manifest.created_at
-    else:
-        view = backend.resources.labels(name)
-        if view is None:
-            typer.echo(f"Container for session '{name}' not found.", err=True)
-            raise typer.Exit(1)
-        state = _resolve_base_from_view(view)
-        created_at = datetime.now(UTC).isoformat()
-
+    state, created_at = _resolve_upgrade_state(name, backend)
     _apply_overrides(state, overrides)
 
     # Persist the fully-resolved config BEFORE any destructive step, so an
     # interrupt from here on can be finished by re-running the upgrade.
     upgrade_state.save(_manifest_from_state(name, state, __version__, created_at))
 
-    composition = state.composition
-    workspace = state.workspace
-
-    # Detect project config from workspace
     config = None
-    config_file = detect_config(workspace)
+    config_file = detect_config(state.workspace)
     if config_file:
         config = parse_config(config_file)
-
-    engine = backend.engine
-    agent_instance = composition.primary
-    agent_specs = [
-        (item.config.name, item.config.provider or "") for item in composition.agents
-    ]
 
     # Salvage state written by older images before deleting their writable
     # layer. A no-op when resuming after the old container is already gone —
     # its state was already copied into the workspace volume.
-    backend.resources.migrate_legacy_state(name, composition)
-
-    image_manager = ImageManager(
-        script_dir=_detect_dev_script_dir(),
-        agent=agent_instance,
-        composition=composition,
-        engine=engine,
-    )
+    backend.resources.migrate_legacy_state(name, state.composition)
 
     # A build failure here is transient and non-destructive: nothing has been
-    # torn down yet and the manifest is already saved. Raise a plain exception
-    # (not typer.Exit) so session_upgrade's generic handler reports it, tells
-    # the user their data is safe, and points them at re-running to retry — the
-    # bare `except typer.Exit: raise` path would swallow that guidance.
+    # torn down yet and the manifest is already saved. Re-raise as a plain
+    # exception (not typer.Exit) so session_upgrade's generic handler reports
+    # it, tells the user their data is safe, and points them at re-running to
+    # retry — the bare `except typer.Exit: raise` path would swallow that.
     try:
-        if config is not None and config.has_customizations:
-            image = image_manager.ensure_custom_image(
-                config, force_rebuild=True, workspace=workspace
-            )
-        else:
-            image = image_manager.ensure_default_image(force_rebuild=True)
-    except Exception as e:
-        raise RuntimeError(f"building the agent image failed: {e}") from e
+        images = build_session_images(
+            engine=backend.engine,
+            composition=state.composition,
+            config=config,
+            workspace=state.workspace,
+            force_rebuild=True,
+        )
+    except ImageBuildError as e:
+        raise RuntimeError(str(e)) from e
 
-    # Build proxy image (always required — all sessions use proxy)
-    proxy_image: str | None = None
-    try:
-        proxy_image = image_manager.ensure_proxy_image(force_rebuild=True)
-    except Exception as e:
-        raise RuntimeError(f"building the proxy image failed: {e}") from e
-
-    # Remove the old container and its proxy resources. Deliberately keeps the
-    # workspace volume, the proxy auth volume and the credential secrets — see
-    # SessionResources.teardown_for_rebuild.
+    # Only now, with both images in hand, is anything removed. Deliberately
+    # keeps the workspace volume, the proxy auth volume and the credential
+    # secrets — see SessionResources.teardown_for_rebuild.
     backend.resources.teardown_for_rebuild(name)
 
-    # Build mounts and env
-    home = Path.home()
-    mounts = build_mounts(home, composition, include_config=engine.is_remote)
+    _recreate_session(name, backend, state, images, config)
 
-    # For SSH remotes, transfer the local config files referenced by the bind
-    # mounts to the remote host and rewrite the mount sources to the remote
-    # paths — the local (e.g. Mac) source paths don't exist on the remote host,
-    # so podman would fail to create the container ("statfs ...: no such file").
-    # Mirrors the create path (see create_podman.py).
-    if engine.is_remote:
-        from paude.transport.config_sync import remap_mounts, sync_configs_to_remote
-        from paude.transport.ssh import SshTransport
 
-        if isinstance(engine.transport, SshTransport):
-            typer.echo("Syncing configuration to remote host...", err=True)
-            remote_config_paths = sync_configs_to_remote(engine.transport, mounts)
-            mounts = remap_mounts(mounts, remote_config_paths.path_map)
+def _recreate_session(
+    name: str,
+    backend: PodmanBackend,
+    state: ResolvedSession,
+    images: SessionImages,
+    config: PaudeConfig | None,
+) -> None:
+    """Build the replacement container around the preserved volume, and start it."""
+    from paude.cli.helpers import _prepare_session_create
+    from paude.cli.session_rebuild import (
+        prepare_session_mounts,
+        session_config_from_spec,
+    )
 
-    # Expand domains — all sessions get a proxy.
-    # allowed_domains=None (old sessions without proxy) is passed as-is to
-    # _prepare_session_create, which defaults to ["default"].
-    expanded_domains, parsed_args, env, unrestricted = _prepare_session_create(
+    prepared = prepare_session_mounts(
+        engine=backend.engine, composition=state.composition
+    )
+
+    # Expand domains — all sessions get a proxy. allowed_domains=None (an old
+    # session created before that was true) is passed through as-is to
+    # _prepare_session_create, which defaults it to ["default"].
+    expanded_domains, _args, env, _unrestricted = _prepare_session_create(
         state.spec.allowed_domains,
         state.spec.yolo,
         None,
@@ -700,40 +664,52 @@ def _upgrade_podman(
         agent_name=state.spec.agent,
         provider_name=state.spec.provider,
         otel_endpoint=state.spec.otel_endpoint,
-        composition=composition,
+        composition=state.composition,
         credential_providers=state.spec.credential_providers,
     )
-    session_domains = expanded_domains
 
-    # Compute OTEL proxy ports
     otel_ports: list[int] = []
     if state.spec.otel_endpoint:
         from paude.otel import otel_proxy_ports
 
         otel_ports = otel_proxy_ports(state.spec.otel_endpoint)
 
-    # Create new session config with reuse_volume=True
-    from paude.backends import SessionConfig
-
-    session_config = SessionConfig(
-        name=name,
-        workspace=workspace,
-        image=image,
-        env=env,
-        mounts=mounts,
-        allowed_domains=session_domains,
-        yolo=state.spec.yolo,
-        proxy_image=proxy_image or state.spec.proxy_image,
-        agent=state.spec.agent,
-        provider=state.spec.provider,
-        agent_providers=agent_specs,
-        credential_providers=state.spec.credential_providers,
-        gpu=state.spec.gpu,
-        reuse_volume=True,
-        ports=composition.exposed_ports,
-        otel_ports=otel_ports,
-        otel_endpoint=state.spec.otel_endpoint,
+    backend.create_session(
+        session_config_from_spec(
+            state.spec,
+            name=name,
+            workspace=state.workspace,
+            composition=state.composition,
+            images=images,
+            env=env,
+            mounts=prepared.mounts,
+            allowed_domains=expanded_domains,
+            otel_ports=otel_ports,
+            reuse_volume=True,
+        )
     )
-
-    backend.create_session(session_config)
     backend.start_session_no_attach(name)
+
+
+def _resolve_upgrade_state(
+    name: str, backend: PodmanBackend
+) -> tuple[ResolvedSession, str]:
+    """Resolve the session's configuration, and when this upgrade started.
+
+    A leftover manifest means a previous attempt was interrupted: it is the
+    only remaining source of the config once the old container is gone, so it
+    wins over the container's labels and keeps the original start time.
+    """
+    from datetime import UTC, datetime
+
+    from paude import upgrade_state
+
+    manifest = upgrade_state.load(name)
+    if manifest is not None:
+        return _resolve_base_from_manifest(manifest), manifest.created_at
+
+    view = backend.resources.labels(name)
+    if view is None:
+        typer.echo(f"Container for session '{name}' not found.", err=True)
+        raise typer.Exit(1)
+    return _resolve_base_from_view(view), datetime.now(UTC).isoformat()

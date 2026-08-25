@@ -647,6 +647,48 @@ class TestUpgradePodman:
         # The manifest (written before the build) survives, so a re-run resumes.
         assert upgrade_state.load("test-session") is not None
         up.create_session.assert_not_called()
+        # And nothing was torn down: the images are built first precisely so a
+        # build failure leaves the old session intact.
+        up.runner.remove_container.assert_not_called()
+        up.volumes.remove_volume.assert_not_called()
+        up.networks.remove_network.assert_not_called()
+
+    @patch("paude.mounts.build_mounts", return_value=[])
+    @patch("paude.cli.helpers._prepare_session_create")
+    @patch("paude.container.ImageManager")
+    @patch("paude.config.detector.detect_config", return_value=None)
+    def test_proxy_build_failure_is_also_non_destructive(
+        self,
+        mock_detect_config: MagicMock,
+        mock_image_manager_class: MagicMock,
+        mock_prepare: MagicMock,
+        mock_build_mounts: MagicMock,
+    ) -> None:
+        """The proxy build is the last step before teardown, so it matters most.
+
+        Both images are built before anything is removed; a failure on the
+        second one must be as harmless as a failure on the first.
+        """
+        from paude import upgrade_state
+        from paude.cli.upgrade import _upgrade_podman
+
+        mock_image_manager = MagicMock()
+        mock_image_manager.ensure_default_image.return_value = "paude:latest"
+        mock_image_manager.ensure_proxy_image.side_effect = RuntimeError("no proxy")
+        mock_image_manager_class.return_value = mock_image_manager
+        mock_prepare.return_value = ([], [], {}, True)
+
+        up = _upgrade_backend(self._make_container_labels())
+
+        with pytest.raises(RuntimeError, match="building the proxy image failed"):
+            _upgrade_podman(
+                "test-session", up.backend, rebuild=False, overrides=_NO_OVERRIDES
+            )
+
+        assert upgrade_state.load("test-session") is not None
+        up.runner.remove_container.assert_not_called()
+        up.volumes.remove_volume.assert_not_called()
+        up.create_session.assert_not_called()
 
 
 class TestUpgradeResume:
