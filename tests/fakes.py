@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 from paude.backends.podman.backend import PodmanBackend
 from paude.backends.podman.proxy import PodmanProxyManager
+from paude.backends.podman.resources import SessionResources
 from paude.backends.podman.session_setup import SessionSetup
 from paude.container.engine import ContainerEngine
 from paude.container.network import NetworkManager
@@ -189,8 +190,8 @@ def make_backend(
 
     Every collaborator is substituted, so no test reaches a real container
     engine. Callers may pass their own doubles to assert on interactions; the
-    proxy manager and session setup are rebuilt afterwards so they observe the
-    substituted runner rather than the discarded real one.
+    proxy manager, session setup and session resources are rebuilt afterwards
+    so they observe the substituted runner rather than the discarded real one.
     """
     backend = PodmanBackend(engine=make_engine(engine_binary))
     if runner is None:
@@ -213,5 +214,8 @@ def make_backend(
     backend._volume_manager = volume_manager or MagicMock(spec=VolumeManager)
     backend._proxy = PodmanProxyManager(runner, network_manager)
     backend._setup = SessionSetup(runner, runner.engine)
+    backend._resources = SessionResources(
+        runner, network_manager, backend._volume_manager, backend._proxy
+    )
     backend._port_forward = MagicMock()
     return backend

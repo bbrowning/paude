@@ -341,31 +341,6 @@ class TestUpgradePodman:
             labels[PAUDE_LABEL_PROXY_IMAGE] = proxy_image
         return labels
 
-    def test_reused_volume_survives_container_creation_rollback(self) -> None:
-        from paude.backends import SessionConfig
-        from paude.backends.podman.backend import PodmanBackend
-
-        backend = MagicMock(spec=PodmanBackend)
-        backend._runner = MagicMock()
-        backend._network_manager = MagicMock()
-        backend._volume_manager = MagicMock()
-        config = SessionConfig(
-            name="test-session",
-            workspace=Path("/workspace"),
-            image="paude:latest",
-            reuse_volume=True,
-        )
-
-        PodmanBackend._rollback_session_resources(
-            backend,
-            config,
-            "test-session",
-            "paude-test-session-workspace",
-            volume_reused=True,
-        )
-
-        backend._volume_manager.remove_volume.assert_not_called()
-
     @patch("paude.mounts.build_mounts", return_value=[])
     @patch("paude.cli.helpers._prepare_session_create")
     @patch("paude.container.ImageManager")
