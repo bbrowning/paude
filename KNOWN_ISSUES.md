@@ -478,6 +478,45 @@ No path forward here is trivial — SELinux MAC enforcement and `podman exec`'s 
 
 ## Test Suite
 
+### TEST-004: Remaining test-suite duplication and untestable-by-design seams
+
+**Status**: Open
+**Priority**: Medium (this is what makes refactoring `src/` expensive)
+**Discovered**: 2026-08-25 during the test-infrastructure pass that added
+`tests/fakes.py`'s `make_backend`/`make_runner`/`FakeTransport`
+
+The shared doubles now exist and the poll-sleep tax is gone, but three larger
+items were deliberately left:
+
+1. **`git_remote/utils.py` calls `subprocess.run` 17 times directly**
+   (`workflow.py` adds 5 more), which is why
+   `@patch("paude.git_remote.subprocess.run")` is the single most-patched
+   target in the suite at 79 sites. This violates the project's own rule in
+   `docs/CODING_STANDARDS.md` ("Wrap external commands ... in testable classes
+   rather than calling subprocess directly"). Routing git through an injectable
+   runner would delete those 79 patches and let a `FakeTransport`-style double
+   record git invocations. Deferred because it is a `src/` change, and the
+   test-infrastructure work was kept behaviour-preserving.
+
+2. **`tests/test_upgrade.py` still assigns `backend._runner` in 15 places**, and
+   `MagicMock(spec=PodmanBackend)` with `__class__` reassignment in 15 more.
+   These are not a test smell that can be fixed in the tests: they faithfully
+   model `cli/upgrade.py` and `cli/backup.py` reaching into `PodmanBackend`
+   privates (18 sites). The tests can only be cleaned up once that layering is,
+   which is the session-rebuild consolidation described in REFACTOR-007.
+
+3. **`tests/test_cli.py` (2041 lines) is a grab-bag** whose classes duplicate
+   topics that already have dedicated files (`TestBlockedDomainsCLI` vs
+   `test_blocked_domains.py`, `TestParseCopyPath` vs `test_remote_copy.py`,
+   `TestAgentSpecificDomainExpansion` vs `test_domains.py`). Splitting it along
+   its existing class boundaries is mechanical. Separately,
+   `tests/test_agents.py` (2000 lines, 45 classes, zero mocks) is a
+   6-agents x 6-concerns copy-paste grid that wants parametrizing -- best done
+   after the Gemini removal in AGENT-003, which deletes one row of it.
+
+For reference, the pass that opened this entry took `make test` from 26.9s to
+6.8s, mock/patch constructions from 2028 to 1937, and put `tests/` under mypy.
+
 ### TEST-003: Test signatures are unannotated, so mypy runs relaxed over `tests/`
 
 **Status**: Open
