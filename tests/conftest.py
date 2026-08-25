@@ -62,9 +62,10 @@ class _InstantSleep:
         return getattr(self._real, name)
 
 
-# Modules whose retry/poll loops call time.sleep(). Left real, these dominate
-# the unit suite's wall clock: tests drive them with mocked runners that never
-# satisfy the loop's exit condition, so each one burns its full poll budget.
+# Modules that call time.sleep() -- a retry/poll loop in the first two, a fixed
+# post-start settle in proxy_runner. Left real, these dominate the unit suite's
+# wall clock: tests drive them with mocked runners that never satisfy a loop's
+# exit condition, so each one burns its full poll budget.
 _POLL_SLEEP_MODULES = (
     "paude.backends.podman.ca_cert",
     "paude.backends.podman.proxy",
@@ -76,10 +77,16 @@ _POLL_SLEEP_MODULES = (
 def _no_poll_sleep(request, monkeypatch):
     """Make retry/poll sleeps instant for unit tests.
 
-    Safe because every one of these loops bounds itself by counting -- an
-    iteration counter (proxy._get_proxy_ip) or an accumulator incremented by
-    the interval constant (ca_cert), never by wall clock -- so removing the
-    delay preserves timeout semantics exactly, including the warning paths.
+    Safe because no sleep here carries meaning for the code under test. The
+    loops bound themselves by counting -- an iteration counter
+    (proxy._get_proxy_ip) or an accumulator incremented by the interval
+    constant (ca_cert), never by wall clock -- so removing the delay preserves
+    timeout semantics exactly, including the warning paths. proxy_runner has no
+    loop at all: just a fixed settle after starting the proxy, which nothing
+    under test observes.
+
+    A module whose behaviour depends on elapsed wall clock does not belong
+    here.
 
     Skipped for integration tests, which drive a real container engine and
     need real waits.

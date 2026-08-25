@@ -421,6 +421,48 @@ class TestResolveBaseFromView:
         assert view.spec.gpu is None
 
 
+class TestResolveBaseFromManifest:
+    """Rebuilding a session's config from a persisted upgrade manifest."""
+
+    def test_a_null_credential_providers_entry_resolves_to_empty(
+        self, tmp_path: Path
+    ) -> None:
+        """The manifest is JSON on disk, and load applies no per-field checks.
+
+        Only agent_providers is normalised on the way in, so a manifest holding
+        ``"credential_providers": null`` -- hand-edited, or written by
+        something other than paude -- constructs fine and reaches here intact.
+        Without the fallback, resolving it raises TypeError and aborts the
+        resumed upgrade instead of degrading to the empty set.
+        """
+        from paude import upgrade_state
+        from paude.cli.upgrade import _resolve_base_from_manifest
+
+        path = tmp_path / "upgrades.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "upgrades": {
+                        "sess": {
+                            "name": "sess",
+                            "to_version": "0.20.0",
+                            "created_at": "2026-01-01T00:00:00+00:00",
+                            "workspace": "/home/user/project",
+                            "agent": "claude",
+                            "credential_providers": None,
+                        }
+                    }
+                }
+            )
+        )
+        manifest = upgrade_state.load("sess", path=path)
+        assert manifest is not None
+
+        state = _resolve_base_from_manifest(manifest)
+
+        assert state.spec.credential_providers == []
+
+
 class TestUpgradePodman:
     """Tests for _upgrade_podman internal function."""
 

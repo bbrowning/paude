@@ -421,7 +421,7 @@ def _resolve_base_from_manifest(manifest: UpgradeManifest) -> ResolvedSession:
         agent=manifest.agent,
         provider=manifest.provider,
         agent_providers=list(manifest.agent_providers),
-        credential_providers=list(manifest.credential_providers),
+        credential_providers=list(manifest.credential_providers or []),
         gpu=manifest.gpu,
         yolo=manifest.yolo,
         otel_endpoint=manifest.otel_endpoint,

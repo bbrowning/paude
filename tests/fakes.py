@@ -199,10 +199,15 @@ def make_backend(
     if runner is None:
         runner = make_runner(make_engine(engine_binary))
     elif not isinstance(getattr(runner.engine, "binary", None), str):
-        # A bare MagicMock() runner whose engine was never configured: give it
-        # a real engine so binary-dependent branches behave like production. A
-        # caller that configured its own engine double (to assert on
-        # engine.run, say) keeps it.
+        # The runner's engine has no str ``binary``, so binary-dependent
+        # branches would see a MagicMock where production sees "podman" --
+        # typically a bare MagicMock() runner whose engine was never
+        # configured. Swap in a real engine so those branches behave like
+        # production.
+        #
+        # This replaces the engine wholesale, so an engine double you mean to
+        # assert on is lost here unless its ``binary`` is a str: build it with
+        # make_engine(), or set ``.binary`` before passing the runner in.
         runner.engine = make_engine(engine_binary)
     backend._runner = runner
     backend._engine = runner.engine
