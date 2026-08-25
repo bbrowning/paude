@@ -26,7 +26,8 @@ def _find_free_port() -> int:
     """Find an available TCP port."""
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+        port: int = s.getsockname()[1]
+        return port
 
 
 def _cleanup_proxy(proc: subprocess.Popen[bytes]) -> None:

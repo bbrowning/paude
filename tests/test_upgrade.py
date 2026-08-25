@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
+from paude.backends import SessionConfig
 from paude.backends.base import Session
 from paude.backends.labels import (
     PAUDE_LABEL_AGENT,
@@ -75,7 +76,7 @@ class TestUpgradeCommand:
         from paude.backends.podman.backend import PodmanBackend
 
         mock_backend = MagicMock()
-        mock_backend.__class__ = PodmanBackend
+        mock_backend.__class__ = PodmanBackend  # type: ignore[assignment]
         mock_backend.get_session.return_value = _make_session(
             "test-session", version=__version__
         )
@@ -102,7 +103,7 @@ class TestUpgradeCommand:
         # Make backend appear as PodmanBackend
         from paude.backends.podman.backend import PodmanBackend
 
-        mock_backend.__class__ = PodmanBackend
+        mock_backend.__class__ = PodmanBackend  # type: ignore[assignment]
         mock_find.return_value = ("podman", mock_backend)
 
         result = runner.invoke(app, ["upgrade", "test-session", "--rebuild"])
@@ -122,7 +123,7 @@ class TestUpgradeCommand:
         )
         from paude.backends.podman.backend import PodmanBackend
 
-        mock_backend.__class__ = PodmanBackend
+        mock_backend.__class__ = PodmanBackend  # type: ignore[assignment]
         mock_find.return_value = ("podman", mock_backend)
 
         result = runner.invoke(app, ["upgrade", "test-session"])
@@ -141,7 +142,7 @@ class TestUpgradeCommand:
         )
         from paude.backends.podman.backend import PodmanBackend
 
-        mock_backend.__class__ = PodmanBackend
+        mock_backend.__class__ = PodmanBackend  # type: ignore[assignment]
         mock_find.return_value = ("podman", mock_backend)
 
         result = runner.invoke(
@@ -172,7 +173,7 @@ class TestUpgradeCommand:
         backend.get_session.return_value = _make_session(
             "test-session", version="0.1.0"
         )
-        backend.__class__ = PodmanBackend
+        backend.__class__ = PodmanBackend  # type: ignore[assignment]
         mock_find.return_value = ("podman", backend)
         return backend
 
@@ -277,7 +278,7 @@ class TestUpgradeCommand:
         )
         from paude.backends.podman.backend import PodmanBackend
 
-        mock_backend.__class__ = PodmanBackend
+        mock_backend.__class__ = PodmanBackend  # type: ignore[assignment]
         mock_find.return_value = ("podman", mock_backend)
 
         result = runner.invoke(
@@ -820,7 +821,7 @@ class TestUpgradeResume:
             )
         )
         mock_backend = MagicMock()
-        mock_backend.__class__ = PodmanBackend
+        mock_backend.__class__ = PodmanBackend  # type: ignore[assignment]
         mock_backend.get_session.return_value = _make_session(
             "test-session", version="0.1.0"
         )
@@ -851,7 +852,7 @@ class TestUpgradeResume:
             )
         )
         mock_backend = MagicMock()
-        mock_backend.__class__ = PodmanBackend
+        mock_backend.__class__ = PodmanBackend  # type: ignore[assignment]
         mock_backend.get_session.return_value = _make_session(
             "test-session", status="running", version=__version__
         )
@@ -891,7 +892,7 @@ class TestUpgradeResume:
             )
         )
         mock_backend = MagicMock()
-        mock_backend.__class__ = PodmanBackend
+        mock_backend.__class__ = PodmanBackend  # type: ignore[assignment]
         mock_backend.get_session.return_value = _make_session(
             "test-session", status="stopped", version=__version__
         )
@@ -926,7 +927,7 @@ class TestUpgradeResume:
             )
         )
         mock_backend = MagicMock()
-        mock_backend.__class__ = PodmanBackend
+        mock_backend.__class__ = PodmanBackend  # type: ignore[assignment]
         mock_backend.get_session.return_value = _make_session(
             "test-session", status="degraded", version=__version__
         )
@@ -970,7 +971,7 @@ class TestUpgradeResume:
             )
         )
         mock_backend = MagicMock()
-        mock_backend.__class__ = PodmanBackend
+        mock_backend.__class__ = PodmanBackend  # type: ignore[assignment]
         mock_backend.get_session.return_value = _make_session(
             "test-session", status="running", version=__version__
         )
@@ -1069,7 +1070,7 @@ class TestUpgradeResume:
             )
         )
         mock_backend = MagicMock()
-        mock_backend.__class__ = PodmanBackend
+        mock_backend.__class__ = PodmanBackend  # type: ignore[assignment]
         mock_backend.get_session.return_value = None  # container gone
         mock_find.return_value = ("podman", mock_backend)
 
@@ -1102,7 +1103,7 @@ class TestUpgradeResume:
         mock_upgrade_podman.side_effect = KeyboardInterrupt
 
         mock_backend = MagicMock()
-        mock_backend.__class__ = PodmanBackend
+        mock_backend.__class__ = PodmanBackend  # type: ignore[assignment]
         mock_backend.get_session.return_value = _make_session(
             "test-session", version="0.1.0"
         )
@@ -1140,7 +1141,7 @@ class TestUpgradeResume:
         )
 
         mock_backend = MagicMock()
-        mock_backend.__class__ = PodmanBackend
+        mock_backend.__class__ = PodmanBackend  # type: ignore[assignment]
         mock_backend.get_session.return_value = _make_session(
             "test-session", version="0.1.0"
         )
@@ -1171,7 +1172,7 @@ class TestUpgradeResume:
         )
 
         mock_backend = MagicMock()
-        mock_backend.__class__ = PodmanBackend
+        mock_backend.__class__ = PodmanBackend  # type: ignore[assignment]
         mock_backend.get_session.return_value = _make_session(
             "test-session", version="0.1.0"
         )
@@ -1634,7 +1635,9 @@ class TestUpgradePodmanAddAgent:
             labels[PAUDE_LABEL_PROVIDERS] = encode_providers(providers)
         return labels
 
-    def _run(self, labels: dict[str, str], overrides: UpgradeOverrides) -> object:
+    def _run(
+        self, labels: dict[str, str], overrides: UpgradeOverrides
+    ) -> SessionConfig:
         """Run _upgrade_podman with all I/O mocked; return the created config."""
         from paude.backends.podman.backend import PodmanBackend
         from paude.cli.upgrade import _upgrade_podman
@@ -1665,7 +1668,8 @@ class TestUpgradePodmanAddAgent:
             backend._engine = MagicMock()
 
             _upgrade_podman("test-session", backend, rebuild=False, overrides=overrides)
-            return backend.create_session.call_args[0][0]
+            config: SessionConfig = backend.create_session.call_args[0][0]
+            return config
 
     def test_add_agent_merges_composition_preserves_primary(self) -> None:
         """--add-agent codex appends codex, keeping claude primary."""

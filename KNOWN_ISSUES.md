@@ -478,6 +478,29 @@ No path forward here is trivial — SELinux MAC enforcement and `podman exec`'s 
 
 ## Test Suite
 
+### TEST-003: Test signatures are unannotated, so mypy runs relaxed over `tests/`
+
+**Status**: Open
+**Priority**: Low (the checks that catch real bugs are already on)
+**Discovered**: 2026-08-25 while extending `make typecheck` to cover `tests/`
+
+`tests/` is now type-checked (it is the larger half of the repo's Python), but
+`[[tool.mypy.overrides]]` for `tests.*` disables `disallow_untyped_defs`,
+`disallow_incomplete_defs` and `disallow_untyped_calls`. Without those three,
+enabling mypy on tests surfaced 81 real errors, all since fixed; with them it
+is 782, of which 701 are purely "this signature has no annotations".
+
+The relaxation is deliberate: the value of checking tests is catching wrong
+argument types, stale attribute names and str/bytes confusion, and strict mode
+still enforces all of that. Annotating ~1900 test signatures buys little and
+would churn every test file.
+
+To tighten later, drop the override keys one at a time — `disallow_untyped_calls`
+first (47 errors, mostly calls into unannotated test helpers), then
+`disallow_incomplete_defs` (a further ~81), then `disallow_untyped_defs`
+(~654). Note `tests/*` also waives `E501` in the ruff per-file ignores, so test
+code has one fewer guardrail than `src` either way.
+
 ### TEST-002: Single-file branch of `_transfer_path` is untested
 
 **Status**: Open

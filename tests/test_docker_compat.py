@@ -309,7 +309,8 @@ class TestDockerVolumePermissions:
             if "exec" in c[0][0] and "--user" in c[0][0]
         ]
         assert len(exec_calls) == 1, exec_calls
-        return exec_calls[0]
+        argv: list[str] = exec_calls[0]
+        return argv
 
     @patch("subprocess.run")
     def test_docker_reconciles_volume_ownership_on_start(

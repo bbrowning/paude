@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import typer
+from click.testing import Result
 from typer.testing import CliRunner
 
 from paude.backends import PodmanBackend, Session
@@ -24,7 +25,7 @@ from tests.fakes import FakeTransport, make_backend, make_engine, make_runner
 runner = CliRunner()
 
 
-def _out(result) -> str:
+def _out(result: Result) -> str:
     """Combined stdout + stderr, mirroring the rest of the CLI test suite."""
     return result.stdout + (result.stderr or "")
 

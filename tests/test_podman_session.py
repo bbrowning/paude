@@ -36,7 +36,7 @@ from paude.backends.podman.session_setup import SessionSetup
 from paude.backends.proxy_config import ProxyCredentials
 from paude.backends.session_env import decode_path as _decode_path_raw
 from paude.backends.session_env import encode_path as _encode_path_raw
-from tests.fakes import make_backend
+from tests.fakes import make_backend, recorded_commands
 
 
 def encode_path(path: Path) -> str:
@@ -1068,7 +1068,7 @@ class TestPodmanBackendCreateSessionWithProxy:
         )
 
         # Proxy container should be created via engine.run
-        engine_calls = [" ".join(c) for c in backend.engine.transport.commands]
+        engine_calls = [" ".join(c) for c in recorded_commands(backend.engine)]
         assert any("create" in c for c in engine_calls)
 
         # Main container should be on the internal network
@@ -1229,7 +1229,7 @@ class TestPodmanBackendStartSessionWithProxy:
         backend.start_session("my-session")
 
         # Proxy should be started via engine.run
-        engine_calls = [" ".join(c) for c in backend.engine.transport.commands]
+        engine_calls = [" ".join(c) for c in recorded_commands(backend.engine)]
         assert any("start" in c for c in engine_calls)
         mock_runner.start_container.assert_called_once_with("paude-my-session")
 
@@ -1534,7 +1534,7 @@ class TestProxyRecreation:
         backend.start_session("my-session")
 
         # Proxy should be recreated via engine.run (create + start)
-        engine_calls = [" ".join(c) for c in backend.engine.transport.commands]
+        engine_calls = [" ".join(c) for c in recorded_commands(backend.engine)]
         assert any("create" in c for c in engine_calls)
         assert any("start" in c for c in engine_calls)
 
@@ -1607,7 +1607,7 @@ class TestProxyRecreation:
         backend.connect_session("my-session")
 
         # Proxy should be recreated via engine.run (create + start)
-        engine_calls = [" ".join(c) for c in backend.engine.transport.commands]
+        engine_calls = [" ".join(c) for c in recorded_commands(backend.engine)]
         assert any("create" in c for c in engine_calls)
         assert any("start" in c for c in engine_calls)
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import subprocess
+from typing import cast
 from unittest.mock import MagicMock
 
 from paude.backends.podman.backend import PodmanBackend
@@ -39,7 +40,7 @@ class FakePopen:
     def wait(self, timeout: float | None = None) -> int:
         if self._pending_waits > 0:
             self._pending_waits -= 1
-            raise subprocess.TimeoutExpired(cmd="fake", timeout=timeout)
+            raise subprocess.TimeoutExpired(cmd="fake", timeout=timeout or 0)
         return self._returncode
 
     def poll(self) -> int | None:
@@ -48,6 +49,16 @@ class FakePopen:
     def kill(self) -> None:
         self.killed = True
         self._pending_waits = 0
+
+
+def as_popen(proc: FakePopen) -> subprocess.Popen[bytes]:
+    """Present a :class:`FakePopen` where a real ``Popen`` is required.
+
+    FakePopen implements the subset ``subprocess_utils`` actually uses (wait,
+    poll, kill, stdout, stderr). Casting here documents that, rather than
+    widening a production signature to accommodate a test double.
+    """
+    return cast("subprocess.Popen[bytes]", proc)
 
 
 class FakeTransport:
@@ -138,6 +149,20 @@ def make_engine(
         binary,
         transport=transport or FakeTransport(is_remote=is_remote),  # type: ignore[arg-type]
     )
+
+
+def recorded_commands(engine: ContainerEngine) -> list[list[str]]:
+    """Commands the :class:`FakeTransport` behind ``engine`` has recorded.
+
+    ``ContainerEngine.transport`` is typed as the ``Transport`` protocol, which
+    has no ``commands``, so this narrows it in one place instead of at every
+    assertion.
+    """
+    transport = engine.transport
+    assert isinstance(transport, FakeTransport), (
+        f"engine is not backed by a FakeTransport: {transport!r}"
+    )
+    return transport.commands
 
 
 def make_runner(engine: ContainerEngine | None = None, **attrs: object) -> MagicMock:

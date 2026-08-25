@@ -12,7 +12,13 @@ import pytest
 
 from paude.backends.podman.backend import PodmanBackend
 from paude.container.engine import ContainerEngine
-from tests.fakes import FakeTransport, make_backend, make_engine, make_runner
+from tests.fakes import (
+    FakeTransport,
+    make_backend,
+    make_engine,
+    make_runner,
+    recorded_commands,
+)
 
 
 class TestFakeTransport:
@@ -68,7 +74,7 @@ class TestMakeEngine:
         engine = make_engine("docker")
         engine.run("ps", "-a")
 
-        assert engine.transport.commands == [["docker", "ps", "-a"]]
+        assert recorded_commands(engine) == [["docker", "ps", "-a"]]
 
 
 class TestMakeRunner:

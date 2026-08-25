@@ -101,6 +101,16 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 
+# Tests are type-checked too (they are the larger half of the codebase), but
+# annotating ~1900 test signatures is not worth the churn -- the value is in
+# catching wrong argument types and stale attribute names, which the rest of
+# strict mode still enforces. See KNOWN_ISSUES.md TEST-003 to tighten this.
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --ignore=tests/integration"

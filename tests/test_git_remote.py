@@ -36,6 +36,7 @@ from paude.git_remote import (
     setup_precommit_in_container,
     ssh_url_to_https,
 )
+from paude.transport.ssh import SshTransport
 
 
 class TestBuildPodmanRemoteUrl:
@@ -1318,7 +1319,7 @@ class TestResolveSessionRemote:
             "ext::ssh -i /home/user/.ssh/id_ed25519 -p 2222 user@gpu-server "
             "docker exec -i paude-my-session %S /pvc/workspace"
         )
-        assert transport is not None
+        assert isinstance(transport, SshTransport)
         assert transport.host == "user@gpu-server"
         assert transport.port == 2222
         assert transport.key == "/home/user/.ssh/id_ed25519"

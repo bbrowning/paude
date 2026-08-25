@@ -94,7 +94,7 @@ format:
 	uv run ruff format src tests
 
 typecheck:
-	uv run mypy src
+	uv run mypy src tests
 
 # Login to container registry
 login:
