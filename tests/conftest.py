@@ -1,10 +1,23 @@
 """Pytest fixtures for paude tests."""
 
 import importlib
+from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 import pytest
+
+_INTEGRATION_DIR = Path(__file__).parent / "integration"
+
+
+def _is_integration(request) -> bool:
+    """Whether this test lives under tests/integration/.
+
+    Matches the directory rather than the string "integration" anywhere in the
+    path: tests/test_integration.py is a unit test that a substring check
+    wrongly excluded from config isolation.
+    """
+    return _INTEGRATION_DIR in Path(str(request.fspath)).parents
 
 
 @pytest.fixture(autouse=True)
@@ -19,7 +32,7 @@ def _isolate_config(request, tmp_path, monkeypatch):
     Skipped for integration tests which need real container engine
     config (e.g. podman network definitions).
     """
-    if "integration" not in str(request.fspath):
+    if not _is_integration(request):
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
         monkeypatch.chdir(tmp_path)
 
@@ -71,7 +84,7 @@ def _no_poll_sleep(request, monkeypatch):
     Skipped for integration tests, which drive a real container engine and
     need real waits.
     """
-    if "integration" in str(request.fspath):
+    if _is_integration(request):
         return
     for name in _POLL_SLEEP_MODULES:
         module = importlib.import_module(name)
