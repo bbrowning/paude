@@ -1616,7 +1616,7 @@ class TestUpgradePodmanAddAgent:
         ``providers`` seeds the credential-provider label (used to model a
         provider that is provisioned for the session but not mapped to any agent).
         """
-        from paude.backends.podman.helpers import (
+        from paude.backends.labels import (
             encode_agent_providers,
             encode_providers,
         )

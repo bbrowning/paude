@@ -5,9 +5,6 @@ Free functions and naming helpers extracted from PodmanBackend.
 
 from __future__ import annotations
 
-import base64
-import binascii
-import json
 import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -24,6 +21,8 @@ from paude.backends.labels import (
     PAUDE_LABEL_SESSION,
     PAUDE_LABEL_VERSION,
     PAUDE_LABEL_WORKSPACE,
+    parse_agent_providers_label,
+    parse_providers_label,
 )
 from paude.backends.naming import (
     network_name,
@@ -190,8 +189,8 @@ def build_session_from_container(
     agent_name = labels.get(PAUDE_LABEL_AGENT, "claude")
     provider_name = labels.get(PAUDE_LABEL_PROVIDER)
     raw_specs = labels.get(PAUDE_LABEL_AGENT_PROVIDERS)
-    agent_providers = _parse_agent_providers(raw_specs)
-    credential_providers = _parse_providers(labels.get(PAUDE_LABEL_PROVIDERS))
+    agent_providers = parse_agent_providers_label(raw_specs)
+    credential_providers = parse_providers_label(labels.get(PAUDE_LABEL_PROVIDERS))
     version = labels.get(PAUDE_LABEL_VERSION)
 
     return Session(
@@ -275,7 +274,7 @@ def get_session_composition(
     labels = get_session_labels(runner, session_name)
     agent_name = str(labels.get(PAUDE_LABEL_AGENT, "claude"))
     provider = labels.get(PAUDE_LABEL_PROVIDER) or None
-    specs = _parse_agent_providers(labels.get(PAUDE_LABEL_AGENT_PROVIDERS))
+    specs = parse_agent_providers_label(labels.get(PAUDE_LABEL_AGENT_PROVIDERS))
     if specs:
         return get_agents(
             [name for name, _provider in specs],
@@ -285,22 +284,12 @@ def get_session_composition(
     return get_agent_composition(get_agent(agent_name, provider=provider))
 
 
-def encode_agent_providers(specs: list[tuple[str, str]]) -> str:
-    """Encode ordered agent/provider pairs for a container label."""
-    return _encode_json_label(specs)
-
-
-def encode_providers(providers: list[str]) -> str:
-    """Encode a credential-provider set for a container label."""
-    return _encode_json_label(providers)
-
-
 def get_session_credential_providers(
     runner: ContainerRunner, session_name: str
 ) -> list[str]:
     """Get credential providers, deriving them for legacy sessions."""
     labels = get_session_labels(runner, session_name)
-    providers = _parse_providers(labels.get(PAUDE_LABEL_PROVIDERS))
+    providers = parse_providers_label(labels.get(PAUDE_LABEL_PROVIDERS))
     if providers:
         return providers
     return list(
@@ -310,50 +299,3 @@ def get_session_credential_providers(
             if agent.config.provider
         )
     )
-
-
-def _parse_providers(raw: str | None) -> list[str]:
-    """Parse a credential-provider label, returning empty when invalid."""
-    if not raw:
-        return []
-    value = _decode_json_label(raw)
-    if not isinstance(value, list):
-        return []
-    return list(dict.fromkeys(item for item in value if isinstance(item, str)))
-
-
-def _parse_agent_providers(raw: str | None) -> list[tuple[str, str]]:
-    """Parse a composition label, returning an empty list when invalid."""
-    if not raw:
-        return []
-    value = _decode_json_label(raw)
-    if not isinstance(value, list):
-        return []
-    specs: list[tuple[str, str]] = []
-    for item in value:
-        if (
-            isinstance(item, list)
-            and len(item) == 2
-            and isinstance(item[0], str)
-            and isinstance(item[1], str)
-        ):
-            specs.append((item[0], item[1]))
-    return specs
-
-
-def _encode_json_label(value: Any) -> str:
-    """Encode JSON as URL-safe base64 for use as a Podman label value."""
-    payload = json.dumps(value, separators=(",", ":")).encode()
-    return base64.urlsafe_b64encode(payload).decode()
-
-
-def _decode_json_label(raw: str) -> Any | None:
-    """Decode a structured label, accepting the original raw-JSON format."""
-    try:
-        decoded = base64.urlsafe_b64decode(raw.encode("ascii"))
-        return json.loads(decoded)
-    except (binascii.Error, UnicodeError, json.JSONDecodeError, ValueError):
-        try:
-            return json.loads(raw)
-        except (TypeError, ValueError):
-            return None
