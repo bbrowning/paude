@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import MISSING, fields
 from pathlib import Path
 
 from paude import upgrade_state
+from paude.backends.labels import SessionSpec
 from paude.upgrade_state import UpgradeManifest
 
 
@@ -91,3 +94,119 @@ class TestUpgradeState:
         path = tmp_path / "upgrades.json"
         path.write_text('{"upgrades": {"test-session": {"unexpected": "field"}}}')
         assert upgrade_state.load("test-session", path=path) is None
+
+
+class TestManifestSchema:
+    """Guards on the on-disk schema, which in-flight upgrades depend on."""
+
+    # A manifest exactly as paude 0.20.2 wrote it, before UpgradeManifest
+    # inherited SessionSpec: flat, and in the field order of that release.
+    LEGACY_JSON = """
+    {"upgrades": {"test-session": {
+        "name": "test-session",
+        "to_version": "0.20.2",
+        "created_at": "2026-08-01T09:00:00+00:00",
+        "workspace": "/home/user/project",
+        "agent": "claude",
+        "provider": "anthropic",
+        "agent_providers": [["claude", "anthropic"], ["codex", "openai"]],
+        "credential_providers": ["anthropic", "openai"],
+        "gpu": "all",
+        "yolo": true,
+        "otel_endpoint": "http://collector:4318",
+        "allowed_domains": [".googleapis.com"],
+        "proxy_image": "proxy:latest"
+    }}}
+    """
+
+    def test_a_manifest_from_an_earlier_release_still_loads(
+        self, tmp_path: Path
+    ) -> None:
+        """An upgrade interrupted before this change must still be resumable."""
+        path = tmp_path / "upgrades.json"
+        path.write_text(self.LEGACY_JSON)
+
+        loaded = upgrade_state.load("test-session", path=path)
+
+        assert loaded == UpgradeManifest(
+            name="test-session",
+            to_version="0.20.2",
+            created_at="2026-08-01T09:00:00+00:00",
+            workspace="/home/user/project",
+            agent="claude",
+            provider="anthropic",
+            agent_providers=[("claude", "anthropic"), ("codex", "openai")],
+            credential_providers=["anthropic", "openai"],
+            gpu="all",
+            yolo=True,
+            otel_endpoint="http://collector:4318",
+            allowed_domains=[".googleapis.com"],
+            proxy_image="proxy:latest",
+        )
+
+    def test_saved_json_stays_flat(self, tmp_path: Path) -> None:
+        """Nesting the spec would strand every manifest an earlier paude wrote."""
+        path = tmp_path / "upgrades.json"
+        upgrade_state.save(_manifest(), path=path)
+
+        entry = json.loads(path.read_text())["upgrades"]["test-session"]
+
+        assert "spec" not in entry
+        assert not any(isinstance(value, dict) for value in entry.values())
+        assert set(entry) == {
+            "name",
+            "to_version",
+            "created_at",
+            "workspace",
+            "agent",
+            "provider",
+            "agent_providers",
+            "credential_providers",
+            "gpu",
+            "yolo",
+            "otel_endpoint",
+            "allowed_domains",
+            "proxy_image",
+        }
+
+
+class TestManifestCarriesTheWholeSpec:
+    """A new SessionSpec field must reach the manifest, not just the dataclass.
+
+    Inheriting the spec dedupes the *schema*; it does not dedupe the *copying*.
+    ``_manifest_from_state`` assigns the spec fields explicitly (which is what
+    makes them mypy-checkable), so a tenth label added to ``SessionSpec`` would
+    silently persist as its default until someone updated that function too.
+    This fails instead.
+    """
+
+    def test_every_spec_field_reaches_the_manifest(self) -> None:
+        from paude.agents import get_agents
+        from paude.cli.upgrade import _manifest_from_state, _ResolvedUpgrade
+
+        state = _ResolvedUpgrade(
+            agent_name="codex",
+            provider_name="openai",
+            composition=get_agents(
+                ["codex"], providers={"codex": "openai"}, include_bundled=False
+            ),
+            credential_providers=["openai"],
+            workspace=Path("/home/user/project"),
+            gpu="all",
+            yolo=True,
+            otel_endpoint="http://collector:4318",
+            allowed_domains=[".pypi.org"],
+            proxy_image_label="proxy:latest",
+        )
+
+        manifest = _manifest_from_state("s", state, "0.21.0", "2026-08-25T00:00:00Z")
+
+        for spec_field in fields(SessionSpec):
+            default = (
+                spec_field.default_factory()
+                if spec_field.default_factory is not MISSING
+                else spec_field.default
+            )
+            assert getattr(manifest, spec_field.name) != default, (
+                f"_manifest_from_state does not carry SessionSpec.{spec_field.name}"
+            )

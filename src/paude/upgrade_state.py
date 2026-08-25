@@ -18,38 +18,36 @@ for remote/SSH sessions, so recovery works even if the connection drops.
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from paude.backends.labels import SessionSpec, normalize_agent_providers
 from paude.config.user_config import _paude_config_dir
 from paude.json_store import atomic_write_json, read_json
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class UpgradeManifest:
+@dataclass(kw_only=True)
+class UpgradeManifest(SessionSpec):
     """Everything needed to recreate a session without its container labels.
 
-    Mirrors the configuration derived from container labels in
-    :func:`paude.cli.upgrade._upgrade_podman` so a resumed upgrade can rebuild
-    the session even after the original container (and its labels) are gone.
+    The label-derived configuration is inherited from
+    :class:`~paude.backends.labels.SessionSpec`; this adds only what the
+    session's labels cannot supply once the container is gone -- which session,
+    where, and what version the interrupted upgrade was heading for.
+
+    Inheriting rather than embedding keeps ``asdict()`` flat, so the on-disk
+    JSON keeps the exact key set an earlier paude wrote. A nested ``spec``
+    object would make an in-flight upgrade unresumable across the release that
+    introduced it.
     """
 
     name: str
     to_version: str
     created_at: str
     workspace: str
-    agent: str = "claude"
-    provider: str | None = None
-    agent_providers: list[tuple[str, str]] = field(default_factory=list)
-    credential_providers: list[str] = field(default_factory=list)
-    gpu: str | None = None
-    yolo: bool = False
-    otel_endpoint: str | None = None
-    allowed_domains: list[str] | None = None
-    proxy_image: str | None = None
 
 
 def _manifests_path() -> Path:
@@ -80,9 +78,9 @@ def load(name: str, path: Path | None = None) -> UpgradeManifest | None:
     try:
         entry = dict(raw)
         # JSON stores tuples as lists; normalise agent_providers back to tuples.
-        entry["agent_providers"] = [
-            tuple(item) for item in (entry.get("agent_providers") or [])
-        ]
+        entry["agent_providers"] = normalize_agent_providers(
+            entry.get("agent_providers")
+        )
         return UpgradeManifest(**entry)
     except (TypeError, ValueError):
         logger.warning("Ignoring corrupt upgrade manifest for '%s'", name)
