@@ -11,18 +11,12 @@ from typing import TYPE_CHECKING, Any
 
 from paude.backends.base import Session
 from paude.backends.labels import (
-    PAUDE_LABEL_AGENT,
-    PAUDE_LABEL_AGENT_PROVIDERS,
     PAUDE_LABEL_APP,
-    PAUDE_LABEL_CREATED,
     PAUDE_LABEL_DOMAINS,
-    PAUDE_LABEL_PROVIDER,
-    PAUDE_LABEL_PROVIDERS,
     PAUDE_LABEL_SESSION,
-    PAUDE_LABEL_VERSION,
-    PAUDE_LABEL_WORKSPACE,
-    parse_agent_providers_label,
-    parse_providers_label,
+    SessionSpec,
+    read_labels,
+    spec_from_labels,
 )
 from paude.backends.naming import (
     network_name,
@@ -31,7 +25,6 @@ from paude.backends.naming import (
     volume_name,
 )
 from paude.backends.podman.exceptions import SessionNotFoundError
-from paude.backends.session_env import decode_path
 from paude.container.runner import ContainerRunner
 
 if TYPE_CHECKING:
@@ -174,38 +167,27 @@ def build_session_from_container(
         Fully-constructed Session object.
     """
     labels = container.get("Labels", {}) or {}
-
-    workspace_encoded = labels.get(PAUDE_LABEL_WORKSPACE, "")
-    workspace = (
-        decode_path(workspace_encoded, url_safe=True)
-        if workspace_encoded
-        else Path("/")
-    )
-    created_at = labels.get(PAUDE_LABEL_CREATED, "")
-
-    status = _get_container_status(container)
-    status = _check_proxy_health(runner, name, labels, status)
-
-    agent_name = labels.get(PAUDE_LABEL_AGENT, "claude")
-    provider_name = labels.get(PAUDE_LABEL_PROVIDER)
-    raw_specs = labels.get(PAUDE_LABEL_AGENT_PROVIDERS)
-    agent_providers = parse_agent_providers_label(raw_specs)
-    credential_providers = parse_providers_label(labels.get(PAUDE_LABEL_PROVIDERS))
-    version = labels.get(PAUDE_LABEL_VERSION)
+    view = read_labels(labels)
+    status = _check_proxy_health(runner, name, labels, _get_container_status(container))
 
     return Session(
         name=name,
         status=status,
-        workspace=workspace,
-        created_at=created_at,
+        # A session whose workspace label was never written must still list;
+        # "/" is the placeholder paude has always shown for one.
+        workspace=view.workspace or Path("/"),
+        created_at=view.created_at,
         backend_type=backend_type,
         container_id=container.get("Id", ""),
         volume_name=volume_name(name),
-        agent=agent_name,
-        provider=provider_name,
-        agent_providers=agent_providers,
-        credential_providers=credential_providers,
-        version=version,
+        agent=view.spec.agent,
+        provider=view.spec.provider,
+        agent_providers=view.spec.agent_providers,
+        # The raw label, deliberately: a listing reports what the session
+        # declared. Callers that want the legacy derivation for a session
+        # predating the label ask for credential_providers_for_spec.
+        credential_providers=view.spec.credential_providers,
+        version=view.version,
     )
 
 
@@ -265,37 +247,60 @@ def get_session_agent(runner: ContainerRunner, session_name: str) -> Agent:
     return get_session_composition(runner, session_name).primary
 
 
+def composition_for_spec(spec: SessionSpec) -> AgentComposition:
+    """Build the agent composition a session's declared spec describes.
+
+    The two branches are not interchangeable, which is why deriving a
+    composition from ``spec.agent_providers`` alone would be wrong. A session
+    created before multi-agent support has no agent-providers label, only a
+    primary agent name -- and resolving that through ``get_agent_composition``
+    expands the agent's ``bundled_agents``. A legacy ``gascity`` session
+    installs claude and gemini alongside itself; take the other branch and it
+    silently comes back with one agent instead of three.
+    """
+    from paude.agents import get_agent, get_agent_composition, get_agents
+
+    if spec.agent_providers:
+        return get_agents(
+            [name for name, _provider in spec.agent_providers],
+            providers={
+                name: provider for name, provider in spec.agent_providers if provider
+            },
+            include_bundled=False,
+        )
+    return get_agent_composition(get_agent(spec.agent, provider=spec.provider))
+
+
+def credential_providers_for_spec(spec: SessionSpec) -> list[str]:
+    """Credential providers for a session, derived for legacy sessions.
+
+    The spec carries the raw label; a session created before that label existed
+    has none, so fall back to the providers its agents map to.
+    """
+    if spec.credential_providers:
+        return spec.credential_providers
+    return list(
+        dict.fromkeys(
+            agent.config.provider or ""
+            for agent in composition_for_spec(spec).agents
+            if agent.config.provider
+        )
+    )
+
+
 def get_session_composition(
     runner: ContainerRunner, session_name: str
 ) -> AgentComposition:
     """Get the full agent composition for a session from its labels."""
-    from paude.agents import get_agent, get_agent_composition, get_agents
-
-    labels = get_session_labels(runner, session_name)
-    agent_name = str(labels.get(PAUDE_LABEL_AGENT, "claude"))
-    provider = labels.get(PAUDE_LABEL_PROVIDER) or None
-    specs = parse_agent_providers_label(labels.get(PAUDE_LABEL_AGENT_PROVIDERS))
-    if specs:
-        return get_agents(
-            [name for name, _provider in specs],
-            providers={name: provider for name, provider in specs if provider},
-            include_bundled=False,
-        )
-    return get_agent_composition(get_agent(agent_name, provider=provider))
+    return composition_for_spec(
+        spec_from_labels(get_session_labels(runner, session_name))
+    )
 
 
 def get_session_credential_providers(
     runner: ContainerRunner, session_name: str
 ) -> list[str]:
     """Get credential providers, deriving them for legacy sessions."""
-    labels = get_session_labels(runner, session_name)
-    providers = parse_providers_label(labels.get(PAUDE_LABEL_PROVIDERS))
-    if providers:
-        return providers
-    return list(
-        dict.fromkeys(
-            agent.config.provider or ""
-            for agent in get_session_composition(runner, session_name).agents
-            if agent.config.provider
-        )
+    return credential_providers_for_spec(
+        spec_from_labels(get_session_labels(runner, session_name))
     )

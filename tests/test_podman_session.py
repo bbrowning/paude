@@ -19,6 +19,7 @@ from paude.backends.labels import (
     PAUDE_LABEL_PROXY_IMAGE,
     PAUDE_LABEL_SESSION,
     PAUDE_LABEL_WORKSPACE,
+    encode_agent_providers,
 )
 from paude.backends.podman import (
     PodmanBackend,
@@ -1704,6 +1705,32 @@ class TestBuildSessionFromContainer:
         assert session.workspace == Path("/")
         assert session.status == "stopped"
 
+    def test_credential_providers_are_the_raw_label(self) -> None:
+        """A listing reports what a session declared, not what its agents imply.
+
+        get_session_credential_providers derives providers for a session
+        predating the providers label; build_session_from_container must not,
+        or `paude list` would show credentials that were never provisioned.
+        """
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = False
+        container = {
+            "Id": "abc123",
+            "Labels": {
+                PAUDE_LABEL_SESSION: "my-session",
+                PAUDE_LABEL_AGENT: "claude",
+                PAUDE_LABEL_AGENT_PROVIDERS: encode_agent_providers(
+                    [("claude", "vertex")]
+                ),
+            },
+            "State": "exited",
+        }
+
+        session = build_session_from_container("my-session", container, mock_runner)
+
+        assert session.agent_providers == [("claude", "vertex")]
+        assert session.credential_providers == []
+
     def test_includes_proxy_health_check(self) -> None:
         """Status is degraded when proxy is expected but missing."""
         mock_runner = MagicMock()
@@ -2042,6 +2069,29 @@ class TestSessionLabelPersistence:
             "anthropic",
             "openai",
         ]
+        # The derivation used to re-fetch the labels it was already reading.
+        # One container fetch is one SSH round trip on a --host session.
+        assert runner.list_containers.call_count == 1
+
+    def test_legacy_session_without_a_composition_label_expands_bundled_agents(
+        self,
+    ) -> None:
+        """The no-agent-providers branch is not interchangeable with the other.
+
+        A session created before multi-agent support records only its primary
+        agent. Resolving that through get_agent_composition pulls in the
+        agent's bundled_agents; deriving the composition from the (empty)
+        agent-providers list instead would come back with one agent where
+        three belong, and the rebuild would install the wrong toolchain.
+        """
+        runner = MagicMock()
+        runner.list_containers.return_value = [
+            {"Labels": {PAUDE_LABEL_SESSION: "s", PAUDE_LABEL_AGENT: "gascity"}}
+        ]
+
+        composition = get_session_composition(runner, "s")
+
+        assert composition.names == ["gascity", "claude", "gemini"]
 
     def test_legacy_json_composition_labels_still_parse(self) -> None:
         config = SessionConfig(
