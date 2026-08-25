@@ -19,6 +19,7 @@ from paude.backup_state import (
 )
 from paude.cli import app
 from paude.transport.ssh import SshTransport
+from tests.fakes import FakeTransport, make_backend, make_engine, make_runner
 
 runner = CliRunner()
 
@@ -55,14 +56,15 @@ def _mock_backend(
     transport's ``run`` for whichever calls they don't stub out at a higher
     level.
     """
-    backend = PodmanBackend(engine=MagicMock())
-    backend._runner = MagicMock()
-    backend._runner.container_exists.return_value = exists
-    backend._runner.container_running.return_value = running
-    backend._runner.get_container_image.return_value = image
+    transport = SshTransport("user@host") if remote else FakeTransport()
+    runner = make_runner(
+        make_engine(transport=transport, is_remote=remote),
+        container_exists=exists,
+        container_running=running,
+        get_container_image=image,
+    )
+    backend = make_backend(runner)
     backend.get_session = MagicMock(return_value=_make_session())  # type: ignore[method-assign]
-    backend._engine.is_remote = remote
-    backend._engine.transport = SshTransport("user@host") if remote else MagicMock()
     return backend
 
 
@@ -466,8 +468,7 @@ class TestBuildManifest:
         from paude.cli.backup import _build_manifest
         from paude.registry import RegistryEntry
 
-        backend = PodmanBackend(engine=MagicMock())
-        backend._runner = MagicMock()
+        backend = make_backend()
         session = Session(
             name="s",
             status="stopped",
@@ -529,8 +530,7 @@ class TestBuildManifest:
     def test_absent_domains_label_means_none(self) -> None:
         from paude.cli.backup import _build_manifest
 
-        backend = PodmanBackend(engine=MagicMock())
-        backend._runner = MagicMock()
+        backend = make_backend()
         from datetime import UTC, datetime
 
         with (
