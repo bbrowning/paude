@@ -89,11 +89,6 @@ def _make_backend(
     from paude.backends.podman.proxy import PodmanProxyManager
 
     backend._proxy = PodmanProxyManager(runner, network)
-    # No-op CA distribution to avoid 30s polling timeouts in tests
-    # that don't test CA distribution. Tests in test_podman_proxy.py
-    # create their own PodmanProxyManager with proper mocks.
-    backend._proxy.distribute_ca_cert = MagicMock()  # type: ignore[method-assign]
-    backend._proxy._redistribute_ca_if_needed = MagicMock()  # type: ignore[method-assign]
     engine = mock_runner.engine if mock_runner is not None else backend._engine
     backend._setup = SessionSetup(runner, engine)
     backend._port_forward = MagicMock()
@@ -1189,14 +1184,12 @@ class TestPodmanBackendCreateSessionWithProxy:
         assert call_kwargs["dns"] == ["10.89.0.2"]
         assert call_kwargs["network"] == "paude-net-dns-session"
 
-    @patch("paude.backends.podman.proxy.time.sleep")
     @patch("paude.backends.podman.proxy.get_podman_machine_dns")
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_no_dns_false_when_no_proxy_ip(
         self,
         mock_runner_class: MagicMock,
         mock_dns: MagicMock,
-        mock_sleep: MagicMock,
     ) -> None:
         """On Docker, the network keeps its plain name when the proxy IP
         cannot be determined: the DNS-enabled network makes the hostname

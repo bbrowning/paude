@@ -1,5 +1,9 @@
 """Pytest fixtures for paude tests."""
 
+import importlib
+from types import ModuleType
+from typing import Any
+
 import pytest
 
 
@@ -26,3 +30,49 @@ def temp_workspace(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     return workspace
+
+
+class _InstantSleep:
+    """Stand-in for the ``time`` module whose ``sleep`` returns immediately.
+
+    Every other attribute delegates to the real module, so a poll loop that
+    also reads a clock still behaves normally.
+    """
+
+    def __init__(self, real: ModuleType) -> None:
+        self._real = real
+
+    def sleep(self, seconds: float) -> None:
+        """Return immediately instead of blocking."""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._real, name)
+
+
+# Modules whose retry/poll loops call time.sleep(). Left real, these dominate
+# the unit suite's wall clock: tests drive them with mocked runners that never
+# satisfy the loop's exit condition, so each one burns its full poll budget.
+_POLL_SLEEP_MODULES = (
+    "paude.backends.podman.ca_cert",
+    "paude.backends.podman.proxy",
+    "paude.container.proxy_runner",
+)
+
+
+@pytest.fixture(autouse=True)
+def _no_poll_sleep(request, monkeypatch):
+    """Make retry/poll sleeps instant for unit tests.
+
+    Safe because every one of these loops bounds itself by counting -- an
+    iteration counter (proxy._get_proxy_ip) or an accumulator incremented by
+    the interval constant (ca_cert), never by wall clock -- so removing the
+    delay preserves timeout semantics exactly, including the warning paths.
+
+    Skipped for integration tests, which drive a real container engine and
+    need real waits.
+    """
+    if "integration" in str(request.fspath):
+        return
+    for name in _POLL_SLEEP_MODULES:
+        module = importlib.import_module(name)
+        monkeypatch.setattr(module, "time", _InstantSleep(module.time))

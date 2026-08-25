@@ -157,10 +157,9 @@ class TestProxyManagerFixedIp:
         assert nname == "paude-net-test-session"
         assert proxy_ip == "10.89.0.2"
 
-    @patch("paude.backends.podman.proxy.time.sleep")
     @patch("paude.backends.podman.proxy.get_podman_machine_dns")
     def test_create_proxy_docker_returns_none_ip_when_no_gateway(
-        self, mock_dns: MagicMock, mock_sleep: MagicMock
+        self, mock_dns: MagicMock
     ) -> None:
         """On Docker, create_proxy returns None IP (hostname fallback is ok)."""
         mock_dns.return_value = None
@@ -180,10 +179,9 @@ class TestProxyManagerFixedIp:
         assert proxy_ip is None
         mock_network.remove_network.assert_not_called()
 
-    @patch("paude.backends.podman.proxy.time.sleep")
     @patch("paude.backends.podman.proxy.get_podman_machine_dns")
     def test_create_proxy_raises_on_podman_when_ip_unavailable(
-        self, mock_dns: MagicMock, mock_sleep: MagicMock
+        self, mock_dns: MagicMock
     ) -> None:
         """On Podman, create_proxy aborts and removes the network if no IP."""
         mock_dns.return_value = None
@@ -235,8 +233,7 @@ class TestProxyManagerFixedIp:
 class TestResolveProxyIpGuard:
     """Direct tests for the shared _resolve_proxy_ip reachability guard."""
 
-    @patch("paude.backends.podman.proxy.time.sleep")
-    def test_raises_and_removes_network_when_owned(self, mock_sleep: MagicMock) -> None:
+    def test_raises_and_removes_network_when_owned(self) -> None:
         """On disable-dns with no IP, raise and remove a just-created network."""
         mock_runner = _make_mock_runner()
         mock_network = MagicMock()
@@ -250,8 +247,7 @@ class TestResolveProxyIpGuard:
 
         mock_network.remove_network.assert_called_once_with("paude-net-test")
 
-    @patch("paude.backends.podman.proxy.time.sleep")
-    def test_raises_without_removing_live_network(self, mock_sleep: MagicMock) -> None:
+    def test_raises_without_removing_live_network(self) -> None:
         """A live network is not torn down on a transient inspect failure."""
         mock_runner = _make_mock_runner()
         mock_network = MagicMock()
@@ -265,10 +261,7 @@ class TestResolveProxyIpGuard:
 
         mock_network.remove_network.assert_not_called()
 
-    @patch("paude.backends.podman.proxy.time.sleep")
-    def test_returns_none_without_raising_when_dns_enabled(
-        self, mock_sleep: MagicMock
-    ) -> None:
+    def test_returns_none_without_raising_when_dns_enabled(self) -> None:
         """With DNS the hostname fallback is legitimate, so None passes through."""
         mock_runner = _make_mock_runner("docker")
         mock_network = MagicMock()
@@ -296,10 +289,9 @@ class TestResolveProxyIpGuard:
         assert result == "10.89.0.2"
         mock_network.remove_network.assert_not_called()
 
-    @patch("paude.backends.podman.proxy.time.sleep")
     @patch("paude.backends.podman.proxy._get_host_dns")
     def test_start_if_needed_raises_on_podman_when_ip_unavailable(
-        self, mock_dns: MagicMock, mock_sleep: MagicMock
+        self, mock_dns: MagicMock
     ) -> None:
         """Recreating a missing proxy aborts without IP, but leaves the
         network alone since the session's agent container may still be
@@ -329,10 +321,9 @@ class TestResolveProxyIpGuard:
         ]
         assert not create_calls
 
-    @patch("paude.backends.podman.proxy.time.sleep")
     @patch("paude.backends.podman.proxy._get_host_dns")
     def test_update_domains_raises_on_podman_when_ip_unavailable(
-        self, mock_dns: MagicMock, mock_sleep: MagicMock
+        self, mock_dns: MagicMock
     ) -> None:
         """update_domains aborts without tearing down the live network."""
         mock_dns.return_value = None
@@ -1109,10 +1100,9 @@ class TestSourceIpFiltering:
         env_vals = [call_args[i + 1] for i in env_indices]
         assert "PAUDE_PROXY_ALLOWED_CLIENTS=10.89.0.3" in env_vals
 
-    @patch("paude.backends.podman.proxy.time.sleep")
     @patch("paude.backends.podman.proxy.get_podman_machine_dns")
     def test_create_proxy_no_allowed_clients_when_no_gateway(
-        self, mock_dns: MagicMock, mock_sleep: MagicMock
+        self, mock_dns: MagicMock
     ) -> None:
         """create_proxy omits allowed_clients when gateway is unavailable.
 
