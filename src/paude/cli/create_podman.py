@@ -13,9 +13,9 @@ from paude.cli.helpers import (
     _detect_dev_script_dir,
     _finalize_session_create,
     _run_setup_command,
-    called_process_stderr,
 )
 from paude.config.models import PaudeConfig
+from paude.subprocess_utils import called_process_stderr
 
 if TYPE_CHECKING:
     from paude.transport.base import Transport

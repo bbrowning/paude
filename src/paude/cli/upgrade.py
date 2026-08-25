@@ -10,7 +10,8 @@ import typer
 
 from paude.backends import SessionNotFoundError
 from paude.cli.app import BackendType, app
-from paude.cli.helpers import called_process_stderr, find_session_backend
+from paude.cli.helpers import find_session_backend
+from paude.subprocess_utils import called_process_stderr
 
 if TYPE_CHECKING:
     from paude.agents.base import AgentComposition
@@ -684,7 +685,7 @@ def _upgrade_podman(
     # its state was already copied into the workspace volume.
     cname = container_name(name)
     if backend._runner.container_exists(cname):
-        from paude.cli.upgrade_persistence import migrate_legacy_state
+        from paude.backends.podman.legacy_state import migrate_legacy_state
 
         typer.echo("Migrating persistent agent state...", err=True)
         migrate_legacy_state(backend._runner, cname, composition)

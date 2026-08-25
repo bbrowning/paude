@@ -12,10 +12,10 @@ from paude.cli.helpers import (
     _auto_select_session,
     _get_backend_instance,
     _parse_forward_ports,
-    called_process_stderr,
     find_session_backend,
 )
 from paude.session_discovery import resolve_session_for_backend
+from paude.subprocess_utils import called_process_stderr
 
 
 @app.command("start")

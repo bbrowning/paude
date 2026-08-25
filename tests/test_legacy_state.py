@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, call
 import pytest
 
 from paude.agents import get_agents
-from paude.cli.upgrade_persistence import (
+from paude.backends.podman.legacy_state import (
     _MIGRATE_SCRIPT,
     migrate_legacy_state,
     persistent_state_paths,

@@ -7,6 +7,18 @@ import threading
 from typing import IO
 
 
+def called_process_stderr(e: Exception) -> str | None:
+    """Return a CalledProcessError's captured stderr, stripped, if any.
+
+    str(CalledProcessError) omits the captured stderr, so callers reporting a
+    failure via an f-string need this to surface the underlying command's
+    actual explanation instead of just "returned non-zero exit status N".
+    """
+    if isinstance(e, subprocess.CalledProcessError) and e.stderr:
+        return str(e.stderr).strip()
+    return None
+
+
 def drain_pipe(pipe: IO[bytes] | None, chunks: list[bytes]) -> threading.Thread:
     """Start a daemon thread that reads ``pipe`` fully into ``chunks``.
 

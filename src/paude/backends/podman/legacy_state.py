@@ -7,9 +7,9 @@ import sys
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
-from paude.cli.helpers import called_process_stderr
 from paude.constants import CONTAINER_HOME
 from paude.container.runner import echo_captured_stderr
+from paude.subprocess_utils import called_process_stderr
 
 if TYPE_CHECKING:
     from paude.agents.base import AgentComposition

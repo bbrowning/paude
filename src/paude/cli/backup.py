@@ -293,7 +293,7 @@ def _finalize_backup(
     """
     from paude.backends import SessionNotFoundError
     from paude.backends.podman.helpers import get_session_composition
-    from paude.cli.upgrade_persistence import credential_exclude_globs
+    from paude.backends.podman.legacy_state import credential_exclude_globs
 
     try:
         composition = get_session_composition(backend_obj._runner, name)
