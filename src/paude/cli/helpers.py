@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,18 +21,6 @@ from paude.session_discovery import (
 if TYPE_CHECKING:
     from paude.agents.base import AgentComposition
     from paude.backends.port_forward_utils import ForwardPort
-
-
-def called_process_stderr(e: Exception) -> str | None:
-    """Return a CalledProcessError's captured stderr, stripped, if any.
-
-    str(CalledProcessError) omits the captured stderr, so callers reporting a
-    failure via an f-string need this to surface the underlying command's
-    actual explanation instead of just "returned non-zero exit status N".
-    """
-    if isinstance(e, subprocess.CalledProcessError) and e.stderr:
-        return str(e.stderr).strip()
-    return None
 
 
 def find_session_backend(

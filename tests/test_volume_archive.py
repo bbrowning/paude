@@ -30,10 +30,11 @@ def _failing_stream(data: bytes = b"partial") -> Iterator[io.BytesIO]:
     raise RuntimeError("archive command failed")
 
 
-def _helper_name_from(call_args) -> str:
+def _helper_name_from(call_args: object) -> str:
     """Extract the helper container name from a ``run ... --name NAME ...`` call."""
-    args = list(call_args.args)
-    return args[args.index("--name") + 1]
+    args = list(call_args.args)  # type: ignore[attr-defined]
+    name: str = args[args.index("--name") + 1]
+    return name
 
 
 class TestExportVolume:

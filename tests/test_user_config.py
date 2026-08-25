@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from paude.config.models import PaudeConfig
-from paude.config.resolver import resolve_create_options
+from paude.config.resolver import ResolvedCreateOptions, resolve_create_options
 from paude.config.user_config import UserDefaults, load_user_defaults
 
 
@@ -90,8 +91,8 @@ class TestLoadUserDefaults:
 class TestResolveCreateOptions:
     """Tests for resolve_create_options."""
 
-    def _resolve(self, **kwargs):
-        defaults = {
+    def _resolve(self, **kwargs: Any) -> ResolvedCreateOptions:
+        defaults: dict[str, Any] = {
             "cli_backend": None,
             "cli_agent": None,
             "cli_yolo": None,
@@ -198,8 +199,8 @@ class TestResolveCreateOptions:
 class TestResolveAgentsAndProviders:
     """Tests for list-valued agents/providers resolution."""
 
-    def _resolve(self, **kwargs):
-        defaults = {
+    def _resolve(self, **kwargs: Any) -> ResolvedCreateOptions:
+        defaults: dict[str, Any] = {
             "cli_backend": None,
             "cli_agent": None,
             "cli_yolo": None,

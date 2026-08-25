@@ -2,21 +2,30 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
 import typer
 
 from paude.backends import SessionNotFoundError
+from paude.backends.labels import SessionSpec
+from paude.backends.podman.helpers import (
+    agent_specs_for,
+    composition_for_spec,
+    credential_providers_for_spec,
+)
 from paude.cli.app import BackendType, app
-from paude.cli.helpers import called_process_stderr, find_session_backend
+from paude.cli.helpers import find_session_backend
+from paude.subprocess_utils import called_process_stderr
 
 if TYPE_CHECKING:
     from paude.agents.base import AgentComposition
     from paude.backends.base import Session
+    from paude.backends.labels import LabeledSession
     from paude.backends.podman.backend import PodmanBackend
-    from paude.container.runner import ContainerRunner
+    from paude.cli.session_rebuild import SessionImages
+    from paude.config.models import PaudeConfig
     from paude.upgrade_state import UpgradeManifest
 
 
@@ -365,104 +374,68 @@ def session_upgrade(
 
 
 @dataclass
-class _ResolvedUpgrade:
-    """Fully-resolved session configuration for a (re)build during upgrade.
+class ResolvedSession:
+    """A session's configuration, fully resolved and ready to rebuild from.
 
     Sourced either from the old container's labels (fresh upgrade) or from a
-    persisted :class:`~paude.cli.upgrade_state.UpgradeManifest` (resumed
-    upgrade), then normalised through :func:`_apply_overrides`.
+    persisted :class:`~paude.upgrade_state.UpgradeManifest` (resumed upgrade),
+    then normalised through :func:`_apply_overrides`.
+
+    The declared configuration lives in ``spec``, shared with both manifests,
+    so it is copied rather than restated. The other two fields are what a spec
+    deliberately excludes: ``composition`` is not serializable, and
+    ``workspace`` has no single sensible default across callers.
     """
 
-    agent_name: str
-    provider_name: str | None
+    spec: SessionSpec
     composition: AgentComposition
-    credential_providers: list[str]
     workspace: Path
-    gpu: str | None
-    yolo: bool
-    otel_endpoint: str | None
-    allowed_domains: list[str] | None
-    proxy_image_label: str | None
 
 
-def _resolve_base_from_labels(
-    runner: ContainerRunner, name: str, labels: dict[str, str]
-) -> _ResolvedUpgrade:
+def _resolve_base_from_view(view: LabeledSession) -> ResolvedSession:
     """Read the session's configuration from its container labels."""
-    from paude.backends.labels import (
-        PAUDE_LABEL_AGENT,
-        PAUDE_LABEL_DOMAINS,
-        PAUDE_LABEL_GPU,
-        PAUDE_LABEL_OTEL_ENDPOINT,
-        PAUDE_LABEL_PROVIDER,
-        PAUDE_LABEL_PROXY_IMAGE,
-        PAUDE_LABEL_WORKSPACE,
-        PAUDE_LABEL_YOLO,
-    )
-    from paude.backends.podman.helpers import (
-        get_session_composition,
-        get_session_credential_providers,
-    )
-    from paude.backends.session_env import decode_path
-
-    workspace_encoded = labels.get(PAUDE_LABEL_WORKSPACE, "")
-    workspace = (
-        decode_path(workspace_encoded, url_safe=True)
-        if workspace_encoded
-        else Path.cwd()
-    )
-
-    # Domain config — old sessions may not have the label (no proxy).
-    # On upgrade, all sessions get a proxy; default to None to trigger
-    # expansion via _prepare_session_create (which defaults to ["default"]).
-    domains_str = labels.get(PAUDE_LABEL_DOMAINS)
-    allowed_domains: list[str] | None = None
-    if domains_str is not None:
-        allowed_domains = domains_str.split(",") if domains_str else []
-
-    return _ResolvedUpgrade(
-        agent_name=labels.get(PAUDE_LABEL_AGENT, "claude"),
-        provider_name=labels.get(PAUDE_LABEL_PROVIDER),
-        composition=get_session_composition(runner, name),
-        credential_providers=get_session_credential_providers(runner, name),
-        workspace=workspace,
-        gpu=labels.get(PAUDE_LABEL_GPU),
-        yolo=labels.get(PAUDE_LABEL_YOLO) == "1",
-        otel_endpoint=labels.get(PAUDE_LABEL_OTEL_ENDPOINT),
-        allowed_domains=allowed_domains,
-        proxy_image_label=labels.get(PAUDE_LABEL_PROXY_IMAGE),
+    return ResolvedSession(
+        # Copied, not aliased: LabeledSession is frozen but its spec is not,
+        # and _apply_overrides mutates what it is handed. Credential providers
+        # are derived rather than read raw, so a session created before the
+        # providers label existed keeps the set its agents imply.
+        spec=replace(
+            view.spec,
+            credential_providers=credential_providers_for_spec(view.spec),
+        ),
+        composition=composition_for_spec(view.spec),
+        # A session created before the workspace label existed: the current
+        # directory is the only guess available, and it is what upgrade has
+        # always used.
+        workspace=view.workspace or Path.cwd(),
     )
 
 
-def _resolve_base_from_manifest(manifest: UpgradeManifest) -> _ResolvedUpgrade:
+def _resolve_base_from_manifest(manifest: UpgradeManifest) -> ResolvedSession:
     """Rebuild the session's configuration from a persisted upgrade manifest.
 
     Used when resuming an interrupted upgrade whose original container (the
     only other source of this config) has already been removed.
     """
-    from paude.agents import get_agents
-
-    specs = manifest.agent_providers or [(manifest.agent, manifest.provider or "")]
-    composition = get_agents(
-        [agent for agent, _provider in specs],
-        providers={agent: provider for agent, provider in specs if provider},
-        include_bundled=False,
-    )
-    return _ResolvedUpgrade(
-        agent_name=manifest.agent,
-        provider_name=manifest.provider,
-        composition=composition,
+    spec = SessionSpec(
+        agent=manifest.agent,
+        provider=manifest.provider,
+        agent_providers=list(manifest.agent_providers),
         credential_providers=list(manifest.credential_providers or []),
-        workspace=Path(manifest.workspace),
         gpu=manifest.gpu,
         yolo=manifest.yolo,
         otel_endpoint=manifest.otel_endpoint,
         allowed_domains=manifest.allowed_domains,
-        proxy_image_label=manifest.proxy_image,
+        proxy_image=manifest.proxy_image,
+    )
+    return ResolvedSession(
+        spec=spec,
+        composition=composition_for_spec(spec),
+        workspace=Path(manifest.workspace),
     )
 
 
-def _apply_overrides(state: _ResolvedUpgrade, overrides: UpgradeOverrides) -> None:
+def _apply_overrides(state: ResolvedSession, overrides: UpgradeOverrides) -> None:
     """Apply CLI overrides to a resolved config in place, normalising provider.
 
     Agent-set changes (``--add-agent`` / ``--agents``) and provider remappings
@@ -538,13 +511,13 @@ def _apply_overrides(state: _ResolvedUpgrade, overrides: UpgradeOverrides) -> No
     if overrides.providers is not None:
         from paude.providers import get_provider
 
-        state.credential_providers = list(dict.fromkeys(overrides.providers))
-        for provider in state.credential_providers:
+        state.spec.credential_providers = list(dict.fromkeys(overrides.providers))
+        for provider in state.spec.credential_providers:
             get_provider(provider)
         missing = [
             provider
             for provider in mapped_providers
-            if provider not in state.credential_providers
+            if provider not in state.spec.credential_providers
         ]
         if missing:
             raise ValueError(
@@ -558,56 +531,53 @@ def _apply_overrides(state: _ResolvedUpgrade, overrides: UpgradeOverrides) -> No
         # `remap` so the documented "add + set provider" workflow
         # (--add-agent X --agent-provider X=P) does not drop credential-only
         # providers.
-        state.credential_providers = list(
-            dict.fromkeys([*state.credential_providers, *mapped_providers])
+        state.spec.credential_providers = list(
+            dict.fromkeys([*state.spec.credential_providers, *mapped_providers])
         )
     elif remap:
         # Pure remap (no agent-set change): replace the credential set with the
         # mapped set, dropping any provider no longer referenced by an agent.
-        state.credential_providers = mapped_providers
+        state.spec.credential_providers = mapped_providers
 
     # Keep the primary-agent scalars in sync with the (possibly reordered or
     # extended) composition, so a changed primary is reflected in labels/env.
-    state.agent_name = state.composition.primary.config.name
-    state.provider_name = state.composition.primary.config.provider
+    state.spec.agent = state.composition.primary.config.name
+    state.spec.provider = state.composition.primary.config.provider
+    state.spec.agent_providers = agent_specs_for(state.composition)
     if overrides.gpu is not None:
-        state.gpu = overrides.gpu if overrides.gpu != "" else None
+        state.spec.gpu = overrides.gpu if overrides.gpu != "" else None
     if overrides.yolo is not None:
-        state.yolo = overrides.yolo
+        state.spec.yolo = overrides.yolo
     if overrides.otel_endpoint is not None:
         # Empty string means "remove OTEL".
-        state.otel_endpoint = overrides.otel_endpoint or None
+        state.spec.otel_endpoint = overrides.otel_endpoint or None
     if overrides.allowed_domains is not None:
-        state.allowed_domains = overrides.allowed_domains
+        state.spec.allowed_domains = overrides.allowed_domains
 
 
 def _manifest_from_state(
     name: str,
-    state: _ResolvedUpgrade,
+    state: ResolvedSession,
     to_version: str,
     created_at: str,
 ) -> UpgradeManifest:
     """Capture a resolved config as a durable manifest for crash recovery."""
     from paude.upgrade_state import UpgradeManifest
 
-    agent_specs = [
-        (item.config.name, item.config.provider or "")
-        for item in state.composition.agents
-    ]
     return UpgradeManifest(
         name=name,
         to_version=to_version,
         created_at=created_at,
         workspace=str(state.workspace),
-        agent=state.agent_name,
-        provider=state.provider_name,
-        agent_providers=agent_specs,
-        credential_providers=list(state.credential_providers),
-        gpu=state.gpu,
-        yolo=state.yolo,
-        otel_endpoint=state.otel_endpoint,
-        allowed_domains=state.allowed_domains,
-        proxy_image=state.proxy_image_label,
+        agent=state.spec.agent,
+        provider=state.spec.provider,
+        agent_providers=list(state.spec.agent_providers),
+        credential_providers=list(state.spec.credential_providers),
+        gpu=state.spec.gpu,
+        yolo=state.spec.yolo,
+        otel_endpoint=state.spec.otel_endpoint,
+        allowed_domains=state.spec.allowed_domains,
+        proxy_image=state.spec.proxy_image,
     )
 
 
@@ -620,183 +590,134 @@ def _upgrade_podman(
     """Upgrade a Podman/Docker session in place.
 
     The whole flow is idempotent and resumable: the resolved configuration is
-    written to a durable manifest before anything is torn down, teardown uses
-    force/tolerant removals, and ``create_session(reuse_volume=True)`` rebuilds
-    from a clean slate while preserving the workspace volume. Re-running after
-    an interruption reads the manifest and converges to a single healthy
-    session.
+    written to a durable manifest before anything is torn down, the images are
+    built before that teardown so a build failure changes nothing, teardown
+    uses force/tolerant removals, and ``create_session(reuse_volume=True)``
+    rebuilds from a clean slate while preserving the workspace volume.
+    Re-running after an interruption reads the manifest and converges to a
+    single healthy session.
     """
-    from datetime import UTC, datetime
-
     from paude import __version__, upgrade_state
-    from paude.backends.podman.helpers import (
-        container_name,
-        find_container_by_session_name,
-        network_name,
-        proxy_container_name,
-    )
-    from paude.cli.helpers import (
-        _detect_dev_script_dir,
-        _prepare_session_create,
-    )
+    from paude.cli.session_rebuild import ImageBuildError, build_session_images
     from paude.config.detector import detect_config
     from paude.config.parser import parse_config
-    from paude.container import ImageManager
-    from paude.mounts import build_mounts
 
-    # Resolve the session config from a manifest (resume) or labels (fresh).
-    manifest = upgrade_state.load(name)
-    if manifest is not None:
-        state = _resolve_base_from_manifest(manifest)
-        created_at = manifest.created_at
-    else:
-        container = find_container_by_session_name(backend._runner, name)
-        if container is None:
-            typer.echo(f"Container for session '{name}' not found.", err=True)
-            raise typer.Exit(1)
-        labels = container.get("Labels", {}) or {}
-        state = _resolve_base_from_labels(backend._runner, name, labels)
-        created_at = datetime.now(UTC).isoformat()
-
+    state, created_at = _resolve_upgrade_state(name, backend)
     _apply_overrides(state, overrides)
 
     # Persist the fully-resolved config BEFORE any destructive step, so an
     # interrupt from here on can be finished by re-running the upgrade.
     upgrade_state.save(_manifest_from_state(name, state, __version__, created_at))
 
-    composition = state.composition
-    workspace = state.workspace
-
-    # Detect project config from workspace
     config = None
-    config_file = detect_config(workspace)
+    config_file = detect_config(state.workspace)
     if config_file:
         config = parse_config(config_file)
 
-    engine = backend._engine
-    agent_instance = composition.primary
-    agent_specs = [
-        (item.config.name, item.config.provider or "") for item in composition.agents
-    ]
-
     # Salvage state written by older images before deleting their writable
-    # layer. Skipped when resuming after the old container is already gone —
+    # layer. A no-op when resuming after the old container is already gone —
     # its state was already copied into the workspace volume.
-    cname = container_name(name)
-    if backend._runner.container_exists(cname):
-        from paude.cli.upgrade_persistence import migrate_legacy_state
-
-        typer.echo("Migrating persistent agent state...", err=True)
-        migrate_legacy_state(backend._runner, cname, composition)
-
-    image_manager = ImageManager(
-        script_dir=_detect_dev_script_dir(),
-        agent=agent_instance,
-        composition=composition,
-        engine=engine,
-    )
+    backend.resources.migrate_legacy_state(name, state.composition)
 
     # A build failure here is transient and non-destructive: nothing has been
-    # torn down yet and the manifest is already saved. Raise a plain exception
-    # (not typer.Exit) so session_upgrade's generic handler reports it, tells
-    # the user their data is safe, and points them at re-running to retry — the
-    # bare `except typer.Exit: raise` path would swallow that guidance.
+    # torn down yet and the manifest is already saved. Re-raise as a plain
+    # exception (not typer.Exit) so session_upgrade's generic handler reports
+    # it, tells the user their data is safe, and points them at re-running to
+    # retry — the bare `except typer.Exit: raise` path would swallow that.
     try:
-        if config is not None and config.has_customizations:
-            image = image_manager.ensure_custom_image(
-                config, force_rebuild=True, workspace=workspace
-            )
-        else:
-            image = image_manager.ensure_default_image(force_rebuild=True)
-    except Exception as e:
-        raise RuntimeError(f"building the agent image failed: {e}") from e
+        images = build_session_images(
+            engine=backend.engine,
+            composition=state.composition,
+            config=config,
+            workspace=state.workspace,
+            force_rebuild=True,
+        )
+    except ImageBuildError as e:
+        raise RuntimeError(str(e)) from e
 
-    # Build proxy image (always required — all sessions use proxy)
-    proxy_image: str | None = None
-    try:
-        proxy_image = image_manager.ensure_proxy_image(force_rebuild=True)
-    except Exception as e:
-        raise RuntimeError(f"building the proxy image failed: {e}") from e
+    # Only now, with both images in hand, is anything removed. Deliberately
+    # keeps the workspace volume, the proxy auth volume and the credential
+    # secrets — see SessionResources.teardown_for_rebuild.
+    backend.resources.teardown_for_rebuild(name)
 
-    # Remove old container and proxy resources (but NOT the workspace volume).
-    # All removals are force/tolerant, so re-running after a partial teardown
-    # is safe.
-    typer.echo(f"Removing old container {cname}...", err=True)
-    backend._runner.remove_container(cname, force=True)
+    _recreate_session(name, backend, state, images, config)
 
-    pname = proxy_container_name(name)
-    backend._runner.remove_container(pname, force=True)
-    nname = network_name(name)
-    backend._network_manager.remove_network(nname)
 
-    # Remove CA volume so create_session can recreate it
-    from paude.backends.podman.proxy import ca_volume_name
+def _recreate_session(
+    name: str,
+    backend: PodmanBackend,
+    state: ResolvedSession,
+    images: SessionImages,
+    config: PaudeConfig | None,
+) -> None:
+    """Build the replacement container around the preserved volume, and start it."""
+    from paude.cli.helpers import _prepare_session_create
+    from paude.cli.session_rebuild import (
+        prepare_session_mounts,
+        session_config_from_spec,
+    )
 
-    backend._volume_manager.remove_volume(ca_volume_name(name), force=True)
+    prepared = prepare_session_mounts(
+        engine=backend.engine, composition=state.composition
+    )
 
-    # Build mounts and env
-    home = Path.home()
-    mounts = build_mounts(home, composition, include_config=engine.is_remote)
-
-    # For SSH remotes, transfer the local config files referenced by the bind
-    # mounts to the remote host and rewrite the mount sources to the remote
-    # paths — the local (e.g. Mac) source paths don't exist on the remote host,
-    # so podman would fail to create the container ("statfs ...: no such file").
-    # Mirrors the create path (see create_podman.py).
-    if engine.is_remote:
-        from paude.transport.config_sync import remap_mounts, sync_configs_to_remote
-        from paude.transport.ssh import SshTransport
-
-        if isinstance(engine.transport, SshTransport):
-            typer.echo("Syncing configuration to remote host...", err=True)
-            remote_config_paths = sync_configs_to_remote(engine.transport, mounts)
-            mounts = remap_mounts(mounts, remote_config_paths.path_map)
-
-    # Expand domains — all sessions get a proxy.
-    # allowed_domains=None (old sessions without proxy) is passed as-is to
-    # _prepare_session_create, which defaults to ["default"].
-    expanded_domains, parsed_args, env, unrestricted = _prepare_session_create(
-        state.allowed_domains,
-        state.yolo,
+    # Expand domains — all sessions get a proxy. allowed_domains=None (an old
+    # session created before that was true) is passed through as-is to
+    # _prepare_session_create, which defaults it to ["default"].
+    expanded_domains, _args, env, _unrestricted = _prepare_session_create(
+        state.spec.allowed_domains,
+        state.spec.yolo,
         None,
         config,
-        agent_name=state.agent_name,
-        provider_name=state.provider_name,
-        otel_endpoint=state.otel_endpoint,
-        composition=composition,
-        credential_providers=state.credential_providers,
+        agent_name=state.spec.agent,
+        provider_name=state.spec.provider,
+        otel_endpoint=state.spec.otel_endpoint,
+        composition=state.composition,
+        credential_providers=state.spec.credential_providers,
     )
-    session_domains = expanded_domains
 
-    # Compute OTEL proxy ports
     otel_ports: list[int] = []
-    if state.otel_endpoint:
+    if state.spec.otel_endpoint:
         from paude.otel import otel_proxy_ports
 
-        otel_ports = otel_proxy_ports(state.otel_endpoint)
+        otel_ports = otel_proxy_ports(state.spec.otel_endpoint)
 
-    # Create new session config with reuse_volume=True
-    from paude.backends import SessionConfig
-
-    session_config = SessionConfig(
-        name=name,
-        workspace=workspace,
-        image=image,
-        env=env,
-        mounts=mounts,
-        allowed_domains=session_domains,
-        yolo=state.yolo,
-        proxy_image=proxy_image or state.proxy_image_label,
-        agent=state.agent_name,
-        provider=state.provider_name,
-        agent_providers=agent_specs,
-        credential_providers=state.credential_providers,
-        gpu=state.gpu,
-        reuse_volume=True,
-        ports=composition.exposed_ports,
-        otel_ports=otel_ports,
-        otel_endpoint=state.otel_endpoint,
+    backend.create_session(
+        session_config_from_spec(
+            state.spec,
+            name=name,
+            workspace=state.workspace,
+            composition=state.composition,
+            images=images,
+            env=env,
+            mounts=prepared.mounts,
+            expanded_domains=expanded_domains,
+            otel_ports=otel_ports,
+            reuse_volume=True,
+        )
     )
-
-    backend.create_session(session_config)
     backend.start_session_no_attach(name)
+
+
+def _resolve_upgrade_state(
+    name: str, backend: PodmanBackend
+) -> tuple[ResolvedSession, str]:
+    """Resolve the session's configuration, and when this upgrade started.
+
+    A leftover manifest means a previous attempt was interrupted: it is the
+    only remaining source of the config once the old container is gone, so it
+    wins over the container's labels and keeps the original start time.
+    """
+    from datetime import UTC, datetime
+
+    from paude import upgrade_state
+
+    manifest = upgrade_state.load(name)
+    if manifest is not None:
+        return _resolve_base_from_manifest(manifest), manifest.created_at
+
+    view = backend.resources.labels(name)
+    if view is None:
+        typer.echo(f"Container for session '{name}' not found.", err=True)
+        raise typer.Exit(1)
+    return _resolve_base_from_view(view), datetime.now(UTC).isoformat()

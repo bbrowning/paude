@@ -42,7 +42,9 @@ class TestDetectPlatformTransport:
         assert _detect_platform(transport) == "linux/amd64"
 
     @patch("platform.machine", return_value="x86_64")
-    def test_transport_failure_falls_back_to_local(self, mock_machine: object) -> None:
+    def test_transport_failure_falls_back_to_local(
+        self, mock_machine: MagicMock
+    ) -> None:
         transport = MagicMock()
         transport.machine.side_effect = RuntimeError("could not determine arch")
         assert _detect_platform(transport) == "linux/amd64"

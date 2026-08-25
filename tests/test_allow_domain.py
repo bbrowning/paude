@@ -6,9 +6,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from paude.backends.podman import PodmanBackend
 from paude.backends.podman import SessionNotFoundError as PodmanSessionNotFoundError
 from paude.backends.podman.proxy import PodmanProxyManager
+from tests.fakes import make_backend
 
 # ---------------------------------------------------------------------------
 # ProxyManager: get_deployment_domains
@@ -20,37 +20,27 @@ from paude.backends.podman.proxy import PodmanProxyManager
 class TestPodmanGetAllowedDomains:
     """Tests for PodmanBackend.get_allowed_domains method."""
 
-    @patch("paude.backends.podman.backend.ContainerRunner")
-    def test_returns_none_when_no_proxy(self, mock_runner_class: MagicMock) -> None:
+    def test_returns_none_when_no_proxy(self) -> None:
         """get_allowed_domains returns None when no proxy exists (unrestricted)."""
         mock_runner = MagicMock()
         # Main container exists, proxy does not
         mock_runner.container_exists.side_effect = lambda name: (
             name == "paude-my-session"
         )
-        mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
+        backend = make_backend(mock_runner)
 
         result = backend.get_allowed_domains("my-session")
         assert result is None
 
-    @patch("paude.backends.podman.backend.ContainerRunner")
-    def test_returns_domain_list_when_proxy_exists(
-        self, mock_runner_class: MagicMock
-    ) -> None:
+    def test_returns_domain_list_when_proxy_exists(self) -> None:
         """get_allowed_domains returns domains from proxy container env."""
         mock_runner = MagicMock()
         # Both main and proxy containers exist
         mock_runner.container_exists.return_value = True
         mock_runner.get_container_env.return_value = ".googleapis.com,.pypi.org"
-        mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
+        backend = make_backend(mock_runner)
 
         result = backend.get_allowed_domains("my-session")
 
@@ -59,33 +49,23 @@ class TestPodmanGetAllowedDomains:
             "paude-proxy-my-session", "ALLOWED_DOMAINS"
         )
 
-    @patch("paude.backends.podman.backend.ContainerRunner")
-    def test_returns_empty_list_when_proxy_has_no_domains(
-        self, mock_runner_class: MagicMock
-    ) -> None:
+    def test_returns_empty_list_when_proxy_has_no_domains(self) -> None:
         """get_allowed_domains returns empty list when ALLOWED_DOMAINS is empty."""
         mock_runner = MagicMock()
         mock_runner.container_exists.return_value = True
         mock_runner.get_container_env.return_value = ""
-        mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
+        backend = make_backend(mock_runner)
 
         result = backend.get_allowed_domains("my-session")
         assert result == []
 
-    @patch("paude.backends.podman.backend.ContainerRunner")
-    def test_raises_session_not_found(self, mock_runner_class: MagicMock) -> None:
+    def test_raises_session_not_found(self) -> None:
         """get_allowed_domains raises SessionNotFoundError when session missing."""
         mock_runner = MagicMock()
         mock_runner.container_exists.return_value = False
-        mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
+        backend = make_backend(mock_runner)
 
         with pytest.raises(PodmanSessionNotFoundError):
             backend.get_allowed_domains("nonexistent")
@@ -100,12 +80,7 @@ class TestPodmanUpdateAllowedDomains:
     """Tests for PodmanBackend.update_allowed_domains method."""
 
     @patch("paude.backends.podman.proxy.get_podman_machine_dns")
-    @patch("paude.backends.podman.backend.ContainerRunner")
-    def test_recreates_proxy_with_new_domains(
-        self,
-        mock_runner_class: MagicMock,
-        mock_dns: MagicMock,
-    ) -> None:
+    def test_recreates_proxy_with_new_domains(self, mock_dns: MagicMock) -> None:
         """update_allowed_domains recreates proxy with new domain list."""
         mock_runner = MagicMock()
         mock_runner.engine.binary = "podman"
@@ -119,11 +94,9 @@ class TestPodmanUpdateAllowedDomains:
         mock_runner.get_container_image.return_value = "proxy:latest"
         # Disable CA verification polling (not the focus of this test)
         mock_runner.container_running.return_value = False
-        mock_runner_class.return_value = mock_runner
         mock_dns.return_value = None
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
+        backend = make_backend(mock_runner)
         mock_network = MagicMock()
         mock_network.get_network_gateway.return_value = "10.89.0.1"
         backend._proxy = PodmanProxyManager(mock_runner, mock_network)
@@ -138,35 +111,25 @@ class TestPodmanUpdateAllowedDomains:
         assert any("create" in c for c in engine_calls)
         assert any("start" in c for c in engine_calls)
 
-    @patch("paude.backends.podman.backend.ContainerRunner")
-    def test_raises_session_not_found(self, mock_runner_class: MagicMock) -> None:
+    def test_raises_session_not_found(self) -> None:
         """update_allowed_domains raises SessionNotFoundError when session missing."""
         mock_runner = MagicMock()
         mock_runner.container_exists.return_value = False
-        mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
+        backend = make_backend(mock_runner)
 
         with pytest.raises(PodmanSessionNotFoundError):
             backend.update_allowed_domains("nonexistent", [".example.com"])
 
-    @patch("paude.backends.podman.backend.ContainerRunner")
-    def test_raises_value_error_when_no_proxy(
-        self, mock_runner_class: MagicMock
-    ) -> None:
+    def test_raises_value_error_when_no_proxy(self) -> None:
         """update_allowed_domains raises ValueError when session has no proxy."""
         mock_runner = MagicMock()
         # Main container exists, proxy does not
         mock_runner.container_exists.side_effect = lambda name: (
             name == "paude-my-session"
         )
-        mock_runner_class.return_value = mock_runner
 
-        backend = PodmanBackend()
-        backend._runner = mock_runner
-        backend._proxy._runner = mock_runner
+        backend = make_backend(mock_runner)
 
         with pytest.raises(ValueError, match="no proxy"):
             backend.update_allowed_domains("my-session", [".example.com"])

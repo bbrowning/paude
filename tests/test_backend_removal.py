@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from paude.backends.podman.backend import PodmanBackend
 from paude.cli import app
 from paude.cli.app import BackendType
 from paude.cli.helpers import _get_backend_instance
@@ -133,6 +134,7 @@ def test_unregister_returns_false_for_missing(tmp_path: Path) -> None:
 def test_local_engine_backend(backend: BackendType) -> None:
     instance = _get_backend_instance(backend)
 
+    assert isinstance(instance, PodmanBackend)
     assert instance.engine.binary == backend.value
     assert isinstance(instance.engine.transport, LocalTransport)
 
@@ -143,7 +145,9 @@ def test_ssh_engine_backend(backend: BackendType) -> None:
         backend, ssh_host="user@example.test:2222", ssh_key="/tmp/test-key"
     )
 
+    assert isinstance(instance, PodmanBackend)
     assert instance.engine.binary == backend.value
-    assert isinstance(instance.engine.transport, SshTransport)
-    assert instance.engine.transport.host == "user@example.test"
-    assert instance.engine.transport.port == 2222
+    transport = instance.engine.transport
+    assert isinstance(transport, SshTransport)
+    assert transport.host == "user@example.test"
+    assert transport.port == 2222

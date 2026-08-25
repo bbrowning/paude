@@ -19,6 +19,7 @@ from paude.backends.labels import (
     PAUDE_LABEL_PROXY_IMAGE,
     PAUDE_LABEL_SESSION,
     PAUDE_LABEL_WORKSPACE,
+    encode_agent_providers,
 )
 from paude.backends.podman import (
     PodmanBackend,
@@ -36,6 +37,7 @@ from paude.backends.podman.session_setup import SessionSetup
 from paude.backends.proxy_config import ProxyCredentials
 from paude.backends.session_env import decode_path as _decode_path_raw
 from paude.backends.session_env import encode_path as _encode_path_raw
+from tests.fakes import make_backend, recorded_commands
 
 
 def encode_path(path: Path) -> str:
@@ -46,58 +48,6 @@ def encode_path(path: Path) -> str:
 def decode_path(encoded: str) -> Path:
     """Decode path with url_safe=True (matches Podman backend usage)."""
     return _decode_path_raw(encoded, url_safe=True)
-
-
-def _make_backend(
-    mock_runner: MagicMock | None = None,
-    mock_network_manager: MagicMock | None = None,
-    mock_volume_manager: MagicMock | None = None,
-    engine_binary: str = "podman",
-) -> PodmanBackend:
-    """Create a PodmanBackend with mocked runner, network, and volume manager."""
-    backend = PodmanBackend()
-    if mock_runner is not None:
-        # Ensure engine attributes are set for ProxyRunner compatibility
-        if not hasattr(mock_runner.engine, "binary") or isinstance(
-            mock_runner.engine.binary, MagicMock
-        ):
-            is_podman = engine_binary != "docker"
-            mock_runner.engine.binary = engine_binary
-            mock_runner.engine.is_podman = is_podman
-            mock_runner.engine.supports_multi_network_create = is_podman
-            mock_runner.engine.default_bridge_network = (
-                "podman" if is_podman else "bridge"
-            )
-            mock_runner.engine.is_remote = False
-            mock_runner.engine.run.return_value = MagicMock(
-                returncode=0, stdout="", stderr=""
-            )
-        backend._runner = mock_runner
-        backend._engine = mock_runner.engine
-    if mock_network_manager is not None:
-        # Ensure get_network_gateway returns a valid IP for proxy IP derivation
-        if not hasattr(mock_network_manager, "_mock_children") or isinstance(
-            mock_network_manager.get_network_gateway.return_value, MagicMock
-        ):
-            mock_network_manager.get_network_gateway.return_value = "10.89.0.1"
-        backend._network_manager = mock_network_manager
-    # Always mock volume manager to prevent real podman calls
-    backend._volume_manager = mock_volume_manager or MagicMock()
-    # Rebuild proxy manager with the mocked runner and network
-    runner = mock_runner or backend._runner
-    network = mock_network_manager or backend._network_manager
-    from paude.backends.podman.proxy import PodmanProxyManager
-
-    backend._proxy = PodmanProxyManager(runner, network)
-    # No-op CA distribution to avoid 30s polling timeouts in tests
-    # that don't test CA distribution. Tests in test_podman_proxy.py
-    # create their own PodmanProxyManager with proper mocks.
-    backend._proxy.distribute_ca_cert = MagicMock()  # type: ignore[method-assign]
-    backend._proxy._redistribute_ca_if_needed = MagicMock()  # type: ignore[method-assign]
-    engine = mock_runner.engine if mock_runner is not None else backend._engine
-    backend._setup = SessionSetup(runner, engine)
-    backend._port_forward = MagicMock()
-    return backend
 
 
 class TestHelperFunctions:
@@ -162,7 +112,7 @@ def _make_create_session_backend(
     Mocks _gather_proxy_credentials and _proxy.create_proxy so tests
     don't need proxy_image or real credentials.
     """
-    backend = _make_backend(mock_runner, MagicMock(), mock_volume)
+    backend = make_backend(mock_runner, MagicMock(), mock_volume)
     backend._setup.gather_proxy_credentials = MagicMock(return_value={})  # type: ignore[method-assign]
     backend._proxy.create_proxy = MagicMock(  # type: ignore[method-assign]
         return_value=("paude-net-test", "10.89.0.2")
@@ -185,7 +135,7 @@ class TestPodmanBackendStartNoAttach:
         mock_runner.container_running.return_value = False
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
         backend._setup = MagicMock()
 
         backend.start_session_no_attach("test-session")
@@ -203,7 +153,7 @@ class TestPodmanBackendStartNoAttach:
         mock_runner.container_running.return_value = True
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
         backend._setup = MagicMock()
 
         backend.start_session_no_attach("test-session")
@@ -478,7 +428,7 @@ class TestPodmanBackendDeleteSession:
         mock_runner_class.return_value = mock_runner
         mock_volume = MagicMock()
 
-        backend = _make_backend(mock_runner, MagicMock(), mock_volume)
+        backend = make_backend(mock_runner, MagicMock(), mock_volume)
 
         backend.delete_session("my-session", confirm=True)
 
@@ -502,7 +452,7 @@ class TestPodmanBackendDeleteSession:
         mock_runner.container_running.return_value = True
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner, MagicMock())
+        backend = make_backend(mock_runner, MagicMock())
 
         backend.delete_session("running-session", confirm=True)
 
@@ -519,7 +469,7 @@ class TestPodmanBackendDeleteSession:
         mock_volume = MagicMock()
         mock_volume.volume_exists.return_value = False
 
-        backend = _make_backend(mock_runner, MagicMock(), mock_volume)
+        backend = make_backend(mock_runner, MagicMock(), mock_volume)
 
         with pytest.raises(SessionNotFoundError) as excinfo:
             backend.delete_session("nonexistent", confirm=True)
@@ -536,7 +486,7 @@ class TestPodmanBackendDeleteSession:
         mock_volume = MagicMock()
         mock_volume.volume_exists.return_value = True
 
-        backend = _make_backend(mock_runner, MagicMock(), mock_volume)
+        backend = make_backend(mock_runner, MagicMock(), mock_volume)
 
         backend.delete_session("orphaned", confirm=True)
 
@@ -558,7 +508,7 @@ class TestPodmanBackendDeleteSession:
         )
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner, MagicMock())
+        backend = make_backend(mock_runner, MagicMock())
 
         with pytest.raises(RuntimeError, match="Failed to remove container"):
             backend.delete_session("stuck-session", confirm=True)
@@ -579,7 +529,7 @@ class TestPodmanBackendDeleteSession:
             "Failed to remove volume"
         )
 
-        backend = _make_backend(mock_runner, MagicMock(), mock_volume)
+        backend = make_backend(mock_runner, MagicMock(), mock_volume)
 
         with pytest.raises(RuntimeError, match="Failed to remove volume"):
             backend.delete_session("vol-stuck", confirm=True)
@@ -603,7 +553,7 @@ class TestPodmanBackendStartSession:
         mock_runner.attach_container.return_value = 0
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
 
         exit_code = backend.start_session("my-session")
 
@@ -629,7 +579,7 @@ class TestPodmanBackendStartSession:
         mock_runner.exec_in_container.return_value = MagicMock(returncode=0)
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
 
         exit_code = backend.start_session("running-session")
 
@@ -650,7 +600,7 @@ class TestPodmanBackendStartSession:
         mock_runner.get_container_state.return_value = "running"
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
         backend.connect_session = MagicMock(return_value=0)  # type: ignore[method-assign]
 
         exit_code = backend.start_session(
@@ -696,7 +646,7 @@ class TestPodmanBackendStopSession:
         mock_runner.container_running.return_value = True
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
 
         backend.stop_session("my-session")
 
@@ -714,7 +664,7 @@ class TestPodmanBackendStopSession:
         mock_runner.container_running.return_value = False
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
 
         backend.stop_session("stopped-session")
 
@@ -727,7 +677,7 @@ class TestPodmanBackendStopSession:
         mock_runner.container_exists.return_value = False
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
 
         # Should not raise, just print and return
         backend.stop_session("nonexistent")
@@ -833,7 +783,7 @@ class TestPodmanBackendConnectSession:
         ]
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
 
         with patch.object(backend._setup, "sync_host_config"):
             exit_code = backend.connect_session("my-session")
@@ -1102,7 +1052,7 @@ class TestPodmanBackendCreateSessionWithProxy:
         mock_dns.return_value = None
         mock_network = MagicMock()
 
-        backend = _make_backend(mock_runner, mock_network)
+        backend = make_backend(mock_runner, mock_network)
 
         config = SessionConfig(
             name="my-session",
@@ -1119,7 +1069,7 @@ class TestPodmanBackendCreateSessionWithProxy:
         )
 
         # Proxy container should be created via engine.run
-        engine_calls = [str(c) for c in mock_runner.engine.run.call_args_list]
+        engine_calls = [" ".join(c) for c in recorded_commands(backend.engine)]
         assert any("create" in c for c in engine_calls)
 
         # Main container should be on the internal network
@@ -1144,7 +1094,7 @@ class TestPodmanBackendCreateSessionWithProxy:
         mock_runner_class.return_value = mock_runner
         mock_dns.return_value = None
 
-        backend = _make_backend(mock_runner, MagicMock())
+        backend = make_backend(mock_runner, MagicMock())
 
         config = SessionConfig(
             name="my-session",
@@ -1174,7 +1124,7 @@ class TestPodmanBackendCreateSessionWithProxy:
         mock_network = MagicMock()
         mock_network.get_network_gateway.return_value = "10.89.0.1"
 
-        backend = _make_backend(mock_runner, mock_network)
+        backend = make_backend(mock_runner, mock_network)
 
         config = SessionConfig(
             name="dns-session",
@@ -1189,14 +1139,12 @@ class TestPodmanBackendCreateSessionWithProxy:
         assert call_kwargs["dns"] == ["10.89.0.2"]
         assert call_kwargs["network"] == "paude-net-dns-session"
 
-    @patch("paude.backends.podman.proxy.time.sleep")
     @patch("paude.backends.podman.proxy.get_podman_machine_dns")
     @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_no_dns_false_when_no_proxy_ip(
         self,
         mock_runner_class: MagicMock,
         mock_dns: MagicMock,
-        mock_sleep: MagicMock,
     ) -> None:
         """On Docker, the network keeps its plain name when the proxy IP
         cannot be determined: the DNS-enabled network makes the hostname
@@ -1210,7 +1158,7 @@ class TestPodmanBackendCreateSessionWithProxy:
         mock_network = MagicMock()
         mock_network.get_network_gateway.return_value = None
 
-        backend = _make_backend(mock_runner, mock_network, engine_binary="docker")
+        backend = make_backend(mock_runner, mock_network, engine_binary="docker")
 
         config = SessionConfig(
             name="no-ip-session",
@@ -1239,7 +1187,7 @@ class TestPodmanBackendCreateSessionWithProxy:
         mock_network = MagicMock()
         mock_volume = MagicMock()
 
-        backend = _make_backend(mock_runner, mock_network, mock_volume)
+        backend = make_backend(mock_runner, mock_network, mock_volume)
 
         config = SessionConfig(
             name="my-session",
@@ -1277,12 +1225,12 @@ class TestPodmanBackendStartSessionWithProxy:
         mock_runner.attach_container.return_value = 0
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
 
         backend.start_session("my-session")
 
         # Proxy should be started via engine.run
-        engine_calls = [str(c) for c in mock_runner.engine.run.call_args_list]
+        engine_calls = [" ".join(c) for c in recorded_commands(backend.engine)]
         assert any("start" in c for c in engine_calls)
         mock_runner.start_container.assert_called_once_with("paude-my-session")
 
@@ -1301,7 +1249,7 @@ class TestPodmanBackendStartSessionWithProxy:
         mock_runner.attach_container.return_value = 0
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
 
         backend.start_session("my-session")
 
@@ -1363,7 +1311,7 @@ class TestPodmanBackendStopSessionWithProxy:
         mock_runner.container_running.return_value = True
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
 
         backend.stop_session("my-session")
 
@@ -1386,7 +1334,7 @@ class TestPodmanBackendDeleteSessionWithProxy:
         mock_runner_class.return_value = mock_runner
         mock_network = MagicMock()
 
-        backend = _make_backend(mock_runner, mock_network)
+        backend = make_backend(mock_runner, mock_network)
 
         backend.delete_session("my-session", confirm=True)
 
@@ -1429,7 +1377,7 @@ class TestProxyHealthCheck:
         )
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
         sessions = backend.list_sessions()
 
         assert len(sessions) == 1
@@ -1460,7 +1408,7 @@ class TestProxyHealthCheck:
         )
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
         sessions = backend.list_sessions()
 
         assert len(sessions) == 1
@@ -1489,7 +1437,7 @@ class TestProxyHealthCheck:
         mock_runner.container_running.return_value = True
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
         sessions = backend.list_sessions()
 
         assert len(sessions) == 1
@@ -1514,7 +1462,7 @@ class TestProxyHealthCheck:
         ]
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
         sessions = backend.list_sessions()
 
         assert len(sessions) == 1
@@ -1543,7 +1491,7 @@ class TestProxyHealthCheck:
         ]
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
         session = backend.get_session("my-session")
 
         assert session is not None
@@ -1583,11 +1531,11 @@ class TestProxyRecreation:
         mock_runner_class.return_value = mock_runner
         mock_network = MagicMock()
 
-        backend = _make_backend(mock_runner, mock_network)
+        backend = make_backend(mock_runner, mock_network)
         backend.start_session("my-session")
 
         # Proxy should be recreated via engine.run (create + start)
-        engine_calls = [str(c) for c in mock_runner.engine.run.call_args_list]
+        engine_calls = [" ".join(c) for c in recorded_commands(backend.engine)]
         assert any("create" in c for c in engine_calls)
         assert any("start" in c for c in engine_calls)
 
@@ -1616,7 +1564,7 @@ class TestProxyRecreation:
         ]
         mock_runner_class.return_value = mock_runner
 
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
         backend.start_session("my-session")
 
         mock_runner.create_session_proxy.assert_not_called()
@@ -1656,11 +1604,11 @@ class TestProxyRecreation:
         mock_runner_class.return_value = mock_runner
         mock_network = MagicMock()
 
-        backend = _make_backend(mock_runner, mock_network)
+        backend = make_backend(mock_runner, mock_network)
         backend.connect_session("my-session")
 
         # Proxy should be recreated via engine.run (create + start)
-        engine_calls = [str(c) for c in mock_runner.engine.run.call_args_list]
+        engine_calls = [" ".join(c) for c in recorded_commands(backend.engine)]
         assert any("create" in c for c in engine_calls)
         assert any("start" in c for c in engine_calls)
 
@@ -1757,6 +1705,32 @@ class TestBuildSessionFromContainer:
         assert session.workspace == Path("/")
         assert session.status == "stopped"
 
+    def test_credential_providers_are_the_raw_label(self) -> None:
+        """A listing reports what a session declared, not what its agents imply.
+
+        get_session_credential_providers derives providers for a session
+        predating the providers label; build_session_from_container must not,
+        or `paude list` would show credentials that were never provisioned.
+        """
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = False
+        container = {
+            "Id": "abc123",
+            "Labels": {
+                PAUDE_LABEL_SESSION: "my-session",
+                PAUDE_LABEL_AGENT: "claude",
+                PAUDE_LABEL_AGENT_PROVIDERS: encode_agent_providers(
+                    [("claude", "vertex")]
+                ),
+            },
+            "State": "exited",
+        }
+
+        session = build_session_from_container("my-session", container, mock_runner)
+
+        assert session.agent_providers == [("claude", "vertex")]
+        assert session.credential_providers == []
+
     def test_includes_proxy_health_check(self) -> None:
         """Status is degraded when proxy is expected but missing."""
         mock_runner = MagicMock()
@@ -1793,7 +1767,7 @@ class TestPodmanBackendSyncHostConfig:
         mock_runner.engine.run.return_value = MagicMock(
             returncode=0, stdout="", stderr=""
         )
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
         backend._engine = mock_runner.engine
 
         with patch("paude.backends.sync_base.Path.home", return_value=tmp_path):
@@ -1821,7 +1795,7 @@ class TestPodmanBackendSyncHostConfig:
         mock_runner.engine.run.return_value = MagicMock(
             returncode=0, stdout="", stderr=""
         )
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
         backend._engine = mock_runner.engine
 
         with patch("paude.backends.sync_base.Path.home", return_value=tmp_path):
@@ -1847,7 +1821,7 @@ class TestPodmanBackendSyncHostConfig:
         mock_runner.engine.run.return_value = MagicMock(
             returncode=0, stdout="", stderr=""
         )
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
         backend._engine = mock_runner.engine
 
         with patch("paude.backends.sync_base.Path.home", return_value=tmp_path):
@@ -1874,7 +1848,7 @@ class TestPodmanBackendSyncHostConfig:
         mock_runner.engine.run.return_value = MagicMock(
             returncode=0, stdout="", stderr=""
         )
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
         backend._engine = mock_runner.engine
 
         with patch("paude.backends.sync_base.Path.home", return_value=tmp_path):
@@ -1908,7 +1882,7 @@ class TestPodmanBackendSyncHostConfig:
             return MagicMock(returncode=0, stdout="", stderr="")
 
         mock_runner.engine.run.side_effect = run_side_effect
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
         backend._engine = mock_runner.engine
 
         with patch("paude.backends.sync_base.Path.home", return_value=tmp_path):
@@ -1937,7 +1911,7 @@ class TestPodmanBackendSyncHostConfig:
             }
         ]
 
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
         backend._engine = MagicMock()
         backend._engine.is_remote = False
         backend._engine.supports_secrets = True
@@ -1965,7 +1939,7 @@ class TestPodmanBackendSyncHostConfig:
             }
         ]
 
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
         backend._engine = MagicMock()
         backend._engine.is_remote = False
         backend._engine.run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -1989,7 +1963,7 @@ class TestPodmanPortUrls:
         mock_runner.engine.run.return_value = MagicMock(
             returncode=0, stdout="", stderr=""
         )
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
 
         mock_agent = MagicMock()
         mock_agent.config.exposed_ports = [(18789, 18789)]
@@ -2008,7 +1982,7 @@ class TestPodmanPortUrls:
         mock_runner.engine.run.return_value = MagicMock(
             returncode=0, stdout="", stderr=""
         )
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
 
         mock_agent = MagicMock()
         mock_agent.config.exposed_ports = []
@@ -2027,7 +2001,7 @@ class TestPodmanPortUrls:
         mock_runner.engine.run.return_value = MagicMock(
             returncode=0, stdout="", stderr=""
         )
-        backend = _make_backend(mock_runner)
+        backend = make_backend(mock_runner)
 
         mock_agent = MagicMock()
         mock_agent.config.exposed_ports = [(18789, 18789)]
@@ -2095,6 +2069,29 @@ class TestSessionLabelPersistence:
             "anthropic",
             "openai",
         ]
+        # The derivation used to re-fetch the labels it was already reading.
+        # One container fetch is one SSH round trip on a --host session.
+        assert runner.list_containers.call_count == 1
+
+    def test_legacy_session_without_a_composition_label_expands_bundled_agents(
+        self,
+    ) -> None:
+        """The no-agent-providers branch is not interchangeable with the other.
+
+        A session created before multi-agent support records only its primary
+        agent. Resolving that through get_agent_composition pulls in the
+        agent's bundled_agents; deriving the composition from the (empty)
+        agent-providers list instead would come back with one agent where
+        three belong, and the rebuild would install the wrong toolchain.
+        """
+        runner = MagicMock()
+        runner.list_containers.return_value = [
+            {"Labels": {PAUDE_LABEL_SESSION: "s", PAUDE_LABEL_AGENT: "gascity"}}
+        ]
+
+        composition = get_session_composition(runner, "s")
+
+        assert composition.names == ["gascity", "claude", "gemini"]
 
     def test_legacy_json_composition_labels_still_parse(self) -> None:
         config = SessionConfig(
@@ -2126,7 +2123,7 @@ class TestCollectForwardPorts:
     def test_collect_forward_ports_merges_and_dedups(self) -> None:
         """User forwards take precedence over agent ports on host-bind conflict."""
         runner = MagicMock()
-        backend = _make_backend(mock_runner=runner)
+        backend = make_backend(runner=runner)
         agent = MagicMock()
         agent.config.exposed_ports = [(18789, 18789), (8372, 8372)]
 
@@ -2146,7 +2143,7 @@ class TestCollectForwardPorts:
     def test_collect_forward_ports_agent_only(self) -> None:
         """Without CLI forwards, only agent-declared ports are forwarded."""
         runner = MagicMock()
-        backend = _make_backend(mock_runner=runner)
+        backend = make_backend(runner=runner)
         agent = MagicMock()
         agent.config.exposed_ports = [(18789, 18789)]
 
@@ -2157,7 +2154,7 @@ class TestCollectForwardPorts:
     def test_collect_forward_ports_none_when_nothing_declared(self) -> None:
         """No CLI forwards and no agent ports yields an empty list."""
         runner = MagicMock()
-        backend = _make_backend(mock_runner=runner)
+        backend = make_backend(runner=runner)
         agent = MagicMock()
         agent.config.exposed_ports = []
 

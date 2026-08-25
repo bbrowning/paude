@@ -496,7 +496,7 @@ class TestSshTransport:
     )
     @patch("paude.transport.ssh.subprocess.run")
     def test_machine_failure_raises(
-        self, mock_run: MagicMock, run_kwargs: dict
+        self, mock_run: MagicMock, run_kwargs: dict[str, object]
     ) -> None:
         mock_run.configure_mock(**run_kwargs)
         transport = SshTransport("user@host")

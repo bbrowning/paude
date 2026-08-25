@@ -8,28 +8,28 @@ import threading
 import pytest
 
 from paude.subprocess_utils import drain_pipe, raise_on_nonzero, reap
-from tests.fakes import FakePopen
+from tests.fakes import FakePopen, as_popen
 
 
 class TestReap:
     def test_already_exited_no_grace(self) -> None:
         proc = FakePopen(returncode=0)
-        assert reap(proc) == 0
+        assert reap(as_popen(proc)) == 0
         assert proc.killed is False
 
     def test_still_running_no_grace_gets_killed(self) -> None:
         proc = FakePopen(pending_waits=1, returncode=-9)
-        assert reap(proc) == -9
+        assert reap(as_popen(proc)) == -9
         assert proc.killed is True
 
     def test_exits_within_grace_not_killed(self) -> None:
         proc = FakePopen(returncode=0)
-        assert reap(proc, grace=5.0) == 0
+        assert reap(as_popen(proc), grace=5.0) == 0
         assert proc.killed is False
 
     def test_exceeds_grace_gets_killed(self) -> None:
         proc = FakePopen(pending_waits=1, returncode=-9)
-        assert reap(proc, grace=5.0) == -9
+        assert reap(as_popen(proc), grace=5.0) == -9
         assert proc.killed is True
 
     def test_joins_drain_threads(self) -> None:
@@ -37,7 +37,7 @@ class TestReap:
         joined = threading.Event()
         thread = threading.Thread(target=joined.set)
         thread.start()
-        reap(proc, thread)
+        reap(as_popen(proc), thread)
         assert joined.is_set()
 
 

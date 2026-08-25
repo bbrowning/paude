@@ -28,11 +28,11 @@ from paude.backends.labels import (
     PAUDE_LABEL_VERSION,
     PAUDE_LABEL_WORKSPACE,
     PAUDE_LABEL_YOLO,
+    encode_agent_providers,
+    encode_providers,
 )
 from paude.backends.podman.helpers import (
     container_name,
-    encode_agent_providers,
-    encode_providers,
     get_session_composition,
     get_session_credential_providers,
     get_session_labels,

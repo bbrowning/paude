@@ -218,7 +218,7 @@ class TestPodmanUpgrade:
             assert "legacy-agent-state" in result.stdout
 
             # 7. Verify proxy container exists
-            result = subprocess.run(
+            exists_result = subprocess.run(
                 [
                     "podman",
                     "container",
@@ -227,7 +227,7 @@ class TestPodmanUpgrade:
                 ],
                 capture_output=True,
             )
-            assert result.returncode == 0, "Proxy container should exist"
+            assert exists_result.returncode == 0, "Proxy container should exist"
 
         finally:
             cleanup_session(backend, unique_session_name)

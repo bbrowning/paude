@@ -17,23 +17,36 @@ Technical debt identified during codebase analysis. Address these before adding 
 - `backends/podman/proxy.py` — reduced from 641 lines to 400 lines. Deleted dead code, extracted collaborator classes.
 - `backends/podman/backend.py` — `create_session()` reduced from 143 lines to ~37 lines.
 
-**Still open — files exceeding 400-line limit:**
-- `cli/commands.py` — 580 lines
-- `workflow.py` — 467 lines
-- `container/runner.py` — 442 lines
+**Still open — files exceeding 400-line limit** (counts refreshed 2026-08-25
+after the session-rebuild consolidation):
+- `cli/upgrade.py` — 715 lines (was 802)
+- `cli/backup.py` — 682 lines (was 703; still needs splitting into a package)
+- `workflow.py` — 534 lines
 - `container/image.py` — 531 lines
-- `cli/backup.py` — 703 lines (grew past the limit adding `--remote-only`
-  streaming backup support; needs splitting into a package)
+- `cli/helpers.py` — 515 lines
+- `container/runner.py` — 460 lines
+- `backends/podman/backend.py` — 448 lines (was 479; two teardowns moved to
+  `backends/podman/resources.py`)
+
+`cli/commands.py` is no longer listed: it is now a package (`cli/commands/`)
+whose largest module is 168 lines.
 
 **Still open — methods exceeding 50-line limit:**
 - `workflow.py` — `harvest_session()` (~102 lines), `status_sessions()` (~84), `reset_session()` (~72)
-- `cli/commands.py` — `session_cp()` (~75 lines)
+- `cli/commands/cp.py` — `session_cp()` (~75 lines)
+- `cli/create_podman.py` — `create_podman_session()` (65 lines, down from 157).
+  Nearly all of what remains is keyword arguments being forwarded from a
+  22-parameter signature to three collaborators; an attempt to extract a
+  fourth helper needed 10 forwarded parameters to remove 4 lines and was
+  reverted as parameter-plumbing rather than decomposition. The real fix is
+  fewer parameters, not another helper.
 
 ### REFACTOR-004: Duplicated Dockerfile between static file and generated code
 
 **Status**: Open
-**Priority**: Medium (every new container script requires updates in multiple places)
+**Priority**: High (has now caused two real build failures; every new container script requires updates in four places)
 **Discovered**: 2026-03-28 while adding entrypoint-lib-openclaw.sh
+**Recurred**: 2026-08-25 with patch-gemini-otel-proxy.sh (see AGENT-003)
 
 The static `containers/paude/Dockerfile` and the programmatic Dockerfile generator in `src/paude/config/dockerfile.py` must be kept in sync manually. Adding a new script to the container requires changes in four places:
 
@@ -42,7 +55,11 @@ The static `containers/paude/Dockerfile` and the programmatic Dockerfile generat
 3. `src/paude/container/build_context.py` — `copy_entrypoints()` file list
 4. `pyproject.toml` — `force-include` for production wheel packaging
 
-This caused a bug where the new OpenClaw helper script was added to the static Dockerfile but not to generated images. Consider having a single source of truth for the list of container scripts (e.g., a constant in `build_context.py`) that all four locations reference, or generating the static Dockerfile from the same code path.
+This caused a bug where the new OpenClaw helper script was added to the static Dockerfile but not to generated images. **It has since recurred**: `patch-gemini-otel-proxy.sh` is present in locations 1, 3 and 4 but missing from location 2, so `generate_workspace_dockerfile` emits a `RUN` referencing a script it never COPYs and the build fails (see AGENT-003 for the reproduction and trigger conditions).
+
+Two recurrences of the same defect mean the manual-sync approach has been falsified. Fix by giving the list of container scripts a single source of truth (e.g. a constant in `build_context.py`) that all four locations derive from, or by generating the static Dockerfile from the same code path.
+
+Whatever the fix, add a guard test — none exists today. The cheapest one that would have caught both bugs: assert that every `/usr/local/bin/*.sh` referenced by a `RUN` line in each generator's output also has a matching `COPY` in that same output. `tests/test_build_context.py:141,156,177` only checks that scripts reach the *build context*, which both bugs passed.
 
 ### REFACTOR-005: SSH transport construction (`ssh_host` string → `SshTransport`) duplicated in three places
 
@@ -60,27 +77,30 @@ The third occurrence was added while fixing SEC-003 rather than reusing `_build_
 
 ### REFACTOR-007: BackupManifest and UpgradeManifest duplicate the label-derived config block
 
-**Status**: Open
-**Priority**: Low (drift-prone; two dataclasses + two loaders must stay in sync)
+**Status**: Resolved (2026-08-25)
 **Discovered**: 2026-08-10 during a cleanup review of the `paude backup` work
 
-`BackupManifest` (`src/paude/backup_state.py`) and `UpgradeManifest`
-(`src/paude/upgrade_state.py`) embed an identical ~9-field "label-derived session
-config" block (`agent`, `provider`, `agent_providers`, `credential_providers`,
-`gpu`, `yolo`, `otel_endpoint`, `allowed_domains`, `proxy_image`), and both
-`backup_state.loads()` and `upgrade_state.load()` re-implement the same
-JSON-list→tuple normalization for `agent_providers`. A new label (e.g. a future
-`env_profile`) must be added to both dataclasses and both loaders.
+`BackupManifest` and `UpgradeManifest` embedded an identical ~9-field
+"label-derived session config" block, and both loaders re-implemented the same
+JSON-list-to-tuple normalization for `agent_providers`, so a new label meant
+editing four places.
 
-Keeping the two *types* separate is correct — they have genuinely different
-lifecycles (`UpgradeManifest` is a durable `name`-keyed host file with
-save/load/delete; `BackupManifest` is a standalone, version-gated bundle member
-with integrity + registry/transport fields). Only the shared *core* should be
-extracted: a small serializable `LabelDerivedConfig` dataclass both manifests
-embed (or inherit), with the tuple-normalization living once beside it. This was
-left out of the backup work because it reaches into the stable upgrade path
-(`_manifest_from_state`/`_resolve_base_from_manifest` in `cli/upgrade.py`), which
-is out of scope for that feature.
+Resolved by the session-rebuild consolidation. Both manifests now inherit
+`SessionSpec` (`backends/labels.py`), which declares those nine fields once
+beside the label constants they come from, along with the codec that produces
+them. Inheritance rather than an embedded `spec` field is what keeps
+`asdict()` flat, so existing `upgrades.json` files and backup bundles are
+unchanged -- guarded by tests that parse a literal written the way 0.20.2 wrote
+it and assert the serialized key set.
+
+Inheritance dedupes the *schema*, not the *copying*: `_manifest_from_state` and
+`_build_manifest` still assign the fields explicitly so mypy can check them, so
+a tenth label could still be silently dropped. Both now have a drift guard that
+loops over `dataclasses.fields(SessionSpec)` and fails by name if either
+manifest does not carry one.
+
+The layering violation behind it went with it: `src/paude/cli` no longer
+imports a `PAUDE_LABEL_*` constant or touches a `PodmanBackend` private.
 
 ### REFACTOR-008: streaming-subprocess lifecycle is duplicated between engine and SSH transport
 
@@ -156,9 +176,210 @@ Podman's auto-allocator currently handles for free. That's a meaningful new
 subsystem. If this race keeps recurring, the deterministic subnet is the actual
 fix and should be prioritized over widening the retry budget.
 
+### PERF-001: the same container labels are fetched up to four times per command
+
+**Status**: Open
+**Priority**: Medium (every fetch is an SSH round trip on a `--host` session)
+**Discovered**: 2026-08-25 during a `/simplify` review of the session-rebuild
+consolidation
+
+Measured by instrumenting `Transport.run` and driving the real paths.
+`ControlPersist` is off (`transport/ssh.py`), so sequential calls do not share
+an SSH master -- each is a full handshake.
+
+- `backend.start_session_no_attach` issues 21 engine round trips, **four** of
+  them the byte-identical `podman ps --format json -a --filter label=app=paude`.
+  Two pairs cause it: `SessionSetup.sync_sandbox_config` calls
+  `get_session_labels` then `get_session_composition` (which re-fetches), and
+  `start_session_containers` calls `get_session_composition` then
+  `get_session_credential_providers`. `connect_session` and
+  `update_allowed_domains` repeat the pattern.
+- `paude backup` pays three `inspect`-style calls (`resources.exists`,
+  `.running`, `.image`) before the `ps` that `resources.labels` makes, for
+  facts that one `ps` record already carries (`State`, `Image`).
+
+The consolidation built exactly the pieces that fix the first one --
+`spec_from_labels` + `composition_for_spec` + `credential_providers_for_spec`
+are pure and I/O-free -- and applied them to `upgrade` and `backup` only.
+One `spec = spec_from_labels(get_session_labels(runner, name))` per command,
+then the two pure derivations, takes `start`/`connect`/`domains --set` from
+four fetches to one. Left out of the consolidation because those call sites are
+outside its diff.
+
+The backup half needs care rather than a mechanical swap: `resources.exists`
+keys off the *container name* while `resources.labels` keys off the *session
+label*, so they are not the same predicate, and `get_container_image` uses
+`ContainerEngine.image_name_format` (`{{.ImageName}}` vs `{{.Config.Image}}`),
+which is not verified to equal `ps`'s `Image` field on both engines. Collapsing
+them wants a `describe()` returning existence, state, image and labels from one
+fetch, checked against both engines.
+
+Separately, `build_session_images` runs the agent and proxy builds
+sequentially though they share no inputs; `paude upgrade` always rebuilds both.
+Parallelising is the largest raw saving here, but both stream progress with
+`capture=False`, so it is only worth doing alongside capturing and replaying
+the proxy pull's output.
+
+### RESTORE-001: `paude restore` is still a stub, and needs a volume-import primitive
+
+**Status**: Open
+**Priority**: Medium (the command exists, is documented as planned, and exits 2)
+**Discovered**: 2026-08-25 while sequencing the session-rebuild consolidation
+
+`session_restore` (`cli/backup.py`) validates a bundle and prints the restore it
+would perform. The consolidation was sequenced to make the implementation small:
+it can now reuse `build_session_images` / `prepare_session_mounts` /
+`session_config_from_spec` (`cli/session_rebuild.py`) plus
+`SessionResources.teardown_for_rebuild`, and read its configuration straight off
+`BackupManifest`'s inherited `SessionSpec`.
+
+The blocker is that `VolumeArchiver` (`backends/podman/volume_archive.py`) has
+`export_volume` / `export_volume_to_remote_file` / `volume_size_bytes` and **no
+inverse**. Building one means a helper container running `tar xzf -` from stdin
+under the same `--user root --security-opt label=disable` escape hatch
+RUNTIME-006 already flags -- except *writing* attacker-influenced tar content
+rather than reading. Path traversal, symlink escape, device nodes, and
+verifying `archive_sha256` **before** extracting are all open questions that
+want their own review. Note also that `--confirm` (restore over an existing
+session) has to call the destructive `delete_session`, which is exactly the
+operation `teardown_for_rebuild` was kept separate from.
+
+`--host` retargeting and `--name` renaming raise product questions the
+consolidation does not answer: whether a rename rewrites `PAUDE_LABEL_WORKSPACE`,
+whether `--host` re-syncs configs and registers `remote_config_dir` (see
+UPGRADE-002), and whether the bundle's recorded `image` is reused or rebuilt.
+
 ## Correctness Backlog
 
 Lower-severity correctness/robustness issues surfaced during code review.
+
+### TEST-005: the rebuild suites patch definition sites, which pins production import style
+
+**Status**: Open
+**Priority**: Low
+**Discovered**: 2026-08-25 during a `/simplify` review of the session-rebuild
+consolidation
+
+`tests/test_create_podman.py`, `tests/test_upgrade.py` and
+`tests/test_session_rebuild.py` patch `paude.container.ImageManager`,
+`paude.mounts.build_mounts` and `paude.transport.config_sync.*` at the modules
+that *define* them rather than where they are looked up. That works only
+because `cli/session_rebuild.py` imports them inside the functions that use
+them, so the module docstring has to warn future editors not to hoist those
+imports -- a test artifact constraining production code.
+
+Two fixes, ascending: patch the lookup site
+(`paude.cli.session_rebuild.ImageManager`), which frees the imports; or, better
+and in line with the project's own "wrap external commands in testable classes"
+rule, inject the `ImageManager` into `build_session_images` the way `engine`
+already is, so there is nothing to patch. The second touches all three suites,
+which the consolidation had just rewritten, so it was deferred.
+
+Related, and larger: `SessionSpec`'s natural sibling is `SessionConfig` in
+`backends/base.py` -- they are the same domain family and
+`session_config_from_spec` is the conversion between them, currently owned by a
+third package (`cli/`). Moving the spec there and making the conversion
+`SessionConfig.from_spec` would put two durable JSON schemas in a module named
+for domain types rather than one named for container-label constants. Deferred:
+a rename touching many imports, with no behaviour change to show for it.
+`cli/helpers._detect_dev_script_dir` is similarly misplaced -- after the
+consolidation its only caller is `cli/session_rebuild.py`, and it is an
+`ImageManager` concern, not a CLI one, yet its path arithmetic is hardcoded to
+living in `cli/`.
+
+### UPGRADE-002: upgrading an SSH session leaks its remote config directory
+
+**Status**: Open
+**Severity**: Medium (leaks a directory per upgrade; registry actively lies)
+**Discovered**: 2026-08-25 during the session-rebuild consolidation
+
+A `--host` session's config files are synced to a temp directory on the remote
+host, and the registry records where (`remote_config_dir`). Upgrade re-syncs
+them -- it needs the new paths to remap its bind mounts -- but discards the new
+`remote_base` and never updates the registry.
+`SessionRegistry.refresh_from_session` (`registry.py`) *deliberately* preserves
+`remote_config_dir`, so after an upgrade the entry still names the pre-upgrade
+directory.
+
+Two consequences: every upgrade of a remote session leaves one
+`/tmp/paude-config-*` tree behind on the remote host, and
+`_cleanup_remote_config_dir` (`cli/commands/delete.py`) then deletes the
+*stale* directory on `paude delete` while leaking the live one.
+
+The plumbing is now in place -- `prepare_session_mounts` returns the
+`RemoteConfigPaths` that upgrade drops on the floor -- so the fix is small, but
+it needs a new `SessionRegistry` method (`refresh_from_session` cannot carry the
+field, by design) and it is a real behaviour change with a visible effect on
+`paude delete`, so it wants its own commit and test rather than riding along
+with a refactor.
+
+### UPGRADE-003: an upgraded session silently loses its `--agent-args`
+
+**Status**: Open
+**Severity**: Low
+**Discovered**: 2026-08-25 during the session-rebuild consolidation
+
+`SessionConfig.args` is live: `backends/session_env.py` turns it into the
+primary agent's `args_env_var`. `create` passes the parsed `--agent-args`;
+upgrade passes nothing, so a rebuilt container comes back without them. Upgrade
+even computes `parsed_args` (it calls `_prepare_session_create` with
+`claude_args=None`) and discards the result.
+
+Preserved deliberately through the consolidation, because passing the computed
+value would change nothing -- it is always empty -- and *fixing* it properly
+means persisting the agent args somewhere durable (a label, or the upgrade
+manifest), which is a feature rather than a refactor.
+
+### UPGRADE-004: `Path.cwd()` is a poor workspace fallback for a session with no workspace label
+
+**Status**: Open
+**Severity**: Low (only reachable for sessions predating the workspace label)
+**Discovered**: 2026-08-25 during the session-rebuild consolidation
+
+`_resolve_base_from_view` (`cli/upgrade.py`) falls back to `Path.cwd()` when the
+container has no `paude.io/workspace` label, so the rebuilt session records
+whatever directory the user happened to run `paude upgrade` from.
+`build_session_from_container` uses `Path("/")` for the same missing label, and
+a test pins that, so the two disagree.
+
+Preserved on both sides by the consolidation --
+`labels.workspace_from_labels` returns `Path | None` and each caller applies its
+own fallback, so the disagreement is at least visible now instead of buried in a
+shared default. `SessionConfig.workspace` only reaches labels and the `Session`
+object (never a bind mount), so this is metadata, not a mount bug.
+
+### CREATE-001: a failed `create_session` performs no rollback
+
+**Status**: Open
+**Severity**: Low (leaves a half-built session that `paude delete` can clear)
+**Discovered**: 2026-08-25 while characterizing the create pipeline
+
+`_create_session_or_exit` (`cli/create_podman.py`) cleans up on failure by
+calling `delete_session(session.name, ...)`, but `session` is only bound by the
+`create_session` call itself. When *that* is what failed, the cleanup raises
+`UnboundLocalError` into its own best-effort `except Exception: pass`, so
+nothing is rolled back. A failure in `start_session_no_attach` (where `session`
+*is* bound) rolls back correctly.
+
+The container itself is cleaned up by `PodmanBackend`'s own
+`rollback_create`, so the leak is bounded, but the outer cleanup is dead code on
+the path it most needs to run. Both behaviours are characterized in
+`tests/test_create_podman.py` so the fix cannot be made accidentally. The fix is
+to use `session_config.name` (or the generated name) instead.
+
+### CONFIG-001: three `SessionConfig` fields are never read
+
+**Status**: Open
+**Severity**: Low (dead weight, and one of them is misleading)
+**Discovered**: 2026-08-25 during the session-rebuild consolidation
+
+`SessionConfig.workdir`, `.network` and `.wait_for_ready` (`backends/base.py`)
+are set by callers and read by nobody. `workdir` is the misleading one: `create`
+sets it to the *host* workspace path, while `SessionSetup` hardcodes
+`workdir="/pvc"` when it creates the container, so the field reads like a knob
+that does something. `SessionConfig`'s docstring is also stale -- it documents
+through `ports` and omits `proxy_image`, the `agent*` fields, `gpu`,
+`reuse_volume` and the `otel_*` fields.
 
 ### HARVEST-001: `harvest` diff summary hardcodes `main` as the base ref
 
@@ -208,6 +429,59 @@ pruning every unreferenced provider.
 ## Agent Limitations
 
 Issues caused by upstream agent behavior, not paude bugs.
+
+### AGENT-003: Remove the Gemini agent entirely (deprecated upstream)
+
+**Status**: Open
+**Priority**: Medium (supersedes AGENT-001 and AGENT-002, and resolves a live build bug)
+**Discovered**: 2026-08-25 during a codebase maintenance review
+
+Google has deprecated the Gemini CLI, so paude should drop the agent rather than
+keep carrying workarounds for it. This supersedes **AGENT-001** (idle-session
+OAuth token expiry) and **AGENT-002** (proxy support broken in 0.36.0+, which is
+why `src/paude/agents/gemini.py` has been pinned to `@google/gemini-cli@0.35.3`
+since 2026-05-12); both entries can be deleted along with the agent.
+
+**Decide this first — it is the actual blocker.** `src/paude/agents/gascity.py`
+declares `bundled_agents=["claude", "gemini"]`, so removing gemini forces a
+decision about what gascity bundles. Everything else is mechanical.
+
+**Removal surface (~34 files).** Source: `agents/gemini.py`, `agents/__init__.py`
+(import + `_AGENTS`), `agents/gascity.py` (`bundled_agents`),
+`providers/agent_providers.py` (`AGENT_PROVIDERS` **and** `DEFAULT_PROVIDER` —
+the default provider is stored in both), `domains.py` (`DOMAIN_ALIASES`),
+`otel.py` (`builders`), `hash.py`, `registry.py`, `cli/create.py`,
+`cli/help.py`, `container/build_context.py`. Containers:
+`containers/paude/Dockerfile` (COPY line) and
+`containers/paude/patch-gemini-otel-proxy.sh` (delete). Packaging:
+`pyproject.toml` `force-include`. Docs: `README.md`, `docs/SESSIONS.md`. Plus
+~19 test files, of which `tests/test_gascity.py` and `tests/test_agents.py` need
+real edits rather than deletions.
+
+Note that existing sessions created with gemini will still carry a
+`paude.io/agent=gemini` label, so `paude list` / `paude upgrade` need to degrade
+sensibly (or fail with a clear message) rather than raising a bare `ValueError`
+from `get_agent()`.
+
+**A live bug that removal also fixes.** `generate_workspace_dockerfile`
+(`src/paude/config/dockerfile.py:219-231`) COPYs `patch-proxy-fetch.sh` and the
+two OpenClaw patch scripts, but **not** `patch-gemini-otel-proxy.sh` — while
+`agents/gemini.py:59-61` emits
+
+```
+RUN npm install -g @google/gemini-cli@latest && /usr/local/bin/patch-gemini-otel-proxy.sh --force 2>&1
+```
+
+so the generated Dockerfile references a file it never copied and the build
+fails. Reproduced against `generate_workspace_dockerfile(cfg, agent=get_agent("gemini"))`:
+`REFERENCED BUT NEVER COPIED: ['patch-gemini-otel-proxy.sh']`.
+
+Trigger: a `paude.json` setting `base_image` or `dockerfile` (so
+`_resolve_custom_base` returns `using_default=False`, `container/image.py:357-366`)
+plus gemini in the agent set — directly or via gascity. The default-image path
+(`generate_pip_install_dockerfile`) is unaffected only because its base was built
+from the *static* `containers/paude/Dockerfile:101`, which does have the COPY.
+This is REFACTOR-004 recurring on a third script; see that entry.
 
 ### AGENT-001: Gemini CLI token expiry in long-running sessions
 
@@ -419,6 +693,77 @@ Ideas worth investigating for closing this out (none attempted yet — this is a
 No path forward here is trivial — SELinux MAC enforcement and `podman exec`'s user model are real constraints, not oversights — but the goal is for paude to never invoke any podman/docker operation as root.
 
 ## Test Suite
+
+### TEST-004: Remaining test-suite duplication and untestable-by-design seams
+
+**Status**: Open
+**Priority**: Medium (this is what makes refactoring `src/` expensive)
+**Discovered**: 2026-08-25 during the test-infrastructure pass that added
+`tests/fakes.py`'s `make_backend`/`make_runner`/`FakeTransport`
+
+The shared doubles now exist and the poll-sleep tax is gone, but three larger
+items were deliberately left:
+
+1. **`git_remote/utils.py` calls `subprocess.run` 17 times directly**
+   (`workflow.py` adds 5 more), which is why
+   `@patch("paude.git_remote.subprocess.run")` is the single most-patched
+   target in the suite at 79 sites. This violates the project's own rule in
+   `docs/CODING_STANDARDS.md` ("Wrap external commands ... in testable classes
+   rather than calling subprocess directly"). Routing git through an injectable
+   runner would delete those 79 patches and let a `FakeTransport`-style double
+   record git invocations. Deferred because it is a `src/` change, and the
+   test-infrastructure work was kept behaviour-preserving.
+
+2. **Half-resolved (2026-08-25).** The 15 `backend._runner` assignments in
+   `tests/test_upgrade.py` are gone: the session-rebuild consolidation
+   (REFACTOR-007) gave `PodmanBackend` a `resources` collaborator, `cli/` moved
+   onto it, and the tests moved onto `tests/fakes.py`'s `make_backend` via one
+   `_upgrade_backend` helper. Assertions now land on the doubles the test
+   injected rather than on attributes read back out of the system under test.
+
+   The other 15 -- `MagicMock()` with `__class__ = PodmanBackend` -- remain, and
+   the original entry was wrong to lump them together. They are in the
+   `session_upgrade` tests, where `_upgrade_podman` is patched out entirely;
+   they exist only to satisfy `isinstance(backend_obj, PodmanBackend)` while
+   controlling `get_session`/`stop_session`. No layering change reaches them.
+   Fixing them means either making `make_backend` cheap enough to use where a
+   bare mock is wanted, or having `session_upgrade` dispatch on something other
+   than `isinstance`.
+
+3. **`tests/test_cli.py` (2041 lines) is a grab-bag** whose classes duplicate
+   topics that already have dedicated files (`TestBlockedDomainsCLI` vs
+   `test_blocked_domains.py`, `TestParseCopyPath` vs `test_remote_copy.py`,
+   `TestAgentSpecificDomainExpansion` vs `test_domains.py`). Splitting it along
+   its existing class boundaries is mechanical. Separately,
+   `tests/test_agents.py` (2000 lines, 45 classes, zero mocks) is a
+   6-agents x 6-concerns copy-paste grid that wants parametrizing -- best done
+   after the Gemini removal in AGENT-003, which deletes one row of it.
+
+For reference, the pass that opened this entry took `make test` from 26.9s to
+6.8s, mock/patch constructions from 2028 to 1937, and put `tests/` under mypy.
+
+### TEST-003: Test signatures are unannotated, so mypy runs relaxed over `tests/`
+
+**Status**: Open
+**Priority**: Low (the checks that catch real bugs are already on)
+**Discovered**: 2026-08-25 while extending `make typecheck` to cover `tests/`
+
+`tests/` is now type-checked (it is the larger half of the repo's Python), but
+`[[tool.mypy.overrides]]` for `tests.*` disables `disallow_untyped_defs`,
+`disallow_incomplete_defs` and `disallow_untyped_calls`. Without those three,
+enabling mypy on tests surfaced 81 real errors, all since fixed; with them it
+is 782, of which 701 are purely "this signature has no annotations".
+
+The relaxation is deliberate: the value of checking tests is catching wrong
+argument types, stale attribute names and str/bytes confusion, and strict mode
+still enforces all of that. Annotating ~1900 test signatures buys little and
+would churn every test file.
+
+To tighten later, drop the override keys one at a time — `disallow_untyped_calls`
+first (47 errors, mostly calls into unannotated test helpers), then
+`disallow_incomplete_defs` (a further ~81), then `disallow_untyped_defs`
+(~654). Note `tests/*` also waives `E501` in the ruff per-file ignores, so test
+code has one fewer guardrail than `src` either way.
 
 ### TEST-002: Single-file branch of `_transfer_path` is untested
 

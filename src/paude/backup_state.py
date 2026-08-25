@@ -22,7 +22,9 @@ version gating, not atomic file persistence.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
+
+from paude.backends.labels import SessionSpec, normalize_agent_providers
 
 # Bump when the bundle layout or manifest schema changes incompatibly.
 BACKUP_FORMAT_VERSION = 1
@@ -35,9 +37,15 @@ class BackupFormatError(ValueError):
     """Raised when a bundle's manifest is missing, corrupt, or unsupported."""
 
 
-@dataclass
-class BackupManifest:
+@dataclass(kw_only=True)
+class BackupManifest(SessionSpec):
     """Everything needed to identify and rebuild a backed-up session.
+
+    The label-derived configuration is inherited from
+    :class:`~paude.backends.labels.SessionSpec`; this adds the bundle's own
+    identity and integrity fields plus the registry-only fields a remote or
+    renamed restore needs. Inheriting rather than embedding keeps ``to_json()``
+    flat, so the manifest schema is unchanged.
 
     Attributes:
         name: Session name at backup time.
@@ -47,9 +55,7 @@ class BackupManifest:
         source_paude_version: paude version that produced the bundle.
         session_created_at: ISO timestamp of the original session creation.
         archive_sha256: SHA-256 of ``pvc.tar.gz`` for integrity checks.
-        agent/provider/agent_providers/credential_providers: agent composition.
-        gpu/yolo/otel_endpoint/allowed_domains/proxy_image/image: session config
-            derived from container labels.
+        image: The container image the bundle captured.
         backend_type/engine/ssh_host/ssh_key/remote_config_dir: registry-only
             fields needed to reconstruct how to reach the (possibly remote)
             session on restore.
@@ -63,16 +69,9 @@ class BackupManifest:
     session_created_at: str | None = None
     archive_sha256: str | None = None
 
-    # Label-derived config (mirrors UpgradeManifest).
-    agent: str = "claude"
-    provider: str | None = None
-    agent_providers: list[tuple[str, str]] = field(default_factory=list)
-    credential_providers: list[str] = field(default_factory=list)
-    gpu: str | None = None
-    yolo: bool = False
-    otel_endpoint: str | None = None
-    allowed_domains: list[str] | None = None
-    proxy_image: str | None = None
+    # The image the bundle captured. Not a SessionSpec field: the spec records
+    # declared configuration, and this is a build output. Upgrade has no use for
+    # it (it always force-rebuilds), but a restore must know what it restored.
     image: str | None = None
 
     # Registry-only fields (not present in container labels).
@@ -109,11 +108,18 @@ def loads(text: str) -> BackupManifest:
         )
 
     entry = dict(raw)
-    # JSON stores tuples as lists; normalize agent_providers back to tuples so it
-    # round-trips identically to the in-memory dataclass.
-    entry["agent_providers"] = [
-        tuple(item) for item in (entry.get("agent_providers") or [])
-    ]
+    try:
+        # JSON stores tuples as lists; normalize agent_providers back to tuples
+        # so it round-trips identically to the in-memory dataclass. Strict, so a
+        # malformed pair surfaces here rather than as a 1-tuple that blows up
+        # later where a caller unpacks `for agent, provider in specs`.
+        entry["agent_providers"] = normalize_agent_providers(
+            entry.get("agent_providers")
+        )
+    except ValueError as exc:
+        raise BackupFormatError(
+            f"Backup manifest has a malformed field: {exc}"
+        ) from exc
     try:
         return BackupManifest(**entry)
     except TypeError as exc:

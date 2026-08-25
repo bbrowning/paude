@@ -12,6 +12,7 @@ from paude.backends.base import Session, SessionConfig
 from paude.backends.labels import (
     PAUDE_LABEL_APP,
     PAUDE_LABEL_SESSION,
+    SessionSpec,
 )
 from paude.backends.podman.exceptions import (
     SessionExistsError,
@@ -24,11 +25,11 @@ from paude.backends.podman.file_copy import (
 from paude.backends.podman.helpers import (
     _generate_session_name,
     build_session_from_container,
+    composition_for_spec,
     container_name,
     find_container_by_session_name,
     get_session_agent,
     get_session_composition,
-    network_name,
     proxy_container_name,
     require_running_session,
     require_session,
@@ -36,11 +37,11 @@ from paude.backends.podman.helpers import (
 )
 from paude.backends.podman.port_forward import PodmanPortForwardManager
 from paude.backends.podman.proxy import PodmanProxyManager
+from paude.backends.podman.resources import SessionResources
 from paude.backends.podman.session_setup import SessionSetup
 from paude.backends.port_forward_utils import ForwardPort, merge_forward_ports
 from paude.constants import (
     CONTAINER_ENTRYPOINT,
-    GCP_ADC_SECRET_NAME,
 )
 from paude.container.engine import ContainerEngine
 from paude.container.network import NetworkManager
@@ -75,11 +76,23 @@ class PodmanBackend:
         self._proxy = PodmanProxyManager(self._runner, self._network_manager)
         self._port_forward = PodmanPortForwardManager(self._engine)
         self._setup = SessionSetup(self._runner, self._engine)
+        self._resources = SessionResources(
+            self._runner, self._network_manager, self._volume_manager, self._proxy
+        )
 
     @property
     def engine(self) -> ContainerEngine:
         """Access the underlying container engine."""
         return self._engine
+
+    @property
+    def resources(self) -> SessionResources:
+        """Read and remove this session's podman objects.
+
+        The public seam for callers that drive a rebuild (upgrade, backup)
+        without needing -- or being handed -- the backend's collaborators.
+        """
+        return self._resources
 
     @property
     def backend_type(self) -> str:
@@ -106,22 +119,13 @@ class PodmanBackend:
             print(f"Creating volume {vname}...", file=sys.stderr)
             self._volume_manager.create_volume(vname, labels=labels)
 
-        from paude.agents import get_agent, get_agent_composition, get_agents
-
-        if config.agent_providers:
-            composition = get_agents(
-                [agent for agent, _provider in config.agent_providers],
-                providers={
-                    agent: provider
-                    for agent, provider in config.agent_providers
-                    if provider
-                },
-                include_bundled=False,
+        composition = composition_for_spec(
+            SessionSpec(
+                agent=config.agent,
+                provider=config.provider,
+                agent_providers=config.agent_providers,
             )
-        else:
-            composition = get_agent_composition(
-                get_agent(config.agent, provider=config.provider)
-            )
+        )
         network, proxy_ip = self._create_session_proxy(
             config, name, composition, vname, volume_reused
         )
@@ -136,7 +140,7 @@ class PodmanBackend:
                 proxy_ip,
             )
         except Exception:
-            self._rollback_session_resources(config, name, vname, volume_reused)
+            self._resources.rollback_create(config, name, vname, volume_reused)
             raise
 
         print(f"Session '{name}' created (stopped).", file=sys.stderr)
@@ -174,21 +178,6 @@ class PodmanBackend:
             raise
         return network, proxy_ip
 
-    def _rollback_session_resources(
-        self,
-        config: SessionConfig,
-        session_name: str,
-        vname: str,
-        volume_reused: bool,
-    ) -> None:
-        """Clean up proxy/volume on container creation failure."""
-        if config.proxy_image:
-            pname = proxy_container_name(session_name)
-            self._runner.remove_container(pname, force=True)
-            self._network_manager.remove_network(network_name(session_name))
-        if not volume_reused:
-            self._volume_manager.remove_volume(vname, force=True)
-
     def start_session_no_attach(self, name: str) -> None:
         """Start containers without attaching (used by create and upgrade)."""
         cname = require_session(self._runner, name)
@@ -218,7 +207,7 @@ class PodmanBackend:
             if not self._volume_manager.volume_exists(vname):
                 raise SessionNotFoundError(f"Session '{name}' not found")
             print(f"Removing orphaned volume {vname}...", file=sys.stderr)
-            self._cleanup_session_resources(name, vname)
+            self._resources.cleanup_all(name, vname)
             return
 
         print(f"Deleting session '{name}'...", file=sys.stderr)
@@ -233,27 +222,7 @@ class PodmanBackend:
             self._runner.remove_container_verified(pname)
         print(f"Removing container {cname}...", file=sys.stderr)
         self._runner.remove_container_verified(cname)
-        self._cleanup_session_resources(name, vname)
-
-    def _cleanup_session_resources(
-        self,
-        name: str,
-        vname: str,
-    ) -> None:
-        """Remove network, proxy volumes, secrets, and main volume."""
-        self._network_manager.remove_network(network_name(name))
-        from paude.backends.podman.proxy import (
-            auth_volume_name,
-            ca_volume_name,
-        )
-
-        for pv in (ca_volume_name(name), auth_volume_name(name)):
-            if self._volume_manager.volume_exists(pv):
-                self._volume_manager.remove_volume(pv, force=True)
-        self._proxy.remove_credential_secrets(name)
-        print(f"Removing volume {vname}...", file=sys.stderr)
-        self._volume_manager.remove_volume_verified(vname)
-        self._runner.remove_secret(GCP_ADC_SECRET_NAME)
+        self._resources.cleanup_all(name, vname)
 
     def start_session(
         self,

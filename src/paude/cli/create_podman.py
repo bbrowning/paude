@@ -9,16 +9,27 @@ import typer
 
 from paude.agents import get_agents
 from paude.backends import PodmanBackend, SessionConfig, SessionExistsError
+from paude.backends.labels import SessionSpec
+from paude.backends.podman.helpers import agent_specs_for
 from paude.cli.helpers import (
-    _detect_dev_script_dir,
     _finalize_session_create,
     _run_setup_command,
-    called_process_stderr,
+)
+from paude.cli.session_rebuild import (
+    ImageBuildError,
+    build_session_images,
+    prepare_session_mounts,
+    session_config_from_spec,
 )
 from paude.config.models import PaudeConfig
+from paude.subprocess_utils import called_process_stderr
 
 if TYPE_CHECKING:
+    from paude.agents.base import AgentComposition
+    from paude.backends.base import Session
+    from paude.container.engine import ContainerEngine
     from paude.transport.base import Transport
+    from paude.transport.config_sync import RemoteConfigPaths
 
 
 def create_podman_session(
@@ -28,7 +39,6 @@ def create_podman_session(
     config: PaudeConfig | None,
     env: dict[str, str],
     expanded_domains: list[str],
-    unrestricted: bool,
     parsed_args: list[str],
     yolo: bool,
     git: bool,
@@ -48,92 +58,123 @@ def create_podman_session(
     otel_endpoint: str | None = None,
 ) -> None:
     """Local container session creation logic (Podman or Docker)."""
-    from paude.container import ImageManager
     from paude.container.engine import ContainerEngine
-    from paude.mounts import build_mounts
 
     engine = ContainerEngine(engine_binary, transport=transport)
-    home = Path.home()
+    composition, spec = _resolve_composition_and_spec(
+        agent_name=agent_name,
+        provider_name=provider_name,
+        agent_providers=agent_providers,
+        credential_providers=credential_providers,
+        gpu=gpu,
+        yolo=yolo,
+        otel_endpoint=otel_endpoint,
+    )
+
+    try:
+        images = build_session_images(
+            engine=engine,
+            composition=composition,
+            config=config,
+            workspace=workspace,
+            force_rebuild=rebuild,
+            platform=platform,
+        )
+    except ImageBuildError as e:
+        label = "image" if e.stage == "agent" else "proxy image"
+        typer.echo(f"Error ensuring {label}: {e.cause}", err=True)
+        raise typer.Exit(1) from None
+
+    prepared = prepare_session_mounts(engine=engine, composition=composition)
+
+    session_config = session_config_from_spec(
+        spec,
+        name=name,
+        workspace=workspace,
+        composition=composition,
+        images=images,
+        env=env,
+        mounts=prepared.mounts,
+        expanded_domains=expanded_domains,
+        otel_ports=otel_ports or [],
+        args=parsed_args,
+        workdir=str(workspace),
+    )
+
+    backend_instance, session = _create_session_or_exit(
+        engine, session_config, prepared.remote_config
+    )
+
+    from paude import __version__
+
+    _finalize_session_create(
+        session=session,
+        expanded_domains=expanded_domains,
+        yolo=yolo,
+        git=git,
+        no_clone_origin=no_clone_origin,
+        ssh_host=ssh_host,
+        ssh_key=ssh_key,
+        remote_config_dir=(
+            prepared.remote_config.remote_base if prepared.remote_config else None
+        ),
+        paude_version=__version__,
+    )
+
+    if config and config.setup_command:
+        _run_setup_command(backend_instance, session.name, config.setup_command)
+
+
+def _resolve_composition_and_spec(
+    *,
+    agent_name: str,
+    provider_name: str | None,
+    agent_providers: list[tuple[str, str]] | None,
+    credential_providers: list[str] | None,
+    gpu: str | None,
+    yolo: bool,
+    otel_endpoint: str | None,
+) -> tuple[AgentComposition, SessionSpec]:
+    """Resolve the requested agents and gather the session's declared config.
+
+    The spec is normalised here rather than downstream: unspecified credential
+    providers mean "whatever the agents map to", and that default belongs with
+    the caller that knows it, not inside the shared session builder.
+    """
     specs = agent_providers or [(agent_name, provider_name or "")]
     composition = get_agents(
         [name for name, _provider in specs],
         providers={name: provider for name, provider in specs if provider},
         include_bundled=False,
     )
-    resolved_specs = [
-        (item.config.name, item.config.provider or "") for item in composition.agents
-    ]
-    agent_instance = composition.primary
-    image_manager = ImageManager(
-        script_dir=_detect_dev_script_dir(),
-        platform=platform,
-        agent=agent_instance,
-        composition=composition,
-        engine=engine,
-    )
-
-    # Ensure image
-    try:
-        if config is not None and config.has_customizations:
-            image = image_manager.ensure_custom_image(
-                config, force_rebuild=rebuild, workspace=workspace
-            )
-        else:
-            image = image_manager.ensure_default_image(force_rebuild=rebuild)
-    except Exception as e:
-        typer.echo(f"Error ensuring image: {e}", err=True)
-        raise typer.Exit(1) from None
-
-    # Build mounts — skip config bind mounts for local engines (use podman cp
-    # instead, which avoids SELinux label issues). SSH remotes keep bind mounts.
-    mounts = build_mounts(home, composition, include_config=engine.is_remote)
-
-    # Sync configs to remote host if using SSH
-    remote_config_paths = None
-    if engine.is_remote:
-        from paude.transport.config_sync import remap_mounts, sync_configs_to_remote
-        from paude.transport.ssh import SshTransport
-
-        if isinstance(engine.transport, SshTransport):
-            typer.echo("Syncing configuration to remote host...", err=True)
-            remote_config_paths = sync_configs_to_remote(engine.transport, mounts)
-            mounts = remap_mounts(mounts, remote_config_paths.path_map)
-
-    # Ensure proxy image (always required — all sessions use proxy)
-    podman_proxy_image: str | None = None
-    try:
-        podman_proxy_image = image_manager.ensure_proxy_image(force_rebuild=rebuild)
-    except Exception as e:
-        typer.echo(f"Error ensuring proxy image: {e}", err=True)
-        raise typer.Exit(1) from None
-
-    # Create session config
-    session_config = SessionConfig(
-        name=name,
-        workspace=workspace,
-        image=image,
-        env=env,
-        mounts=mounts,
-        args=parsed_args,
-        workdir=str(workspace),
-        allowed_domains=expanded_domains,
-        yolo=yolo,
-        proxy_image=podman_proxy_image,
+    resolved_specs = agent_specs_for(composition)
+    spec = SessionSpec(
         agent=agent_name,
         provider=provider_name,
         agent_providers=resolved_specs,
         credential_providers=credential_providers
         or [provider for _agent, provider in resolved_specs],
         gpu=gpu,
-        ports=composition.exposed_ports,
-        otel_ports=otel_ports or [],
+        yolo=yolo,
         otel_endpoint=otel_endpoint,
     )
+    return composition, spec
 
+
+def _create_session_or_exit(
+    engine: ContainerEngine,
+    session_config: SessionConfig,
+    remote_config: RemoteConfigPaths | None,
+) -> tuple[PodmanBackend, Session]:
+    """Create and start the session, or report the failure and exit.
+
+    An existing session is reported as-is and deliberately left alone; every
+    other failure is rolled back on a best-effort basis, including any config
+    files synced to a remote host.
+    """
+    backend_instance = PodmanBackend(engine=engine)
     try:
-        backend_instance = PodmanBackend(engine=engine)
         session = backend_instance.create_session(session_config)
-
         # Auto-start the container (entrypoint is tini -- sleep infinity)
         backend_instance.start_session_no_attach(session.name)
     except SessionExistsError as e:
@@ -147,34 +188,14 @@ def create_podman_session(
             backend_instance.delete_session(session.name, confirm=True)
         except Exception:  # noqa: S110 - best-effort cleanup
             pass
-        if remote_config_paths:
+        if remote_config:
             try:
                 from paude.transport.config_sync import cleanup_remote_configs
                 from paude.transport.ssh import SshTransport
 
                 if isinstance(engine.transport, SshTransport):
-                    cleanup_remote_configs(
-                        engine.transport, remote_config_paths.remote_base
-                    )
+                    cleanup_remote_configs(engine.transport, remote_config.remote_base)
             except Exception:  # noqa: S110 - best-effort cleanup
                 pass
         raise typer.Exit(1) from None
-
-    from paude import __version__
-
-    _finalize_session_create(
-        session=session,
-        expanded_domains=expanded_domains,
-        yolo=yolo,
-        git=git,
-        no_clone_origin=no_clone_origin,
-        ssh_host=ssh_host,
-        ssh_key=ssh_key,
-        remote_config_dir=(
-            remote_config_paths.remote_base if remote_config_paths else None
-        ),
-        paude_version=__version__,
-    )
-
-    if config and config.setup_command:
-        _run_setup_command(backend_instance, session.name, config.setup_command)
+    return backend_instance, session
