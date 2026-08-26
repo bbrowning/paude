@@ -55,10 +55,8 @@ class GeminiAgent:
             "# Install Node.js for Gemini CLI",
             *nodejs_prereq_install_lines(),
             "",
-            "# Install Gemini CLI and patch OTEL proxy",
-            "RUN npm install -g @google/gemini-cli@latest"
-            " && /usr/local/bin/patch-gemini-otel-proxy.sh"
-            " --force 2>&1",
+            "# Install Gemini CLI",
+            "RUN npm install -g @google/gemini-cli@latest",
             "",
             "# Set up home directory",
             "USER paude",

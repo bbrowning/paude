@@ -138,9 +138,6 @@ class TestCopyEntrypoints:
             "entrypoint-lib-config.sh",
             "entrypoint-lib-install.sh",
             "patch-proxy-fetch.sh",
-            "patch-gemini-otel-proxy.sh",
-            "patch-openclaw-otel-proxy.sh",
-            "patch-openclaw-otel-logs.sh",
         ]:
             (src_dir / lib_name).write_text(f"#!/bin/bash\r\n# {lib_name}\r\n")
 
@@ -153,9 +150,6 @@ class TestCopyEntrypoints:
             "entrypoint-lib-config.sh",
             "entrypoint-lib-install.sh",
             "patch-proxy-fetch.sh",
-            "patch-gemini-otel-proxy.sh",
-            "patch-openclaw-otel-proxy.sh",
-            "patch-openclaw-otel-logs.sh",
         ]:
             lib_dest = dest_dir / lib_name
             assert lib_dest.exists(), f"{lib_name} not copied"
@@ -174,11 +168,31 @@ class TestCopyEntrypoints:
             "entrypoint-lib-config.sh",
             "entrypoint-lib-install.sh",
             "patch-proxy-fetch.sh",
+        ]:
+            assert not (dest_dir / lib_name).exists()
+
+    def test_skips_removed_otel_patch_files(self, tmp_path: Path) -> None:
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        entrypoint = src_dir / "entrypoint.sh"
+        entrypoint.write_text("#!/bin/bash\n")
+        for script_name in [
             "patch-gemini-otel-proxy.sh",
             "patch-openclaw-otel-proxy.sh",
             "patch-openclaw-otel-logs.sh",
         ]:
-            assert not (dest_dir / lib_name).exists()
+            (src_dir / script_name).write_text("#!/bin/bash\n")
+
+        dest_dir = tmp_path / "dest"
+        dest_dir.mkdir()
+        copy_entrypoints(entrypoint, dest_dir)
+
+        for script_name in [
+            "patch-gemini-otel-proxy.sh",
+            "patch-openclaw-otel-proxy.sh",
+            "patch-openclaw-otel-logs.sh",
+        ]:
+            assert not (dest_dir / script_name).exists()
 
 
 class TestGenerateDockerfileContent:

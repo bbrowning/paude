@@ -805,6 +805,11 @@ class TestGeminiAgentDockerfile:
         text = "\n".join(lines)
         assert "@google/gemini-cli" in text
 
+    def test_does_not_patch_otel_proxy(self) -> None:
+        lines = GeminiAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "patch-gemini-otel-proxy.sh" not in text
+
     def test_no_chmod(self) -> None:
         lines = GeminiAgent().dockerfile_install_lines("/home/paude")
         text = "\n".join(lines)
@@ -1813,6 +1818,12 @@ class TestOpenClawAgentDockerfile:
         lines = OpenClawAgent().dockerfile_install_lines("/home/paude")
         text = "\n".join(lines)
         assert "NODE_USE_ENV_PROXY=1" in text
+
+    def test_does_not_patch_otel(self) -> None:
+        lines = OpenClawAgent().dockerfile_install_lines("/home/paude")
+        text = "\n".join(lines)
+        assert "patch-openclaw-otel-proxy.sh" not in text
+        assert "patch-openclaw-otel-logs.sh" not in text
 
     def test_handles_both_base_images(self) -> None:
         lines = OpenClawAgent().dockerfile_install_lines("/home/paude")

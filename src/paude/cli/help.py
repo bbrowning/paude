@@ -167,7 +167,7 @@ _SECTIONS: tuple[HelpSection, ...] = (
             ),
             (
                 "paude create --otel-endpoint http://collector:4318",
-                "Export agent telemetry to OTLP collector",
+                "Export Claude Code telemetry to OTLP collector",
             ),
             (
                 "paude connect --forward-port 8372",
