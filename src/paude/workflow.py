@@ -74,7 +74,7 @@ def _remote_targets_container_path(remote_url: str, container_path: str) -> bool
     """
     parsed = _parse_paude_remote_url(remote_url)
     if parsed is None:
-        return True
+        return "%S" not in remote_url
     return parsed[1] == container_path
 
 

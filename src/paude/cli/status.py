@@ -98,7 +98,10 @@ def harvest_cmd(
         str | None,
         typer.Option(
             "--remote",
-            help="Git remote name to use (default: paude-<session>).",
+            help=(
+                "Git remote name to use (default: matching remote in the "
+                "current checkout or paude-<session>)."
+            ),
         ),
     ] = None,
     repo: Annotated[
@@ -107,7 +110,8 @@ def harvest_cmd(
             "--repo",
             help=(
                 "Host git repo to harvest into "
-                "(default: the session's recorded workspace)."
+                "(default: current checkout with a matching remote or the "
+                "session's recorded workspace)."
             ),
         ),
     ] = None,

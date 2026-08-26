@@ -897,6 +897,16 @@ class TestRemoteTargetsContainerPath:
             "git@github.com:user/repo.git", "/pvc/workspace"
         )
 
+    @pytest.mark.parametrize(
+        "remote_url",
+        [
+            "ext::podman run -i paude-test %S /pvc/other",
+            "ext::podman exec -i 'paude-test %S /pvc/other",
+        ],
+    )
+    def test_rejects_unparsable_url_with_path_marker(self, remote_url: str) -> None:
+        assert not _remote_targets_container_path(remote_url, "/pvc/workspace")
+
 
 class TestStatusSessions:
     """Tests for status_sessions."""
