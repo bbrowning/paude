@@ -72,9 +72,115 @@ def _remote_targets_container_path(remote_url: str, container_path: str) -> bool
     paude ext:: remotes; treat those as a match so a manually configured remote
     isn't blocked.
     """
-    if "%S " not in remote_url:
-        return True
-    return remote_url.rsplit(" ", 1)[-1] == container_path
+    parsed = _parse_paude_remote_url(remote_url)
+    if parsed is None:
+        return "%S" not in remote_url
+    return parsed[1] == container_path
+
+
+def _parse_paude_remote_url(remote_url: str) -> tuple[str, str] | None:
+    """Return the container name and path encoded in a paude ext URL."""
+    if not remote_url.startswith("ext::"):
+        return None
+
+    command, marker, container_path = remote_url[6:].partition(" %S ")
+    if not marker or not container_path:
+        return None
+
+    try:
+        command_parts = shlex.split(command)
+        exec_index = command_parts.index("exec")
+    except ValueError:
+        return None
+
+    container_index = exec_index + 1
+    while container_index < len(command_parts) and command_parts[
+        container_index
+    ].startswith("-"):
+        container_index += 1
+    if container_index >= len(command_parts):
+        return None
+    return command_parts[container_index], container_path
+
+
+def _session_remote_candidates(
+    session_name: str,
+    cwd: Path,
+    container_path: str | None,
+) -> list[tuple[str, str]]:
+    """Find current-repository ext remotes targeting a session."""
+    from paude.git_remote import list_git_remotes
+
+    candidates: list[tuple[str, str]] = []
+    for remote_name, remote_url in list_git_remotes(cwd=cwd):
+        parsed = _parse_paude_remote_url(remote_url)
+        if parsed is None or parsed[0] != resource_name(session_name):
+            continue
+        if container_path is None or parsed[1] == container_path:
+            candidates.append((remote_name, parsed[1]))
+    return candidates
+
+
+def _current_git_repo() -> Path | None:
+    """Return the repository containing the current working directory."""
+    current = Path.cwd().resolve()
+    for candidate in (current, *current.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _resolve_harvest_target(
+    session_name: str,
+    session: Session,
+    remote_name: str | None,
+    container_path: str | None,
+    repo: str | None,
+) -> tuple[Path, str | None, str]:
+    """Resolve host repo, remote, and container path for harvest."""
+    from paude.git_remote import git_remote_exists, git_remote_get_url
+
+    current_repo = _current_git_repo()
+    workspace = Path(repo).expanduser().resolve() if repo else session.workspace
+    selected_remote = remote_name
+    selected_path = container_path
+
+    if not repo and current_repo is not None:
+        if remote_name and git_remote_exists(remote_name, cwd=current_repo):
+            workspace = current_repo
+        elif remote_name is None:
+            candidates = _session_remote_candidates(
+                session_name, current_repo, container_path
+            )
+            if len(candidates) > 1:
+                details = ", ".join(
+                    f"{name} ({path})" for name, path in candidates
+                )
+                typer.echo(
+                    f"Error: Multiple remotes in the current repository target "
+                    f"session '{session_name}': {details}.",
+                    err=True,
+                )
+                typer.echo(
+                    "  Use --remote to choose one, or --repo to choose a checkout.",
+                    err=True,
+                )
+                raise typer.Exit(1)
+            if candidates:
+                workspace = current_repo
+                selected_remote, selected_path = candidates[0]
+
+    if selected_path is None:
+        candidate_name = selected_remote or resource_name(session_name)
+        if (workspace / ".git").exists() and git_remote_exists(
+            candidate_name, cwd=workspace
+        ):
+            remote_url = git_remote_get_url(candidate_name, cwd=workspace)
+            parsed = _parse_paude_remote_url(remote_url or "")
+            if parsed is not None:
+                selected_path = parsed[1]
+
+    return workspace, selected_remote, selected_path or CONTAINER_WORKSPACE
 
 
 def _ensure_remote_exists(
@@ -193,31 +299,52 @@ def _get_container_branch(
 
 def harvest_session(
     session_name: str,
-    branch_name: str,
+    branch_name: str | None = None,
     create_pr: bool = False,
     pr_title: str | None = None,
-    container_path: str = CONTAINER_WORKSPACE,
+    container_path: str | None = None,
     remote_name: str | None = None,
     repo: str | None = None,
+    source_branch: str | None = None,
 ) -> None:
     """Harvest changes from a running session into a local branch.
 
+    ``source_branch`` selects a branch or ref in the container without requiring
+    it to be checked out. When omitted, the checked-out container branch is
+    used. ``branch_name`` defaults to the source branch when one is supplied.
     ``container_path`` selects which repo path inside the container to harvest
     from, ``remote_name`` the git remote to use, and ``repo`` the host repo to
-    harvest into. All default to the single-repo behavior (the session's
-    ``/pvc/workspace`` and recorded host workspace).
+    harvest into. Existing matching remotes in the current host checkout can
+    supply the latter two defaults.
     """
     from paude.git_remote import git_diff_stat, git_fetch_from_remote
+
+    if branch_name is None:
+        if source_branch is None:
+            typer.echo(
+                "Error: --branch is required unless --from is supplied.", err=True
+            )
+            raise typer.Exit(1)
+        if source_branch.startswith("refs/heads/"):
+            branch_name = source_branch.removeprefix("refs/heads/")
+        else:
+            branch_name = source_branch.removeprefix("refs/")
 
     _validate_harvest_branch(branch_name)
 
     backend_type, backend, session = _find_backend_and_session(session_name)
 
-    workspace = Path(repo).expanduser().resolve() if repo else session.workspace
-    if not (workspace / ".git").is_dir():
+    workspace, remote_name, container_path = _resolve_harvest_target(
+        session_name,
+        session,
+        remote_name,
+        container_path,
+        repo,
+    )
+    if not (workspace / ".git").exists():
         typer.echo(
             f"Error: Workspace '{workspace}' is not a git repository "
-            f"(missing or no .git directory).",
+            f"(missing .git entry).",
             err=True,
         )
         raise typer.Exit(1)
@@ -232,15 +359,27 @@ def harvest_session(
         cwd=workspace,
     )
 
-    container_branch = _get_container_branch(backend, session_name, container_path)
-    typer.echo(f"Container is on branch '{container_branch}'.", err=True)
+    if source_branch is None:
+        source_ref = _get_container_branch(backend, session_name, container_path)
+        typer.echo(f"Container is on branch '{source_ref}'.", err=True)
+    else:
+        source_ref = source_branch
+        typer.echo(f"Using container source ref '{source_branch}'.", err=True)
+
+    if source_ref.startswith("refs/"):
+        fetch_ref = source_ref
+    else:
+        fetch_ref = f"refs/heads/{source_ref}"
+    remote_ref = "FETCH_HEAD"
 
     typer.echo(f"Fetching from '{remote_name}'...", err=True)
-    if not git_fetch_from_remote(remote_name, cwd=workspace):
+    fetch_succeeded = git_fetch_from_remote(
+        remote_name, cwd=workspace, source_ref=fetch_ref
+    )
+    if not fetch_succeeded:
         typer.echo("Error: Failed to fetch from remote.", err=True)
         raise typer.Exit(1)
 
-    remote_ref = f"{remote_name}/{container_branch}"
     typer.echo(f"Resetting '{branch_name}' to '{remote_ref}'...", err=True)
     result = subprocess.run(
         ["git", "checkout", "-B", branch_name, remote_ref],
@@ -250,7 +389,8 @@ def harvest_session(
     )
     if result.returncode != 0:
         typer.echo(
-            f"Error: Failed to reset branch: {result.stderr.strip()}",
+            f"Error: Failed to harvest source ref '{source_ref}' from "
+            f"remote '{remote_name}': {result.stderr.strip()}",
             err=True,
         )
         raise typer.Exit(1)

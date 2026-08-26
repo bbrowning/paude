@@ -11,6 +11,7 @@ import pytest
 
 from paude.workflow import (
     _get_container_branch,
+    _parse_paude_remote_url,
     _remote_targets_container_path,
     _validate_harvest_branch,
     _verify_container_repo,
@@ -55,6 +56,23 @@ class TestGetContainerBranch:
 
         cmd = mock_backend.exec_in_session.call_args[0][1]
         assert cmd == ("git -C /pvc/workspace/rigs/vllm rev-parse --abbrev-ref HEAD")
+
+
+class TestParsePaudeRemoteUrl:
+    """Tests for parsing session remotes."""
+
+    def test_parses_local_remote(self) -> None:
+        assert _parse_paude_remote_url(
+            "ext::podman exec -i paude-test %S /pvc/workspace/rigs/api"
+        ) == ("paude-test", "/pvc/workspace/rigs/api")
+
+    def test_parses_ssh_remote(self) -> None:
+        assert _parse_paude_remote_url(
+            "ext::ssh user@host docker exec -i paude-test %S /pvc/workspace"
+        ) == ("paude-test", "/pvc/workspace")
+
+    def test_rejects_non_paude_url(self) -> None:
+        assert _parse_paude_remote_url("https://github.com/example/repo") is None
 
 
 class TestValidateHarvestBranch:
@@ -120,10 +138,242 @@ class TestHarvestSession:
         harvest_session("test", "my-branch")
 
         mock_fetch.assert_called_once()
-        # Single checkout -B call
-        assert mock_run.call_count == 1
-        args = mock_run.call_args[0][0]
+        # Remote inference lists the current repository before checkout.
+        assert mock_run.call_count == 2
+        args = mock_run.call_args_list[-1][0][0]
         assert args[:3] == ["git", "checkout", "-B"]
+
+    @patch("paude.workflow.subprocess.run")
+    @patch("paude.git_remote.git_diff_stat")
+    @patch("paude.git_remote.git_fetch_from_remote")
+    @patch("paude.git_remote.git_remote_get_url")
+    @patch("paude.git_remote.git_remote_exists")
+    @patch("paude.cli.find_session_backend")
+    def test_harvests_explicit_source_and_defaults_destination(
+        self,
+        mock_find: MagicMock,
+        mock_exists: MagicMock,
+        mock_get_url: MagicMock,
+        mock_fetch: MagicMock,
+        mock_diff: MagicMock,
+        mock_run: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        backend = self._setup_mocks(mock_find, tmp_path)
+        mock_exists.return_value = True
+        mock_get_url.return_value = "ext::podman exec -i paude-test %S /pvc/workspace"
+        mock_fetch.return_value = True
+        mock_diff.return_value = ""
+        mock_run.return_value = CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+
+        harvest_session("test", source_branch="feature/foo")
+
+        assert backend.exec_in_session.call_count == 1
+        assert mock_run.call_args[0][0] == [
+            "git",
+            "checkout",
+            "-B",
+            "feature/foo",
+            "FETCH_HEAD",
+        ]
+        mock_fetch.assert_called_once_with(
+            "paude-test", cwd=tmp_path, source_ref="refs/heads/feature/foo"
+        )
+
+    @pytest.mark.parametrize(
+        ("source_ref", "expected_branch"),
+        [
+            ("refs/heads/feature/foo", "feature/foo"),
+            ("refs/tags/v1.0", "tags/v1.0"),
+            ("refs/pull/42/head", "pull/42/head"),
+        ],
+    )
+    @patch("paude.workflow.subprocess.run")
+    @patch("paude.git_remote.git_diff_stat")
+    @patch("paude.git_remote.git_fetch_from_remote")
+    @patch("paude.git_remote.git_remote_get_url")
+    @patch("paude.git_remote.git_remote_exists")
+    @patch("paude.cli.find_session_backend")
+    def test_harvests_explicit_full_ref_via_fetch_head(
+        self,
+        mock_find: MagicMock,
+        mock_exists: MagicMock,
+        mock_get_url: MagicMock,
+        mock_fetch: MagicMock,
+        mock_diff: MagicMock,
+        mock_run: MagicMock,
+        tmp_path: Path,
+        source_ref: str,
+        expected_branch: str,
+    ) -> None:
+        self._setup_mocks(mock_find, tmp_path)
+        mock_exists.return_value = True
+        mock_get_url.return_value = "ext::podman exec -i paude-test %S /pvc/workspace"
+        mock_fetch.return_value = True
+        mock_diff.return_value = ""
+        mock_run.return_value = CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+
+        harvest_session("test", source_branch=source_ref)
+
+        mock_fetch.assert_called_once_with(
+            "paude-test", cwd=tmp_path, source_ref=source_ref
+        )
+        assert mock_run.call_args[0][0] == [
+            "git",
+            "checkout",
+            "-B",
+            expected_branch,
+            "FETCH_HEAD",
+        ]
+
+    @patch("paude.workflow.subprocess.run")
+    @patch("paude.git_remote.git_diff_stat")
+    @patch("paude.git_remote.git_fetch_from_remote")
+    @patch("paude.git_remote.git_remote_get_url")
+    @patch("paude.git_remote.git_remote_exists")
+    @patch("paude.cli.find_session_backend")
+    def test_branch_named_like_remote_is_not_misclassified(
+        self,
+        mock_find: MagicMock,
+        mock_exists: MagicMock,
+        mock_get_url: MagicMock,
+        mock_fetch: MagicMock,
+        mock_diff: MagicMock,
+        mock_run: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        self._setup_mocks(mock_find, tmp_path)
+        mock_exists.return_value = True
+        mock_get_url.return_value = "ext::podman exec -i paude-test %S /pvc/workspace"
+        mock_fetch.return_value = True
+        mock_diff.return_value = ""
+        mock_run.return_value = CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+
+        harvest_session("test", source_branch="paude-test/feature")
+
+        mock_fetch.assert_called_once_with(
+            "paude-test",
+            cwd=tmp_path,
+            source_ref="refs/heads/paude-test/feature",
+        )
+        assert mock_run.call_args[0][0][-1] == "FETCH_HEAD"
+
+    @patch("paude.workflow.Path.cwd")
+    @patch("paude.workflow.subprocess.run")
+    @patch("paude.git_remote.list_git_remotes")
+    @patch("paude.git_remote.git_diff_stat")
+    @patch("paude.git_remote.git_fetch_from_remote")
+    @patch("paude.git_remote.git_remote_exists")
+    @patch("paude.cli.find_session_backend")
+    def test_infers_custom_remote_and_container_path_from_current_repo(
+        self,
+        mock_find: MagicMock,
+        mock_exists: MagicMock,
+        mock_fetch: MagicMock,
+        mock_diff: MagicMock,
+        mock_remotes: MagicMock,
+        mock_run: MagicMock,
+        mock_cwd: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        host_repo = tmp_path / "api"
+        (host_repo / "src").mkdir(parents=True)
+        (host_repo / ".git").mkdir()
+        mock_cwd.return_value = host_repo / "src"
+        backend = self._setup_mocks(mock_find, tmp_path)
+        backend.get_session.return_value.workspace = tmp_path / "recorded"
+        (tmp_path / "recorded" / ".git").mkdir(parents=True)
+        mock_remotes.return_value = [
+            (
+                "rig-api",
+                "ext::podman exec -i paude-test %S /pvc/workspace/rigs/api",
+            )
+        ]
+        mock_exists.side_effect = lambda name, cwd=None: name == "rig-api"
+        mock_fetch.return_value = True
+        mock_diff.return_value = ""
+        mock_run.return_value = CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+
+        harvest_session("test", source_branch="feature/foo")
+
+        assert backend.exec_in_session.call_args[0][1] == (
+            "git -C /pvc/workspace/rigs/api rev-parse --is-inside-work-tree"
+        )
+        mock_fetch.assert_called_once_with(
+            "rig-api", cwd=host_repo, source_ref="refs/heads/feature/foo"
+        )
+        assert mock_run.call_args.kwargs["cwd"] == host_repo
+
+    @patch("paude.workflow.subprocess.run")
+    @patch("paude.git_remote.git_diff_stat")
+    @patch("paude.git_remote.git_fetch_from_remote")
+    @patch("paude.git_remote.git_remote_get_url")
+    @patch("paude.git_remote.git_remote_exists")
+    @patch("paude.cli.find_session_backend")
+    def test_accepts_linked_git_worktree(
+        self,
+        mock_find: MagicMock,
+        mock_exists: MagicMock,
+        mock_get_url: MagicMock,
+        mock_fetch: MagicMock,
+        mock_diff: MagicMock,
+        mock_run: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        self._setup_mocks(mock_find, tmp_path)
+        (tmp_path / ".git").rmdir()
+        (tmp_path / ".git").write_text("gitdir: /tmp/common/worktrees/linked\n")
+        mock_exists.return_value = True
+        mock_get_url.return_value = "ext::podman exec -i paude-test %S /pvc/workspace"
+        mock_fetch.return_value = True
+        mock_diff.return_value = ""
+        mock_run.return_value = CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+
+        harvest_session("test", source_branch="feature/foo")
+
+        assert mock_run.call_args[0][0][-1] == "FETCH_HEAD"
+
+    @patch("paude.workflow.Path.cwd")
+    @patch("paude.git_remote.list_git_remotes")
+    @patch("paude.git_remote.git_remote_exists")
+    @patch("paude.cli.find_session_backend")
+    def test_rejects_ambiguous_current_repo_remotes(
+        self,
+        mock_find: MagicMock,
+        mock_exists: MagicMock,
+        mock_remotes: MagicMock,
+        mock_cwd: MagicMock,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        host_repo = tmp_path / "api"
+        (host_repo / ".git").mkdir(parents=True)
+        mock_cwd.return_value = host_repo
+        self._setup_mocks(mock_find, tmp_path)
+        mock_find.return_value[1].get_session.return_value.workspace = (
+            tmp_path / "recorded"
+        )
+        (tmp_path / "recorded" / ".git").mkdir(parents=True)
+        mock_exists.return_value = False
+        mock_remotes.return_value = [
+            ("api-one", "ext::podman exec -i paude-test %S /pvc/one"),
+            ("api-two", "ext::podman exec -i paude-test %S /pvc/two"),
+        ]
+
+        with pytest.raises(click.exceptions.Exit):
+            harvest_session("test", source_branch="feature/foo")
+
+        assert "Multiple remotes" in capsys.readouterr().err
 
     @patch("paude.cli.find_session_backend")
     def test_harvest_session_not_found(self, mock_find: MagicMock) -> None:
@@ -159,6 +409,10 @@ class TestHarvestSession:
 
         with pytest.raises(click.exceptions.Exit):
             harvest_session("test", "my-branch")
+
+        mock_fetch.assert_called_once_with(
+            "paude-test", cwd=tmp_path, source_ref="refs/heads/main"
+        )
 
     @patch("paude.workflow.subprocess.run")
     @patch("paude.git_remote.git_diff_stat")
@@ -212,6 +466,8 @@ class TestHarvestSession:
         mock_diff.return_value = " 2 files changed\n"
         # checkout -B, fetch origin, push, pr view
         mock_run.side_effect = [
+            # Current-repository remote inference.
+            CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
             CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
             CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
             CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
@@ -222,10 +478,10 @@ class TestHarvestSession:
 
         harvest_session("test", "my-branch", create_pr=True)
 
-        # fetch origin is call [1], push is call [2]
-        fetch_call = mock_run.call_args_list[1]
+        # fetch origin is call [2], push is call [3]
+        fetch_call = mock_run.call_args_list[2]
         assert fetch_call[0][0] == ["git", "fetch", "origin"]
-        push_call = mock_run.call_args_list[2]
+        push_call = mock_run.call_args_list[3]
         push_args = push_call[0][0]
         assert "--force-with-lease" in push_args
 
@@ -253,6 +509,8 @@ class TestHarvestSession:
         mock_diff.return_value = " 2 files changed\n"
         # checkout -B, fetch origin, push, pr list (no open PRs), pr create
         mock_run.side_effect = [
+            # Current-repository remote inference.
+            CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
             CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
             CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
             CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
@@ -263,7 +521,7 @@ class TestHarvestSession:
         harvest_session("test", "my-branch", create_pr=True)
 
         # pr list returns empty → should call gh pr create
-        pr_create_call = mock_run.call_args_list[4]
+        pr_create_call = mock_run.call_args_list[5]
         pr_create_args = pr_create_call[0][0]
         assert pr_create_args[:3] == ["gh", "pr", "create"]
 
@@ -414,14 +672,16 @@ class TestHarvestSession:
         # remote added under the custom name, in the --repo host checkout
         mock_remote_add.assert_called_once_with("rig-vllm", rig_url, cwd=host_repo)
         # fetch + checkout run in the host checkout, using the custom remote
-        mock_fetch.assert_called_once_with("rig-vllm", cwd=host_repo)
+        mock_fetch.assert_called_once_with(
+            "rig-vllm", cwd=host_repo, source_ref="refs/heads/main"
+        )
         checkout_args = mock_run.call_args[0][0]
         assert checkout_args == [
             "git",
             "checkout",
             "-B",
             "fix/foo",
-            "rig-vllm/main",
+            "FETCH_HEAD",
         ]
         assert mock_run.call_args.kwargs["cwd"] == host_repo
 
@@ -586,8 +846,9 @@ class TestHarvestSession:
 
         harvest_session("test", "my-branch", container_path="/pvc/ws/rig")
 
-        mock_fetch.assert_called_once_with("paude-test", cwd=tmp_path)
-
+        mock_fetch.assert_called_once_with(
+            "paude-test", cwd=tmp_path, source_ref="refs/heads/main"
+        )
 
 class TestVerifyContainerRepo:
     """Tests for _verify_container_repo."""
@@ -635,6 +896,16 @@ class TestRemoteTargetsContainerPath:
         assert _remote_targets_container_path(
             "git@github.com:user/repo.git", "/pvc/workspace"
         )
+
+    @pytest.mark.parametrize(
+        "remote_url",
+        [
+            "ext::podman run -i paude-test %S /pvc/other",
+            "ext::podman exec -i 'paude-test %S /pvc/other",
+        ],
+    )
+    def test_rejects_unparsable_url_with_path_marker(self, remote_url: str) -> None:
+        assert not _remote_targets_container_path(remote_url, "/pvc/workspace")
 
 
 class TestStatusSessions:

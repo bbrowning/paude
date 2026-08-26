@@ -1121,18 +1121,35 @@ class TestHarvestCommand:
             container_path="/pvc/workspace/rigs/vllm",
             remote_name="rig-vllm",
             repo="/host/vllm",
+            source_branch=None,
         )
 
     @patch("paude.workflow.harvest_session")
     def test_harvest_defaults_preserved(self, mock_harvest):
-        """Omitting the new flags keeps the single-repo defaults."""
+        """Omitting the new flags lets workflow apply single-repo defaults."""
         result = runner.invoke(app, ["harvest", "my-session", "-b", "fix/foo"])
 
         assert result.exit_code == 0
         _args, kwargs = mock_harvest.call_args
-        assert kwargs["container_path"] == "/pvc/workspace"
+        assert kwargs["container_path"] is None
         assert kwargs["remote_name"] is None
         assert kwargs["repo"] is None
+
+    @patch("paude.workflow.harvest_session")
+    def test_harvest_source_defaults_branch(self, mock_harvest):
+        result = runner.invoke(app, ["harvest", "my-session", "--from", "feature/foo"])
+
+        assert result.exit_code == 0
+        mock_harvest.assert_called_once_with(
+            session_name="my-session",
+            branch_name=None,
+            create_pr=False,
+            pr_title=None,
+            container_path=None,
+            remote_name=None,
+            repo=None,
+            source_branch="feature/foo",
+        )
 
 
 def test_subcommand_runs_without_main_execution():

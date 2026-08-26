@@ -7,7 +7,6 @@ from typing import Annotated
 import typer
 
 from paude.cli.app import app
-from paude.constants import CONTAINER_WORKSPACE
 
 
 @app.command("status")
@@ -61,9 +60,21 @@ def reset_cmd(
 def harvest_cmd(
     session: Annotated[str, typer.Argument(help="Session name to harvest from.")],
     branch: Annotated[
-        str,
-        typer.Option("--branch", "-b", help="Local branch name to create."),
-    ],
+        str | None,
+        typer.Option(
+            "--branch",
+            "-b",
+            help="Local branch name to create (defaults to --from).",
+        ),
+    ] = None,
+    source_branch: Annotated[
+        str | None,
+        typer.Option(
+            "--from",
+            "--source-branch",
+            help="Branch or ref to harvest from the container.",
+        ),
+    ] = None,
     pr: Annotated[
         bool,
         typer.Option("--pr", help="Create a PR after harvesting."),
@@ -73,20 +84,24 @@ def harvest_cmd(
         typer.Option("--pr-title", help="PR title (defaults to branch name)."),
     ] = None,
     container_path: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--container-path",
             help=(
                 "Path of the repo inside the container to harvest from "
-                "(default: the session workspace)."
+                "(default: inferred from a matching remote or the session "
+                "workspace)."
             ),
         ),
-    ] = CONTAINER_WORKSPACE,
+    ] = None,
     remote: Annotated[
         str | None,
         typer.Option(
             "--remote",
-            help="Git remote name to use (default: paude-<session>).",
+            help=(
+                "Git remote name to use (default: matching remote in the "
+                "current checkout or paude-<session>)."
+            ),
         ),
     ] = None,
     repo: Annotated[
@@ -95,7 +110,8 @@ def harvest_cmd(
             "--repo",
             help=(
                 "Host git repo to harvest into "
-                "(default: the session's recorded workspace)."
+                "(default: current checkout with a matching remote or the "
+                "session's recorded workspace)."
             ),
         ),
     ] = None,
@@ -111,4 +127,5 @@ def harvest_cmd(
         container_path=container_path,
         remote_name=remote,
         repo=repo,
+        source_branch=source_branch,
     )

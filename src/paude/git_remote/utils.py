@@ -211,6 +211,15 @@ def git_remote_remove(remote_name: str, cwd: Path | None = None) -> bool:
 
 def list_paude_remotes(cwd: Path | None = None) -> list[tuple[str, str]]:
     """List all paude git remotes."""
+    return [
+        (name, url)
+        for name, url in list_git_remotes(cwd=cwd)
+        if name.startswith("paude-")
+    ]
+
+
+def list_git_remotes(cwd: Path | None = None) -> list[tuple[str, str]]:
+    """List each git remote and its URL once."""
     result = subprocess.run(
         ["git", "remote", "-v"],
         capture_output=True,
@@ -230,8 +239,8 @@ def list_paude_remotes(cwd: Path | None = None) -> list[tuple[str, str]]:
         parts = line.split("\t", 1)
         if len(parts) >= 2:
             name = parts[0]
-            url_part = parts[1].rsplit(" ", 1)[0] if " " in parts[1] else parts[1]
-            if name.startswith("paude-") and name not in seen:
+            url_part = parts[1].removesuffix(" (fetch)").removesuffix(" (push)")
+            if name not in seen:
                 remotes.append((name, url_part))
                 seen.add(name)
 
@@ -335,10 +344,17 @@ def git_push_tags_to_remote(remote_name: str) -> bool:
     return result.returncode == 0
 
 
-def git_fetch_from_remote(remote_name: str, cwd: Path | None = None) -> bool:
-    """Fetch from a git remote."""
+def git_fetch_from_remote(
+    remote_name: str,
+    cwd: Path | None = None,
+    source_ref: str | None = None,
+) -> bool:
+    """Fetch from a git remote, optionally limiting the fetch to one ref."""
+    command = ["git", "fetch", remote_name]
+    if source_ref is not None:
+        command.append(source_ref)
     result = subprocess.run(
-        ["git", "fetch", remote_name],
+        command,
         capture_output=True,
         text=True,
         cwd=cwd,
