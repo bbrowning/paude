@@ -800,6 +800,24 @@ class TestGitFetchFromRemote:
         assert mock_run.call_args[1]["cwd"] == Path("/tmp/workspace")
 
     @patch("paude.git_remote.subprocess.run")
+    def test_fetch_specific_ref(self, mock_run) -> None:
+        """Append an explicit source ref to the fetch command."""
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        result = git_fetch_from_remote(
+            "paude-test", source_ref="refs/tags/v1.0"
+        )
+
+        assert result is True
+        assert mock_run.call_args[0][0] == [
+            "git",
+            "fetch",
+            "paude-test",
+            "refs/tags/v1.0",
+        ]
+
+    @patch("paude.git_remote.subprocess.run")
     def test_fetch_failure(self, mock_run) -> None:
         """Return False on failed fetch."""
         mock_run.return_value.returncode = 1

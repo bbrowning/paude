@@ -325,7 +325,10 @@ def harvest_session(
                 "Error: --branch is required unless --from is supplied.", err=True
             )
             raise typer.Exit(1)
-        branch_name = source_branch.removeprefix("refs/heads/")
+        if source_branch.startswith("refs/heads/"):
+            branch_name = source_branch.removeprefix("refs/heads/")
+        else:
+            branch_name = source_branch.removeprefix("refs/")
 
     _validate_harvest_branch(branch_name)
 
@@ -358,20 +361,30 @@ def harvest_session(
 
     if source_branch is None:
         source_ref = _get_container_branch(backend, session_name, container_path)
+        fetch_ref = None
+        remote_ref = f"{remote_name}/{source_ref}"
         typer.echo(f"Container is on branch '{source_ref}'.", err=True)
     else:
-        source_ref = source_branch.removeprefix("refs/heads/")
+        source_ref = source_branch
+        if source_ref.startswith("refs/"):
+            fetch_ref = source_ref
+            remote_ref = "FETCH_HEAD"
+        else:
+            fetch_ref = None
+            remote_ref = f"{remote_name}/{source_ref}"
         typer.echo(f"Using container source ref '{source_branch}'.", err=True)
 
     typer.echo(f"Fetching from '{remote_name}'...", err=True)
-    if not git_fetch_from_remote(remote_name, cwd=workspace):
+    if fetch_ref is None:
+        fetch_succeeded = git_fetch_from_remote(remote_name, cwd=workspace)
+    else:
+        fetch_succeeded = git_fetch_from_remote(
+            remote_name, cwd=workspace, source_ref=fetch_ref
+        )
+    if not fetch_succeeded:
         typer.echo("Error: Failed to fetch from remote.", err=True)
         raise typer.Exit(1)
 
-    if source_ref.startswith(f"{remote_name}/"):
-        remote_ref = source_ref
-    else:
-        remote_ref = f"{remote_name}/{source_ref}"
     typer.echo(f"Resetting '{branch_name}' to '{remote_ref}'...", err=True)
     result = subprocess.run(
         ["git", "checkout", "-B", branch_name, remote_ref],

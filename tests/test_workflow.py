@@ -180,6 +180,83 @@ class TestHarvestSession:
         ]
         mock_fetch.assert_called_once_with("paude-test", cwd=tmp_path)
 
+    @pytest.mark.parametrize(
+        ("source_ref", "expected_branch"),
+        [
+            ("refs/heads/feature/foo", "feature/foo"),
+            ("refs/tags/v1.0", "tags/v1.0"),
+            ("refs/pull/42/head", "pull/42/head"),
+        ],
+    )
+    @patch("paude.workflow.subprocess.run")
+    @patch("paude.git_remote.git_diff_stat")
+    @patch("paude.git_remote.git_fetch_from_remote")
+    @patch("paude.git_remote.git_remote_get_url")
+    @patch("paude.git_remote.git_remote_exists")
+    @patch("paude.cli.find_session_backend")
+    def test_harvests_explicit_full_ref_via_fetch_head(
+        self,
+        mock_find: MagicMock,
+        mock_exists: MagicMock,
+        mock_get_url: MagicMock,
+        mock_fetch: MagicMock,
+        mock_diff: MagicMock,
+        mock_run: MagicMock,
+        tmp_path: Path,
+        source_ref: str,
+        expected_branch: str,
+    ) -> None:
+        self._setup_mocks(mock_find, tmp_path)
+        mock_exists.return_value = True
+        mock_get_url.return_value = "ext::podman exec -i paude-test %S /pvc/workspace"
+        mock_fetch.return_value = True
+        mock_diff.return_value = ""
+        mock_run.return_value = CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+
+        harvest_session("test", source_branch=source_ref)
+
+        mock_fetch.assert_called_once_with(
+            "paude-test", cwd=tmp_path, source_ref=source_ref
+        )
+        assert mock_run.call_args[0][0] == [
+            "git",
+            "checkout",
+            "-B",
+            expected_branch,
+            "FETCH_HEAD",
+        ]
+
+    @patch("paude.workflow.subprocess.run")
+    @patch("paude.git_remote.git_diff_stat")
+    @patch("paude.git_remote.git_fetch_from_remote")
+    @patch("paude.git_remote.git_remote_get_url")
+    @patch("paude.git_remote.git_remote_exists")
+    @patch("paude.cli.find_session_backend")
+    def test_branch_named_like_remote_is_not_misclassified(
+        self,
+        mock_find: MagicMock,
+        mock_exists: MagicMock,
+        mock_get_url: MagicMock,
+        mock_fetch: MagicMock,
+        mock_diff: MagicMock,
+        mock_run: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        self._setup_mocks(mock_find, tmp_path)
+        mock_exists.return_value = True
+        mock_get_url.return_value = "ext::podman exec -i paude-test %S /pvc/workspace"
+        mock_fetch.return_value = True
+        mock_diff.return_value = ""
+        mock_run.return_value = CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+
+        harvest_session("test", source_branch="paude-test/feature")
+
+        assert mock_run.call_args[0][0][-1] == "paude-test/paude-test/feature"
+
     @patch("paude.workflow.Path.cwd")
     @patch("paude.workflow.subprocess.run")
     @patch("paude.git_remote.list_git_remotes")

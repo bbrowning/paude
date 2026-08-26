@@ -344,10 +344,17 @@ def git_push_tags_to_remote(remote_name: str) -> bool:
     return result.returncode == 0
 
 
-def git_fetch_from_remote(remote_name: str, cwd: Path | None = None) -> bool:
-    """Fetch from a git remote."""
+def git_fetch_from_remote(
+    remote_name: str,
+    cwd: Path | None = None,
+    source_ref: str | None = None,
+) -> bool:
+    """Fetch from a git remote, optionally limiting the fetch to one ref."""
+    command = ["git", "fetch", remote_name]
+    if source_ref is not None:
+        command.append(source_ref)
     result = subprocess.run(
-        ["git", "fetch", remote_name],
+        command,
         capture_output=True,
         text=True,
         cwd=cwd,
