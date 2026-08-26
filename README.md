@@ -318,7 +318,7 @@ Export agent telemetry (metrics, logs, traces) to any OTLP-compatible collector:
 paude create --otel-endpoint http://collector:4318 my-project
 ```
 
-The endpoint hostname is automatically added to the proxy allowlist and non-standard ports (like 4318) are opened in the proxy. Supported agents: Claude Code, Gemini CLI, OpenClaw. Set `otel-endpoint` in `~/.config/paude/defaults.json` to apply globally.
+The endpoint hostname is automatically added to the proxy allowlist and non-standard ports (like 4318) are opened in the proxy. OTLP export is currently supported for Claude Code; Gemini CLI and OpenClaw do not currently export telemetry. Set `otel-endpoint` in `~/.config/paude/defaults.json` to apply globally.
 
 ### Port Forwarding
 

@@ -305,7 +305,7 @@ class TestGascityComposedInstall:
     def test_contains_gemini(self) -> None:
         text = self._composed()
         assert "@google/gemini-cli" in text
-        assert "patch-gemini-otel-proxy.sh" in text
+        assert "patch-gemini-otel-proxy.sh" not in text
 
     def test_contains_node_and_flock(self) -> None:
         text = self._composed()

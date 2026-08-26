@@ -216,17 +216,9 @@ RUN if ! command -v tini >/dev/null 2>&1; then \\
         f"chown -R paude:{CONTAINER_RUNTIME_GID} {CONTAINER_HOME}"
     )
 
-    # Copy patch script before agent install lines (agents may RUN it)
+    # Copy patch script before agent install lines (OpenClaw may RUN it)
     lines.append(
         "COPY --chmod=755 patch-proxy-fetch.sh /usr/local/bin/patch-proxy-fetch.sh"
-    )
-    lines.append(
-        "COPY --chmod=755 patch-openclaw-otel-proxy.sh"
-        " /usr/local/bin/patch-openclaw-otel-proxy.sh"
-    )
-    lines.append(
-        "COPY --chmod=755 patch-openclaw-otel-logs.sh"
-        " /usr/local/bin/patch-openclaw-otel-logs.sh"
     )
 
     from paude.agents import (
