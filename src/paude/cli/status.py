@@ -7,7 +7,6 @@ from typing import Annotated
 import typer
 
 from paude.cli.app import app
-from paude.constants import CONTAINER_WORKSPACE
 
 
 @app.command("status")
@@ -85,15 +84,16 @@ def harvest_cmd(
         typer.Option("--pr-title", help="PR title (defaults to branch name)."),
     ] = None,
     container_path: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--container-path",
             help=(
                 "Path of the repo inside the container to harvest from "
-                "(default: the session workspace)."
+                "(default: inferred from a matching remote or the session "
+                "workspace)."
             ),
         ),
-    ] = CONTAINER_WORKSPACE,
+    ] = None,
     remote: Annotated[
         str | None,
         typer.Option(

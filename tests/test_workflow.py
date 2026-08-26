@@ -199,8 +199,9 @@ class TestHarvestSession:
         tmp_path: Path,
     ) -> None:
         host_repo = tmp_path / "api"
-        (host_repo / ".git").mkdir(parents=True)
-        mock_cwd.return_value = host_repo
+        (host_repo / "src").mkdir(parents=True)
+        (host_repo / ".git").mkdir()
+        mock_cwd.return_value = host_repo / "src"
         backend = self._setup_mocks(mock_find, tmp_path)
         backend.get_session.return_value.workspace = tmp_path / "recorded"
         (tmp_path / "recorded" / ".git").mkdir(parents=True)

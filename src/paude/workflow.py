@@ -122,9 +122,12 @@ def _session_remote_candidates(
 
 
 def _current_git_repo() -> Path | None:
-    """Return the current git repository when invoked from its root."""
+    """Return the repository containing the current working directory."""
     current = Path.cwd().resolve()
-    return current if (current / ".git").exists() else None
+    for candidate in (current, *current.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
 
 
 def _resolve_harvest_target(
