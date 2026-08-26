@@ -176,9 +176,11 @@ class TestHarvestSession:
             "checkout",
             "-B",
             "feature/foo",
-            "paude-test/feature/foo",
+            "FETCH_HEAD",
         ]
-        mock_fetch.assert_called_once_with("paude-test", cwd=tmp_path)
+        mock_fetch.assert_called_once_with(
+            "paude-test", cwd=tmp_path, source_ref="refs/heads/feature/foo"
+        )
 
     @pytest.mark.parametrize(
         ("source_ref", "expected_branch"),
@@ -255,7 +257,12 @@ class TestHarvestSession:
 
         harvest_session("test", source_branch="paude-test/feature")
 
-        assert mock_run.call_args[0][0][-1] == "paude-test/paude-test/feature"
+        mock_fetch.assert_called_once_with(
+            "paude-test",
+            cwd=tmp_path,
+            source_ref="refs/heads/paude-test/feature",
+        )
+        assert mock_run.call_args[0][0][-1] == "FETCH_HEAD"
 
     @patch("paude.workflow.Path.cwd")
     @patch("paude.workflow.subprocess.run")
@@ -300,8 +307,41 @@ class TestHarvestSession:
         assert backend.exec_in_session.call_args[0][1] == (
             "git -C /pvc/workspace/rigs/api rev-parse --is-inside-work-tree"
         )
-        mock_fetch.assert_called_once_with("rig-api", cwd=host_repo)
+        mock_fetch.assert_called_once_with(
+            "rig-api", cwd=host_repo, source_ref="refs/heads/feature/foo"
+        )
         assert mock_run.call_args.kwargs["cwd"] == host_repo
+
+    @patch("paude.workflow.subprocess.run")
+    @patch("paude.git_remote.git_diff_stat")
+    @patch("paude.git_remote.git_fetch_from_remote")
+    @patch("paude.git_remote.git_remote_get_url")
+    @patch("paude.git_remote.git_remote_exists")
+    @patch("paude.cli.find_session_backend")
+    def test_accepts_linked_git_worktree(
+        self,
+        mock_find: MagicMock,
+        mock_exists: MagicMock,
+        mock_get_url: MagicMock,
+        mock_fetch: MagicMock,
+        mock_diff: MagicMock,
+        mock_run: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        self._setup_mocks(mock_find, tmp_path)
+        (tmp_path / ".git").rmdir()
+        (tmp_path / ".git").write_text("gitdir: /tmp/common/worktrees/linked\n")
+        mock_exists.return_value = True
+        mock_get_url.return_value = "ext::podman exec -i paude-test %S /pvc/workspace"
+        mock_fetch.return_value = True
+        mock_diff.return_value = ""
+        mock_run.return_value = CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+
+        harvest_session("test", source_branch="feature/foo")
+
+        assert mock_run.call_args[0][0][-1] == "FETCH_HEAD"
 
     @patch("paude.workflow.Path.cwd")
     @patch("paude.git_remote.list_git_remotes")
@@ -369,6 +409,10 @@ class TestHarvestSession:
 
         with pytest.raises(click.exceptions.Exit):
             harvest_session("test", "my-branch")
+
+        mock_fetch.assert_called_once_with(
+            "paude-test", cwd=tmp_path, source_ref="refs/heads/main"
+        )
 
     @patch("paude.workflow.subprocess.run")
     @patch("paude.git_remote.git_diff_stat")
@@ -628,14 +672,16 @@ class TestHarvestSession:
         # remote added under the custom name, in the --repo host checkout
         mock_remote_add.assert_called_once_with("rig-vllm", rig_url, cwd=host_repo)
         # fetch + checkout run in the host checkout, using the custom remote
-        mock_fetch.assert_called_once_with("rig-vllm", cwd=host_repo)
+        mock_fetch.assert_called_once_with(
+            "rig-vllm", cwd=host_repo, source_ref="refs/heads/main"
+        )
         checkout_args = mock_run.call_args[0][0]
         assert checkout_args == [
             "git",
             "checkout",
             "-B",
             "fix/foo",
-            "rig-vllm/main",
+            "FETCH_HEAD",
         ]
         assert mock_run.call_args.kwargs["cwd"] == host_repo
 
@@ -800,8 +846,9 @@ class TestHarvestSession:
 
         harvest_session("test", "my-branch", container_path="/pvc/ws/rig")
 
-        mock_fetch.assert_called_once_with("paude-test", cwd=tmp_path)
-
+        mock_fetch.assert_called_once_with(
+            "paude-test", cwd=tmp_path, source_ref="refs/heads/main"
+        )
 
 class TestVerifyContainerRepo:
     """Tests for _verify_container_repo."""
