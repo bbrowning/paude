@@ -61,9 +61,21 @@ def reset_cmd(
 def harvest_cmd(
     session: Annotated[str, typer.Argument(help="Session name to harvest from.")],
     branch: Annotated[
-        str,
-        typer.Option("--branch", "-b", help="Local branch name to create."),
-    ],
+        str | None,
+        typer.Option(
+            "--branch",
+            "-b",
+            help="Local branch name to create (defaults to --from).",
+        ),
+    ] = None,
+    source_branch: Annotated[
+        str | None,
+        typer.Option(
+            "--from",
+            "--source-branch",
+            help="Branch or ref to harvest from the container.",
+        ),
+    ] = None,
     pr: Annotated[
         bool,
         typer.Option("--pr", help="Create a PR after harvesting."),
@@ -111,4 +123,5 @@ def harvest_cmd(
         container_path=container_path,
         remote_name=remote,
         repo=repo,
+        source_branch=source_branch,
     )

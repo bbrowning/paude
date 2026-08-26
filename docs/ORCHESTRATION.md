@@ -44,6 +44,18 @@ paude harvest my-project -b feature/auth-refactor
 
 This creates a local `feature/auth-refactor` branch with all of the agent's commits. Review the diff, run tests, and iterate as needed.
 
+To harvest a branch that is not checked out in the container, select it with
+`--from`. The local destination defaults to the same branch, so this is enough
+for the common case:
+
+```bash
+paude harvest my-project --from feature/auth-refactor
+```
+
+Use `-b`/`--branch` to choose a different local destination. Without `--from`,
+harvest retains its existing behavior and uses the branch currently checked out
+in the container. A source branch that does not exist is reported as an error.
+
 Protected branches (`main`, `master`, `release`, `release-*`, `release/*`) cannot be used as harvest targets.
 
 ### Harvesting a repo at a non-default path
@@ -57,7 +69,7 @@ paude harvest my-project -b fix/foo \
   --repo ~/src/api                             # host repo to harvest into
 ```
 
-`--container-path` selects which repo inside the container to fetch from, `--remote` names the git remote (default `paude-<session>`; use a non-`paude-` name so `paude remote cleanup` leaves it alone), and `--repo` chooses which host checkout to harvest into (default: the session's recorded workspace). Set up a matching remote up front with `paude remote add my-project --container-path <path> --remote <remote>` if you prefer, though harvest adds it automatically when missing.
+`--container-path` selects which repo inside the container to fetch from, `--remote` names the git remote (default `paude-<session>`; use a non-`paude-` name so `paude remote cleanup` leaves it alone), and `--repo` chooses which host checkout to harvest into (default: the session's recorded workspace). When these flags are omitted, harvest reuses a matching `paude ext::` remote in the current host checkout and infers its encoded container path. If more than one remote targets the session, specify `--remote` or `--repo`; harvest never chooses ambiguously. Set up a matching remote up front with `paude remote add my-project --container-path <path> --remote <remote>` if you prefer, though harvest adds it automatically when missing.
 
 ## Open a PR
 
@@ -71,6 +83,10 @@ paude harvest my-project -b feature/auth-refactor --pr --pr-title "Refactor auth
 ```
 
 This pushes `feature/auth-refactor` to origin (force-with-lease) and runs `gh pr create`. If an open PR already exists for that branch, it just prints the URL instead of creating a duplicate.
+
+Harvest performs an exact reset to the selected remote source ref. If you
+intentionally want to combine it with the current local history, use ordinary
+git fetch and merge commands instead.
 
 ## Reset and Repeat
 

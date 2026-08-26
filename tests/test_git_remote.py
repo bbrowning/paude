@@ -26,6 +26,7 @@ from paude.git_remote import (
     initialize_container_workspace,
     is_ext_protocol_allowed,
     is_git_repository,
+    list_git_remotes,
     list_paude_remotes,
     podman_exec_builder,
     resolve_local_git_identity,
@@ -241,6 +242,25 @@ origin\thttps://github.com/user/repo (push)
         remotes = list_paude_remotes()
 
         assert remotes == []
+
+
+class TestListGitRemotes:
+    """Tests for listing arbitrary remotes used by harvest inference."""
+
+    @patch("paude.git_remote.subprocess.run")
+    def test_preserves_ext_url_path_and_custom_names(self, mock_run) -> None:
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = (
+            "api\text::podman exec -i paude-session %S /pvc/repos/api (fetch)\n"
+            "api\text::podman exec -i paude-session %S /pvc/repos/api (push)\n"
+        )
+
+        assert list_git_remotes() == [
+            (
+                "api",
+                "ext::podman exec -i paude-session %S /pvc/repos/api",
+            )
+        ]
 
 
 class TestIsGitRepository:

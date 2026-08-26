@@ -38,6 +38,14 @@ _SECTIONS: tuple[HelpSection, ...] = (
                 "Create, start, push code+tags, set origin",
             ),
             ("paude connect my-project", "Connect to running session"),
+            (
+                "paude harvest my-project --from feature/foo",
+                "Harvest a named container branch (destination defaults to it)",
+            ),
+            (
+                "paude harvest my-project -b fix/foo",
+                "Harvest the container's checked-out branch",
+            ),
             ("", ""),
             ("Manual workflow:", ""),
             ("paude create my-project", "Create and start session"),

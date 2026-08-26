@@ -1121,6 +1121,7 @@ class TestHarvestCommand:
             container_path="/pvc/workspace/rigs/vllm",
             remote_name="rig-vllm",
             repo="/host/vllm",
+            source_branch=None,
         )
 
     @patch("paude.workflow.harvest_session")
@@ -1133,6 +1134,22 @@ class TestHarvestCommand:
         assert kwargs["container_path"] == "/pvc/workspace"
         assert kwargs["remote_name"] is None
         assert kwargs["repo"] is None
+
+    @patch("paude.workflow.harvest_session")
+    def test_harvest_source_defaults_branch(self, mock_harvest):
+        result = runner.invoke(app, ["harvest", "my-session", "--from", "feature/foo"])
+
+        assert result.exit_code == 0
+        mock_harvest.assert_called_once_with(
+            session_name="my-session",
+            branch_name=None,
+            create_pr=False,
+            pr_title=None,
+            container_path="/pvc/workspace",
+            remote_name=None,
+            repo=None,
+            source_branch="feature/foo",
+        )
 
 
 def test_subcommand_runs_without_main_execution():
