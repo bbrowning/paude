@@ -257,6 +257,37 @@ an upgrade is interrupted (e.g. `Ctrl-C`) you can simply re-run
 existing session in place, e.g. `paude upgrade SESSION --add-agent codex`. See
 [Session Management](docs/SESSIONS.md) for the per-agent persistence paths.
 
+### Updating allowed domains safely
+
+Change a running session's egress policy with `paude allowed-domains`:
+
+```bash
+paude allowed-domains SESSION --add .example.com
+paude allowed-domains SESSION --remove .example.com
+paude allowed-domains SESSION --replace default .example.com
+```
+
+Domain-only updates preserve every credential binding already attached to the
+proxy; they do not re-read possibly missing or stale values from the invoking
+shell. Paude preflights the replacement and retains the existing proxy until
+the replacement is running and the new domains are committed. A failed update
+restores the old proxy and policy instead of leaving the session without an
+authenticated route. Committed domains survive proxy recovery and are used by
+subsequent backups and upgrades.
+
+To deliberately replace credentials whose fresh values are available in the
+current environment, add `--refresh-credentials` to a domain mutation. Fresh
+values replace matching bindings while unrelated credentials remain attached:
+
+```bash
+export CLAUDE_CODE_OAUTH_TOKEN=new-setup-token
+paude allowed-domains SESSION --add .example.com --refresh-credentials
+```
+
+If a required binding is neither attached nor supplied for an explicit
+refresh, the command fails before changing the working proxy and names the
+missing environment variable.
+
 ### Backing up a session
 
 To guard a long-running session against loss, snapshot it to a portable bundle:

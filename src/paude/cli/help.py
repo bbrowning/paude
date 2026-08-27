@@ -139,8 +139,19 @@ _SECTIONS: tuple[HelpSection, ...] = (
                 "paude allowed-domains NAME --replace default .example.com",
                 "Replace entire list",
             ),
+            (
+                "paude allowed-domains NAME --add .example.com --refresh-credentials",
+                "Update domains and refresh supplied credentials",
+            ),
             ("paude blocked-domains NAME", "Show blocked domains"),
             ("paude blocked-domains NAME --raw", "Show raw proxy log"),
+        ),
+        text=(
+            "Domain-only updates preserve the proxy's current credential bindings"
+            " and durable policy. Replacement is fail-closed: the old proxy is"
+            " restored if the candidate cannot start or commit. Use"
+            " --refresh-credentials only when fresh replacement values are present"
+            " in the current environment; unrelated bindings remain attached."
         ),
     ),
     HelpSection(

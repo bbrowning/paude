@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,7 +15,8 @@ from paude.backends.podman.proxy import (
     auth_volume_name,
     ca_volume_name,
 )
-from paude.backends.proxy_config import derive_agent_ip
+from paude.backends.podman.proxy_credentials import PreparedProxyCredentials
+from paude.backends.proxy_config import ProxyCredentials, derive_agent_ip
 from paude.container.proxy_runner import ProxyStartError
 
 
@@ -29,7 +31,15 @@ def _make_mock_runner(engine_binary: str = "podman") -> MagicMock:
     mock_runner.engine.default_bridge_network = (
         "podman" if engine_binary == "podman" else "bridge"
     )
-    mock_runner.engine.run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+    def run(*args: str, **_kwargs: object) -> MagicMock:
+        if args[:3] == ("inspect", "-f", "{{json .Config.CreateCommand}}"):
+            return MagicMock(returncode=0, stdout=json.dumps([engine_binary, "create"]))
+        if args and args[0] == "run" and any("test -e" in arg for arg in args):
+            return MagicMock(returncode=3, stdout="", stderr="")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    mock_runner.engine.run.side_effect = run
     return mock_runner
 
 
@@ -895,10 +905,14 @@ class TestProxyCredentials:
             credentials={"ANTHROPIC_API_KEY": "sk-real-key"},
         )
 
-        # Secrets should have been created
-        mock_runner.create_secret_from_value.assert_called_once_with(
-            "paude-proxy-cred-test-session-anthropic-api-key", "sk-real-key"
+        # Refresh uses a generation-specific secret, leaving the old binding
+        # available until the proxy transaction commits.
+        mock_runner.create_secret_from_value.assert_called_once()
+        staged_name, staged_value = mock_runner.create_secret_from_value.call_args.args
+        assert staged_name.startswith(
+            "paude-proxy-cred-test-session-anthropic-api-key-update-"
         )
+        assert staged_value == "sk-real-key"
 
         # Check --secret in the recreate/create call
         engine_calls = mock_runner.engine.run.call_args_list
@@ -907,10 +921,7 @@ class TestProxyCredentials:
         call_args = create_call[0][0]
         secret_indices = [i for i, a in enumerate(call_args) if a == "--secret"]
         secret_vals = [call_args[i + 1] for i in secret_indices]
-        assert (
-            "paude-proxy-cred-test-session-anthropic-api-key,"
-            "type=env,target=ANTHROPIC_API_KEY" in secret_vals
-        )
+        assert f"{staged_name},type=env,target=ANTHROPIC_API_KEY" in secret_vals
 
 
 class TestUpdateDomainsCaResilience:
@@ -1069,6 +1080,76 @@ class TestUpdateDomainsCaResilience:
         captured = capsys.readouterr()
         assert "CA certificate missing after proxy recreate" in captured.err
         mock_runner.inject_file.assert_not_called()
+
+
+class TestUpdateDomainTransaction:
+    """Durable state and retained-proxy swap commit or roll back together."""
+
+    @patch("paude.backends.podman.proxy._get_host_dns", return_value=None)
+    def test_state_write_failure_restores_proxy_state_and_staged_secrets(
+        self, mock_dns: MagicMock
+    ) -> None:
+        runner = _make_mock_runner()
+        runner.container_exists.return_value = True
+        runner.get_container_image.return_value = "proxy:latest"
+        network = MagicMock()
+        network.get_network_gateway.return_value = "10.89.0.1"
+        manager = PodmanProxyManager(runner, network)
+        manager.get_config_from_labels = MagicMock(  # type: ignore[method-assign]
+            return_value=("proxy:latest", [".old.example"], [])
+        )
+        prepared = PreparedProxyCredentials(credentials=ProxyCredentials())
+        manager._credentials = MagicMock()
+        manager._credentials.prepare_update.return_value = prepared
+        manager._credentials.credential_env.return_value = {}
+        manager._state = MagicMock()
+        manager._state.read.return_value = [".old.example"]
+        manager._state.write.side_effect = RuntimeError("write failed")
+        swap = MagicMock()
+        manager._proxy_runner = MagicMock()
+        manager._proxy_runner.swap_session_proxy.return_value = swap
+
+        with pytest.raises(RuntimeError, match="write failed"):
+            manager.update_domains("test-session", [".new.example"])
+
+        manager._state.restore.assert_called_once_with(
+            "paude-auth-test-session", "proxy:latest", [".old.example"]
+        )
+        swap.rollback.assert_called_once_with()
+        manager._credentials.rollback_update.assert_called_once_with(prepared)
+        swap.commit.assert_not_called()
+
+    @patch("paude.backends.podman.proxy._get_host_dns", return_value=None)
+    def test_success_commits_state_before_removing_retained_proxy(
+        self, mock_dns: MagicMock
+    ) -> None:
+        runner = _make_mock_runner()
+        runner.container_exists.return_value = True
+        runner.get_container_image.return_value = "proxy:latest"
+        network = MagicMock()
+        network.get_network_gateway.return_value = "10.89.0.1"
+        manager = PodmanProxyManager(runner, network)
+        manager.get_config_from_labels = MagicMock(  # type: ignore[method-assign]
+            return_value=("proxy:latest", [".old.example"], [])
+        )
+        prepared = PreparedProxyCredentials(credentials=ProxyCredentials())
+        manager._credentials = MagicMock()
+        manager._credentials.prepare_update.return_value = prepared
+        manager._credentials.credential_env.return_value = {}
+        manager._state = MagicMock()
+        manager._state.read.return_value = [".old.example"]
+        swap = MagicMock()
+        manager._proxy_runner = MagicMock()
+        manager._proxy_runner.swap_session_proxy.return_value = swap
+        events = MagicMock()
+        events.attach_mock(manager._state.write, "write")
+        events.attach_mock(swap.commit, "commit")
+
+        manager.update_domains("test-session", [".new.example"])
+
+        assert [call[0] for call in events.mock_calls] == ["write", "commit"]
+        manager._credentials.commit_update.assert_called_once_with(prepared)
+        swap.rollback.assert_not_called()
 
 
 class TestSourceIpFiltering:

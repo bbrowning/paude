@@ -235,12 +235,20 @@ class Backend(Protocol):
         """
         ...
 
-    def update_allowed_domains(self, name: str, domains: list[str]) -> None:
+    def update_allowed_domains(
+        self,
+        name: str,
+        domains: list[str],
+        *,
+        refresh_credentials: bool = False,
+    ) -> None:
         """Update allowed domains for a session.
 
         Args:
             name: Session name.
             domains: New list of allowed domains.
+            refresh_credentials: Replace bindings for credentials currently
+                supplied by the host while preserving all other bindings.
         """
         ...
 

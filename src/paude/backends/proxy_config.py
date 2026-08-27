@@ -170,3 +170,56 @@ def gather_proxy_credentials(
     chatgpt_oauth_mode = "chatgpt" in effective_providers
 
     return ProxyCredentials(environment=creds, chatgpt_oauth_mode=chatgpt_oauth_mode)
+
+
+def proxy_credential_targets(
+    agent_config: AgentConfig | AgentComposition | Agent,
+) -> set[str]:
+    """Return every environment credential paude may bind to a proxy.
+
+    Domain-only updates use this allow-list when reading Docker's inspected
+    environment.  Keeping the list explicit prevents ordinary proxy settings
+    from being replayed as credentials while still preserving credentials for
+    providers other than the session's primary provider.
+    """
+    from paude.providers import get_provider, list_providers
+
+    targets = {"GH_TOKEN", PROXY_GCP_ADC_ENV}
+    targets.update(
+        key
+        for provider_name in list_providers()
+        for key in get_provider(provider_name).secret_env_vars
+    )
+    targets.update(
+        key for config in _agent_configs(agent_config) for key in config.secret_env_vars
+    )
+    return targets
+
+
+def required_proxy_credential_targets(
+    agent_config: AgentConfig | AgentComposition | Agent,
+    credential_providers: list[str],
+) -> set[str]:
+    """Return credential targets required by the session's selected providers."""
+    from paude.providers import get_provider
+
+    required = {
+        key
+        for provider_name in credential_providers
+        for key in get_provider(provider_name).secret_env_vars
+    }
+    required.update(
+        key for config in _agent_configs(agent_config) for key in config.secret_env_vars
+    )
+    return required
+
+
+def _agent_configs(
+    agent_config: AgentConfig | AgentComposition | Agent,
+) -> list[AgentConfig]:
+    """Normalize an agent, composition, or config to its configs."""
+    if hasattr(agent_config, "agents"):
+        return [agent.config for agent in agent_config.agents]
+    if hasattr(agent_config, "config"):
+        return [agent_config.config]
+    return [agent_config]

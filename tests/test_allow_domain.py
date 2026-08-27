@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -86,9 +87,17 @@ class TestPodmanUpdateAllowedDomains:
         mock_runner.engine.binary = "podman"
         mock_runner.engine.supports_multi_network_create = True
         mock_runner.engine.default_bridge_network = "podman"
-        mock_runner.engine.run.return_value = MagicMock(
-            returncode=0, stdout="", stderr=""
-        )
+
+        def run(*args: str, **_kwargs: object) -> MagicMock:
+            if args[:3] == ("inspect", "-f", "{{json .Config.CreateCommand}}"):
+                return MagicMock(
+                    returncode=0, stdout=json.dumps(["podman", "create"]), stderr=""
+                )
+            if args and args[0] == "run" and any("test -e" in arg for arg in args):
+                return MagicMock(returncode=3, stdout="", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_runner.engine.run.side_effect = run
         # Both main and proxy containers exist
         mock_runner.container_exists.return_value = True
         mock_runner.get_container_image.return_value = "proxy:latest"
@@ -133,3 +142,61 @@ class TestPodmanUpdateAllowedDomains:
 
         with pytest.raises(ValueError, match="no proxy"):
             backend.update_allowed_domains("my-session", [".example.com"])
+
+    @patch(
+        "paude.backends.podman.helpers.get_session_credential_providers",
+        return_value=["anthropic-oauth"],
+    )
+    @patch("paude.backends.podman.backend.get_session_composition")
+    def test_default_update_never_gathers_ambient_credentials(
+        self,
+        mock_composition: MagicMock,
+        mock_providers: MagicMock,
+    ) -> None:
+        runner = MagicMock()
+        runner.container_exists.return_value = True
+        backend = make_backend(runner)
+        backend._proxy = MagicMock()
+        backend._setup.gather_proxy_credentials = MagicMock()  # type: ignore[method-assign]
+        composition = MagicMock()
+        composition.agents = []
+        mock_composition.return_value = composition
+
+        backend.update_allowed_domains("my-session", [".example.com"])
+
+        backend._setup.gather_proxy_credentials.assert_not_called()
+        credentials = backend._proxy.update_domains.call_args.kwargs["credentials"]
+        assert credentials.environment == {}
+
+    @patch(
+        "paude.backends.podman.helpers.get_session_credential_providers",
+        return_value=["anthropic-oauth"],
+    )
+    @patch("paude.backends.podman.backend.get_session_composition")
+    def test_explicit_refresh_gathers_a_host_overlay(
+        self,
+        mock_composition: MagicMock,
+        mock_providers: MagicMock,
+    ) -> None:
+        from paude.backends.proxy_config import ProxyCredentials
+
+        runner = MagicMock()
+        runner.container_exists.return_value = True
+        backend = make_backend(runner)
+        backend._proxy = MagicMock()
+        composition = MagicMock()
+        composition.agents = []
+        mock_composition.return_value = composition
+        fresh = ProxyCredentials(environment={"CLAUDE_CODE_OAUTH_TOKEN": "fresh"})
+        backend._setup.gather_proxy_credentials = MagicMock(  # type: ignore[method-assign]
+            return_value=fresh
+        )
+
+        backend.update_allowed_domains(
+            "my-session", [".example.com"], refresh_credentials=True
+        )
+
+        backend._setup.gather_proxy_credentials.assert_called_once_with(
+            composition, ["anthropic-oauth"]
+        )
+        assert backend._proxy.update_domains.call_args.kwargs["credentials"] is fresh

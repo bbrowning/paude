@@ -1812,8 +1812,76 @@ class TestCpCommand:
 
 
 # ---------------------------------------------------------------------------
-# blocked-domains subcommand
+# allowed-domains / blocked-domains subcommands
 # ---------------------------------------------------------------------------
+
+
+class TestAllowedDomainsCLI:
+    """Tests for credential-safe allowed-domain mutation options."""
+
+    @patch("paude.cli.domains._resolve_backend_for_domains")
+    def test_refresh_credentials_is_explicitly_forwarded(
+        self, mock_resolve: MagicMock
+    ) -> None:
+        backend = MagicMock()
+        backend.get_allowed_domains.return_value = [".pypi.org"]
+        mock_resolve.return_value = backend
+
+        result = runner.invoke(
+            app,
+            [
+                "allowed-domains",
+                "my-session",
+                "--add",
+                ".example.com",
+                "--refresh-credentials",
+            ],
+        )
+
+        assert result.exit_code == 0
+        backend.update_allowed_domains.assert_called_once_with(
+            "my-session",
+            [".pypi.org", ".example.com"],
+            refresh_credentials=True,
+        )
+
+    @patch("paude.cli.domains._resolve_backend_for_domains")
+    def test_domain_mutation_preserves_credentials_by_default(
+        self, mock_resolve: MagicMock
+    ) -> None:
+        backend = MagicMock()
+        backend.get_allowed_domains.return_value = [".pypi.org"]
+        mock_resolve.return_value = backend
+
+        result = runner.invoke(
+            app, ["allowed-domains", "my-session", "--add", ".example.com"]
+        )
+
+        assert result.exit_code == 0
+        backend.update_allowed_domains.assert_called_once_with(
+            "my-session",
+            [".pypi.org", ".example.com"],
+            refresh_credentials=False,
+        )
+
+    @patch("paude.cli.domains._resolve_backend_for_domains")
+    def test_refresh_credentials_requires_a_mutation(
+        self, mock_resolve: MagicMock
+    ) -> None:
+        result = runner.invoke(
+            app, ["allowed-domains", "my-session", "--refresh-credentials"]
+        )
+
+        assert result.exit_code == 1
+        output = result.stdout + (result.stderr or "")
+        assert "requires --add, --remove, or --replace" in output
+        mock_resolve.assert_not_called()
+
+    def test_help_documents_refresh_credentials(self) -> None:
+        result = runner.invoke(app, ["allowed-domains", "--help"])
+
+        assert result.exit_code == 0
+        assert "--refresh-credentials" in result.stdout
 
 
 class TestBlockedDomainsCLI:

@@ -413,16 +413,38 @@ class PodmanBackend:
         require_session(self._runner, name)
         return self._proxy.get_blocked_log(name)
 
-    def update_allowed_domains(self, name: str, domains: list[str]) -> None:
+    def update_allowed_domains(
+        self,
+        name: str,
+        domains: list[str],
+        *,
+        refresh_credentials: bool = False,
+    ) -> None:
         """Update allowed domains for a session."""
         require_session(self._runner, name)
         composition = get_session_composition(self._runner, name)
         from paude.backends.podman.helpers import get_session_credential_providers
-
-        proxy_creds = self._setup.gather_proxy_credentials(
-            composition, get_session_credential_providers(self._runner, name)
+        from paude.backends.proxy_config import (
+            ProxyCredentials,
+            proxy_credential_targets,
+            required_proxy_credential_targets,
         )
-        self._proxy.update_domains(name, domains, credentials=proxy_creds)
+
+        providers = get_session_credential_providers(self._runner, name)
+        refresh = (
+            self._setup.gather_proxy_credentials(composition, providers)
+            if refresh_credentials
+            else ProxyCredentials(chatgpt_oauth_mode="chatgpt" in providers)
+        )
+        self._proxy.update_domains(
+            name,
+            domains,
+            credentials=refresh,
+            credential_targets=proxy_credential_targets(composition),
+            required_credentials=required_proxy_credential_targets(
+                composition, providers
+            ),
+        )
 
     def exec_in_session(self, name: str, command: str) -> tuple[int, str, str]:
         """Execute a command inside a running session's container."""
