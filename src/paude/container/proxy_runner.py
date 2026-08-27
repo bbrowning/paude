@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from secrets import token_hex
 
 from paude.container.engine import ContainerEngine
+from paude.container.proxy_inspect import ProxyInspectionError, ProxyInspector
 from paude.container.runner import ContainerRunner
 
 
@@ -81,6 +82,7 @@ class ProxyRunner:
 
     def __init__(self, runner: ContainerRunner) -> None:
         self._runner = runner
+        self._inspector = ProxyInspector(runner)
 
     @property
     def _engine(self) -> ContainerEngine:
@@ -254,6 +256,20 @@ class ProxyRunner:
             raise ProxyStartError(f"Failed to start proxy: {result.stderr}")
         time.sleep(1)
 
+    def _require_running_candidate(self, name: str) -> None:
+        """Fail when a started replacement did not survive initialization."""
+        try:
+            running = self._inspector.running(name)
+        except ProxyInspectionError as exc:
+            raise ProxyStartError(
+                f"Failed to verify replacement proxy startup: {exc}"
+            ) from exc
+        if not running:
+            raise ProxyStartError(
+                "Replacement proxy exited during initialization; "
+                "the previous proxy will be restored."
+            )
+
     def recreate_session_proxy(
         self,
         name: str,
@@ -357,6 +373,7 @@ class ProxyRunner:
             )
             swap.candidate_created = True
             self.start_session_proxy(name)
+            self._require_running_candidate(name)
         except Exception as primary:
             try:
                 swap.rollback()

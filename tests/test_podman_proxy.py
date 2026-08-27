@@ -35,6 +35,8 @@ def _make_mock_runner(engine_binary: str = "podman") -> MagicMock:
     def run(*args: str, **_kwargs: object) -> MagicMock:
         if args[:3] == ("inspect", "-f", "{{json .Config.CreateCommand}}"):
             return MagicMock(returncode=0, stdout=json.dumps([engine_binary, "create"]))
+        if args[:3] == ("inspect", "-f", "{{.State.Running}}"):
+            return MagicMock(returncode=0, stdout="true\n", stderr="")
         if args and args[0] == "run" and any("test -e" in arg for arg in args):
             return MagicMock(returncode=3, stdout="", stderr="")
         return MagicMock(returncode=0, stdout="", stderr="")

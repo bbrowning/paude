@@ -200,18 +200,24 @@ def required_proxy_credential_targets(
     agent_config: AgentConfig | AgentComposition | Agent,
     credential_providers: list[str],
 ) -> set[str]:
-    """Return credential targets required by the session's selected providers."""
+    """Return credential targets required by the active authentication modes."""
     from paude.providers import get_provider
 
-    required = {
+    provider_targets = {
         key
         for provider_name in credential_providers
         for key in get_provider(provider_name).secret_env_vars
     }
-    required.update(
+    required = {
+        key
+        for provider_name in credential_providers
+        for key in get_provider(provider_name).required_secret_env_vars
+    }
+    config_targets = {
         key for config in _agent_configs(agent_config) for key in config.secret_env_vars
-    )
-    return required
+    }
+    optional_provider_targets = provider_targets - required
+    return required | (config_targets - optional_provider_targets)
 
 
 def _agent_configs(

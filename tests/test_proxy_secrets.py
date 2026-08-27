@@ -8,9 +8,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from paude.agents.cursor import CursorAgent
 from paude.backends.podman.helpers import proxy_secret_name, proxy_secret_prefix
 from paude.backends.podman.proxy_credentials import ProxyCredentialManager
-from paude.backends.proxy_config import ProxyCredentials
+from paude.backends.proxy_config import (
+    ProxyCredentials,
+    proxy_credential_targets,
+    required_proxy_credential_targets,
+)
 from paude.container.engine import ContainerEngine
 from paude.container.proxy_inspect import ProxyInspectionError
 from paude.container.proxy_runner import ProxyRunner, ProxyStartError
@@ -491,6 +496,51 @@ class TestCredentialPreservingUpdates:
         }
         assert "ALLOWED_DOMAINS" not in prepared.credentials.environment
 
+    def test_podman_cursor_browser_auth_preserves_unrelated_binding(self) -> None:
+        command = [
+            "podman",
+            "create",
+            "--secret",
+            "old-gh,type=env,target=GH_TOKEN",
+        ]
+        transport = FakeTransport(
+            results={"inspect -f": _result(stdout=json.dumps(command))}
+        )
+        runner = ContainerRunner(make_engine("podman", transport=transport))
+        cursor = CursorAgent().config
+        required = required_proxy_credential_targets(cursor, ["cursor"])
+
+        prepared = ProxyCredentialManager(runner).prepare_update(
+            "sess",
+            "paude-proxy-sess",
+            ProxyCredentials(),
+            proxy_credential_targets(cursor),
+            required,
+        )
+
+        assert required == set()
+        assert prepared.secret_refs == ["old-gh,type=env,target=GH_TOKEN"]
+
+    def test_docker_cursor_browser_auth_preserves_unrelated_binding(self) -> None:
+        current = ["GH_TOKEN=unrelated", "ALLOWED_DOMAINS=.old.example"]
+        transport = FakeTransport(
+            results={"inspect -f": _result(stdout=json.dumps(current))}
+        )
+        runner = ContainerRunner(make_engine("docker", transport=transport))
+        cursor = CursorAgent().config
+        required = required_proxy_credential_targets(cursor, ["cursor"])
+
+        prepared = ProxyCredentialManager(runner).prepare_update(
+            "sess",
+            "paude-proxy-sess",
+            ProxyCredentials(),
+            proxy_credential_targets(cursor),
+            required,
+        )
+
+        assert required == set()
+        assert prepared.credentials.environment == {"GH_TOKEN": "unrelated"}
+
 
 class TestRollbackProxySwap:
     """A candidate failure restores the retained proxy and its fixed address."""
@@ -561,3 +611,42 @@ class TestRollbackProxySwap:
             "paude-net-sess",
             commands[rename_out][2],
         )
+
+    def test_candidate_exit_after_successful_start_restores_old_proxy(self) -> None:
+        engine = MagicMock()
+        engine.supports_multi_network_create = True
+        engine.default_bridge_network = "podman"
+
+        def run(*args: str, **_kwargs: object) -> MagicMock:
+            if args[:3] == ("inspect", "-f", "{{.State.Running}}"):
+                return MagicMock(returncode=0, stdout="false\n", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        engine.run.side_effect = run
+        runner = MagicMock(spec=ContainerRunner)
+        runner.engine = engine
+        runner.container_running.return_value = True
+
+        with pytest.raises(ProxyStartError, match="exited during initialization"):
+            ProxyRunner(runner).swap_session_proxy(
+                name="paude-proxy-sess",
+                image="proxy:latest",
+                network="paude-net-sess",
+                ip="10.89.0.2",
+            )
+
+        commands = [call.args for call in engine.run.call_args_list]
+        rename_out = next(i for i, cmd in enumerate(commands) if cmd[0] == "rename")
+        backup_name = commands[rename_out][2]
+        candidate_start = next(
+            i for i, cmd in enumerate(commands) if cmd == ("start", "paude-proxy-sess")
+        )
+        state_check = next(i for i, cmd in enumerate(commands) if cmd[0] == "inspect")
+        candidate_remove = next(
+            i
+            for i, cmd in enumerate(commands)
+            if cmd == ("rm", "-f", "paude-proxy-sess")
+        )
+        rename_back = max(i for i, cmd in enumerate(commands) if cmd[0] == "rename")
+        assert candidate_start < state_check < candidate_remove < rename_back
+        assert ("rm", "-f", backup_name) not in commands

@@ -93,6 +93,8 @@ class TestPodmanUpdateAllowedDomains:
                 return MagicMock(
                     returncode=0, stdout=json.dumps(["podman", "create"]), stderr=""
                 )
+            if args[:3] == ("inspect", "-f", "{{.State.Running}}"):
+                return MagicMock(returncode=0, stdout="true\n", stderr="")
             if args and args[0] == "run" and any("test -e" in arg for arg in args):
                 return MagicMock(returncode=3, stdout="", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
