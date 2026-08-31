@@ -101,7 +101,13 @@ def _list_domains(backend_obj: Backend, name: str) -> None:
             typer.echo(f"  {domain}")
 
 
-def _add_domains(backend_obj: Backend, name: str, add: list[str]) -> None:
+def _add_domains(
+    backend_obj: Backend,
+    name: str,
+    add: list[str],
+    *,
+    refresh_credentials: bool = False,
+) -> None:
     """Add domains to the current allowed list.
 
     Args:
@@ -127,12 +133,20 @@ def _add_domains(backend_obj: Backend, name: str, add: list[str]) -> None:
             merged.append(d)
             seen.add(d)
 
-    backend_obj.update_allowed_domains(name, merged)
+    backend_obj.update_allowed_domains(
+        name, merged, refresh_credentials=refresh_credentials
+    )
     added_count = len(merged) - len(current)
     typer.echo(f"Added {added_count} domain(s) to session '{name}'.")
 
 
-def _remove_domains(backend_obj: Backend, name: str, remove: list[str]) -> None:
+def _remove_domains(
+    backend_obj: Backend,
+    name: str,
+    remove: list[str],
+    *,
+    refresh_credentials: bool = False,
+) -> None:
     """Remove domains from the current allowed list.
 
     Args:
@@ -160,12 +174,20 @@ def _remove_domains(backend_obj: Backend, name: str, remove: list[str]) -> None:
         )
         raise typer.Exit(1)
 
-    backend_obj.update_allowed_domains(name, remaining)
+    backend_obj.update_allowed_domains(
+        name, remaining, refresh_credentials=refresh_credentials
+    )
     removed_count = len(current) - len(remaining)
     typer.echo(f"Removed {removed_count} domain(s) from session '{name}'.")
 
 
-def _replace_domains(backend_obj: Backend, name: str, replace: list[str]) -> None:
+def _replace_domains(
+    backend_obj: Backend,
+    name: str,
+    replace: list[str],
+    *,
+    refresh_credentials: bool = False,
+) -> None:
     """Replace all domains for a session.
 
     Args:
@@ -174,7 +196,9 @@ def _replace_domains(backend_obj: Backend, name: str, replace: list[str]) -> Non
         replace: New domain list.
     """
     expanded = _expand_domains_or_exit(replace)
-    backend_obj.update_allowed_domains(name, expanded)
+    backend_obj.update_allowed_domains(
+        name, expanded, refresh_credentials=refresh_credentials
+    )
     typer.echo(f"Replaced domains for session '{name}' ({len(expanded)} domain(s)).")
 
 
@@ -200,19 +224,50 @@ def allowed_domains_cmd(
             help="Container backend (auto-detected from session if not specified).",
         ),
     ] = None,
+    refresh_credentials: Annotated[
+        bool,
+        typer.Option(
+            "--refresh-credentials",
+            help=(
+                "Replace proxy credentials supplied by the current host "
+                "environment; preserve all other bindings."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Manage allowed egress domains for a session."""
     _check_domains_mutual_exclusivity(add, remove, replace)
+    if refresh_credentials and not any((add, remove, replace)):
+        typer.echo(
+            "Error: --refresh-credentials requires --add, --remove, or --replace.",
+            err=True,
+        )
+        raise typer.Exit(1)
 
     backend_obj = _resolve_backend_for_domains(name, backend)
 
     try:
         if add:
-            _add_domains(backend_obj, name, add)
+            _add_domains(
+                backend_obj,
+                name,
+                add,
+                refresh_credentials=refresh_credentials,
+            )
         elif remove:
-            _remove_domains(backend_obj, name, remove)
+            _remove_domains(
+                backend_obj,
+                name,
+                remove,
+                refresh_credentials=refresh_credentials,
+            )
         elif replace:
-            _replace_domains(backend_obj, name, replace)
+            _replace_domains(
+                backend_obj,
+                name,
+                replace,
+                refresh_credentials=refresh_credentials,
+            )
         else:
             _list_domains(backend_obj, name)
     except NotImplementedError as e:

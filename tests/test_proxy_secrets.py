@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from paude.agents.cursor import CursorAgent
 from paude.backends.podman.helpers import proxy_secret_name, proxy_secret_prefix
-from paude.backends.proxy_config import ProxyCredentials
+from paude.backends.podman.proxy_credentials import ProxyCredentialManager
+from paude.backends.proxy_config import (
+    ProxyCredentials,
+    proxy_credential_targets,
+    required_proxy_credential_targets,
+)
 from paude.container.engine import ContainerEngine
-from paude.container.proxy_runner import ProxyRunner
+from paude.container.proxy_inspect import ProxyInspectionError
+from paude.container.proxy_runner import ProxyRunner, ProxyStartError
 from paude.container.runner import ContainerRunner
+from tests.fakes import FakeTransport, make_engine, recorded_commands
 
 
 class TestProxySecretName:
@@ -335,3 +345,308 @@ class TestProxyManagerCredentialSecrets:
         assert runner.remove_secret.call_count == 2
         runner.remove_secret.assert_any_call("paude-proxy-cred-sess-api-key")
         runner.remove_secret.assert_any_call("paude-proxy-cred-sess-gh-token")
+
+
+def _result(
+    returncode: int = 0, stdout: str = "", stderr: str = ""
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess([], returncode, stdout, stderr)
+
+
+class TestCredentialPreservingUpdates:
+    """Credential update preparation reads the live binding, not ambient state."""
+
+    def test_podman_preserves_exact_attached_refs_without_rewriting(self) -> None:
+        command = [
+            "podman",
+            "create",
+            "--secret",
+            "paude-proxy-cred-sess-claude-code-oauth-token,"
+            "type=env,target=CLAUDE_CODE_OAUTH_TOKEN",
+            "--secret",
+            "old-gh,type=env,target=GH_TOKEN",
+        ]
+        transport = FakeTransport(
+            results={"inspect -f": _result(stdout=json.dumps(command))}
+        )
+        runner = ContainerRunner(make_engine("podman", transport=transport))
+
+        prepared = ProxyCredentialManager(runner).prepare_update(
+            "sess",
+            "paude-proxy-sess",
+            ProxyCredentials(),
+            {"CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"},
+            {"CLAUDE_CODE_OAUTH_TOKEN"},
+        )
+
+        assert prepared.secret_refs == [
+            "paude-proxy-cred-sess-claude-code-oauth-token,"
+            "type=env,target=CLAUDE_CODE_OAUTH_TOKEN",
+            "old-gh,type=env,target=GH_TOKEN",
+        ]
+        commands = recorded_commands(runner.engine)
+        assert not any(
+            command[1:3] in (["secret", "create"], ["secret", "rm"])
+            for command in commands
+        )
+
+    def test_podman_refresh_stages_new_generation_and_retains_unrelated(self) -> None:
+        command = [
+            "podman",
+            "create",
+            "--secret",
+            "paude-proxy-cred-sess-claude-code-oauth-token,"
+            "type=env,target=CLAUDE_CODE_OAUTH_TOKEN",
+            "--secret",
+            "old-gh,type=env,target=GH_TOKEN",
+        ]
+        transport = FakeTransport(
+            results={"inspect -f": _result(stdout=json.dumps(command))}
+        )
+        runner = ContainerRunner(make_engine("podman", transport=transport))
+        manager = ProxyCredentialManager(runner)
+
+        prepared = manager.prepare_update(
+            "sess",
+            "paude-proxy-sess",
+            ProxyCredentials(environment={"CLAUDE_CODE_OAUTH_TOKEN": "fresh"}),
+            {"CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"},
+            {"CLAUDE_CODE_OAUTH_TOKEN"},
+        )
+
+        assert "old-gh,type=env,target=GH_TOKEN" in prepared.secret_refs
+        assert (
+            "paude-proxy-cred-sess-claude-code-oauth-token,"
+            "type=env,target=CLAUDE_CODE_OAUTH_TOKEN" not in prepared.secret_refs
+        )
+        assert len(prepared.staged_secrets) == 1
+        assert any(
+            ref
+            == f"{prepared.staged_secrets[0]},type=env,target=CLAUDE_CODE_OAUTH_TOKEN"
+            for ref in prepared.secret_refs
+        )
+        assert (
+            "paude-proxy-cred-sess-claude-code-oauth-token"
+            in prepared.superseded_secrets
+        )
+        manager.commit_update(prepared)
+        assert [
+            "podman",
+            "secret",
+            "rm",
+            "paude-proxy-cred-sess-claude-code-oauth-token",
+        ] in recorded_commands(runner.engine)
+
+    def test_missing_required_binding_fails_before_any_mutation(self) -> None:
+        transport = FakeTransport(
+            results={"inspect -f": _result(stdout=json.dumps(["podman", "create"]))}
+        )
+        runner = ContainerRunner(make_engine("podman", transport=transport))
+
+        with pytest.raises(ValueError, match="CLAUDE_CODE_OAUTH_TOKEN"):
+            ProxyCredentialManager(runner).prepare_update(
+                "sess",
+                "paude-proxy-sess",
+                ProxyCredentials(),
+                {"CLAUDE_CODE_OAUTH_TOKEN"},
+                {"CLAUDE_CODE_OAUTH_TOKEN"},
+            )
+
+        assert len(recorded_commands(runner.engine)) == 1
+
+    def test_inspect_failure_is_not_treated_as_no_credentials(self) -> None:
+        transport = FakeTransport(
+            results={"inspect -f": _result(returncode=1, stderr="inspect failed")}
+        )
+        runner = ContainerRunner(make_engine("podman", transport=transport))
+
+        with pytest.raises(ProxyInspectionError, match="inspect failed"):
+            ProxyCredentialManager(runner).prepare_update(
+                "sess",
+                "paude-proxy-sess",
+                ProxyCredentials(),
+                {"CLAUDE_CODE_OAUTH_TOKEN"},
+                {"CLAUDE_CODE_OAUTH_TOKEN"},
+            )
+
+        assert len(recorded_commands(runner.engine)) == 1
+
+    def test_docker_preserves_current_values_and_overlays_only_refresh(self) -> None:
+        current = [
+            "CLAUDE_CODE_OAUTH_TOKEN=old",
+            "GH_TOKEN=unrelated",
+            "ALLOWED_DOMAINS=.old.example",
+        ]
+        transport = FakeTransport(
+            results={"inspect -f": _result(stdout=json.dumps(current))}
+        )
+        runner = ContainerRunner(make_engine("docker", transport=transport))
+
+        prepared = ProxyCredentialManager(runner).prepare_update(
+            "sess",
+            "paude-proxy-sess",
+            ProxyCredentials(environment={"CLAUDE_CODE_OAUTH_TOKEN": "fresh"}),
+            {"CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"},
+            {"CLAUDE_CODE_OAUTH_TOKEN"},
+        )
+
+        assert prepared.credentials.environment == {
+            "CLAUDE_CODE_OAUTH_TOKEN": "fresh",
+            "GH_TOKEN": "unrelated",
+        }
+        assert "ALLOWED_DOMAINS" not in prepared.credentials.environment
+
+    def test_podman_cursor_browser_auth_preserves_unrelated_binding(self) -> None:
+        command = [
+            "podman",
+            "create",
+            "--secret",
+            "old-gh,type=env,target=GH_TOKEN",
+        ]
+        transport = FakeTransport(
+            results={"inspect -f": _result(stdout=json.dumps(command))}
+        )
+        runner = ContainerRunner(make_engine("podman", transport=transport))
+        cursor = CursorAgent().config
+        required = required_proxy_credential_targets(cursor, ["cursor"])
+
+        prepared = ProxyCredentialManager(runner).prepare_update(
+            "sess",
+            "paude-proxy-sess",
+            ProxyCredentials(),
+            proxy_credential_targets(cursor),
+            required,
+        )
+
+        assert required == set()
+        assert prepared.secret_refs == ["old-gh,type=env,target=GH_TOKEN"]
+
+    def test_docker_cursor_browser_auth_preserves_unrelated_binding(self) -> None:
+        current = ["GH_TOKEN=unrelated", "ALLOWED_DOMAINS=.old.example"]
+        transport = FakeTransport(
+            results={"inspect -f": _result(stdout=json.dumps(current))}
+        )
+        runner = ContainerRunner(make_engine("docker", transport=transport))
+        cursor = CursorAgent().config
+        required = required_proxy_credential_targets(cursor, ["cursor"])
+
+        prepared = ProxyCredentialManager(runner).prepare_update(
+            "sess",
+            "paude-proxy-sess",
+            ProxyCredentials(),
+            proxy_credential_targets(cursor),
+            required,
+        )
+
+        assert required == set()
+        assert prepared.credentials.environment == {"GH_TOKEN": "unrelated"}
+
+
+class TestRollbackProxySwap:
+    """A candidate failure restores the retained proxy and its fixed address."""
+
+    def test_start_failure_restores_old_name_network_and_running_state(self) -> None:
+        engine = MagicMock()
+        engine.supports_multi_network_create = True
+        engine.default_bridge_network = "podman"
+        starts = 0
+
+        def run(*args: str, **_kwargs: object) -> MagicMock:
+            nonlocal starts
+            if args == ("start", "paude-proxy-sess"):
+                starts += 1
+                if starts == 1:
+                    return MagicMock(returncode=1, stdout="", stderr="boom")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        engine.run.side_effect = run
+        runner = MagicMock(spec=ContainerRunner)
+        runner.engine = engine
+        runner.container_running.return_value = True
+
+        with pytest.raises(ProxyStartError, match="Failed to start proxy"):
+            ProxyRunner(runner).swap_session_proxy(
+                name="paude-proxy-sess",
+                image="proxy:latest",
+                network="paude-net-sess",
+                ip="10.89.0.2",
+            )
+
+        commands = [call.args for call in engine.run.call_args_list]
+        rename_out = next(i for i, cmd in enumerate(commands) if cmd[0] == "rename")
+        disconnect = next(
+            i for i, cmd in enumerate(commands) if cmd[:2] == ("network", "disconnect")
+        )
+        candidate_create = next(
+            i for i, cmd in enumerate(commands) if cmd[0] == "create"
+        )
+        candidate_start = next(
+            i for i, cmd in enumerate(commands) if cmd == ("start", "paude-proxy-sess")
+        )
+        candidate_remove = next(
+            i for i, cmd in enumerate(commands) if cmd[:2] == ("rm", "-f")
+        )
+        reconnect = next(
+            i for i, cmd in enumerate(commands) if cmd[:2] == ("network", "connect")
+        )
+        rename_back = max(i for i, cmd in enumerate(commands) if cmd[0] == "rename")
+        restart = max(
+            i for i, cmd in enumerate(commands) if cmd == ("start", "paude-proxy-sess")
+        )
+        assert (
+            rename_out
+            < disconnect
+            < candidate_create
+            < candidate_start
+            < candidate_remove
+            < reconnect
+            < rename_back
+            < restart
+        )
+        assert commands[reconnect] == (
+            "network",
+            "connect",
+            "--ip",
+            "10.89.0.2",
+            "paude-net-sess",
+            commands[rename_out][2],
+        )
+
+    def test_candidate_exit_after_successful_start_restores_old_proxy(self) -> None:
+        engine = MagicMock()
+        engine.supports_multi_network_create = True
+        engine.default_bridge_network = "podman"
+
+        def run(*args: str, **_kwargs: object) -> MagicMock:
+            if args[:3] == ("inspect", "-f", "{{.State.Running}}"):
+                return MagicMock(returncode=0, stdout="false\n", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        engine.run.side_effect = run
+        runner = MagicMock(spec=ContainerRunner)
+        runner.engine = engine
+        runner.container_running.return_value = True
+
+        with pytest.raises(ProxyStartError, match="exited during initialization"):
+            ProxyRunner(runner).swap_session_proxy(
+                name="paude-proxy-sess",
+                image="proxy:latest",
+                network="paude-net-sess",
+                ip="10.89.0.2",
+            )
+
+        commands = [call.args for call in engine.run.call_args_list]
+        rename_out = next(i for i, cmd in enumerate(commands) if cmd[0] == "rename")
+        backup_name = commands[rename_out][2]
+        candidate_start = next(
+            i for i, cmd in enumerate(commands) if cmd == ("start", "paude-proxy-sess")
+        )
+        state_check = next(i for i, cmd in enumerate(commands) if cmd[0] == "inspect")
+        candidate_remove = next(
+            i
+            for i, cmd in enumerate(commands)
+            if cmd == ("rm", "-f", "paude-proxy-sess")
+        )
+        rename_back = max(i for i, cmd in enumerate(commands) if cmd[0] == "rename")
+        assert candidate_start < state_check < candidate_remove < rename_back
+        assert ("rm", "-f", backup_name) not in commands

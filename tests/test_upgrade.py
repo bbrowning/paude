@@ -360,6 +360,9 @@ def _upgrade_backend(
     volumes = MagicMock(spec=VolumeManager)
     networks = MagicMock(spec=NetworkManager)
     backend = make_backend(runner, network_manager=networks, volume_manager=volumes)
+    backend._proxy.read_domain_state = MagicMock(  # type: ignore[method-assign]
+        return_value=None
+    )
     create_session = MagicMock(return_value=_upgraded_session())
     start = MagicMock()
     backend.create_session = create_session  # type: ignore[method-assign]

@@ -30,6 +30,7 @@ the two lines they genuinely have in common.
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from paude.backends.labels import LabeledSession, read_labels
@@ -90,7 +91,11 @@ class SessionResources:
         container = find_container_by_session_name(self._runner, name)
         if container is None:
             return None
-        return read_labels(container.get("Labels", {}) or {})
+        view = read_labels(container.get("Labels", {}) or {})
+        domains = self._proxy.read_domain_state(name, view.spec.proxy_image)
+        if domains is None:
+            return view
+        return replace(view, spec=replace(view.spec, allowed_domains=domains))
 
     # -- rebuild ----------------------------------------------------------
 

@@ -240,6 +240,31 @@ class TestReads:
         assert view.spec.agent == "codex"
         assert runner.list_containers.call_count == 1
 
+    def test_labels_prefers_committed_domains_including_empty(
+        self,
+        resources: SessionResources,
+        runner: MagicMock,
+        proxy: MagicMock,
+    ) -> None:
+        runner.list_containers.return_value = [
+            {
+                "Id": "abc",
+                "Labels": {
+                    PAUDE_LABEL_SESSION: SESSION,
+                    PAUDE_LABEL_AGENT: "codex",
+                    "paude.io/proxy-image": "proxy:latest",
+                    "paude.io/allowed-domains": ".stale.example",
+                },
+            }
+        ]
+        proxy.read_domain_state.return_value = []
+
+        view = resources.labels(SESSION)
+
+        assert view is not None
+        assert view.spec.allowed_domains == []
+        proxy.read_domain_state.assert_called_once_with(SESSION, "proxy:latest")
+
     def test_labels_is_none_for_a_session_with_no_container(
         self, resources: SessionResources, runner: MagicMock
     ) -> None:

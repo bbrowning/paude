@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
+from secrets import token_hex
 
 from paude.container.engine import ContainerEngine
+from paude.container.proxy_inspect import ProxyInspectionError, ProxyInspector
 from paude.container.runner import ContainerRunner
 
 
@@ -13,6 +16,61 @@ class ProxyStartError(Exception):
     """Error starting the proxy container."""
 
     pass
+
+
+@dataclass
+class ProxySwap:
+    """A started candidate proxy whose retained predecessor can be restored."""
+
+    runner: ContainerRunner
+    name: str
+    backup_name: str
+    network: str
+    ip: str | None
+    old_running: bool
+    old_renamed: bool = False
+    old_disconnected: bool = False
+    candidate_created: bool = False
+
+    def commit(self) -> None:
+        """Remove the retained predecessor after all update state is durable."""
+        self._run_checked("remove retained proxy", "rm", "-f", self.backup_name)
+
+    def rollback(self) -> None:
+        """Remove the candidate and restore the predecessor's identity/state."""
+        failures: list[str] = []
+        if self.candidate_created:
+            self._try(failures, "remove candidate proxy", "rm", "-f", self.name)
+        if self.old_disconnected:
+            args = ["network", "connect"]
+            if self.ip:
+                args.extend(["--ip", self.ip])
+            args.extend([self.network, self.backup_name])
+            self._try(failures, "reconnect retained proxy", *args)
+        if self.old_renamed:
+            self._try(
+                failures,
+                "restore retained proxy name",
+                "rename",
+                self.backup_name,
+                self.name,
+            )
+        if self.old_running:
+            self._try(failures, "restart retained proxy", "start", self.name)
+        if failures:
+            raise ProxyStartError("; ".join(failures))
+
+    def _try(self, failures: list[str], operation: str, *args: str) -> None:
+        try:
+            self._run_checked(operation, *args)
+        except ProxyStartError as exc:
+            failures.append(str(exc))
+
+    def _run_checked(self, operation: str, *args: str) -> None:
+        result = self.runner.engine.run(*args, check=False)
+        if result.returncode != 0:
+            detail = result.stderr.strip() or "container engine command failed"
+            raise ProxyStartError(f"Failed to {operation}: {detail}")
 
 
 class ProxyRunner:
@@ -24,6 +82,7 @@ class ProxyRunner:
 
     def __init__(self, runner: ContainerRunner) -> None:
         self._runner = runner
+        self._inspector = ProxyInspector(runner)
 
     @property
     def _engine(self) -> ContainerEngine:
@@ -52,7 +111,14 @@ class ProxyRunner:
         if self._engine.supports_multi_network_create:
             return
         bridge = self._engine.default_bridge_network
-        self._engine.run("network", "connect", bridge, container_name, check=False)
+        result = self._engine.run(
+            "network", "connect", bridge, container_name, check=False
+        )
+        if result.returncode != 0:
+            raise ProxyStartError(
+                "Failed to connect proxy to the bridge network: "
+                f"{result.stderr.strip() or 'container engine command failed'}"
+            )
 
     def _build_env_args(
         self,
@@ -172,7 +238,11 @@ class ProxyRunner:
         if result.returncode != 0:
             raise ProxyStartError(f"Failed to create proxy: {result.stderr}")
 
-        self._connect_bridge_if_needed(name)
+        try:
+            self._connect_bridge_if_needed(name)
+        except Exception:
+            self._engine.run("rm", "-f", name, check=False)
+            raise
         return name
 
     def start_session_proxy(self, name: str) -> None:
@@ -185,6 +255,20 @@ class ProxyRunner:
         if result.returncode != 0:
             raise ProxyStartError(f"Failed to start proxy: {result.stderr}")
         time.sleep(1)
+
+    def _require_running_candidate(self, name: str) -> None:
+        """Fail when a started replacement did not survive initialization."""
+        try:
+            running = self._inspector.running(name)
+        except ProxyInspectionError as exc:
+            raise ProxyStartError(
+                f"Failed to verify replacement proxy startup: {exc}"
+            ) from exc
+        if not running:
+            raise ProxyStartError(
+                "Replacement proxy exited during initialization; "
+                "the previous proxy will be restored."
+            )
 
     def recreate_session_proxy(
         self,
@@ -228,3 +312,74 @@ class ProxyRunner:
         self.start_session_proxy(name)
 
         return name
+
+    def swap_session_proxy(
+        self,
+        name: str,
+        image: str,
+        network: str,
+        dns: str | None = None,
+        allowed_domains: list[str] | None = None,
+        ip: str | None = None,
+        otel_ports: list[int] | None = None,
+        ca_volume: str | None = None,
+        credentials: Mapping[str, str] | None = None,
+        allowed_clients: str | None = None,
+        secret_refs: list[str] | None = None,
+        credential_env: Mapping[str, str] | None = None,
+        auth_volume: str | None = None,
+    ) -> ProxySwap:
+        """Start a replacement while retaining the old proxy for rollback."""
+        swap = ProxySwap(
+            runner=self._runner,
+            name=name,
+            backup_name=f"{name}-rollback-{token_hex(4)}",
+            network=network,
+            ip=ip,
+            old_running=self._runner.container_running(name),
+        )
+        try:
+            if swap.old_running:
+                swap._run_checked("stop current proxy", "stop", "-t", "1", name)
+            swap._run_checked(
+                "retain current proxy",
+                "rename",
+                name,
+                swap.backup_name,
+            )
+            swap.old_renamed = True
+            swap._run_checked(
+                "release current proxy address",
+                "network",
+                "disconnect",
+                network,
+                swap.backup_name,
+            )
+            swap.old_disconnected = True
+            self.create_session_proxy(
+                name=name,
+                image=image,
+                network=network,
+                dns=dns,
+                allowed_domains=allowed_domains,
+                ip=ip,
+                otel_ports=otel_ports,
+                ca_volume=ca_volume,
+                credentials=credentials,
+                allowed_clients=allowed_clients,
+                secret_refs=secret_refs,
+                credential_env=credential_env,
+                auth_volume=auth_volume,
+            )
+            swap.candidate_created = True
+            self.start_session_proxy(name)
+            self._require_running_candidate(name)
+        except Exception as primary:
+            try:
+                swap.rollback()
+            except Exception as rollback:
+                raise ProxyStartError(
+                    f"Proxy replacement failed: {primary}; rollback failed: {rollback}"
+                ) from primary
+            raise
+        return swap

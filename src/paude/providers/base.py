@@ -14,6 +14,9 @@ class ProviderConfig:
         display_name: Human-readable name (e.g., "Vertex AI").
         passthrough_env_vars: Host env vars to forward to container (non-secret).
         secret_env_vars: Host env vars to deliver securely.
+        required_secret_env_vars: Secure env vars required for this provider's
+            proxy-backed authentication mode. A secret may be optional when the
+            provider supports an alternative login flow.
         passthrough_env_prefixes: Host env var prefixes to forward.
         domain_aliases: Domain aliases to auto-include in allowed-domains.
     """
@@ -22,6 +25,7 @@ class ProviderConfig:
     display_name: str
     passthrough_env_vars: list[str] = field(default_factory=list)
     secret_env_vars: list[str] = field(default_factory=list)
+    required_secret_env_vars: list[str] = field(default_factory=list)
     passthrough_env_prefixes: list[str] = field(default_factory=list)
     domain_aliases: list[str] = field(default_factory=list)
 
@@ -44,6 +48,7 @@ _PROVIDERS: dict[str, ProviderConfig] = {
         name="openai",
         display_name="OpenAI",
         secret_env_vars=["OPENAI_API_KEY"],
+        required_secret_env_vars=["OPENAI_API_KEY"],
         domain_aliases=["openai"],
     ),
     "chatgpt": ProviderConfig(
@@ -56,6 +61,7 @@ _PROVIDERS: dict[str, ProviderConfig] = {
         name="anthropic",
         display_name="Anthropic",
         secret_env_vars=["ANTHROPIC_API_KEY"],
+        required_secret_env_vars=["ANTHROPIC_API_KEY"],
         domain_aliases=["claude"],
     ),
     "anthropic-oauth": ProviderConfig(
@@ -66,11 +72,13 @@ _PROVIDERS: dict[str, ProviderConfig] = {
         # `Authorization: Bearer` header. The agent only ever sees the
         # `paude-proxy-managed` sentinel (set per-agent via extra_env_vars).
         secret_env_vars=["CLAUDE_CODE_OAUTH_TOKEN"],
+        required_secret_env_vars=["CLAUDE_CODE_OAUTH_TOKEN"],
         domain_aliases=["claude"],
     ),
     "cursor": ProviderConfig(
         name="cursor",
         display_name="Cursor",
+        # Optional: Cursor also supports browser OAuth inside the container.
         secret_env_vars=["CURSOR_API_KEY"],
         domain_aliases=["cursor"],
     ),

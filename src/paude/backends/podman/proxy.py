@@ -21,6 +21,7 @@ from paude.backends.podman.helpers import (
     proxy_container_name,
 )
 from paude.backends.podman.proxy_credentials import ProxyCredentialManager
+from paude.backends.podman.proxy_state import ProxyStateStore
 from paude.backends.proxy_config import CA_CERT_CONTAINER_PATH as CA_CERT_CONTAINER_PATH
 from paude.backends.proxy_config import (
     PROXY_BLOCKED_LOG_PATH,
@@ -98,6 +99,7 @@ class PodmanProxyManager:
         self._proxy_runner = ProxyRunner(runner)
         self._ca_cert = CACertDistributor(runner)
         self._credentials = ProxyCredentialManager(runner)
+        self._state = ProxyStateStore(runner)
 
     def _create_credential_secrets(
         self,
@@ -145,11 +147,22 @@ class PodmanProxyManager:
             return None
 
         domains = [d for d in domains_str.split(",") if d]
+        durable_domains = self.read_domain_state(session_name, proxy_image)
+        if durable_domains is not None:
+            domains = durable_domains
 
         otel_ports_str = labels.get(PAUDE_LABEL_OTEL_PORTS, "")
         otel_ports = [int(p) for p in otel_ports_str.split(",") if p]
 
         return (proxy_image, domains, otel_ports)
+
+    def read_domain_state(
+        self, session_name: str, proxy_image: str | None
+    ) -> list[str] | None:
+        """Read the committed domain override for a session, if one exists."""
+        if not proxy_image:
+            return None
+        return self._state.read(auth_volume_name(session_name), proxy_image)
 
     def start_if_needed(
         self,
@@ -414,8 +427,10 @@ class PodmanProxyManager:
         session_name: str,
         domains: list[str],
         credentials: ProxyCredentials | Mapping[str, str] | None = None,
+        credential_targets: set[str] | None = None,
+        required_credentials: set[str] | None = None,
     ) -> None:
-        """Update allowed domains for a session."""
+        """Update domains using preserved credentials and a rollback-safe swap."""
         pname = proxy_container_name(session_name)
         if not self._runner.container_exists(pname):
             raise ValueError(
@@ -445,28 +460,62 @@ class PodmanProxyManager:
         agent_ip = derive_agent_ip(proxy_ip) if proxy_ip else None
         dns = _get_host_dns(self._runner.engine)
 
-        secret_refs = self._create_credential_secrets(session_name, credentials)
-        credential_env = self._credential_env(credentials)
+        if credentials is None:
+            credentials = ProxyCredentials()
+        elif not isinstance(credentials, ProxyCredentials):
+            credentials = ProxyCredentials(environment=dict(credentials))
+        previous_domains = self._state.read(auth_vol, proxy_image)
+        prepared = self._credentials.prepare_update(
+            session_name,
+            pname,
+            credentials,
+            credential_targets or set(),
+            required_credentials or set(),
+        )
+        credential_env = self._credential_env(prepared.credentials)
 
         print(
             f"Updating proxy domains for session '{session_name}'...",
             file=sys.stderr,
         )
-        self._proxy_runner.recreate_session_proxy(
-            name=pname,
-            image=proxy_image,
-            network=nname,
-            dns=dns,
-            allowed_domains=domains,
-            ip=proxy_ip,
-            otel_ports=otel_ports,
-            ca_volume=ca_vol,
-            credentials=credentials,
-            allowed_clients=agent_ip,
-            secret_refs=secret_refs,
-            credential_env=credential_env,
-            auth_volume=auth_vol,
-        )
+        swap = None
+        try:
+            swap = self._proxy_runner.swap_session_proxy(
+                name=pname,
+                image=proxy_image,
+                network=nname,
+                dns=dns,
+                allowed_domains=domains,
+                ip=proxy_ip,
+                otel_ports=otel_ports,
+                ca_volume=ca_vol,
+                credentials=prepared.credentials,
+                allowed_clients=agent_ip,
+                secret_refs=prepared.secret_refs,
+                credential_env=credential_env,
+                auth_volume=auth_vol,
+            )
+            self._state.write(auth_vol, proxy_image, domains)
+            swap.commit()
+        except Exception as primary:
+            rollback_failures: list[str] = []
+            if swap is not None:
+                try:
+                    self._state.restore(auth_vol, proxy_image, previous_domains)
+                except Exception as exc:
+                    rollback_failures.append(f"state restore failed: {exc}")
+                try:
+                    swap.rollback()
+                except Exception as exc:
+                    rollback_failures.append(f"proxy restore failed: {exc}")
+            self._credentials.rollback_update(prepared)
+            if rollback_failures:
+                raise ProxyStartError(
+                    f"Proxy update failed: {primary}; " + "; ".join(rollback_failures)
+                ) from primary
+            raise
+
+        self._credentials.commit_update(prepared)
 
         # Verify CA cert survived the recreate (same named volume = same cert).
         # If the cert is missing or changed, redistribute to the agent.

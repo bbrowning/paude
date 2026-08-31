@@ -1532,6 +1532,9 @@ class TestProxyRecreation:
         mock_network = MagicMock()
 
         backend = make_backend(mock_runner, mock_network)
+        backend._proxy.read_domain_state = MagicMock(  # type: ignore[method-assign]
+            return_value=None
+        )
         backend.start_session("my-session")
 
         # Proxy should be recreated via engine.run (create + start)
@@ -1605,6 +1608,9 @@ class TestProxyRecreation:
         mock_network = MagicMock()
 
         backend = make_backend(mock_runner, mock_network)
+        backend._proxy.read_domain_state = MagicMock(  # type: ignore[method-assign]
+            return_value=None
+        )
         backend.connect_session("my-session")
 
         # Proxy should be recreated via engine.run (create + start)

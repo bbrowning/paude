@@ -54,6 +54,7 @@ help:
 
 # Detect native architecture for builds
 NATIVE_ARCH := $(shell uname -m | sed 's/x86_64/amd64/')
+PYTEST := env -u NO_COLOR FORCE_COLOR=1 TERM=xterm-256color uv run pytest
 
 # Build images locally (native arch, for development)
 build:
@@ -66,19 +67,19 @@ run:
 
 # Run unit tests (default, fast - integration tests excluded via pyproject.toml)
 test:
-	uv run pytest --cov=paude --cov-report=term-missing
+	$(PYTEST) --cov=paude --cov-report=term-missing
 
 # Run all integration tests (requires infrastructure)
 test-integration:
-	uv run pytest tests/integration/ -v -m integration
+	$(PYTEST) tests/integration/ -v -m integration
 
 # Run all tests (unit + integration, for CI)
 test-all:
-	uv run pytest -o "addopts=-v" --cov=paude --cov-report=term-missing
+	$(PYTEST) -o "addopts=-v" --cov=paude --cov-report=term-missing
 
 # Run Podman integration tests
 test-podman:
-	uv run pytest tests/integration/ -v -m podman
+	$(PYTEST) tests/integration/ -v -m podman
 
 # Development targets
 install:
