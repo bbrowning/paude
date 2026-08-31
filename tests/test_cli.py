@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -12,6 +11,7 @@ from typer.testing import CliRunner
 
 from paude.backends import Session
 from paude.cli import _parse_copy_path, app
+from tests.ansi import strip_ansi
 
 runner = CliRunner()
 
@@ -26,8 +26,9 @@ runner = CliRunner()
 def test_help_shows_help(flag):
     """Help flag shows help and exits 0."""
     result = runner.invoke(app, [flag])
+    output = strip_ansi(result.stdout)
     assert result.exit_code == 0
-    assert "Run AI coding agents in isolated containers" in result.stdout
+    assert "Run AI coding agents in isolated containers" in output
 
 
 @pytest.mark.parametrize(
@@ -130,7 +131,7 @@ def test_forward_port_recognized_on_attach_commands(command):
     """--forward-port is accepted by both attach commands."""
     result = runner.invoke(app, [command, "--help"])
     assert result.exit_code == 0
-    assert "--forward-port" in _strip_ansi(result.stdout)
+    assert "--forward-port" in strip_ansi(result.stdout)
 
 
 @pytest.mark.parametrize("command", ["connect", "start"])
@@ -245,7 +246,7 @@ def test_allowed_domains_multiple_values():
 def test_help_shows_dry_run_option():
     """--help shows --dry-run option."""
     result = runner.invoke(app, ["--help"])
-    assert "--dry-run" in result.stdout
+    assert "--dry-run" in strip_ansi(result.stdout)
 
 
 def test_args_option():
@@ -409,7 +410,7 @@ class TestAnthropicOAuthProvider:
             ],
         )
         assert result.exit_code == 0
-        assert "provider: anthropic-oauth" in _strip_ansi(result.stdout)
+        assert "provider: anthropic-oauth" in strip_ansi(result.stdout)
 
     def test_gascity_claude_codex_swap_to_anthropic_oauth(self):
         """The user's flow: claude + gascity on anthropic-oauth, codex on chatgpt."""
@@ -425,7 +426,7 @@ class TestAnthropicOAuthProvider:
             ],
         )
         assert result.exit_code == 0
-        out = _strip_ansi(result.stdout)
+        out = strip_ansi(result.stdout)
         assert "gascity -> anthropic-oauth" in out
         assert "claude -> anthropic-oauth" in out
         assert "codex -> chatgpt" in out
@@ -465,7 +466,7 @@ class TestAgentsProvidersLists:
             ],
         )
         assert result.exit_code == 0
-        out = _strip_ansi(result.stdout)
+        out = strip_ansi(result.stdout)
         assert "agents: gascity, claude, codex" in out
         assert "credential providers: vertex, chatgpt" in out
         # Derived per-agent providers.
@@ -480,13 +481,13 @@ class TestAgentsProvidersLists:
             ["create", "--agents", "gascity", "--agents", "claude", "--dry-run"],
         )
         assert result.exit_code == 0
-        assert "agents: gascity, claude" in _strip_ansi(result.stdout)
+        assert "agents: gascity, claude" in strip_ansi(result.stdout)
 
     def test_singular_agent_alias_dry_run(self):
         """--agent still resolves to a single-item agents list."""
         result = runner.invoke(app, ["create", "--agent", "gascity", "--dry-run"])
         assert result.exit_code == 0
-        assert "agents: gascity" in _strip_ansi(result.stdout)
+        assert "agents: gascity" in strip_ansi(result.stdout)
 
     @patch("paude.dry_run.show_dry_run")
     def test_single_gascity_install_is_exact(self, mock_show: MagicMock):
@@ -502,7 +503,7 @@ class TestAgentsProvidersLists:
             app, ["create", "--agents", "claude,claude,codex", "--dry-run"]
         )
         assert result.exit_code != 0
-        assert "Duplicate agent" in _strip_ansi(result.output)
+        assert "Duplicate agent" in strip_ansi(result.output)
 
     def test_agent_and_agents_conflict(self):
         """Passing both --agent and --agents fails with a clear message."""
@@ -510,7 +511,7 @@ class TestAgentsProvidersLists:
             app, ["create", "--agent", "claude", "--agents", "codex", "--dry-run"]
         )
         assert result.exit_code != 0
-        assert "not both" in _strip_ansi(result.output)
+        assert "not both" in strip_ansi(result.output)
 
     def test_provider_and_providers_are_independent(self):
         """Primary mapping shorthand can use an explicit credential set."""
@@ -526,7 +527,7 @@ class TestAgentsProvidersLists:
             ],
         )
         assert result.exit_code == 0
-        out = _strip_ansi(result.output)
+        out = strip_ansi(result.output)
         assert "credential providers: vertex, openai" in out
         assert "claude -> vertex" in out
 
@@ -543,7 +544,7 @@ class TestAgentsProvidersLists:
             ],
         )
         assert result.exit_code != 0
-        assert "not both" in _strip_ansi(result.output)
+        assert "not both" in strip_ansi(result.output)
 
     @pytest.mark.parametrize(
         "mapping",
@@ -555,7 +556,7 @@ class TestAgentsProvidersLists:
             ["create", "--agent-provider", mapping, "--dry-run"],
         )
         assert result.exit_code != 0
-        assert "expected AGENT=PROVIDER" in _strip_ansi(result.output)
+        assert "expected AGENT=PROVIDER" in strip_ansi(result.output)
 
     def test_duplicate_agent_provider_mapping_rejected(self):
         result = runner.invoke(
@@ -570,7 +571,7 @@ class TestAgentsProvidersLists:
             ],
         )
         assert result.exit_code != 0
-        assert "Duplicate provider mapping" in _strip_ansi(result.output)
+        assert "Duplicate provider mapping" in strip_ansi(result.output)
 
     def test_unknown_agent_rejected(self):
         """An unknown agent name in --agents is rejected."""
@@ -588,7 +589,7 @@ class TestAgentsProvidersLists:
         mock_prepare.return_value = ([], [], {}, False)
         result = runner.invoke(app, ["create", "--agents", "claude,codex,gascity"])
         assert result.exit_code == 0
-        out = _strip_ansi(result.output)
+        out = strip_ansi(result.output)
         assert "multi-agent creation is not yet supported" not in out
         mock_create.assert_called_once()
         assert mock_create.call_args.kwargs["agent_name"] == "claude"
@@ -609,7 +610,7 @@ class TestAgentsProvidersLists:
         mock_prepare.return_value = ([], [], {}, False)
         result = runner.invoke(app, ["create", "--agents", "claude"])
         assert result.exit_code == 0
-        assert "multi-agent creation is not yet supported" not in _strip_ansi(
+        assert "multi-agent creation is not yet supported" not in strip_ansi(
             result.output
         )
         mock_create.assert_called_once()
@@ -619,13 +620,13 @@ class TestAgentsProvidersLists:
         result = runner.invoke(app, ["create", "--agent", "", "--dry-run"])
         assert result.exit_code != 0
         assert result.exception is None or not isinstance(result.exception, IndexError)
-        assert "Agent name cannot be empty" in _strip_ansi(result.output)
+        assert "Agent name cannot be empty" in strip_ansi(result.output)
 
     def test_empty_provider_rejected_cleanly(self):
         """An explicit empty --provider fails with a clean error, not a silent default."""
         result = runner.invoke(app, ["create", "--provider", "", "--dry-run"])
         assert result.exit_code != 0
-        assert "Provider name cannot be empty" in _strip_ansi(result.output)
+        assert "Provider name cannot be empty" in strip_ansi(result.output)
 
     @patch("paude.cli.create_podman.create_podman_session")
     @patch("paude.cli.create._prepare_session_create")
@@ -687,7 +688,7 @@ class TestAgentsProvidersLists:
             ],
         )
         assert result.exit_code == 0
-        out = _strip_ansi(result.stdout)
+        out = strip_ansi(result.stdout)
         assert "credential providers: vertex, chatgpt, openai" in out
         assert "codex -> chatgpt" in out
 
@@ -713,23 +714,18 @@ def test_no_command_accepts_github_token(args):
     assert "No such option" in result.output
 
 
-def _strip_ansi(text: str) -> str:
-    """Remove ANSI escape codes from text."""
-    return re.sub(r"\x1b\[[0-9;]*m", "", text)
-
-
 class TestCreateHostFlag:
     """Tests for --host and --ssh-key CLI flags."""
 
     def test_host_flag_recognized(self):
         """--host flag is accepted by the create command."""
         result = runner.invoke(app, ["create", "--help"])
-        assert "--host" in _strip_ansi(result.stdout)
+        assert "--host" in strip_ansi(result.stdout)
 
     def test_ssh_key_flag_recognized(self):
         """--ssh-key flag is accepted by the create command."""
         result = runner.invoke(app, ["create", "--help"])
-        assert "--ssh-key" in _strip_ansi(result.stdout)
+        assert "--ssh-key" in strip_ansi(result.stdout)
 
     def test_ssh_key_without_host_rejected(self):
         """--ssh-key requires --host."""
@@ -786,18 +782,19 @@ def test_bare_paude_shows_list():
 def test_help_shows_commands():
     """Help shows commands section."""
     result = runner.invoke(app, ["--help"])
+    output = strip_ansi(result.stdout)
     assert result.exit_code == 0
-    assert "create" in result.stdout
-    assert "start" in result.stdout
-    assert "stop" in result.stdout
-    assert "list" in result.stdout
+    assert "create" in output
+    assert "start" in output
+    assert "stop" in output
+    assert "list" in output
 
 
 def test_help_shows_extra_sections():
     """Help includes extra reference sections as Rich panels."""
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    output = result.stdout
+    output = strip_ansi(result.stdout)
     assert "Workflow" in output
     assert "Syncing Code" in output
     assert "Copying Files" in output
@@ -819,19 +816,21 @@ def test_help_shows_extra_sections():
 def test_subcommand_help(command, description):
     """Subcommand --help shows its own help, not main help."""
     result = runner.invoke(app, [command, "--help"])
+    output = strip_ansi(result.stdout)
     assert result.exit_code == 0
-    assert command in result.stdout.lower()
-    assert description in result.stdout
-    assert "paude - Run Claude Code" not in result.stdout
+    assert command in output.lower()
+    assert description in output
+    assert "paude - Run Claude Code" not in output
 
 
 def test_remote_help():
     """'remote --help' shows subcommand help."""
     result = runner.invoke(app, ["remote", "--help"])
+    output = strip_ansi(result.stdout)
     assert result.exit_code == 0
-    assert "remote" in result.stdout.lower()
-    assert "git" in result.stdout.lower() or "ACTION" in result.stdout
-    assert "paude - Run Claude Code" not in result.stdout
+    assert "remote" in output.lower()
+    assert "git" in output.lower() or "ACTION" in output
+    assert "paude - Run Claude Code" not in output
 
 
 class TestRemoteCommand:
@@ -1157,9 +1156,10 @@ def test_subcommand_runs_without_main_execution():
     # This test verifies that subcommands don't trigger podman checks
     # by confirming they complete without the "podman required" error
     result = runner.invoke(app, ["stop", "--help"])
+    output = strip_ansi(result.stdout)
     assert result.exit_code == 0
-    assert "Stop a session" in result.stdout
-    assert "podman is required" not in result.stdout
+    assert "Stop a session" in output
+    assert "podman is required" not in output
 
 
 # Tests for connect command multi-backend search behavior
@@ -1801,14 +1801,14 @@ class TestCpCommand:
         result = runner.invoke(app, ["cp", "--help"])
 
         assert result.exit_code == 0
-        assert "Copy files between local and a session" in result.stdout
+        assert "Copy files between local and a session" in strip_ansi(result.stdout)
 
     def test_help_shows_cp_command(self):
         """Main help shows cp command."""
         result = runner.invoke(app, ["--help"])
 
         assert result.exit_code == 0
-        assert "cp" in result.stdout
+        assert "cp" in strip_ansi(result.stdout)
 
 
 # ---------------------------------------------------------------------------
@@ -1881,7 +1881,7 @@ class TestAllowedDomainsCLI:
         result = runner.invoke(app, ["allowed-domains", "--help"])
 
         assert result.exit_code == 0
-        assert "--refresh-credentials" in result.stdout
+        assert "--refresh-credentials" in strip_ansi(result.stdout)
 
 
 class TestBlockedDomainsCLI:
@@ -1971,7 +1971,7 @@ class TestBlockedDomainsCLI:
 def test_help_includes_blocked_domains() -> None:
     """Help output includes blocked-domains command."""
     result = runner.invoke(app, ["--help"])
-    assert "blocked-domains" in result.stdout
+    assert "blocked-domains" in strip_ansi(result.stdout)
 
 
 class TestDetectDevScriptDir:

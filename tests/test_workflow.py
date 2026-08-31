@@ -19,6 +19,7 @@ from paude.workflow import (
     reset_session,
     status_sessions,
 )
+from tests.ansi import strip_ansi
 
 
 class TestGetContainerBranch:
@@ -1323,13 +1324,6 @@ class TestResetSession:
             reset_session("test", force=True)
 
 
-def _strip_ansi(text: str) -> str:
-    """Remove ANSI escape codes from text."""
-    import re
-
-    return re.sub(r"\x1b\[[0-9;]*m", "", text)
-
-
 class TestHarvestCli:
     """Tests for harvest CLI command."""
 
@@ -1340,7 +1334,7 @@ class TestHarvestCli:
 
         runner = CliRunner()
         result = runner.invoke(app, ["harvest", "--help"])
-        output = _strip_ansi(result.output)
+        output = strip_ansi(result.output)
         assert result.exit_code == 0
         assert "harvest" in output.lower()
         assert "--branch" in output
@@ -1357,7 +1351,7 @@ class TestResetCli:
 
         runner = CliRunner()
         result = runner.invoke(app, ["reset", "--help"])
-        output = _strip_ansi(result.output)
+        output = strip_ansi(result.output)
         assert result.exit_code == 0
         assert "--branch" in output
         assert "--force" in output
@@ -1374,6 +1368,6 @@ class TestStatusCli:
 
         runner = CliRunner()
         result = runner.invoke(app, ["status", "--help"])
-        output = _strip_ansi(result.output)
+        output = strip_ansi(result.output)
         assert result.exit_code == 0
         assert "status" in output.lower()
