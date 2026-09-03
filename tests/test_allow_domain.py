@@ -96,6 +96,12 @@ class TestPodmanUpdateAllowedDomains:
             if args[:3] == ("inspect", "-f", "{{.State.Running}}"):
                 return MagicMock(returncode=0, stdout="true\n", stderr="")
             if args and args[0] == "run" and any("test -e" in arg for arg in args):
+                if any("printf" in arg for arg in args):
+                    return MagicMock(
+                        returncode=0,
+                        stdout="\0".join(["0", "", "0", "", ""]),
+                        stderr="",
+                    )
                 return MagicMock(returncode=3, stdout="", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 

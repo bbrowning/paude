@@ -155,14 +155,15 @@ class PodmanProxyManager:
             return None
 
         domains = [d for d in domains_str.split(",") if d]
-        durable_domains = self.read_domain_state(session_name, proxy_image)
+        durable_domains, durable_endpoints = self.read_policy_state(
+            session_name, proxy_image
+        )
         if durable_domains is not None:
             domains = durable_domains
 
         endpoints = [
             item for item in labels.get(PAUDE_LABEL_ENDPOINTS, "").split(",") if item
         ]
-        durable_endpoints = self.read_endpoint_state(session_name, proxy_image)
         if durable_endpoints is not None:
             endpoints = durable_endpoints
 
@@ -171,21 +172,17 @@ class PodmanProxyManager:
 
         return (proxy_image, domains, endpoints, otel_ports)
 
-    def read_domain_state(
+    def read_policy_state(
         self, session_name: str, proxy_image: str | None
-    ) -> list[str] | None:
-        """Read the committed domain override for a session, if one exists."""
+    ) -> tuple[list[str] | None, list[str] | None]:
+        """Read committed domain and endpoint overrides in one helper."""
         if not proxy_image:
-            return None
-        return self._state.read(auth_volume_name(session_name), proxy_image)
-
-    def read_endpoint_state(
-        self, session_name: str, proxy_image: str | None
-    ) -> list[str] | None:
-        """Read the committed endpoint override for a session, if one exists."""
-        if not proxy_image:
-            return None
-        return self._endpoint_state.read(auth_volume_name(session_name), proxy_image)
+            return None, None
+        return self._state.read_pair(
+            self._endpoint_state,
+            auth_volume_name(session_name),
+            proxy_image,
+        )
 
     def start_if_needed(
         self,
@@ -479,6 +476,7 @@ class PodmanProxyManager:
         required_credentials: set[str] | None = None,
         allowed_endpoints: list[str] | None = None,
         proxy_image: str | None = None,
+        operation_label: str = "domains",
     ) -> None:
         """Update domains using preserved credentials and a rollback-safe swap."""
         pname = proxy_container_name(session_name)
@@ -520,14 +518,11 @@ class PodmanProxyManager:
             credentials = ProxyCredentials()
         elif not isinstance(credentials, ProxyCredentials):
             credentials = ProxyCredentials(environment=dict(credentials))
-        previous_domains = self._state.read(auth_vol, proxy_image)
         commit_endpoint_state = allowed_endpoints is not None or bool(
             configured_endpoints
         )
-        previous_endpoints = (
-            self._endpoint_state.read(auth_vol, proxy_image)
-            if commit_endpoint_state
-            else None
+        previous_domains, previous_endpoints = self._state.read_pair(
+            self._endpoint_state, auth_vol, proxy_image
         )
         prepared = self._credentials.prepare_update(
             session_name,
@@ -539,7 +534,7 @@ class PodmanProxyManager:
         credential_env = self._credential_env(prepared.credentials)
 
         print(
-            f"Updating proxy domains for session '{session_name}'...",
+            f"Updating proxy {operation_label} for session '{session_name}'...",
             file=sys.stderr,
         )
         swap = None
@@ -622,4 +617,5 @@ class PodmanProxyManager:
             required_credentials=required_credentials,
             allowed_endpoints=endpoints,
             proxy_image=proxy_image,
+            operation_label="endpoints",
         )

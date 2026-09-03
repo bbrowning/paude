@@ -44,6 +44,12 @@ def _make_mock_runner(engine_binary: str = "podman") -> MagicMock:
         if args[:3] == ("inspect", "-f", "{{.State.Running}}"):
             return MagicMock(returncode=0, stdout="true\n", stderr="")
         if args and args[0] == "run" and any("test -e" in arg for arg in args):
+            if any("printf" in arg for arg in args):
+                return MagicMock(
+                    returncode=0,
+                    stdout="\0".join(["0", "", "0", "", ""]),
+                    stderr="",
+                )
             return MagicMock(returncode=3, stdout="", stderr="")
         return MagicMock(returncode=0, stdout="", stderr="")
 
@@ -1111,7 +1117,7 @@ class TestUpdateDomainTransaction:
         manager._credentials.prepare_update.return_value = prepared
         manager._credentials.credential_env.return_value = {}
         manager._state = MagicMock()
-        manager._state.read.return_value = [".old.example"]
+        manager._state.read_pair.return_value = ([".old.example"], None)
         manager._state.write.side_effect = RuntimeError("write failed")
         swap = MagicMock()
         manager._proxy_runner = MagicMock()
@@ -1145,7 +1151,7 @@ class TestUpdateDomainTransaction:
         manager._credentials.prepare_update.return_value = prepared
         manager._credentials.credential_env.return_value = {}
         manager._state = MagicMock()
-        manager._state.read.return_value = [".old.example"]
+        manager._state.read_pair.return_value = ([".old.example"], None)
         swap = MagicMock()
         manager._proxy_runner = MagicMock()
         manager._proxy_runner.swap_session_proxy.return_value = swap
@@ -1184,6 +1190,7 @@ class TestUpdateDomainTransaction:
         manager._credentials.credential_env.return_value = {}
         manager._state = MagicMock()
         manager._endpoint_state = MagicMock()
+        manager._state.read_pair.return_value = (["api.example.com"], None)
         manager._proxy_runner = MagicMock()
         manager._proxy_runner.swap_session_proxy.return_value = MagicMock()
         manager._ca_cert = MagicMock()
@@ -1223,7 +1230,7 @@ class TestUpdateEndpointsCapability:
 
     @patch("paude.backends.podman.proxy._get_host_dns", return_value=None)
     def test_uses_configured_endpoint_capable_image(
-        self, mock_dns: MagicMock
+        self, mock_dns: MagicMock, capsys: pytest.CaptureFixture[str]
     ) -> None:
         runner = _make_mock_runner()
         runner.container_exists.return_value = True
@@ -1249,6 +1256,7 @@ class TestUpdateEndpointsCapability:
         manager._credentials.credential_env.return_value = {}
         manager._state = MagicMock()
         manager._endpoint_state = MagicMock()
+        manager._state.read_pair.return_value = (["api.example.com"], None)
         manager._proxy_runner = MagicMock()
         manager._proxy_runner.swap_session_proxy.return_value = MagicMock()
         manager._ca_cert = MagicMock()
@@ -1257,6 +1265,10 @@ class TestUpdateEndpointsCapability:
 
         swap_args = manager._proxy_runner.swap_session_proxy.call_args.kwargs
         assert swap_args["image"] == "proxy:endpoint-capable"
+        assert (
+            "Updating proxy endpoints for session 'test-session'"
+            in capsys.readouterr().err
+        )
         manager._endpoint_state.write.assert_called_once_with(
             "paude-auth-test-session",
             "proxy:endpoint-capable",

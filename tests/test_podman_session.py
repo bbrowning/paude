@@ -1536,11 +1536,8 @@ class TestProxyRecreation:
         mock_network = MagicMock()
 
         backend = make_backend(mock_runner, mock_network)
-        backend._proxy.read_domain_state = MagicMock(  # type: ignore[method-assign]
-            return_value=None
-        )
-        backend._proxy.read_endpoint_state = MagicMock(  # type: ignore[method-assign]
-            return_value=None
+        backend._proxy.read_policy_state = MagicMock(  # type: ignore[method-assign]
+            return_value=(None, None)
         )
         backend.start_session("my-session")
 
@@ -1615,11 +1612,8 @@ class TestProxyRecreation:
         mock_network = MagicMock()
 
         backend = make_backend(mock_runner, mock_network)
-        backend._proxy.read_domain_state = MagicMock(  # type: ignore[method-assign]
-            return_value=None
-        )
-        backend._proxy.read_endpoint_state = MagicMock(  # type: ignore[method-assign]
-            return_value=None
+        backend._proxy.read_policy_state = MagicMock(  # type: ignore[method-assign]
+            return_value=(None, None)
         )
         backend.connect_session("my-session")
 

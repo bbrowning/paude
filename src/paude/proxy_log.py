@@ -48,18 +48,11 @@ def parse_blocked_log(raw_log: str) -> list[BlockedDomain]:
         ports[domain] = port
 
     result = [
-        BlockedDomain(
-            domain=d, count=counts[d], last_seen=last_seen[d], port=ports[d]
-        )
+        BlockedDomain(domain=d, count=counts[d], last_seen=last_seen[d], port=ports[d])
         for d in counts
     ]
     result.sort(key=lambda b: b.count, reverse=True)
     return result
-
-
-def _extract_domain(url: str) -> str | None:
-    """Extract hostname from a URL or host:port string."""
-    return _extract_destination(url)[0]
 
 
 def _extract_destination(url: str) -> tuple[str | None, int | None]:

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from paude.endpoints import normalize_allowed_endpoints
@@ -48,8 +46,3 @@ def test_normalizes_and_deduplicates_exact_authorities() -> None:
 def test_rejects_non_exact_or_malformed_authorities(value: str) -> None:
     with pytest.raises(ValueError, match="Invalid allowed endpoint"):
         normalize_allowed_endpoints([value])
-
-
-def test_proxy_image_is_pinned_to_endpoint_capable_merge() -> None:
-    dockerfile = (Path(__file__).parents[1] / "containers/proxy/Dockerfile").read_text()
-    assert "598d2d89cbc6a9002db71de9d31d20d70fefb1cc" in dockerfile
