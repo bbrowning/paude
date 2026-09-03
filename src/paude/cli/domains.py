@@ -346,5 +346,13 @@ def blocked_domains_cmd(
         f"{len(entries)} unique domain(s) blocked ({total_requests} total requests)."
     )
     typer.echo("")
-    typer.echo("Tip: To allow a domain, run:")
-    typer.echo(f"  paude allowed-domains {name} --add <domain>")
+    endpoint_blocked = any(
+        entry.port is not None and entry.port not in (80, 443) for entry in entries
+    )
+    if endpoint_blocked:
+        typer.echo("Tip: A nonstandard port needs both host and endpoint access:")
+        typer.echo(f"  paude allowed-domains {name} --add <host>")
+        typer.echo(f"  paude allowed-endpoints {name} --add <host:port>")
+    else:
+        typer.echo("Tip: To allow a domain, run:")
+        typer.echo(f"  paude allowed-domains {name} --add <domain>")

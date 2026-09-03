@@ -144,6 +144,13 @@ class PodmanBackend:
             raise
 
         print(f"Session '{name}' created (stopped).", file=sys.stderr)
+        from paude.endpoints import warn_for_uncovered_allowed_endpoints
+
+        warn_for_uncovered_allowed_endpoints(
+            config.allowed_endpoints,
+            config.allowed_domains,
+            session_name=name,
+        )
         return Session(
             name=name,
             status="stopped",
@@ -408,6 +415,11 @@ class PodmanBackend:
         require_session(self._runner, name)
         return self._proxy.get_allowed_domains(name)
 
+    def get_allowed_endpoints(self, name: str) -> list[str] | None:
+        """Get current allowed endpoints for a session."""
+        require_session(self._runner, name)
+        return self._proxy.get_allowed_endpoints(name)
+
     def get_proxy_blocked_log(self, name: str) -> str | None:
         """Get raw blocked-domain log from the proxy container."""
         require_session(self._runner, name)
@@ -440,6 +452,31 @@ class PodmanBackend:
             name,
             domains,
             credentials=refresh,
+            credential_targets=proxy_credential_targets(composition),
+            required_credentials=required_proxy_credential_targets(
+                composition, providers
+            ),
+        )
+
+    def update_allowed_endpoints(self, name: str, endpoints: list[str]) -> None:
+        """Update destination-scoped port exceptions for a session."""
+        from paude.endpoints import normalize_allowed_endpoints
+
+        endpoints = normalize_allowed_endpoints(endpoints)
+        require_session(self._runner, name)
+        composition = get_session_composition(self._runner, name)
+        from paude.backends.podman.helpers import get_session_credential_providers
+        from paude.backends.proxy_config import (
+            ProxyCredentials,
+            proxy_credential_targets,
+            required_proxy_credential_targets,
+        )
+
+        providers = get_session_credential_providers(self._runner, name)
+        self._proxy.update_endpoints(
+            name,
+            endpoints,
+            credentials=ProxyCredentials(chatgpt_oauth_mode="chatgpt" in providers),
             credential_targets=proxy_credential_targets(composition),
             required_credentials=required_proxy_credential_targets(
                 composition, providers

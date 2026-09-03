@@ -8,6 +8,7 @@ from collections.abc import Mapping
 
 from paude.backends.labels import (
     PAUDE_LABEL_DOMAINS,
+    PAUDE_LABEL_ENDPOINTS,
     PAUDE_LABEL_OTEL_PORTS,
     PAUDE_LABEL_PROXY_IMAGE,
 )
@@ -100,6 +101,13 @@ class PodmanProxyManager:
         self._ca_cert = CACertDistributor(runner)
         self._credentials = ProxyCredentialManager(runner)
         self._state = ProxyStateStore(runner)
+        self._endpoint_state = ProxyStateStore(
+            runner,
+            path="/data/auth/allowed-endpoints.json",
+            schema="allowed-endpoints.v1",
+            field="endpoints",
+            description="allowed-endpoint",
+        )
 
     def _create_credential_secrets(
         self,
@@ -126,11 +134,11 @@ class PodmanProxyManager:
 
     def get_config_from_labels(
         self, session_name: str
-    ) -> tuple[str, list[str], list[int]] | None:
+    ) -> tuple[str, list[str], list[str], list[int]] | None:
         """Read proxy configuration from the main container's labels.
 
         Returns:
-            Tuple of (proxy_image, domains, otel_ports) or None.
+            Tuple of (proxy_image, domains, endpoints, otel_ports) or None.
         """
         container = find_container_by_session_name(self._runner, session_name)
         if container is None:
@@ -147,22 +155,34 @@ class PodmanProxyManager:
             return None
 
         domains = [d for d in domains_str.split(",") if d]
-        durable_domains = self.read_domain_state(session_name, proxy_image)
+        durable_domains, durable_endpoints = self.read_policy_state(
+            session_name, proxy_image
+        )
         if durable_domains is not None:
             domains = durable_domains
+
+        endpoints = [
+            item for item in labels.get(PAUDE_LABEL_ENDPOINTS, "").split(",") if item
+        ]
+        if durable_endpoints is not None:
+            endpoints = durable_endpoints
 
         otel_ports_str = labels.get(PAUDE_LABEL_OTEL_PORTS, "")
         otel_ports = [int(p) for p in otel_ports_str.split(",") if p]
 
-        return (proxy_image, domains, otel_ports)
+        return (proxy_image, domains, endpoints, otel_ports)
 
-    def read_domain_state(
+    def read_policy_state(
         self, session_name: str, proxy_image: str | None
-    ) -> list[str] | None:
-        """Read the committed domain override for a session, if one exists."""
+    ) -> tuple[list[str] | None, list[str] | None]:
+        """Read committed domain and endpoint overrides in one helper."""
         if not proxy_image:
-            return None
-        return self._state.read(auth_volume_name(session_name), proxy_image)
+            return None, None
+        return self._state.read_pair(
+            self._endpoint_state,
+            auth_volume_name(session_name),
+            proxy_image,
+        )
 
     def start_if_needed(
         self,
@@ -185,7 +205,7 @@ class PodmanProxyManager:
             return
 
         # Recreate the missing proxy
-        proxy_image, domains, otel_ports = proxy_config
+        proxy_image, domains, endpoints, otel_ports = proxy_config
         nname = network_name(session_name)
         ca_vol = ca_volume_name(session_name)
         auth_vol = auth_volume_name(session_name)
@@ -217,6 +237,7 @@ class PodmanProxyManager:
             network=nname,
             dns=dns,
             allowed_domains=domains,
+            allowed_endpoints=endpoints,
             ip=proxy_ip,
             otel_ports=otel_ports,
             ca_volume=ca_vol,
@@ -319,6 +340,7 @@ class PodmanProxyManager:
         allowed_domains: list[str] | None,
         otel_ports: list[int] | None = None,
         credentials: ProxyCredentials | Mapping[str, str] | None = None,
+        allowed_endpoints: list[str] | None = None,
     ) -> tuple[str, str | None]:
         """Create a proxy container for a session.
 
@@ -371,6 +393,7 @@ class PodmanProxyManager:
                 network=nname,
                 dns=dns,
                 allowed_domains=allowed_domains,
+                allowed_endpoints=allowed_endpoints,
                 ip=proxy_ip,
                 otel_ports=otel_ports,
                 ca_volume=ca_vol,
@@ -402,6 +425,28 @@ class PodmanProxyManager:
 
         return [d for d in domains_str.split(",") if d]
 
+    def get_allowed_endpoints(self, session_name: str) -> list[str] | None:
+        """Get current destination-scoped port exceptions for a session."""
+        pname = proxy_container_name(session_name)
+        if not self._runner.container_exists(pname):
+            return None
+        endpoints = self._runner.get_container_env(pname, "ALLOWED_ENDPOINTS")
+        return [item for item in (endpoints or "").split(",") if item]
+
+    def _endpoint_update_proxy_image(self, session_name: str) -> str:
+        """Return the configured image after verifying endpoint capability."""
+        container = find_container_by_session_name(self._runner, session_name)
+        labels = container.get("Labels", {}) or {} if container else {}
+        if PAUDE_LABEL_ENDPOINTS not in labels:
+            raise ValueError(
+                f"Session '{session_name}' predates allowed-endpoints support. "
+                f"Run 'paude upgrade {session_name}' before changing endpoints."
+            )
+        proxy_image = labels.get(PAUDE_LABEL_PROXY_IMAGE, "")
+        if not proxy_image:
+            raise ValueError(f"Cannot inspect proxy configuration for: {session_name}")
+        return str(proxy_image)
+
     def get_blocked_log(self, session_name: str) -> str | None:
         """Get raw blocked-domain log from the proxy container."""
         pname = proxy_container_name(session_name)
@@ -429,6 +474,9 @@ class PodmanProxyManager:
         credentials: ProxyCredentials | Mapping[str, str] | None = None,
         credential_targets: set[str] | None = None,
         required_credentials: set[str] | None = None,
+        allowed_endpoints: list[str] | None = None,
+        proxy_image: str | None = None,
+        operation_label: str = "domains",
     ) -> None:
         """Update domains using preserved credentials and a rollback-safe swap."""
         pname = proxy_container_name(session_name)
@@ -438,13 +486,19 @@ class PodmanProxyManager:
                 "Cannot update domains."
             )
 
-        proxy_image = self._runner.get_container_image(pname)
-        if not proxy_image:
+        running_proxy_image = self._runner.get_container_image(pname)
+        if not running_proxy_image:
             raise ValueError(f"Cannot inspect proxy container: {pname}")
+        proxy_image = proxy_image or running_proxy_image
 
         # Preserve OTEL ports from labels across proxy recreate
         proxy_config = self.get_config_from_labels(session_name)
-        _, _, otel_ports = proxy_config if proxy_config else ("", [], [])
+        _, _, configured_endpoints, otel_ports = (
+            proxy_config if proxy_config else ("", [], [], [])
+        )
+        endpoints = (
+            configured_endpoints if allowed_endpoints is None else allowed_endpoints
+        )
 
         nname = network_name(session_name)
         ca_vol = ca_volume_name(session_name)
@@ -464,7 +518,12 @@ class PodmanProxyManager:
             credentials = ProxyCredentials()
         elif not isinstance(credentials, ProxyCredentials):
             credentials = ProxyCredentials(environment=dict(credentials))
-        previous_domains = self._state.read(auth_vol, proxy_image)
+        commit_endpoint_state = allowed_endpoints is not None or bool(
+            configured_endpoints
+        )
+        previous_domains, previous_endpoints = self._state.read_pair(
+            self._endpoint_state, auth_vol, proxy_image
+        )
         prepared = self._credentials.prepare_update(
             session_name,
             pname,
@@ -475,7 +534,7 @@ class PodmanProxyManager:
         credential_env = self._credential_env(prepared.credentials)
 
         print(
-            f"Updating proxy domains for session '{session_name}'...",
+            f"Updating proxy {operation_label} for session '{session_name}'...",
             file=sys.stderr,
         )
         swap = None
@@ -486,6 +545,7 @@ class PodmanProxyManager:
                 network=nname,
                 dns=dns,
                 allowed_domains=domains,
+                allowed_endpoints=endpoints,
                 ip=proxy_ip,
                 otel_ports=otel_ports,
                 ca_volume=ca_vol,
@@ -496,6 +556,8 @@ class PodmanProxyManager:
                 auth_volume=auth_vol,
             )
             self._state.write(auth_vol, proxy_image, domains)
+            if commit_endpoint_state:
+                self._endpoint_state.write(auth_vol, proxy_image, endpoints)
             swap.commit()
         except Exception as primary:
             rollback_failures: list[str] = []
@@ -504,6 +566,15 @@ class PodmanProxyManager:
                     self._state.restore(auth_vol, proxy_image, previous_domains)
                 except Exception as exc:
                     rollback_failures.append(f"state restore failed: {exc}")
+                if commit_endpoint_state:
+                    try:
+                        self._endpoint_state.restore(
+                            auth_vol, proxy_image, previous_endpoints
+                        )
+                    except Exception as exc:
+                        rollback_failures.append(
+                            f"endpoint state restore failed: {exc}"
+                        )
                 try:
                     swap.rollback()
                 except Exception as exc:
@@ -520,3 +591,38 @@ class PodmanProxyManager:
         # Verify CA cert survived the recreate (same named volume = same cert).
         # If the cert is missing or changed, redistribute to the agent.
         self._redistribute_ca_if_needed(session_name)
+
+    def update_endpoints(
+        self,
+        session_name: str,
+        endpoints: list[str],
+        *,
+        credentials: ProxyCredentials | None = None,
+        credential_targets: set[str] | None = None,
+        required_credentials: set[str] | None = None,
+    ) -> None:
+        """Update endpoints while preserving domains via the transactional swap."""
+        proxy_image = self._endpoint_update_proxy_image(session_name)
+        domains = self.get_allowed_domains(session_name)
+        if domains is None:
+            raise ValueError(
+                f"Session '{session_name}' has no proxy (unrestricted network). "
+                "Cannot update endpoints."
+            )
+        self.update_domains(
+            session_name,
+            domains,
+            credentials=credentials,
+            credential_targets=credential_targets,
+            required_credentials=required_credentials,
+            allowed_endpoints=endpoints,
+            proxy_image=proxy_image,
+            operation_label="endpoints",
+        )
+        from paude.endpoints import warn_for_uncovered_allowed_endpoints
+
+        warn_for_uncovered_allowed_endpoints(
+            endpoints,
+            domains,
+            session_name=session_name,
+        )

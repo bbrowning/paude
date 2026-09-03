@@ -39,6 +39,7 @@ def create_podman_session(
     config: PaudeConfig | None,
     env: dict[str, str],
     expanded_domains: list[str],
+    allowed_endpoints: list[str] | None = None,
     parsed_args: list[str],
     yolo: bool,
     git: bool,
@@ -69,6 +70,7 @@ def create_podman_session(
         gpu=gpu,
         yolo=yolo,
         otel_endpoint=otel_endpoint,
+        allowed_endpoints=allowed_endpoints or [],
     )
 
     try:
@@ -134,6 +136,7 @@ def _resolve_composition_and_spec(
     gpu: str | None,
     yolo: bool,
     otel_endpoint: str | None,
+    allowed_endpoints: list[str] | None = None,
 ) -> tuple[AgentComposition, SessionSpec]:
     """Resolve the requested agents and gather the session's declared config.
 
@@ -157,6 +160,7 @@ def _resolve_composition_and_spec(
         gpu=gpu,
         yolo=yolo,
         otel_endpoint=otel_endpoint,
+        allowed_endpoints=allowed_endpoints or [],
     )
     return composition, spec
 

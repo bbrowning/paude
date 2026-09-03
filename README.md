@@ -275,6 +275,23 @@ restores the old proxy and policy instead of leaving the session without an
 authenticated route. Committed domains survive proxy recovery and are used by
 subsequent backups and upgrades.
 
+For a nonstandard port, authorize the host and add an exact destination
+exception:
+
+```bash
+paude allowed-domains SESSION --add 192.168.7.31
+paude allowed-endpoints SESSION --add 192.168.7.31:8000
+```
+
+Both rules must match. If an endpoint host is not covered by the session's
+allowed domains, Paude keeps the exact endpoint rule but warns that it will
+remain blocked and shows the `allowed-domains` command needed to enable it.
+
+This grants port 8000 only to that host. `allowed-endpoints` also supports
+`--remove` and `--replace`; domain and endpoint updates preserve the other
+policy list and use the same rollback-safe swap. IPv6 authorities must be
+bracketed, for example `[2001:db8::1]:4317`.
+
 To deliberately replace credentials whose fresh values are available in the
 current environment, add `--refresh-credentials` to a domain mutation. Fresh
 values replace matching bindings while unrelated credentials remain attached:

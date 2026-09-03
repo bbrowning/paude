@@ -64,6 +64,7 @@ class SessionConfig:
         args: Arguments to pass to Claude.
         workdir: Working directory inside container.
         allowed_domains: List of domains to allow. Empty list means unrestricted.
+        allowed_endpoints: Exact host:port exceptions for nonstandard ports.
         yolo: Enable YOLO mode.
         network: Podman network name for proxy setup.
         ports: Ports to expose as (host_port, container_port) tuples.
@@ -77,6 +78,7 @@ class SessionConfig:
     args: list[str] = field(default_factory=list)
     workdir: str | None = None
     allowed_domains: list[str] = field(default_factory=list)
+    allowed_endpoints: list[str] = field(default_factory=list)
     yolo: bool = False
     network: str | None = None
     proxy_image: str | None = None
@@ -222,6 +224,10 @@ class Backend(Protocol):
         """
         ...
 
+    def get_allowed_endpoints(self, name: str) -> list[str] | None:
+        """Get exact destination-scoped port exceptions for a session."""
+        ...
+
     def get_proxy_blocked_log(self, name: str) -> str | None:
         """Get raw blocked-domain log from the proxy container.
 
@@ -250,6 +256,10 @@ class Backend(Protocol):
             refresh_credentials: Replace bindings for credentials currently
                 supplied by the host while preserving all other bindings.
         """
+        ...
+
+    def update_allowed_endpoints(self, name: str, endpoints: list[str]) -> None:
+        """Replace exact destination-scoped port exceptions for a session."""
         ...
 
     def start_agent_headless(self, name: str) -> None:

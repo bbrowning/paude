@@ -125,6 +125,7 @@ class ProxyRunner:
         dns: str | None,
         allowed_domains: list[str] | None,
         otel_ports: list[int] | None = None,
+        allowed_endpoints: list[str] | None = None,
         credentials: Mapping[str, str] | None = None,
         allowed_clients: str | None = None,
         credential_env: Mapping[str, str] | None = None,
@@ -136,6 +137,8 @@ class ProxyRunner:
             args.extend(["-e", f"PROXY_DNS={dns}"])
         if allowed_domains:
             args.extend(["-e", f"ALLOWED_DOMAINS={','.join(allowed_domains)}"])
+        if allowed_endpoints:
+            args.extend(["-e", f"ALLOWED_ENDPOINTS={','.join(allowed_endpoints)}"])
         if otel_ports:
             args.extend(
                 ["-e", f"ALLOWED_OTEL_PORTS={','.join(str(p) for p in otel_ports)}"]
@@ -188,6 +191,7 @@ class ProxyRunner:
         allowed_domains: list[str] | None = None,
         ip: str | None = None,
         otel_ports: list[int] | None = None,
+        allowed_endpoints: list[str] | None = None,
         ca_volume: str | None = None,
         credentials: Mapping[str, str] | None = None,
         allowed_clients: str | None = None,
@@ -209,6 +213,7 @@ class ProxyRunner:
             dns,
             allowed_domains,
             otel_ports,
+            allowed_endpoints,
             credentials,
             allowed_clients,
             credential_env,
@@ -279,6 +284,7 @@ class ProxyRunner:
         allowed_domains: list[str] | None = None,
         ip: str | None = None,
         otel_ports: list[int] | None = None,
+        allowed_endpoints: list[str] | None = None,
         ca_volume: str | None = None,
         credentials: Mapping[str, str] | None = None,
         allowed_clients: str | None = None,
@@ -300,6 +306,7 @@ class ProxyRunner:
             network=network,
             dns=dns,
             allowed_domains=allowed_domains,
+            allowed_endpoints=allowed_endpoints,
             ip=ip,
             otel_ports=otel_ports,
             ca_volume=ca_volume,
@@ -322,6 +329,7 @@ class ProxyRunner:
         allowed_domains: list[str] | None = None,
         ip: str | None = None,
         otel_ports: list[int] | None = None,
+        allowed_endpoints: list[str] | None = None,
         ca_volume: str | None = None,
         credentials: Mapping[str, str] | None = None,
         allowed_clients: str | None = None,
@@ -362,6 +370,7 @@ class ProxyRunner:
                 network=network,
                 dns=dns,
                 allowed_domains=allowed_domains,
+                allowed_endpoints=allowed_endpoints,
                 ip=ip,
                 otel_ports=otel_ports,
                 ca_volume=ca_volume,

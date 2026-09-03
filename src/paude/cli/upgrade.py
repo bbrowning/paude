@@ -35,6 +35,7 @@ class UpgradeOverrides:
 
     otel_endpoint: str | None = None
     allowed_domains: list[str] | None = None
+    allowed_endpoints: list[str] | None = None
     gpu: str | None = None  # "" means explicitly disabled
     yolo: bool | None = None
     provider: str | None = None
@@ -48,6 +49,7 @@ class UpgradeOverrides:
         return (
             self.otel_endpoint is not None
             or self.allowed_domains is not None
+            or self.allowed_endpoints is not None
             or self.gpu is not None
             or self.yolo is not None
             or self.provider is not None
@@ -105,6 +107,13 @@ def session_upgrade(
         typer.Option(
             "--allowed-domains",
             help="Override allowed domains for network filtering.",
+        ),
+    ] = None,
+    allowed_endpoints: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--allowed-endpoints",
+            help="Override exact host:port exceptions for nonstandard proxy ports.",
         ),
     ] = None,
     gpu: Annotated[
@@ -229,9 +238,22 @@ def session_upgrade(
         )
         raise typer.Exit(1)
 
+    from paude.endpoints import normalize_allowed_endpoints
+
+    try:
+        normalized_endpoints = (
+            normalize_allowed_endpoints(allowed_endpoints)
+            if allowed_endpoints is not None
+            else None
+        )
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+
     overrides = UpgradeOverrides(
         otel_endpoint=otel_endpoint,
         allowed_domains=allowed_domains,
+        allowed_endpoints=normalized_endpoints,
         gpu=cli_gpu,
         yolo=cli_yolo,
         provider=provider,
@@ -426,6 +448,7 @@ def _resolve_base_from_manifest(manifest: UpgradeManifest) -> ResolvedSession:
         yolo=manifest.yolo,
         otel_endpoint=manifest.otel_endpoint,
         allowed_domains=manifest.allowed_domains,
+        allowed_endpoints=list(manifest.allowed_endpoints),
         proxy_image=manifest.proxy_image,
     )
     return ResolvedSession(
@@ -553,6 +576,8 @@ def _apply_overrides(state: ResolvedSession, overrides: UpgradeOverrides) -> Non
         state.spec.otel_endpoint = overrides.otel_endpoint or None
     if overrides.allowed_domains is not None:
         state.spec.allowed_domains = overrides.allowed_domains
+    if overrides.allowed_endpoints is not None:
+        state.spec.allowed_endpoints = overrides.allowed_endpoints
 
 
 def _manifest_from_state(
@@ -577,6 +602,7 @@ def _manifest_from_state(
         yolo=state.spec.yolo,
         otel_endpoint=state.spec.otel_endpoint,
         allowed_domains=state.spec.allowed_domains,
+        allowed_endpoints=list(state.spec.allowed_endpoints),
         proxy_image=state.spec.proxy_image,
     )
 

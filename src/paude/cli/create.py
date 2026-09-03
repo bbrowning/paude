@@ -50,6 +50,16 @@ def session_create(
             ),
         ),
     ] = None,
+    allowed_endpoints: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--allowed-endpoints",
+            help=(
+                "Exact host:port exceptions for nonstandard proxy ports. "
+                "Can be repeated; each host must also be allowed by domains."
+            ),
+        ),
+    ] = None,
     rebuild: Annotated[
         bool,
         typer.Option(
@@ -237,6 +247,7 @@ def session_create(
             cli_platform=platform,
             cli_gpu=cli_gpu,
             cli_allowed_domains=allowed_domains,
+            cli_allowed_endpoints=allowed_endpoints,
             cli_otel_endpoint=otel_endpoint,
             project_config=config,
             user_defaults=user_defaults,
@@ -270,6 +281,13 @@ def session_create(
     r_allowed_domains: list[str] | None = (
         resolved.allowed_domains if resolved.allowed_domains else None
     )
+    from paude.endpoints import normalize_allowed_endpoints
+
+    try:
+        r_allowed_endpoints = normalize_allowed_endpoints(resolved.allowed_endpoints)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
 
     # Validate agent name and provider combination
     try:
@@ -281,6 +299,7 @@ def session_create(
     # Handle dry-run mode
     if dry_run:
         from paude.dry_run import show_dry_run
+        from paude.endpoints import warn_for_uncovered_allowed_endpoints
 
         parsed_args = _parse_agent_args(claude_args)
         expanded, _parsed, _env, _unrestricted = _prepare_session_create(
@@ -294,9 +313,11 @@ def session_create(
             composition=composition,
             credential_providers=resolved.providers,
         )
+        warn_for_uncovered_allowed_endpoints(r_allowed_endpoints, expanded)
         show_dry_run(
             flags={
                 "allowed_domains": expanded,
+                "allowed_endpoints": r_allowed_endpoints,
                 "rebuild": rebuild,
                 "verbose": verbose,
                 "claude_args": parsed_args,
@@ -361,6 +382,7 @@ def session_create(
         config=config,
         env=env,
         expanded_domains=expanded_domains,
+        allowed_endpoints=r_allowed_endpoints,
         parsed_args=parsed_args,
         yolo=r_yolo,
         git=r_git,

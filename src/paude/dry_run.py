@@ -118,6 +118,10 @@ def _show_resolved_flags(
     else:
         typer.echo(f"  allowed-domains: {domains_display}  (built-in)")
 
+    endpoints = flags.get("allowed_endpoints", [])
+    typer.echo(f"  allowed-endpoints: {', '.join(endpoints) or '(none)'}")
+    _show_provenance_groups(resolved.allowed_endpoints_provenance)
+
     typer.echo(f"  rebuild: {flags.get('rebuild', False)}")
 
     if resolved.gpu.value:
@@ -184,6 +188,8 @@ def _show_legacy_flags(flags: dict[str, Any]) -> None:
     allowed_domains = flags.get("allowed_domains", [])
     domains_display = format_domains_for_display(allowed_domains)
     typer.echo(f"  --allowed-domains: {domains_display}")
+    endpoints = flags.get("allowed_endpoints", [])
+    typer.echo(f"  --allowed-endpoints: {', '.join(endpoints) or '(none)'}")
 
     typer.echo(f"  --rebuild: {flags.get('rebuild', False)}")
 

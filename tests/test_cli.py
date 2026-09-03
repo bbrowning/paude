@@ -243,6 +243,68 @@ def test_allowed_domains_multiple_values():
     assert "vertexai" in result.stdout or ".example.com" in result.stdout
 
 
+def test_allowed_endpoints_create_values_are_normalized() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "create",
+            "--allowed-domains",
+            "api.example.com",
+            "--allowed-endpoints",
+            "API.EXAMPLE.COM.:08443",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "allowed-endpoints: api.example.com:8443" in result.output
+
+
+def test_allowed_endpoints_create_warns_for_uncovered_host() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "create",
+            "--allowed-domains",
+            "other.example",
+            "--allowed-endpoints",
+            "api.example.com:8443",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "will remain blocked" in result.output
+    assert "--allowed-domains api.example.com" in result.output
+
+
+def test_allowed_endpoints_create_alias_avoids_false_warning() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "create",
+            "--allowed-domains",
+            "python",
+            "--allowed-endpoints",
+            "files.pythonhosted.org:8443",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "will remain blocked" not in result.output
+
+
+def test_invalid_allowed_endpoint_fails_before_create() -> None:
+    result = runner.invoke(
+        app,
+        ["create", "--allowed-endpoints", "https://api.example.com", "--dry-run"],
+    )
+
+    assert result.exit_code == 1
+    assert "Invalid allowed endpoint" in result.output
+
+
 def test_help_shows_dry_run_option():
     """--help shows --dry-run option."""
     result = runner.invoke(app, ["--help"])
@@ -1884,6 +1946,68 @@ class TestAllowedDomainsCLI:
         assert "--refresh-credentials" in strip_ansi(result.stdout)
 
 
+class TestAllowedEndpointsCLI:
+    """Tests for exact endpoint list management."""
+
+    @patch("paude.cli.endpoints._resolve_backend")
+    def test_add_normalizes_and_preserves_existing_rules(
+        self, mock_resolve: MagicMock
+    ) -> None:
+        backend = MagicMock()
+        backend.get_allowed_endpoints.return_value = ["old.example:8000"]
+        mock_resolve.return_value = backend
+
+        result = runner.invoke(
+            app,
+            [
+                "allowed-endpoints",
+                "my-session",
+                "--add",
+                "API.EXAMPLE.:08443",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        backend.update_allowed_endpoints.assert_called_once_with(
+            "my-session", ["old.example:8000", "api.example:8443"]
+        )
+
+    @patch("paude.cli.endpoints._resolve_backend")
+    def test_invalid_endpoint_does_not_mutate_proxy(
+        self, mock_resolve: MagicMock
+    ) -> None:
+        backend = MagicMock()
+        backend.get_allowed_endpoints.return_value = []
+        mock_resolve.return_value = backend
+
+        result = runner.invoke(
+            app,
+            ["allowed-endpoints", "my-session", "--add", "https://example.com"],
+        )
+
+        assert result.exit_code == 1
+        assert "Invalid allowed endpoint" in result.output
+        backend.update_allowed_endpoints.assert_not_called()
+
+    @patch("paude.cli.endpoints._resolve_backend")
+    def test_operations_are_mutually_exclusive(self, mock_resolve: MagicMock) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "allowed-endpoints",
+                "my-session",
+                "--add",
+                "a.example:8000",
+                "--remove",
+                "b.example:9000",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "Only one of" in result.output
+        mock_resolve.assert_not_called()
+
+
 class TestBlockedDomainsCLI:
     """Tests for the blocked-domains CLI subcommand."""
 
@@ -1940,6 +2064,24 @@ class TestBlockedDomainsCLI:
         assert "other.com" in result.stdout
         assert "2 unique domain(s) blocked (3 total requests)" in result.stdout
         assert "paude allowed-domains my-session --add" in result.stdout
+
+    @patch("paude.cli.domains._resolve_backend_for_domains")
+    def test_nonstandard_port_suggests_endpoint_rule(
+        self, mock_resolve: MagicMock
+    ) -> None:
+        log = (
+            "08/Mar/2026:14:00:00 +0000 10.0.0.2 TCP_DENIED/403 "
+            "CONNECT api.example.com:8443 BLOCKED\n"
+        )
+        backend = MagicMock()
+        backend.get_proxy_blocked_log.return_value = log
+        mock_resolve.return_value = backend
+
+        result = runner.invoke(app, ["blocked-domains", "my-session"])
+
+        assert result.exit_code == 0
+        assert "api.example.com:8443" in result.output
+        assert "paude allowed-endpoints my-session --add <host:port>" in result.output
 
     @patch("paude.cli.domains._resolve_backend_for_domains")
     def test_session_not_found_error(self, mock_resolve: MagicMock) -> None:

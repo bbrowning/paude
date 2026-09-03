@@ -77,6 +77,10 @@ class ResolvedCreateOptions:
     allowed_domains_provenance: list[tuple[list[str], Source]] = field(
         default_factory=list
     )
+    allowed_endpoints: list[str] = field(default_factory=list)
+    allowed_endpoints_provenance: list[tuple[list[str], Source]] = field(
+        default_factory=list
+    )
 
 
 def resolve_create_options(
@@ -92,6 +96,7 @@ def resolve_create_options(
     cli_platform: str | None,
     cli_gpu: str | None,
     cli_allowed_domains: list[str] | None,
+    cli_allowed_endpoints: list[str] | None = None,
     cli_otel_endpoint: str | None = None,
     project_config: PaudeConfig | None,
     user_defaults: UserDefaults,
@@ -187,6 +192,12 @@ def resolve_create_options(
     _resolve_domains(
         result=result,
         cli_allowed_domains=cli_allowed_domains,
+        project_config=project_config,
+        user_defaults=user_defaults,
+    )
+    _resolve_endpoints(
+        result=result,
+        cli_allowed_endpoints=cli_allowed_endpoints,
         project_config=project_config,
         user_defaults=user_defaults,
     )
@@ -465,3 +476,25 @@ def _resolve_domains(
 
     result.allowed_domains = merged
     result.allowed_domains_provenance = provenance
+
+
+def _resolve_endpoints(
+    *,
+    result: ResolvedCreateOptions,
+    cli_allowed_endpoints: list[str] | None,
+    project_config: PaudeConfig | None,
+    user_defaults: UserDefaults,
+) -> None:
+    """Resolve endpoint exceptions with domain-equivalent precedence."""
+    if cli_allowed_endpoints is not None:
+        result.allowed_endpoints = _dedupe(cli_allowed_endpoints)
+        result.allowed_endpoints_provenance = [(cli_allowed_endpoints, "cli")]
+        return
+
+    user = user_defaults.allowed_endpoints
+    project = project_config.create_allowed_endpoints if project_config else []
+    result.allowed_endpoints = _dedupe([*user, *project])
+    if user:
+        result.allowed_endpoints_provenance.append((list(user), "user defaults"))
+    if project:
+        result.allowed_endpoints_provenance.append((list(project), "paude.json"))

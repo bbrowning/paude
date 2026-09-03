@@ -24,6 +24,19 @@ class TestLoadUserDefaults:
         assert result.yolo is None
         assert result.git is None
         assert result.allowed_domains == []
+        assert result.allowed_endpoints == []
+
+    def test_loads_allowed_endpoints(self, tmp_path: Path) -> None:
+        config = tmp_path / "defaults.json"
+        config.write_text(
+            json.dumps(
+                {"defaults": {"allowed-endpoints": ["api.example.com:8443"]}}
+            )
+        )
+
+        assert load_user_defaults(config).allowed_endpoints == [
+            "api.example.com:8443"
+        ]
 
     def test_warns_on_unknown_keys(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -100,6 +113,7 @@ class TestResolveCreateOptions:
             "cli_platform": None,
             "cli_gpu": None,
             "cli_allowed_domains": None,
+            "cli_allowed_endpoints": None,
             "project_config": None,
             "user_defaults": UserDefaults(),
         }
@@ -110,10 +124,30 @@ class TestResolveCreateOptions:
         """Returns built-in defaults when nothing is configured."""
         result = self._resolve()
         assert result.backend.value == "podman"
+        assert result.allowed_endpoints == []
         assert result.backend.source == "built-in"
         assert result.agent.value == "claude"
         assert result.yolo.value is False
         assert result.git.value is False
+
+    def test_endpoints_merge_and_cli_override(self) -> None:
+        user = UserDefaults(allowed_endpoints=["user.example:8000"])
+        project = PaudeConfig(
+            create_allowed_endpoints=["project.example:9000"]
+        )
+
+        merged = self._resolve(user_defaults=user, project_config=project)
+        assert merged.allowed_endpoints == [
+            "user.example:8000",
+            "project.example:9000",
+        ]
+
+        overridden = self._resolve(
+            user_defaults=user,
+            project_config=project,
+            cli_allowed_endpoints=["cli.example:7000"],
+        )
+        assert overridden.allowed_endpoints == ["cli.example:7000"]
 
     def test_project_overrides_user(self):
         """Project config overrides user defaults for agent."""

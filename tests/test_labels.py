@@ -17,6 +17,7 @@ from paude.backends.labels import (
     PAUDE_LABEL_AGENT_PROVIDERS,
     PAUDE_LABEL_CREATED,
     PAUDE_LABEL_DOMAINS,
+    PAUDE_LABEL_ENDPOINTS,
     PAUDE_LABEL_GPU,
     PAUDE_LABEL_OTEL_ENDPOINT,
     PAUDE_LABEL_PROVIDER,
@@ -60,6 +61,7 @@ class TestSpecFromLabels:
                 PAUDE_LABEL_YOLO: "1",
                 PAUDE_LABEL_OTEL_ENDPOINT: "http://otel:4317",
                 PAUDE_LABEL_DOMAINS: "github.com,pypi.org",
+                PAUDE_LABEL_ENDPOINTS: "api.example.com:8443,10.0.0.1:8000",
                 PAUDE_LABEL_PROXY_IMAGE: "paude-proxy:1.2.3",
             }
         )
@@ -72,6 +74,7 @@ class TestSpecFromLabels:
             yolo=True,
             otel_endpoint="http://otel:4317",
             allowed_domains=["github.com", "pypi.org"],
+            allowed_endpoints=["api.example.com:8443", "10.0.0.1:8000"],
             proxy_image="paude-proxy:1.2.3",
         )
 

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import ipaddress
+import re
+
 # Domain aliases for common use cases
 DOMAIN_ALIASES: dict[str, list[str]] = {
     "vertexai": [
@@ -171,6 +174,48 @@ def expand_domains(
                 seen.add(domain)
 
     return expanded
+
+
+def host_matches_allowed_domains(host: str, domains: list[str]) -> bool:
+    """Return whether ``host`` is covered by an allowed-domain entry.
+
+    The comparison mirrors the proxy's exact, suffix, and regex forms. Domain
+    aliases are expanded for callers that have not already resolved them, and
+    an empty expanded list means unrestricted access.
+    """
+    expanded = expand_domains(domains)
+    if not expanded:
+        return True
+
+    canonical_host = _canonical_match_host(host)
+    return any(_domain_matches_host(canonical_host, domain) for domain in expanded)
+
+
+def _domain_matches_host(host: str, domain: str) -> bool:
+    """Match one proxy allowed-domain entry without enforcing policy."""
+    if domain.startswith("~"):
+        try:
+            return re.search(domain[1:], host) is not None
+        except re.error:
+            # This check is advisory. Avoid a false warning when the proxy's
+            # regex dialect accepts syntax that Python's does not.
+            return True
+    if domain.startswith("."):
+        suffix = _canonical_match_host(domain[1:])
+        return host == suffix or host.endswith(f".{suffix}")
+    return host == _canonical_match_host(domain)
+
+
+def _canonical_match_host(host: str) -> str:
+    """Canonicalize a host for advisory policy comparisons."""
+    host = host.lower().removesuffix(".")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return host
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        return str(address.ipv4_mapped)
+    return address.compressed
 
 
 def is_unrestricted(domains: list[str]) -> bool:

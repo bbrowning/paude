@@ -21,7 +21,7 @@ paude
 | `stop` | Stops the container, preserves the volume |
 | `connect` | Attaches to running session |
 | `cp` | Copies files between local machine and session |
-| `upgrade` | Pulls current bases, rebuilds with the latest stable agent tooling, and recreates the session while preserving workspace and agent state; can also add agents (`--add-agent`, `--agents`) and reconfigure options (`--otel-endpoint`, `--allowed-domains`, `--gpu`/`--no-gpu`, `--yolo`/`--no-yolo`, `--provider`) |
+| `upgrade` | Pulls current bases, rebuilds with the latest stable agent tooling, and recreates the session while preserving workspace and agent state; can also add agents (`--add-agent`, `--agents`) and reconfigure options (`--otel-endpoint`, `--allowed-domains`, `--allowed-endpoints`, `--gpu`/`--no-gpu`, `--yolo`/`--no-yolo`, `--provider`) |
 | `remote` | Manages git remotes for code sync |
 | `delete` | Removes all resources including volume |
 | `backup` | Snapshots a stopped session (volume + config) to a portable bundle |
@@ -32,6 +32,7 @@ paude
 | `reset` | Resets session workspace and clears conversation history |
 | `config` | Manages user defaults (`config show`, `config path`, `config init`) |
 | `allowed-domains` | Views or modifies allowed egress domains for a session |
+| `allowed-endpoints` | Views or modifies exact destination port exceptions |
 | `blocked-domains` | Shows domains blocked by the proxy for a session |
 
 ## Examples
@@ -172,7 +173,8 @@ paude backup my-project -o /tmp/my-project.paude
 A backup is a `<name>-<timestamp>.paude/` directory (mode `0700`) with two files:
 
 - `manifest.json` — the session's identity and configuration (agent/providers,
-  allowed domains, yolo, gpu, otel, workspace path, backend/engine, and SSH
+  allowed domains and endpoints, yolo, gpu, otel, workspace path,
+  backend/engine, and SSH
   details for remote sessions).
 - `pvc.tar.gz` — the session's `/pvc` data volume: the workspace plus all agent
   state, history, and skills.

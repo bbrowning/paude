@@ -43,7 +43,9 @@ def networks() -> MagicMock:
 
 @pytest.fixture
 def proxy() -> MagicMock:
-    return MagicMock(spec=PodmanProxyManager)
+    proxy = MagicMock(spec=PodmanProxyManager)
+    proxy.read_policy_state.return_value = (None, None)
+    return proxy
 
 
 @pytest.fixture
@@ -257,13 +259,13 @@ class TestReads:
                 },
             }
         ]
-        proxy.read_domain_state.return_value = []
+        proxy.read_policy_state.return_value = ([], None)
 
         view = resources.labels(SESSION)
 
         assert view is not None
         assert view.spec.allowed_domains == []
-        proxy.read_domain_state.assert_called_once_with(SESSION, "proxy:latest")
+        proxy.read_policy_state.assert_called_once_with(SESSION, "proxy:latest")
 
     def test_labels_is_none_for_a_session_with_no_container(
         self, resources: SessionResources, runner: MagicMock

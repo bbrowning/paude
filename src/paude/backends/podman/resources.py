@@ -92,10 +92,21 @@ class SessionResources:
         if container is None:
             return None
         view = read_labels(container.get("Labels", {}) or {})
-        domains = self._proxy.read_domain_state(name, view.spec.proxy_image)
-        if domains is None:
+        domains, endpoints = self._proxy.read_policy_state(name, view.spec.proxy_image)
+        if domains is None and endpoints is None:
             return view
-        return replace(view, spec=replace(view.spec, allowed_domains=domains))
+        return replace(
+            view,
+            spec=replace(
+                view.spec,
+                allowed_domains=(
+                    view.spec.allowed_domains if domains is None else domains
+                ),
+                allowed_endpoints=(
+                    view.spec.allowed_endpoints if endpoints is None else endpoints
+                ),
+            ),
+        )
 
     # -- rebuild ----------------------------------------------------------
 

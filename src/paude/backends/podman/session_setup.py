@@ -18,6 +18,7 @@ from paude.backends.labels import (
     PAUDE_LABEL_AGENT_PROVIDERS,
     PAUDE_LABEL_CREATED,
     PAUDE_LABEL_DOMAINS,
+    PAUDE_LABEL_ENDPOINTS,
     PAUDE_LABEL_GPU,
     PAUDE_LABEL_OTEL_ENDPOINT,
     PAUDE_LABEL_OTEL_PORTS,
@@ -299,6 +300,7 @@ class SessionSetup:
         if config.yolo:
             labels[PAUDE_LABEL_YOLO] = "1"
         labels[PAUDE_LABEL_DOMAINS] = ",".join(config.allowed_domains)
+        labels[PAUDE_LABEL_ENDPOINTS] = ",".join(config.allowed_endpoints)
         if config.proxy_image:
             labels[PAUDE_LABEL_PROXY_IMAGE] = config.proxy_image
         if config.otel_ports:
@@ -326,6 +328,7 @@ class SessionSetup:
             session_name,
             config.proxy_image or "",
             config.allowed_domains,
+            allowed_endpoints=config.allowed_endpoints,
             otel_ports=config.otel_ports,
             credentials=proxy_creds,
         )

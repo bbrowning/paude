@@ -36,6 +36,7 @@ class PaudeConfig:
 
     # Create hints (from paude.json "create" section)
     create_allowed_domains: list[str] = field(default_factory=list)
+    create_allowed_endpoints: list[str] = field(default_factory=list)
     create_agent: str | None = None
     create_provider: str | None = None
     create_agents: list[str] = field(default_factory=list)

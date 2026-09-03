@@ -1294,6 +1294,25 @@ class TestParseGatewayJson:
 class TestProxyRunnerFixedIp:
     """Tests for ProxyRunner with fixed IP."""
 
+    def test_create_session_proxy_passes_allowed_endpoints(self):
+        """Endpoint exceptions reach the proxy's plural environment variable."""
+        from paude.container.proxy_runner import ProxyRunner
+
+        mock_runner = MagicMock()
+        mock_runner.engine.supports_multi_network_create = True
+        mock_runner.engine.default_bridge_network = "podman"
+        mock_runner.engine.run.return_value = MagicMock(returncode=0)
+
+        ProxyRunner(mock_runner).create_session_proxy(
+            name="paude-proxy-test",
+            image="proxy:latest",
+            network="paude-net-test",
+            allowed_endpoints=["api.example.com:8443"],
+        )
+
+        args = mock_runner.engine.run.call_args_list[0].args
+        assert "ALLOWED_ENDPOINTS=api.example.com:8443" in args
+
     def test_create_session_proxy_embeds_ip_in_network_podman(self):
         """Podman: IP is embedded in --network spec, not as separate --ip."""
         from paude.container.proxy_runner import ProxyRunner

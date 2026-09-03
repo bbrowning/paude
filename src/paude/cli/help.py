@@ -143,15 +143,22 @@ _SECTIONS: tuple[HelpSection, ...] = (
                 "paude allowed-domains NAME --add .example.com --refresh-credentials",
                 "Update domains and refresh supplied credentials",
             ),
+            (
+                "paude allowed-endpoints NAME --add api.example.com:8443",
+                "Allow one exact host and nonstandard port",
+            ),
             ("paude blocked-domains NAME", "Show blocked domains"),
             ("paude blocked-domains NAME --raw", "Show raw proxy log"),
         ),
         text=(
-            "Domain-only updates preserve the proxy's current credential bindings"
-            " and durable policy. Replacement is fail-closed: the old proxy is"
+            "Domain and endpoint updates preserve the other policy list and the"
+            " proxy's current credential bindings. Replacement is fail-closed:"
+            " the old proxy is"
             " restored if the candidate cannot start or commit. Use"
             " --refresh-credentials only when fresh replacement values are present"
             " in the current environment; unrelated bindings remain attached."
+            " Endpoint hosts outside allowed-domains remain blocked and produce an"
+            " actionable warning."
         ),
     ),
     HelpSection(
@@ -168,6 +175,11 @@ _SECTIONS: tuple[HelpSection, ...] = (
             (
                 "paude create --allowed-domains .example.com",
                 "Allow ONLY custom domain (replaces defaults)",
+            ),
+            (
+                "paude create --allowed-domains api.example.com"
+                " --allowed-endpoints api.example.com:8443",
+                "Allow one destination on a nonstandard port",
             ),
             ("paude create -a '-p \"prompt\"'", "Create session with initial prompt"),
             ("paude create --dry-run", "Verify configuration without creating"),
@@ -211,7 +223,8 @@ _SECTIONS: tuple[HelpSection, ...] = (
             "User defaults: ~/.config/paude/defaults.json"
             " (backend, yolo, git, domains, etc.)\n"
             'Project hints: paude.json "create" section'
-            " (allowed-domains, agent, provider, agents, providers, agent-providers)"
+            " (allowed-domains, allowed-endpoints, agent, provider, agents,"
+            " providers, agent-providers)"
         ),
     ),
     HelpSection(

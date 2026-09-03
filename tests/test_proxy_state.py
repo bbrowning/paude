@@ -37,6 +37,58 @@ class TestProxyStateStore:
 
         assert ProxyStateStore(runner).read("auth", "proxy:latest") == []
 
+    def test_reads_domain_and_endpoint_records_in_one_helper(self) -> None:
+        domain_payload = json.dumps(
+            {"schema": "allowed-domains.v1", "domains": ["api.example.com"]}
+        )
+        endpoint_payload = json.dumps(
+            {
+                "schema": "allowed-endpoints.v1",
+                "endpoints": ["api.example.com:8443"],
+            }
+        )
+        runner = MagicMock(spec=ContainerRunner)
+        runner.engine.run.return_value = MagicMock(
+            returncode=0,
+            stdout="\0".join(["1", domain_payload, "1", endpoint_payload, ""]),
+            stderr="",
+        )
+        domains = ProxyStateStore(runner)
+        endpoints = ProxyStateStore(
+            runner,
+            path="/data/auth/allowed-endpoints.json",
+            schema="allowed-endpoints.v1",
+            field="endpoints",
+            description="allowed-endpoint",
+        )
+
+        assert domains.read_pair(endpoints, "auth", "proxy:latest") == (
+            ["api.example.com"],
+            ["api.example.com:8443"],
+        )
+        runner.engine.run.assert_called_once()
+
+    def test_paired_read_preserves_an_absent_legacy_record(self) -> None:
+        endpoint_payload = json.dumps(
+            {"schema": "allowed-endpoints.v1", "endpoints": []}
+        )
+        runner = MagicMock(spec=ContainerRunner)
+        runner.engine.run.return_value = MagicMock(
+            returncode=0,
+            stdout="\0".join(["0", "", "1", endpoint_payload, ""]),
+            stderr="",
+        )
+        domains = ProxyStateStore(runner)
+        endpoints = ProxyStateStore(
+            runner,
+            path="/data/auth/allowed-endpoints.json",
+            schema="allowed-endpoints.v1",
+            field="endpoints",
+            description="allowed-endpoint",
+        )
+
+        assert domains.read_pair(endpoints, "auth", "proxy:latest") == (None, [])
+
     @pytest.mark.parametrize(
         "result",
         [
