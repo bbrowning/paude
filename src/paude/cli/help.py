@@ -157,6 +157,8 @@ _SECTIONS: tuple[HelpSection, ...] = (
             " restored if the candidate cannot start or commit. Use"
             " --refresh-credentials only when fresh replacement values are present"
             " in the current environment; unrelated bindings remain attached."
+            " Endpoint hosts outside allowed-domains remain blocked and produce an"
+            " actionable warning."
         ),
     ),
     HelpSection(

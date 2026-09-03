@@ -299,6 +299,7 @@ def session_create(
     # Handle dry-run mode
     if dry_run:
         from paude.dry_run import show_dry_run
+        from paude.endpoints import warn_for_uncovered_allowed_endpoints
 
         parsed_args = _parse_agent_args(claude_args)
         expanded, _parsed, _env, _unrestricted = _prepare_session_create(
@@ -312,6 +313,7 @@ def session_create(
             composition=composition,
             credential_providers=resolved.providers,
         )
+        warn_for_uncovered_allowed_endpoints(r_allowed_endpoints, expanded)
         show_dry_run(
             flags={
                 "allowed_domains": expanded,

@@ -619,3 +619,10 @@ class PodmanProxyManager:
             proxy_image=proxy_image,
             operation_label="endpoints",
         )
+        from paude.endpoints import warn_for_uncovered_allowed_endpoints
+
+        warn_for_uncovered_allowed_endpoints(
+            endpoints,
+            domains,
+            session_name=session_name,
+        )

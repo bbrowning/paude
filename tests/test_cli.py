@@ -260,6 +260,41 @@ def test_allowed_endpoints_create_values_are_normalized() -> None:
     assert "allowed-endpoints: api.example.com:8443" in result.output
 
 
+def test_allowed_endpoints_create_warns_for_uncovered_host() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "create",
+            "--allowed-domains",
+            "other.example",
+            "--allowed-endpoints",
+            "api.example.com:8443",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "will remain blocked" in result.output
+    assert "--allowed-domains api.example.com" in result.output
+
+
+def test_allowed_endpoints_create_alias_avoids_false_warning() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "create",
+            "--allowed-domains",
+            "python",
+            "--allowed-endpoints",
+            "files.pythonhosted.org:8443",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "will remain blocked" not in result.output
+
+
 def test_invalid_allowed_endpoint_fails_before_create() -> None:
     result = runner.invoke(
         app,

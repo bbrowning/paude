@@ -1228,6 +1228,49 @@ class TestUpdateEndpointsCapability:
 
         manager._proxy_runner.swap_session_proxy.assert_not_called()
 
+    def test_warns_after_updating_uncovered_endpoint(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        manager = PodmanProxyManager(_make_mock_runner(), MagicMock())
+        manager._endpoint_update_proxy_image = MagicMock(  # type: ignore[method-assign]
+            return_value="proxy:endpoint-capable"
+        )
+        manager.get_allowed_domains = MagicMock(  # type: ignore[method-assign]
+            return_value=["other.example"]
+        )
+        manager.update_domains = MagicMock()  # type: ignore[method-assign]
+
+        manager.update_endpoints("test-session", ["api.example.com:8443"])
+
+        stderr = capsys.readouterr().err
+        assert "will remain blocked" in stderr
+        assert "paude allowed-domains test-session --add api.example.com" in stderr
+
+    @pytest.mark.parametrize(
+        "domains",
+        [
+            [".example.com"],
+            [r"~^api\.example\.com$"],
+        ],
+    )
+    def test_covered_endpoint_does_not_warn(
+        self,
+        domains: list[str],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        manager = PodmanProxyManager(_make_mock_runner(), MagicMock())
+        manager._endpoint_update_proxy_image = MagicMock(  # type: ignore[method-assign]
+            return_value="proxy:endpoint-capable"
+        )
+        manager.get_allowed_domains = MagicMock(  # type: ignore[method-assign]
+            return_value=domains
+        )
+        manager.update_domains = MagicMock()  # type: ignore[method-assign]
+
+        manager.update_endpoints("test-session", ["api.example.com:8443"])
+
+        assert "will remain blocked" not in capsys.readouterr().err
+
     @patch("paude.backends.podman.proxy._get_host_dns", return_value=None)
     def test_uses_configured_endpoint_capable_image(
         self, mock_dns: MagicMock, capsys: pytest.CaptureFixture[str]

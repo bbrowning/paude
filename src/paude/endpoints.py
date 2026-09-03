@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import sys
+
+from paude.domains import host_matches_allowed_domains
 
 _HOST_LABEL = re.compile(r"^[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?$")
 
@@ -29,6 +32,37 @@ def normalize_allowed_endpoints(values: list[str] | None) -> list[str]:
                 normalized.append(endpoint)
                 seen.add(endpoint)
     return normalized
+
+
+def warn_for_uncovered_allowed_endpoints(
+    endpoints: list[str] | None,
+    allowed_domains: list[str],
+    *,
+    session_name: str | None = None,
+) -> None:
+    """Warn about endpoint rules whose hosts remain domain-blocked."""
+    for endpoint in normalize_allowed_endpoints(endpoints):
+        host = _authority_host(endpoint)
+        if host_matches_allowed_domains(host, allowed_domains):
+            continue
+        if session_name:
+            action = (
+                f"Run 'paude allowed-domains {session_name} --add {host}' to enable it."
+            )
+        else:
+            action = f"Add '--allowed-domains {host}' to enable it."
+        print(
+            f"Warning: allowed endpoint '{endpoint}' will remain blocked because "
+            f"host '{host}' is not allowed by allowed-domains. {action}",
+            file=sys.stderr,
+        )
+
+
+def _authority_host(authority: str) -> str:
+    """Extract the canonical host from a normalized authority."""
+    if authority.startswith("["):
+        return authority[1 : authority.index("]")]
+    return authority.rsplit(":", 1)[0]
 
 
 def _canonical_authority(authority: str) -> str:

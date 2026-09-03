@@ -144,6 +144,13 @@ class PodmanBackend:
             raise
 
         print(f"Session '{name}' created (stopped).", file=sys.stderr)
+        from paude.endpoints import warn_for_uncovered_allowed_endpoints
+
+        warn_for_uncovered_allowed_endpoints(
+            config.allowed_endpoints,
+            config.allowed_domains,
+            session_name=name,
+        )
         return Session(
             name=name,
             status="stopped",
