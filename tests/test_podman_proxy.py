@@ -7,6 +7,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from paude.backends.labels import (
+    PAUDE_LABEL_DOMAINS,
+    PAUDE_LABEL_ENDPOINTS,
+    PAUDE_LABEL_PROXY_IMAGE,
+    PAUDE_LABEL_SESSION,
+)
 from paude.backends.podman.proxy import (
     _PROXY_IP_POLL_ATTEMPTS,
     CA_CERT_CONTAINER_PATH,
@@ -1189,6 +1195,71 @@ class TestUpdateDomainTransaction:
         manager._endpoint_state.write.assert_called_once_with(
             "paude-auth-test-session",
             "proxy:latest",
+            ["api.example.com:8443"],
+        )
+
+
+class TestUpdateEndpointsCapability:
+    """Endpoint updates never silently reuse a pre-feature proxy image."""
+
+    def test_legacy_session_requires_upgrade(self) -> None:
+        runner = _make_mock_runner()
+        runner.list_containers.return_value = [
+            {
+                "Labels": {
+                    PAUDE_LABEL_SESSION: "test-session",
+                    PAUDE_LABEL_DOMAINS: "api.example.com",
+                    PAUDE_LABEL_PROXY_IMAGE: "proxy:legacy",
+                }
+            }
+        ]
+        manager = PodmanProxyManager(runner, MagicMock())
+        manager._proxy_runner = MagicMock()
+
+        with pytest.raises(ValueError, match="paude upgrade test-session"):
+            manager.update_endpoints("test-session", ["api.example.com:8443"])
+
+        manager._proxy_runner.swap_session_proxy.assert_not_called()
+
+    @patch("paude.backends.podman.proxy._get_host_dns", return_value=None)
+    def test_uses_configured_endpoint_capable_image(
+        self, mock_dns: MagicMock
+    ) -> None:
+        runner = _make_mock_runner()
+        runner.container_exists.return_value = True
+        runner.get_container_image.return_value = "proxy:legacy"
+        runner.get_container_env.return_value = "api.example.com"
+        runner.list_containers.return_value = [
+            {
+                "Labels": {
+                    PAUDE_LABEL_SESSION: "test-session",
+                    PAUDE_LABEL_DOMAINS: "api.example.com",
+                    PAUDE_LABEL_ENDPOINTS: "",
+                    PAUDE_LABEL_PROXY_IMAGE: "proxy:endpoint-capable",
+                }
+            }
+        ]
+        network = MagicMock()
+        network.get_network_gateway.return_value = "10.89.0.1"
+        manager = PodmanProxyManager(runner, network)
+        manager._credentials = MagicMock()
+        manager._credentials.prepare_update.return_value = PreparedProxyCredentials(
+            credentials=ProxyCredentials()
+        )
+        manager._credentials.credential_env.return_value = {}
+        manager._state = MagicMock()
+        manager._endpoint_state = MagicMock()
+        manager._proxy_runner = MagicMock()
+        manager._proxy_runner.swap_session_proxy.return_value = MagicMock()
+        manager._ca_cert = MagicMock()
+
+        manager.update_endpoints("test-session", ["api.example.com:8443"])
+
+        swap_args = manager._proxy_runner.swap_session_proxy.call_args.kwargs
+        assert swap_args["image"] == "proxy:endpoint-capable"
+        manager._endpoint_state.write.assert_called_once_with(
+            "paude-auth-test-session",
+            "proxy:endpoint-capable",
             ["api.example.com:8443"],
         )
 
