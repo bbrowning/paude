@@ -44,6 +44,7 @@ def config_show() -> None:
             cli_platform=None,
             cli_gpu=None,
             cli_allowed_domains=None,
+            cli_allowed_endpoints=None,
             project_config=project_config,
             user_defaults=user_defaults,
         )
@@ -92,6 +93,13 @@ def config_show() -> None:
     else:
         typer.echo('  allowed-domains: ["default"]  (built-in)')
 
+    if resolved.allowed_endpoints:
+        typer.echo("  allowed-endpoints:")
+        for endpoints, source in resolved.allowed_endpoints_provenance:
+            typer.echo(f"    {', '.join(endpoints)}  ({source})")
+    else:
+        typer.echo("  allowed-endpoints: []  (built-in)")
+
 
 @config_app.command("path")
 def config_path() -> None:
@@ -121,6 +129,7 @@ def config_init() -> None:
             "platform": None,
             "gpu": None,
             "allowed-domains": [],
+            "allowed-endpoints": [],
             "otel-endpoint": None,
         }
     }

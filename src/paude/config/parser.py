@@ -122,6 +122,7 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
         packages=packages,
         setup_command=setup_command,
         create_allowed_domains=create_hints.allowed_domains,
+        create_allowed_endpoints=create_hints.allowed_endpoints,
         create_agent=create_hints.agent,
         create_provider=create_hints.provider,
         create_agents=create_hints.agents,
@@ -133,6 +134,7 @@ def _parse_paude_json(config_file: Path, data: dict[str, Any]) -> PaudeConfig:
 
 _KNOWN_CREATE_KEYS = {
     "allowed-domains",
+    "allowed-endpoints",
     "agent",
     "provider",
     "agents",
@@ -147,6 +149,7 @@ class CreateHints:
     """Parsed create hints from a project config 'create' section."""
 
     allowed_domains: list[str] = field(default_factory=list)
+    allowed_endpoints: list[str] = field(default_factory=list)
     agent: str | None = None
     provider: str | None = None
     agents: list[str] = field(default_factory=list)
@@ -170,6 +173,7 @@ def _parse_create_section(create_data: dict[str, Any]) -> CreateHints:
     _warn_unknown_keys(create_data, _KNOWN_CREATE_KEYS, "create section")
 
     allowed_domains = _string_list(create_data.get("allowed-domains", []))
+    allowed_endpoints = _string_list(create_data.get("allowed-endpoints", []))
     agents = _string_list(create_data.get("agents", []))
     providers = _string_list(create_data.get("providers", []))
     raw_agent_providers = create_data.get("agent-providers", {})
@@ -197,6 +201,7 @@ def _parse_create_section(create_data: dict[str, Any]) -> CreateHints:
 
     return CreateHints(
         allowed_domains=allowed_domains,
+        allowed_endpoints=allowed_endpoints,
         agent=agent,
         provider=provider,
         agents=agents,

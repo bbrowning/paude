@@ -75,7 +75,8 @@ class TestParseBlockedLog:
         log = "08/Mar/2026:14:00:00 +0000 10.0.0.2 TCP_DENIED/403 GET http://example.com:8080/path BLOCKED"
         result = parse_blocked_log(log)
         assert len(result) == 1
-        assert result[0].domain == "example.com"
+        assert result[0].domain == "example.com:8080"
+        assert result[0].port == 8080
 
     def test_connect_without_port(self) -> None:
         log = "08/Mar/2026:14:00:00 +0000 10.0.0.2 TCP_DENIED/403 CONNECT example.com BLOCKED"

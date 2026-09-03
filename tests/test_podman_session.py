@@ -15,6 +15,7 @@ from paude.backends.labels import (
     PAUDE_LABEL_APP,
     PAUDE_LABEL_CREATED,
     PAUDE_LABEL_DOMAINS,
+    PAUDE_LABEL_ENDPOINTS,
     PAUDE_LABEL_PROVIDERS,
     PAUDE_LABEL_PROXY_IMAGE,
     PAUDE_LABEL_SESSION,
@@ -1059,6 +1060,7 @@ class TestPodmanBackendCreateSessionWithProxy:
             workspace=Path("/home/user/project"),
             image="paude:latest",
             allowed_domains=[".googleapis.com", ".pypi.org"],
+            allowed_endpoints=["api.example.com:8443"],
             proxy_image="proxy:latest",
         )
         session = backend.create_session(config)
@@ -1101,6 +1103,7 @@ class TestPodmanBackendCreateSessionWithProxy:
             workspace=Path("/home/user/project"),
             image="paude:latest",
             allowed_domains=[".googleapis.com", ".pypi.org"],
+            allowed_endpoints=["api.example.com:8443"],
             proxy_image="proxy:latest",
         )
         backend.create_session(config)
@@ -1109,6 +1112,7 @@ class TestPodmanBackendCreateSessionWithProxy:
         labels = call_kwargs["labels"]
         assert PAUDE_LABEL_DOMAINS in labels
         assert labels[PAUDE_LABEL_DOMAINS] == ".googleapis.com,.pypi.org"
+        assert labels[PAUDE_LABEL_ENDPOINTS] == "api.example.com:8443"
         assert labels[PAUDE_LABEL_PROXY_IMAGE] == "proxy:latest"
 
     @patch("paude.backends.podman.proxy.get_podman_machine_dns")
@@ -1535,6 +1539,9 @@ class TestProxyRecreation:
         backend._proxy.read_domain_state = MagicMock(  # type: ignore[method-assign]
             return_value=None
         )
+        backend._proxy.read_endpoint_state = MagicMock(  # type: ignore[method-assign]
+            return_value=None
+        )
         backend.start_session("my-session")
 
         # Proxy should be recreated via engine.run (create + start)
@@ -1609,6 +1616,9 @@ class TestProxyRecreation:
 
         backend = make_backend(mock_runner, mock_network)
         backend._proxy.read_domain_state = MagicMock(  # type: ignore[method-assign]
+            return_value=None
+        )
+        backend._proxy.read_endpoint_state = MagicMock(  # type: ignore[method-assign]
             return_value=None
         )
         backend.connect_session("my-session")

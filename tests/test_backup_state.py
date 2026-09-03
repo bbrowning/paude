@@ -25,6 +25,7 @@ def _manifest(name: str = "test-session") -> BackupManifest:
         yolo=True,
         otel_endpoint="http://collector:4318",
         allowed_domains=[".googleapis.com", ".pypi.org"],
+        allowed_endpoints=["api.example.com:8443"],
         proxy_image="proxy:latest",
         image="runtime:abc123",
         backend_type="podman",
@@ -119,6 +120,7 @@ class TestManifestSchema:
         assert loaded.name == "test-session"
         assert loaded.agent_providers == [("claude", "anthropic")]
         assert loaded.allowed_domains == [".pypi.org"]
+        assert loaded.allowed_endpoints == []
         assert loaded.image == "runtime:abc123"
         assert loaded.gpu is None
 
@@ -144,6 +146,7 @@ class TestManifestSchema:
             "yolo",
             "otel_endpoint",
             "allowed_domains",
+            "allowed_endpoints",
             "proxy_image",
             "image",
             "backend_type",

@@ -180,6 +180,7 @@ def session_config_from_spec(
         # records what was declared (or None for a session predating the
         # always-on proxy), the container needs what that expands to.
         allowed_domains=expanded_domains,
+        allowed_endpoints=list(spec.allowed_endpoints),
         yolo=spec.yolo,
         proxy_image=images.proxy,
         agent=spec.agent,

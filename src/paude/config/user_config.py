@@ -29,6 +29,7 @@ class UserDefaults:
     platform: str | None = None
     gpu: str | None = None
     allowed_domains: list[str] = field(default_factory=list)
+    allowed_endpoints: list[str] = field(default_factory=list)
     otel_endpoint: str | None = None
 
 
@@ -45,6 +46,7 @@ _KNOWN_KEYS = {
     "platform",
     "gpu",
     "allowed-domains",
+    "allowed-endpoints",
     "otel-endpoint",
 }
 
@@ -127,6 +129,7 @@ def _parse_defaults(data: dict[str, Any], path: Path) -> UserDefaults:
         platform=data.get("platform"),
         gpu=data.get("gpu"),
         allowed_domains=_string_list(data.get("allowed-domains", [])),
+        allowed_endpoints=_string_list(data.get("allowed-endpoints", [])),
         otel_endpoint=data.get("otel-endpoint"),
     )
 

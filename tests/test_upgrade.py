@@ -363,6 +363,9 @@ def _upgrade_backend(
     backend._proxy.read_domain_state = MagicMock(  # type: ignore[method-assign]
         return_value=None
     )
+    backend._proxy.read_endpoint_state = MagicMock(  # type: ignore[method-assign]
+        return_value=None
+    )
     create_session = MagicMock(return_value=_upgraded_session())
     start = MagicMock()
     backend.create_session = create_session  # type: ignore[method-assign]

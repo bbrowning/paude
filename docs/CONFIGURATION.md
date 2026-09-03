@@ -51,6 +51,7 @@ Then edit it to set the values you want. Any field set to `null` or omitted uses
     "platform": "linux/amd64",
     "gpu": "all",
     "allowed-domains": ["default", "golang"],
+    "allowed-endpoints": ["api.example.com:8443"],
     "otel-endpoint": null
   }
 }
@@ -68,12 +69,13 @@ Projects can declare defaults in their `paude.json` so that anyone cloning the r
   "packages": ["make"],
   "create": {
     "allowed-domains": ["default", "golang"],
+    "allowed-endpoints": ["api.example.com:8443"],
     "agent": "claude"
   }
 }
 ```
 
-Only `allowed-domains`, `agent`, `provider`, `agents`, `providers`,
+Only `allowed-domains`, `allowed-endpoints`, `agent`, `provider`, `agents`, `providers`,
 `agent-providers`, and `otel-endpoint` are supported as project-level create
 hints.
 
@@ -103,6 +105,9 @@ Gas City does not implicitly install child CLIs.
 Domains from user defaults and project config are **merged** (union). For example, if your user defaults specify `["default", "golang"]` and the project config specifies `["nodejs"]`, the resolved list is `["default", "golang", "nodejs"]`.
 
 However, if you pass `--allowed-domains` on the CLI, it **overrides** entirely — no merging with user/project config occurs. The one exception is provider-required domains, which are always forced onto the allowlist regardless of what you pass — see [Network Domains](#network-domains).
+
+`allowed-endpoints` uses the same merge/override rule. Entries are exact
+`host:port` authorities; the host must independently match `allowed-domains`.
 
 ### Port Forwarding
 
@@ -135,6 +140,7 @@ paude create --dry-run
 | `git` | yes | — | `--git` | `false` |
 | `platform` | yes | — | `--platform` | (none) |
 | `allowed-domains` | yes | yes | `--allowed-domains` | `["default"]` |
+| `allowed-endpoints` | yes | yes | `--allowed-endpoints` | `[]` |
 | `gpu` | yes | — | `--gpu` / `--no-gpu` | (none) |
 | `provider` | yes | yes | `--provider` | (none) |
 | `agents` | yes | yes | `--agents` | `["claude"]` |
@@ -221,6 +227,24 @@ Opt-in OpenClaw plugin aliases, for skill packages that talk to external service
 
 **Special values**: `all` (unrestricted), `default` (vertexai + python + github + agent-specific). Any other alias name listed above, or a raw domain, can also be passed directly. Specifying domains without `default` replaces the allowlist entirely.
 
+## Destination-Scoped Port Exceptions
+
+Default proxy ports and telemetry ports remain global. To allow a nonstandard
+port for only one destination, configure both layers:
+
+```bash
+paude create \
+  --allowed-domains 192.168.7.31 \
+  --allowed-endpoints 192.168.7.31:8000
+```
+
+Endpoint hosts are case-insensitive and ignore one trailing dot. IP addresses
+are canonicalized, bracketed IPv6 is supported, and container service names may
+contain underscores. Schemes, paths, userinfo, wildcard/suffix/regex hosts,
+missing or invalid ports, invalid IPs, IPv6 zones, and unbracketed IPv6 are
+rejected before a proxy is changed. `paude allowed-endpoints NAME` lists rules
+and supports mutually exclusive `--add`, `--remove`, and `--replace` updates.
+
 ## Diagnosing Blocked Domains
 
 When a tool or package install fails due to network filtering, check what the proxy blocked:
@@ -264,6 +288,11 @@ paude allowed-domains my-session --remove registry.npmjs.org
 # Replace the entire allowlist
 paude allowed-domains my-session --replace default,pypi
 ```
+
+Blocked nonstandard destinations retain their port in this report. Follow both
+suggested commands: allow the host with `allowed-domains`, then allow the exact
+authority with `allowed-endpoints`; granting `host:8000` never grants port 8000
+to another host.
 
 ## GitHub CLI Access
 

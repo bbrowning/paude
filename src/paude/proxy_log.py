@@ -13,6 +13,7 @@ class BlockedDomain:
     domain: str
     count: int
     last_seen: str
+    port: int | None = None
 
 
 def parse_blocked_log(raw_log: str) -> list[BlockedDomain]:
@@ -28,6 +29,7 @@ def parse_blocked_log(raw_log: str) -> list[BlockedDomain]:
     """
     counts: dict[str, int] = {}
     last_seen: dict[str, str] = {}
+    ports: dict[str, int | None] = {}
 
     for line in raw_log.splitlines():
         parts = line.split()
@@ -36,15 +38,20 @@ def parse_blocked_log(raw_log: str) -> list[BlockedDomain]:
 
         timestamp = f"{parts[0]} {parts[1]}"
         url = parts[5]
-        domain = _extract_domain(url)
+        host, port = _extract_destination(url)
+        domain = _display_destination(host, port)
         if not domain:
             continue
 
         counts[domain] = counts.get(domain, 0) + 1
         last_seen[domain] = timestamp
+        ports[domain] = port
 
     result = [
-        BlockedDomain(domain=d, count=counts[d], last_seen=last_seen[d]) for d in counts
+        BlockedDomain(
+            domain=d, count=counts[d], last_seen=last_seen[d], port=ports[d]
+        )
+        for d in counts
     ]
     result.sort(key=lambda b: b.count, reverse=True)
     return result
@@ -52,10 +59,30 @@ def parse_blocked_log(raw_log: str) -> list[BlockedDomain]:
 
 def _extract_domain(url: str) -> str | None:
     """Extract hostname from a URL or host:port string."""
+    return _extract_destination(url)[0]
+
+
+def _extract_destination(url: str) -> tuple[str | None, int | None]:
+    """Extract the host and explicit port from a proxy log destination."""
     if "://" in url:
         parsed = urlparse(url)
-        return parsed.hostname or None
+        try:
+            return parsed.hostname or None, parsed.port
+        except ValueError:
+            return parsed.hostname or None, None
 
-    # CONNECT-style: host:port
-    host = url.split(":")[0]
-    return host if host else None
+    parsed = urlparse(f"//{url}")
+    try:
+        return parsed.hostname or None, parsed.port
+    except ValueError:
+        return parsed.hostname or None, None
+
+
+def _display_destination(host: str | None, port: int | None) -> str | None:
+    """Retain nonstandard ports while keeping ordinary domain blocks compact."""
+    if not host:
+        return None
+    if port is None or port in (80, 443):
+        return host
+    bracketed = f"[{host}]" if ":" in host else host
+    return f"{bracketed}:{port}"

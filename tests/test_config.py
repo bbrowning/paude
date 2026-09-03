@@ -59,6 +59,18 @@ class TestDetectConfig:
 class TestParseConfig:
     """Tests for config parsing."""
 
+    def test_parses_allowed_endpoints_create_hint(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "paude.json"
+        config_file.write_text(
+            json.dumps(
+                {"create": {"allowed-endpoints": ["api.example.com:8443"]}}
+            )
+        )
+
+        assert parse_config(config_file).create_allowed_endpoints == [
+            "api.example.com:8443"
+        ]
+
     def test_rejects_devcontainer_file(self, tmp_path: Path):
         """parse_config accepts only paude.json."""
         config_file = tmp_path / ".devcontainer" / "devcontainer.json"

@@ -25,6 +25,7 @@ def _manifest(name: str = "test-session") -> UpgradeManifest:
         yolo=True,
         otel_endpoint="http://collector:4318",
         allowed_domains=[".googleapis.com", ".pypi.org"],
+        allowed_endpoints=["api.example.com:8443"],
         proxy_image="proxy:latest",
     )
 
@@ -166,6 +167,7 @@ class TestManifestSchema:
             "yolo",
             "otel_endpoint",
             "allowed_domains",
+            "allowed_endpoints",
             "proxy_image",
         }
 
@@ -193,6 +195,7 @@ class TestManifestCarriesTheWholeSpec:
             yolo=True,
             otel_endpoint="http://collector:4318",
             allowed_domains=[".pypi.org"],
+            allowed_endpoints=["api.example.com:8443"],
             proxy_image="proxy:latest",
         )
         state = ResolvedSession(

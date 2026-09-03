@@ -131,6 +131,7 @@ def _build_manifest(
         yolo=view.spec.yolo,
         otel_endpoint=view.spec.otel_endpoint,
         allowed_domains=view.spec.allowed_domains,
+        allowed_endpoints=list(view.spec.allowed_endpoints),
         proxy_image=view.spec.proxy_image,
         image=image,
         backend_type=backend_type,

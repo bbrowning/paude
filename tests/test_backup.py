@@ -18,6 +18,7 @@ from paude.backends.labels import (
     PAUDE_LABEL_AGENT_PROVIDERS,
     PAUDE_LABEL_CREATED,
     PAUDE_LABEL_DOMAINS,
+    PAUDE_LABEL_ENDPOINTS,
     PAUDE_LABEL_GPU,
     PAUDE_LABEL_OTEL_ENDPOINT,
     PAUDE_LABEL_PROVIDER,
@@ -509,6 +510,7 @@ class TestBuildManifest:
                 PAUDE_LABEL_GPU: "all",
                 PAUDE_LABEL_YOLO: "1",
                 PAUDE_LABEL_DOMAINS: "a,b",
+                PAUDE_LABEL_ENDPOINTS: "api.example.com:8443",
                 PAUDE_LABEL_OTEL_ENDPOINT: "http://collector:4318",
                 PAUDE_LABEL_PROXY_IMAGE: "proxy:1",
             }
@@ -564,6 +566,7 @@ class TestBuildManifest:
                 PAUDE_LABEL_GPU: "all",
                 PAUDE_LABEL_YOLO: "1",
                 PAUDE_LABEL_DOMAINS: "a,b",
+                PAUDE_LABEL_ENDPOINTS: "api.example.com:8443",
                 PAUDE_LABEL_OTEL_ENDPOINT: "http://collector:4318",
                 PAUDE_LABEL_PROXY_IMAGE: "proxy:1",
             }

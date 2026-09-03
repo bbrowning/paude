@@ -27,6 +27,7 @@ PAUDE_LABEL_WORKSPACE = "paude.io/workspace"
 PAUDE_LABEL_CREATED = "paude.io/created-at"
 PAUDE_LABEL_AGENT = "paude.io/agent"
 PAUDE_LABEL_DOMAINS = "paude.io/allowed-domains"
+PAUDE_LABEL_ENDPOINTS = "paude.io/allowed-endpoints"
 PAUDE_LABEL_PROXY_IMAGE = "paude.io/proxy-image"
 PAUDE_LABEL_VERSION = "paude.io/version"
 PAUDE_LABEL_GPU = "paude.io/gpu"
@@ -43,7 +44,7 @@ class SessionSpec:
     """The session configuration both durable manifests serialize.
 
     The field set is not a design principle, it is a schema constraint: these
-    are exactly the nine fields ``UpgradeManifest`` and ``BackupManifest``
+    are exactly the fields ``UpgradeManifest`` and ``BackupManifest``
     already wrote to disk, kept verbatim so existing ``upgrades.json`` files
     and backup bundles stay readable. Adding a field here changes both
     schemas; that, not a rule about "declared configuration", is the test to
@@ -67,6 +68,7 @@ class SessionSpec:
     yolo: bool = False
     otel_endpoint: str | None = None
     allowed_domains: list[str] | None = None
+    allowed_endpoints: list[str] = field(default_factory=list)
     proxy_image: str | None = None
 
 
@@ -154,6 +156,11 @@ def parse_domains_label(raw: str | None) -> list[str] | None:
     return raw.split(",") if raw else []
 
 
+def parse_endpoints_label(raw: str | None) -> list[str]:
+    """Parse the endpoint label, defaulting legacy sessions to no exceptions."""
+    return raw.split(",") if raw else []
+
+
 def normalize_agent_providers(value: object) -> list[tuple[str, str]]:
     """Coerce a JSON-decoded agent/provider list back into tuples.
 
@@ -218,6 +225,7 @@ def spec_from_labels(labels: Mapping[str, str]) -> SessionSpec:
         yolo=labels.get(PAUDE_LABEL_YOLO) == "1",
         otel_endpoint=labels.get(PAUDE_LABEL_OTEL_ENDPOINT) or None,
         allowed_domains=parse_domains_label(labels.get(PAUDE_LABEL_DOMAINS)),
+        allowed_endpoints=parse_endpoints_label(labels.get(PAUDE_LABEL_ENDPOINTS)),
         proxy_image=labels.get(PAUDE_LABEL_PROXY_IMAGE) or None,
     )
 

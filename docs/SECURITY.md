@@ -52,6 +52,10 @@ The `--yolo` flag enables autonomous execution (no confirmation prompts). This i
 
 **Do not combine `--yolo` with `--allowed-domains all`** unless you fully trust the task.
 
+`--allowed-endpoints HOST:PORT` is narrower than a global port exception: the
+proxy requires both an allowed-domain host match and the exact endpoint match.
+Endpoint rules never authorize a host on their own or grant that port elsewhere.
+
 ## Workspace Protection
 
 The agent operates on its own copy of your code, not your host files. **Your protection is git itself.** Push important work to a remote before running in autonomous mode:
