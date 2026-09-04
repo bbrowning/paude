@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 import subprocess
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -17,6 +19,31 @@ if TYPE_CHECKING:
 # clobbered, short enough that a caller who didn't drain to EOF isn't left
 # hanging.
 _REAP_GRACE_SECONDS = 5.0
+MINIMUM_PODMAN_VERSION = (4, 0)
+
+
+class UnsupportedEngineError(RuntimeError):
+    """Raised when an engine cannot provide required networking semantics."""
+
+
+def _parse_podman_version(output: str) -> tuple[int, ...]:
+    """Parse the effective version from a Podman JSON version report."""
+    report = json.loads(output)
+    if not isinstance(report, dict):
+        raise ValueError("expected a JSON object")
+    server = report.get("Server")
+    source = server if isinstance(server, dict) else report.get("Client")
+    if not isinstance(source, dict):
+        raise ValueError("missing Client and Server version objects")
+    raw_version = source.get("Version")
+    if not isinstance(raw_version, str):
+        raise ValueError("missing Version string")
+    match = re.fullmatch(
+        r"v?(\d+(?:\.\d+)*)(?:[-+][0-9A-Za-z.-]+)?", raw_version
+    )
+    if match is None:
+        raise ValueError(f"invalid Version value {raw_version!r}")
+    return tuple(int(part) for part in match.group(1).split("."))
 
 
 class ContainerEngine:
@@ -40,6 +67,9 @@ class ContainerEngine:
 
             transport = LocalTransport()
         self._transport = transport
+        self._version_checked = False
+        self._version: tuple[int, ...] | None = None
+        self._version_error: str | None = None
 
     def run(
         self,
@@ -154,6 +184,59 @@ class ContainerEngine:
         """Access the underlying transport."""
         return self._transport
 
+    @property
+    def version(self) -> tuple[int, ...] | None:
+        """Return the effective Podman version, probing at most once.
+
+        Remote Podman clients report both client and server versions. The
+        server controls networking behavior, so prefer it when present.
+        Docker does not need this Podman-specific capability probe.
+        """
+        if not self.is_podman:
+            return None
+        if not self._version_checked:
+            self._probe_version()
+        return self._version
+
+    def _probe_version(self) -> None:
+        """Populate the cached Podman version and diagnostic."""
+        self._version_checked = True
+        try:
+            result = self.run("version", "--format", "json", check=False)
+        except Exception as exc:
+            self._version_error = f"command failed: {exc}"
+            return
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "no output").strip()
+            self._version_error = f"exit {result.returncode}: {detail}"
+            return
+        try:
+            self._version = _parse_podman_version(result.stdout)
+        except (json.JSONDecodeError, ValueError) as exc:
+            self._version_error = f"invalid JSON output {result.stdout!r}: {exc}"
+
+    def ensure_supported_networking(self) -> None:
+        """Require Podman networking semantics needed for proxy isolation."""
+        if not self.is_podman:
+            return
+        version = self.version
+        command = f"{self.binary} version --format json"
+        if version is None:
+            raise UnsupportedEngineError(
+                f"Could not determine the Podman version using `{command}` "
+                f"({self._version_error or 'unknown error'}). Paude requires "
+                "Podman 4.0+ for isolated proxy networking."
+            )
+        required = MINIMUM_PODMAN_VERSION
+        comparable = version + (0,) * max(0, len(required) - len(version))
+        if comparable < required:
+            detected = ".".join(str(part) for part in version)
+            raise UnsupportedEngineError(
+                f"Podman {detected} is unsupported; Paude requires Podman "
+                "4.0+ for repeated --network flags and per-network static "
+                "IPs used by isolated proxy networking."
+            )
+
     def _exists(self, resource_type: str, name: str) -> bool:
         """Check if a resource exists.
 
@@ -191,7 +274,7 @@ class ContainerEngine:
     def network_args(self, network: str, network_ip: str | None = None) -> list[str]:
         """Build ``--network`` arguments, embedding a static IP if given.
 
-        Podman embeds the IP in the ``--network`` value (``net:ip=...``);
+        Podman 4.0+ embeds the IP in the ``--network`` value (``net:ip=...``);
         Docker requires the IP as a separate ``--ip`` flag.
         """
         if network_ip and not self.is_podman:
@@ -224,7 +307,7 @@ class ContainerEngine:
     def supports_multi_network_create(self) -> bool:
         """Whether --network net1,net2 works in create/run.
 
-        Podman supports this; Docker requires ``docker network connect``
+        Podman 4.0+ supports this; Docker requires ``docker network connect``
         after container creation.
         """
         return self.binary != "docker"

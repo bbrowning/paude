@@ -57,7 +57,7 @@ implicitly—list every CLI the image should contain.
 
 ### Prerequisites
 
-**Container runtime**: [Podman](https://podman.io/getting-started/installation) or [Docker](https://docs.docker.com/get-docker/), locally or on a remote host reached over SSH.
+**Container runtime**: [Podman 4.0+](https://podman.io/getting-started/installation) or [Docker](https://docs.docker.com/get-docker/), locally or on a remote host reached over SSH. Podman 4.0 introduced the multi-network and per-network static-IP support required for isolated proxy networking.
 
 **Authentication** — set up credentials for your chosen provider:
 
@@ -488,7 +488,7 @@ pip install -e .
 ### Requirements
 
 - Python 3.11+ (for the Python package)
-- [Podman](https://podman.io/getting-started/installation) or [Docker](https://docs.docker.com/get-docker/) (for local backend)
+- [Podman 4.0+](https://podman.io/getting-started/installation) or [Docker](https://docs.docker.com/get-docker/) (for local backend; Podman 4.0+ is required for isolated proxy networking)
 - Auth credentials for your provider (Google Cloud SDK, API key, etc.)
 
 ## Development

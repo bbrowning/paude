@@ -195,6 +195,7 @@ class PodmanProxyManager:
         if self._runner.container_exists(pname):
             if self._runner.container_running(pname):
                 return
+            self._runner.engine.ensure_supported_networking()
             print(f"Starting proxy {pname}...", file=sys.stderr)
             self._proxy_runner.start_session_proxy(pname)
             return
@@ -205,6 +206,7 @@ class PodmanProxyManager:
             return
 
         # Recreate the missing proxy
+        self._runner.engine.ensure_supported_networking()
         proxy_image, domains, endpoints, otel_ports = proxy_config
         nname = network_name(session_name)
         ca_vol = ca_volume_name(session_name)
@@ -251,6 +253,7 @@ class PodmanProxyManager:
 
     def start_proxy(self, session_name: str) -> None:
         """Start the proxy container for a session."""
+        self._runner.engine.ensure_supported_networking()
         pname = proxy_container_name(session_name)
         self._proxy_runner.start_session_proxy(pname)
 
@@ -351,6 +354,7 @@ class PodmanProxyManager:
         if not proxy_image:
             raise ValueError("proxy_image is required to create a proxy")
 
+        self._runner.engine.ensure_supported_networking()
         nname = network_name(session_name)
         # `disable_dns` is the single fact that decides whether a hostname
         # fallback is viable: with DNS the agent can resolve the proxy by
@@ -490,6 +494,7 @@ class PodmanProxyManager:
         if not running_proxy_image:
             raise ValueError(f"Cannot inspect proxy container: {pname}")
         proxy_image = proxy_image or running_proxy_image
+        self._runner.engine.ensure_supported_networking()
 
         # Preserve OTEL ports from labels across proxy recreate
         proxy_config = self.get_config_from_labels(session_name)

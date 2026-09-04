@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,7 +24,9 @@ from paude.backends.podman.proxy import (
 )
 from paude.backends.podman.proxy_credentials import PreparedProxyCredentials
 from paude.backends.proxy_config import ProxyCredentials, derive_agent_ip
+from paude.container.engine import UnsupportedEngineError
 from paude.container.proxy_runner import ProxyStartError
+from tests.fakes import FakeTransport, make_engine, make_runner, recorded_commands
 
 
 def _make_mock_runner(engine_binary: str = "podman") -> MagicMock:
@@ -252,6 +255,78 @@ class TestProxyManagerFixedIp:
         net_indices = [i for i, a in enumerate(call_args) if a == "--network"]
         assert len(net_indices) == 2
         assert "ip=172.28.0.2" in call_args[net_indices[0] + 1]
+
+
+class TestPodmanVersionGuard:
+    """Unsupported Podman versions fail before proxy resource mutation."""
+
+    @staticmethod
+    def _runner() -> MagicMock:
+        result = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout='{"Client":{"Version":"3.4.4"}}',
+            stderr="",
+        )
+        transport = FakeTransport(results={"version --format json": result})
+        return make_runner(make_engine("podman", transport=transport))
+
+    def test_create_proxy_refuses_before_mutation(self) -> None:
+        runner = self._runner()
+        network = MagicMock()
+        manager = PodmanProxyManager(runner, network)
+
+        with pytest.raises(UnsupportedEngineError, match="Podman 3.4.4"):
+            manager.create_proxy("test-session", "proxy:latest", ["example.com"])
+
+        network.create_internal_network.assert_not_called()
+        assert recorded_commands(runner.engine) == [
+            ["podman", "version", "--format", "json"]
+        ]
+
+    def test_start_if_needed_refuses_before_start(self) -> None:
+        runner = self._runner()
+        runner.container_exists.return_value = True
+        runner.container_running.return_value = False
+        manager = PodmanProxyManager(runner, MagicMock())
+
+        with pytest.raises(UnsupportedEngineError):
+            manager.start_if_needed("test-session")
+
+        assert recorded_commands(runner.engine) == [
+            ["podman", "version", "--format", "json"]
+        ]
+
+    def test_recreate_refuses_before_network_or_volume_mutation(self) -> None:
+        runner = self._runner()
+        runner.container_exists.return_value = False
+        network = MagicMock()
+        manager = PodmanProxyManager(runner, network)
+
+        with (
+            patch.object(
+                manager,
+                "get_config_from_labels",
+                return_value=("proxy:latest", ["example.com"], [], []),
+            ),
+            pytest.raises(UnsupportedEngineError),
+        ):
+            manager.start_if_needed("test-session")
+
+        network.create_internal_network.assert_not_called()
+
+    def test_update_domains_refuses_before_swap(self) -> None:
+        runner = self._runner()
+        runner.container_exists.return_value = True
+        runner.get_container_image.return_value = "proxy:latest"
+        manager = PodmanProxyManager(runner, MagicMock())
+
+        with pytest.raises(UnsupportedEngineError):
+            manager.update_domains("test-session", ["example.com"])
+
+        assert recorded_commands(runner.engine) == [
+            ["podman", "version", "--format", "json"]
+        ]
 
 
 class TestResolveProxyIpGuard:

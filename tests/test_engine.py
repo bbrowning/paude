@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from paude.container.engine import ContainerEngine
+from paude.container.engine import ContainerEngine, UnsupportedEngineError
 from paude.transport import LocalTransport, SshTransport
-from tests.fakes import FakePopen
+from tests.fakes import FakePopen, FakeTransport, recorded_commands
 
 
 class TestContainerEngineInit:
@@ -44,6 +45,91 @@ class TestContainerEngineProperties:
 
     def test_docker_default_bridge_network(self) -> None:
         assert ContainerEngine("docker").default_bridge_network == "bridge"
+
+
+class TestPodmanVersionSupport:
+    """Tests for the Podman networking capability guard."""
+
+    @staticmethod
+    def _engine(
+        stdout: str, *, returncode: int = 0, stderr: str = ""
+    ) -> ContainerEngine:
+        result = subprocess.CompletedProcess(
+            args=[], returncode=returncode, stdout=stdout, stderr=stderr
+        )
+        transport = FakeTransport(results={"version --format json": result})
+        return ContainerEngine("podman", transport=transport)
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("4.0.0", (4, 0, 0)),
+            ("4.9.3-rc1", (4, 9, 3)),
+            ("v5.8.4-dev", (5, 8, 4)),
+        ],
+    )
+    def test_version_parses_release_strings(
+        self, raw: str, expected: tuple[int, ...]
+    ) -> None:
+        engine = self._engine(json.dumps({"Client": {"Version": raw}}))
+        assert engine.version == expected
+
+    def test_version_prefers_server_and_is_cached(self) -> None:
+        engine = self._engine(
+            json.dumps(
+                {
+                    "Client": {"Version": "5.8.4"},
+                    "Server": {"Version": "4.9.3"},
+                }
+            )
+        )
+        assert engine.version == (4, 9, 3)
+        assert engine.version == (4, 9, 3)
+        assert recorded_commands(engine) == [["podman", "version", "--format", "json"]]
+
+    @pytest.mark.parametrize(
+        "raw",
+        ["not-json", "{}", '{"Client":{}}', '{"Client":{"Version":"4broken"}}'],
+    )
+    def test_version_is_none_for_invalid_output(self, raw: str) -> None:
+        assert self._engine(raw).version is None
+
+    def test_version_is_none_for_failed_command(self) -> None:
+        engine = self._engine("", returncode=125, stderr="podman unavailable")
+        assert engine.version is None
+
+    @pytest.mark.parametrize("raw", ["4.0.0", "4.9.3", "5.8.4"])
+    def test_guard_accepts_supported_podman(self, raw: str) -> None:
+        engine = self._engine(json.dumps({"Client": {"Version": raw}}))
+        engine.ensure_supported_networking()
+
+    def test_guard_rejects_podman_3_with_actionable_message(self) -> None:
+        engine = self._engine(json.dumps({"Client": {"Version": "3.4.4"}}))
+        with pytest.raises(UnsupportedEngineError, match=r"3\.4\.4.*4\.0"):
+            engine.ensure_supported_networking()
+
+    def test_guard_fails_closed_with_command_diagnostic(self) -> None:
+        engine = self._engine("", returncode=125, stderr="connection refused")
+        with pytest.raises(
+            UnsupportedEngineError,
+            match=r"podman version --format json.*exit 125: connection refused",
+        ):
+            engine.ensure_supported_networking()
+
+    def test_guard_wraps_transport_failure(self) -> None:
+        transport = MagicMock()
+        transport.run.side_effect = OSError("podman not found")
+        engine = ContainerEngine("podman", transport=transport)
+        with pytest.raises(
+            UnsupportedEngineError,
+            match=r"podman version --format json.*command failed: podman not found",
+        ):
+            engine.ensure_supported_networking()
+
+    def test_guard_never_probes_docker(self) -> None:
+        engine = ContainerEngine("docker", transport=FakeTransport())
+        engine.ensure_supported_networking()
+        assert recorded_commands(engine) == []
 
 
 class TestContainerEngineRun:

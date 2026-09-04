@@ -151,22 +151,27 @@ This predates the `--add-agent` work (the `--providers` validation branch was al
 ### REFACTOR-009: Proxy IP is inspected back from an auto-allocated subnet instead of being chosen deterministically
 
 **Status**: Open
-**Priority**: Low (bounded retry makes it reliable today; deterministic subnet is the deeper fix)
+**Priority**: Low (deterministic subnet allocation would remove inspect coupling)
 **Discovered**: 2026-08-14 during a `/simplify` review of the proxy-IP race fix
 
 `PodmanProxyManager.create_proxy` (`src/paude/backends/podman/proxy.py`) lets
 Podman auto-allocate the session network's subnet (`create_internal_network`
 with no `--subnet`), then discovers the gateway/proxy IP by running `podman
 network inspect` (`_get_proxy_ip` → `NetworkManager.get_network_gateway`) and
-deriving `gateway + 1`. The inspect can race the create — on a `--disable-dns`
-network run under CI load, `network inspect` occasionally returns before the
-subnet/IPAM is populated, so the proxy IP comes back `None`. The current fix is
-a bounded retry poll in `_get_proxy_ip` (5 attempts, 0.25s apart) plus a
-Podman-gated hard error when the IP still can't be determined.
+deriving `gateway + 1`. A bounded retry poll in `_get_proxy_ip` (5 attempts,
+0.25s apart) covers transient inspect results, and a Podman-gated hard error
+prevents an unreachable proxy when the IP still cannot be determined.
 
-The retry is a reasonable, low-risk interim measure, but it is a workaround for
-a design that could be deterministic: passing an explicit `--subnet` at network
-create time makes the gateway/proxy IP known *without inspecting at all*,
+The 2026-09-04 Podman CI failure was not this race: the runner had downgraded to
+unsupported Podman 3.4.4, whose CNI inspect output uses a different schema.
+Podman 3.x also cannot safely express Paude's repeated `--network` flags and
+per-network static IPs. An explicit subnet or a CNI parser branch would not fix
+that incompatibility, so Paude now requires Podman 4.0+ and fails before
+creating proxy resources on older or indeterminate versions.
+
+The remaining inspect dependency could be removed by passing an explicit
+`--subnet` at network creation time. That makes the gateway/proxy IP known
+*without inspecting at all*,
 eliminating the whole race class — and with it the retry poll, the `None`
 return, the hard-error gate, and the Docker hostname-fallback branch in
 `session_setup.py`. The catch (why it's deferred): an explicit subnet trades the
@@ -897,4 +902,3 @@ Note: README's agent table/examples were not re-audited as part of the 2026-07-3
 **Discovered**: 2026-07-31 during docs/ audit (`docs/CONFIGURATION.md`)
 
 Gas City no longer contributes a standalone alias. Its resolved child-agent composition contributes the Claude/Gemini domains when those children are installed.
-

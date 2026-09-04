@@ -91,7 +91,8 @@ _SECTIONS: tuple[HelpSection, ...] = (
             " utilities, including rg (ripgrep) for fast code search."
             " The Codex CLI image also includes Node.js for documentation"
             " tooling, using the custom base image's package manager or an"
-            " existing Node.js installation."
+            " existing Node.js installation. Podman 4.0+ or Docker is required"
+            " for isolated proxy networking."
         ),
     ),
     HelpSection(
