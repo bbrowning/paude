@@ -71,7 +71,7 @@ jobs:
     name: Podman Integration Tests
     needs: [detect-changes, lint, unit-tests]
     if: always() && !failure() && !cancelled() && (needs.detect-changes.outputs.code == 'true' || needs.detect-changes.outputs.containers == 'true')
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
 
@@ -84,6 +84,12 @@ jobs:
         run: |
           podman version
           podman info
+          podman_version="$(podman version --format '{{.Client.Version}}')"
+          podman_major="${podman_version%%.*}"
+          if ! [[ "$podman_major" =~ ^[0-9]+$ ]] || (( podman_major < 4 )); then
+            echo "Podman 4.0+ is required; found ${podman_version:-unknown}" >&2
+            exit 1
+          fi
 
       - name: Build test images
         run: make build

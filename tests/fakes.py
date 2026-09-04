@@ -90,7 +90,13 @@ class FakeTransport:
     ) -> None:
         self._is_remote = is_remote
         self._host_label = host_label
-        self._results = results or {}
+        supported_version = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout='{"Client":{"Version":"5.8.4"}}',
+            stderr="",
+        )
+        self._results = {"version --format json": supported_version, **(results or {})}
         self._default = default_result or subprocess.CompletedProcess(
             args=[], returncode=0, stdout="", stderr=""
         )
