@@ -431,6 +431,23 @@ pruning every unreferenced provider.
 
 `remove_network()` in `src/paude/container/network.py` runs `podman network rm <name>` with `check=False` and doesn't inspect the `CompletedProcess` result at all, so a failed removal (e.g. the network still has a container attached) is indistinguishable from success. The one call site that removed a network still in active use by a live agent container (`PodmanProxyManager.start_if_needed`'s recreate-missing-proxy branch) has been fixed to no longer call this in that situation, but the underlying swallow-everything behavior in `remove_network` itself is still present for any future caller. A fix would capture the result and at least log a warning on non-zero exit (mirroring the pattern already used for `echo_captured_stderr`).
 
+### ENGINE-001: `--backend=docker` on a podman-docker shim host uses Docker-flavored flags
+
+**Status**: Open
+**Severity**: Low
+**Discovered**: 2026-09-29 while fixing podman sessions being listed as `docker`
+
+When `/usr/bin/docker` is the `podman-docker` shim, discovery now ignores the
+docker engine (`ContainerEngine.is_podman_shim`), so sessions show up under
+podman. But explicitly creating with `--backend=docker` still builds a
+`ContainerEngine("docker")` whose capability properties (`is_podman`,
+`supports_secrets`, `supports_multi_network_create`, `gpu_args`,
+`image_name_format`) key off the binary name and pick Docker behavior against
+what is really Podman. Such sessions are also listed under podman, while the
+registry records them as docker. A fix would either treat a shim `docker` as
+podman for capabilities, or reject/redirect `--backend=docker` when the shim is
+detected.
+
 ## Agent Limitations
 
 Issues caused by upstream agent behavior, not paude bugs.

@@ -10,7 +10,7 @@ import pytest
 
 from paude.container.engine import ContainerEngine, UnsupportedEngineError
 from paude.transport import LocalTransport, SshTransport
-from tests.fakes import FakePopen, FakeTransport, recorded_commands
+from tests.fakes import FakePopen, FakeTransport, make_engine, recorded_commands
 
 
 class TestContainerEngineInit:
@@ -129,6 +129,44 @@ class TestPodmanVersionSupport:
     def test_guard_never_probes_docker(self) -> None:
         engine = ContainerEngine("docker", transport=FakeTransport())
         engine.ensure_supported_networking()
+        assert recorded_commands(engine) == []
+
+
+class TestPodmanShimDetection:
+    """Tests for detecting a docker binary that is really Podman."""
+
+    @staticmethod
+    def _docker(stdout: str, *, returncode: int = 0) -> ContainerEngine:
+        result = subprocess.CompletedProcess(
+            args=[], returncode=returncode, stdout=stdout, stderr=""
+        )
+        return make_engine(
+            "docker", transport=FakeTransport(results={"--version": result})
+        )
+
+    def test_podman_docker_shim_detected_and_cached(self) -> None:
+        engine = self._docker("podman version 5.8.7\n")
+        assert engine.is_podman_shim is True
+        assert engine.is_podman_shim is True
+        assert recorded_commands(engine) == [["docker", "--version"]]
+
+    def test_real_docker_is_not_shim(self) -> None:
+        engine = self._docker("Docker version 27.3.1, build ce12230\n")
+        assert engine.is_podman_shim is False
+
+    def test_failed_probe_is_not_shim(self) -> None:
+        assert (
+            self._docker("podman version 5.8.7", returncode=1).is_podman_shim is False
+        )
+
+    def test_transport_error_is_not_shim(self) -> None:
+        transport = MagicMock()
+        transport.run.side_effect = FileNotFoundError("docker")
+        assert ContainerEngine("docker", transport=transport).is_podman_shim is False
+
+    def test_podman_engine_never_probes(self) -> None:
+        engine = make_engine("podman")
+        assert engine.is_podman_shim is False
         assert recorded_commands(engine) == []
 
 
