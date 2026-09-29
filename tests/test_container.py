@@ -1466,3 +1466,130 @@ class TestProxyRunnerAllowedClients:
         env_indices = [i for i, a in enumerate(call_args) if a == "-e"]
         env_vals = [call_args[i + 1] for i in env_indices]
         assert "PAUDE_PROXY_ALLOWED_CLIENTS=10.89.0.3" in env_vals
+
+
+class TestLocalBaseRef:
+    """Tests for qualifying locally built base images in FROM."""
+
+    @staticmethod
+    def _make_script_dir(tmp_path: Path) -> None:
+        containers_dir = tmp_path / "containers" / "paude"
+        containers_dir.mkdir(parents=True)
+        (containers_dir / "Dockerfile").write_text("FROM centos:stream9")
+        (containers_dir / "entrypoint.sh").write_text("#!/bin/bash\nexec $@")
+        (containers_dir / "entrypoint-session.sh").write_text("#!/bin/bash\nexec $@")
+        (containers_dir / "tmux.conf").write_text("# tmux")
+
+    @staticmethod
+    def _base_image_args(mock_run: MagicMock) -> list[str]:
+        return [
+            arg
+            for call in mock_run.call_args_list
+            for arg in call[0]
+            if arg.startswith("BASE_IMAGE=")
+        ]
+
+    @pytest.mark.parametrize(
+        ("engine_name", "tag", "expected"),
+        [
+            ("podman", "paude-user-base:abc", "localhost/paude-user-base:abc"),
+            (
+                "podman",
+                "localhost/paude-user-base:abc",
+                "localhost/paude-user-base:abc",
+            ),
+            ("podman", "quay.io/org/img:1", "quay.io/org/img:1"),
+            ("podman", "myhost:5000/img:1", "myhost:5000/img:1"),
+            ("docker", "paude-user-base:abc", "paude-user-base:abc"),
+        ],
+    )
+    def test_local_base_ref(self, tmp_path, engine_name, tag, expected):
+        """Only unqualified tags on Podman get the localhost/ prefix."""
+        from paude.container.engine import ContainerEngine
+        from paude.container.image import ImageManager
+
+        manager = ImageManager(
+            script_dir=tmp_path,
+            platform="linux/amd64",
+            engine=ContainerEngine(engine_name),
+        )
+        assert manager._local_base_ref(tag) == expected
+
+    @pytest.mark.parametrize(
+        ("engine_name", "prefix"),
+        [("podman", "localhost/"), ("docker", "")],
+    )
+    def test_user_dockerfile_base_is_qualified(self, tmp_path, engine_name, prefix):
+        """The user-Dockerfile image is referenced as localhost/ on Podman."""
+        from paude.config.models import PaudeConfig
+        from paude.container.engine import ContainerEngine
+        from paude.container.image import ImageManager
+
+        self._make_script_dir(tmp_path)
+        user_dockerfile = tmp_path / "user" / "Dockerfile"
+        user_dockerfile.parent.mkdir()
+        user_dockerfile.write_text("FROM fedora:latest")
+        config = PaudeConfig(dockerfile=user_dockerfile)
+
+        engine = ContainerEngine(engine_name)
+        with (
+            patch.object(engine, "image_exists", return_value=False),
+            patch.object(engine, "run") as mock_run,
+        ):
+            manager = ImageManager(
+                script_dir=tmp_path, platform="linux/amd64", engine=engine
+            )
+            manager.ensure_custom_image(config)
+
+        assert mock_run.call_count == 2
+        first_call = mock_run.call_args_list[0][0]
+        tag = first_call[first_call.index("-t") + 1]
+        assert tag.startswith("paude-user-base:")
+        assert self._base_image_args(mock_run) == [f"BASE_IMAGE={prefix}{tag}"]
+
+    def test_dev_base_is_qualified_for_runtime_layer(self, tmp_path):
+        """The dev-mode base image is referenced as localhost/ on Podman."""
+        import os
+
+        from paude.container.engine import ContainerEngine
+        from paude.container.image import ImageManager
+
+        self._make_script_dir(tmp_path)
+        engine = ContainerEngine("podman")
+        with (
+            patch.object(engine, "image_exists", return_value=False),
+            patch.object(engine, "run") as mock_run,
+            patch.dict(os.environ, {"PAUDE_DEV": "1"}),
+        ):
+            manager = ImageManager(
+                script_dir=tmp_path, platform="linux/amd64", engine=engine
+            )
+            manager.ensure_default_image()
+
+        assert self._base_image_args(mock_run) == [
+            "BASE_IMAGE=localhost/paude-base-centos10:latest-amd64"
+        ]
+
+    def test_default_runtime_base_is_qualified_for_workspace(self, tmp_path):
+        """The runtime image is referenced as localhost/ in workspace builds."""
+        from paude.config.models import PaudeConfig
+        from paude.container.engine import ContainerEngine
+        from paude.container.image import ImageManager
+
+        self._make_script_dir(tmp_path)
+        engine = ContainerEngine("podman")
+        manager = ImageManager(
+            script_dir=tmp_path, platform="linux/amd64", engine=engine
+        )
+        with (
+            patch.object(engine, "image_exists", return_value=False),
+            patch.object(engine, "run") as mock_run,
+            patch.object(
+                manager, "ensure_default_image", return_value="paude-runtime:abc"
+            ),
+        ):
+            manager.ensure_custom_image(PaudeConfig(packages=["git"]))
+
+        assert self._base_image_args(mock_run) == [
+            "BASE_IMAGE=localhost/paude-runtime:abc"
+        ]

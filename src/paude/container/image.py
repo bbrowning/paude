@@ -228,7 +228,7 @@ class ImageManager:
             dockerfile_path = Path(tmpdir) / "Dockerfile"
             dockerfile_path.write_text(layer_content)
 
-            build_args = {"BASE_IMAGE": base_image}
+            build_args = {"BASE_IMAGE": self._local_base_ref(base_image)}
             try:
                 self.build_image(
                     dockerfile_path,
@@ -307,6 +307,8 @@ class ImageManager:
             if not using_default:
                 copy_entrypoints(entrypoint, Path(tmpdir))
 
+            if using_default:
+                base_image = self._local_base_ref(base_image)
             build_args = {"BASE_IMAGE": base_image}
             self.build_image(
                 Path(tmpdir) / "Dockerfile",
@@ -328,6 +330,19 @@ class ImageManager:
             f"{agent.config.name}:{agent.config.provider or ''}"
             for agent in self.composition.agents
         )
+
+    def _local_base_ref(self, tag: str) -> str:
+        """Qualify a locally built tag for use in FROM.
+
+        Podman treats unqualified names as short names and may prompt for a
+        registry; locally built images live under ``localhost/``.
+        """
+        if not self._engine.is_podman:
+            return tag
+        first, sep, _ = tag.partition("/")
+        if sep and ("." in first or ":" in first or first == "localhost"):
+            return tag
+        return f"localhost/{tag}"
 
     def _resolve_custom_base(
         self,
@@ -353,7 +368,7 @@ class ImageManager:
                 fresh=force_rebuild,
             )
             print("  → Adding paude requirements...", file=sys.stderr)
-            return user_image, False
+            return self._local_base_ref(user_image), False
         elif config.base_image:
             print(f"  → Using base: {config.base_image}", file=sys.stderr)
             return config.base_image, False
