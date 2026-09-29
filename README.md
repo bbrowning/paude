@@ -227,6 +227,35 @@ agent login  # or set CURSOR_API_KEY=your-api-key
 
 </details>
 
+<details>
+<summary><strong>Keeping tokens out of plaintext files</strong> (Linux keyring)</summary>
+
+paude reads credentials from its environment, but they don't need to be
+exported from `~/.bashrc`. Store each one in your desktop keyring once
+(`secret-tool` prompts for the value, keeping it out of shell history):
+
+```bash
+secret-tool store --label="paude GitHub PAT" service paude key PAUDE_GITHUB_TOKEN
+secret-tool store --label="paude Claude OAuth" service paude key CLAUDE_CODE_OAUTH_TOKEN
+```
+
+Then add a wrapper to `~/.bashrc` that injects them only into `paude` itself:
+
+```bash
+paude() {
+  PAUDE_GITHUB_TOKEN="$(secret-tool lookup service paude key PAUDE_GITHUB_TOKEN)" \
+  CLAUDE_CODE_OAUTH_TOKEN="$(secret-tool lookup service paude key CLAUDE_CODE_OAUTH_TOKEN)" \
+    command paude "$@"
+}
+```
+
+This keeps tokens off disk in plaintext and out of every other process's
+environment, but any process running as your user can still query the
+unlocked keyring. On macOS, use `security find-generic-password -w -s <name>`
+in the wrapper instead.
+
+</details>
+
 ### Install
 
 ```bash

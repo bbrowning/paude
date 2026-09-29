@@ -307,6 +307,9 @@ paude start my-project
 # Inside the container, gh is authenticated automatically
 ```
 
+To avoid keeping the token in a plaintext shell profile, see "Keeping tokens
+out of plaintext files" in the [README](../README.md).
+
 The token is never handed to the agent's own container:
 - `PAUDE_GITHUB_TOKEN` is read on the host and stored only on the network-filtering proxy sidecar. See [Remote Hosts & Docker Backend](REMOTE.md) for how storage differs between the Podman and Docker backends
 - The agent container's own `GH_TOKEN` environment variable is always a non-functional placeholder; the proxy transparently attaches the real token to requests it forwards to GitHub's API
