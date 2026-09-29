@@ -349,14 +349,15 @@ def session_upgrade(
             err=True,
         )
 
-    # Auto-stop if running
-    if session is not None and session.status == "running":
-        typer.echo(f"Stopping session '{name}'...", err=True)
-        backend_obj.stop_session(name)
-
     try:
         if isinstance(backend_obj, PodmanBackend):
-            _upgrade_podman(name, backend_obj, True, overrides)
+            _upgrade_podman(
+                name,
+                backend_obj,
+                True,
+                overrides,
+                stop_running=session is not None and session.status == "running",
+            )
         else:
             typer.echo("Unsupported backend for upgrade.", err=True)
             raise typer.Exit(1)
@@ -612,6 +613,8 @@ def _upgrade_podman(
     backend: PodmanBackend,
     rebuild: bool,
     overrides: UpgradeOverrides,
+    *,
+    stop_running: bool = False,
 ) -> None:
     """Upgrade a Podman/Docker session in place.
 
@@ -630,6 +633,13 @@ def _upgrade_podman(
 
     state, created_at = _resolve_upgrade_state(name, backend)
     _apply_overrides(state, overrides)
+    _require_provider_secrets(name, state.spec.credential_providers)
+
+    # Stopped only once the preflight checks pass, so a refused upgrade leaves
+    # a running session running.
+    if stop_running:
+        typer.echo(f"Stopping session '{name}'...", err=True)
+        backend.stop_session(name)
 
     # Persist the fully-resolved config BEFORE any destructive step, so an
     # interrupt from here on can be finished by re-running the upgrade.
@@ -667,6 +677,27 @@ def _upgrade_podman(
     backend.resources.teardown_for_rebuild(name)
 
     _recreate_session(name, backend, state, images, config)
+
+
+def _require_provider_secrets(name: str, credential_providers: list[str]) -> None:
+    """Refuse to rebuild when the host lacks a provider's required secrets.
+
+    The proxy is recreated from the host environment, so rebuilding without
+    them would leave the session unable to authenticate. Checked before the
+    manifest is saved or anything is torn down.
+    """
+    from paude.providers import check_required_secrets
+
+    try:
+        check_required_secrets(credential_providers)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        typer.echo(
+            f"Session '{name}' was not modified. Export the missing "
+            f"variables and re-run 'paude upgrade {name}'.",
+            err=True,
+        )
+        raise typer.Exit(1) from None
 
 
 def _recreate_session(

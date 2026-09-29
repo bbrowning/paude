@@ -407,8 +407,11 @@ class TestPodmanUpgradeReconfigure:
         unique_session_name: str,
         podman_test_image: str,
         podman_proxy_image: str,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Swapping codex chatgpt->openai strips config and clears auth.json."""
+        # Upgrade refuses to add a provider whose required secret is unset.
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test-dummy")
         backend = PodmanBackend()
 
         try:

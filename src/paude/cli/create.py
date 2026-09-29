@@ -327,6 +327,14 @@ def session_create(
         )
         raise typer.Exit()
 
+    from paude.providers import check_required_secrets
+
+    try:
+        check_required_secrets(resolved.providers)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+
     if ssh_key and not host:
         typer.echo(
             "Error: --ssh-key requires --host.",
