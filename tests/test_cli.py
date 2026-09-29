@@ -493,6 +493,50 @@ class TestAnthropicOAuthProvider:
         assert "claude -> anthropic-oauth" in out
         assert "codex -> chatgpt" in out
 
+    @patch("paude.cli.create_podman.create_podman_session")
+    @patch("paude.cli.create._prepare_session_create")
+    def test_create_without_oauth_token_fails(self, mock_prepare, mock_create):
+        """create refuses to build a session whose proxy would lack the token."""
+        result = runner.invoke(
+            app,
+            ["create", "--agent", "claude", "--provider", "anthropic-oauth"],
+            env={"CLAUDE_CODE_OAUTH_TOKEN": None},
+        )
+        assert result.exit_code == 1
+        output = result.stdout + (result.stderr or "")
+        assert "CLAUDE_CODE_OAUTH_TOKEN" in output
+        assert "claude setup-token" in output
+        mock_prepare.assert_not_called()
+        mock_create.assert_not_called()
+
+    @patch("paude.cli.create_podman.create_podman_session")
+    @patch("paude.cli.create._prepare_session_create")
+    def test_create_with_oauth_token_proceeds(self, mock_prepare, mock_create):
+        mock_prepare.return_value = ([], [], {}, False)
+        result = runner.invoke(
+            app,
+            ["create", "--agent", "claude", "--provider", "anthropic-oauth"],
+            env={"CLAUDE_CODE_OAUTH_TOKEN": "sk-ant-oat01-test"},
+        )
+        assert result.exit_code == 0
+        mock_create.assert_called_once()
+
+    def test_dry_run_without_oauth_token_still_works(self):
+        """Dry-run only previews the config, so it does not require secrets."""
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--agent",
+                "claude",
+                "--provider",
+                "anthropic-oauth",
+                "--dry-run",
+            ],
+            env={"CLAUDE_CODE_OAUTH_TOKEN": None},
+        )
+        assert result.exit_code == 0
+
     def test_codex_anthropic_oauth_rejected(self):
         """anthropic-oauth is not a valid provider for codex."""
         result = runner.invoke(
@@ -708,6 +752,7 @@ class TestAgentsProvidersLists:
                 "--agent-provider",
                 "claude=anthropic,codex=openai",
             ],
+            env={"ANTHROPIC_API_KEY": "sk-ant", "OPENAI_API_KEY": "sk-oai"},
         )
         assert result.exit_code == 0
         mock_create.assert_called_once()
@@ -727,7 +772,9 @@ class TestAgentsProvidersLists:
         """An extra credential provider need not map to an agent."""
         mock_prepare.return_value = ([], [], {}, False)
         result = runner.invoke(
-            app, ["create", "--agents", "claude", "--providers", "vertex,openai"]
+            app,
+            ["create", "--agents", "claude", "--providers", "vertex,openai"],
+            env={"OPENAI_API_KEY": "sk-oai"},
         )
         assert result.exit_code == 0
         mock_create.assert_called_once()

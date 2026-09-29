@@ -11,7 +11,12 @@ from paude.providers.agent_providers import (
     resolve_agent_provider,
     supported_providers,
 )
-from paude.providers.base import ProviderConfig, get_provider, list_providers
+from paude.providers.base import (
+    ProviderConfig,
+    check_required_secrets,
+    get_provider,
+    list_providers,
+)
 
 
 class TestProviderRegistry:
@@ -273,3 +278,37 @@ class TestSupportedProviders:
         for agent_name in AGENT_PROVIDERS:
             providers = supported_providers(agent_name)
             assert providers == sorted(providers)
+
+
+class TestCheckRequiredSecrets:
+    """Tests for host-side validation of required provider secrets."""
+
+    def test_present_secret_passes(self) -> None:
+        check_required_secrets(
+            ["anthropic-oauth"], environ={"CLAUDE_CODE_OAUTH_TOKEN": "tok"}
+        )
+
+    def test_providers_without_required_secrets_pass(self) -> None:
+        check_required_secrets(["vertex", "chatgpt", "cursor", "google"], environ={})
+
+    def test_missing_oauth_token_names_var_and_hint(self) -> None:
+        with pytest.raises(ValueError, match="Missing required") as exc:
+            check_required_secrets(["anthropic-oauth"], environ={})
+        message = str(exc.value)
+        assert "CLAUDE_CODE_OAUTH_TOKEN" in message
+        assert "anthropic-oauth" in message
+        assert "claude setup-token" in message
+
+    def test_empty_value_counts_as_missing(self) -> None:
+        with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+            check_required_secrets(["openai"], environ={"OPENAI_API_KEY": ""})
+
+    def test_reports_every_missing_provider(self) -> None:
+        with pytest.raises(ValueError, match="Missing required") as exc:
+            check_required_secrets(
+                ["anthropic", "vertex", "openai"],
+                environ={"ANTHROPIC_API_KEY": "k"},
+            )
+        message = str(exc.value)
+        assert "OPENAI_API_KEY" in message
+        assert "ANTHROPIC_API_KEY" not in message

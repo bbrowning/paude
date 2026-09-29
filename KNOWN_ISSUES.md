@@ -448,6 +448,23 @@ registry records them as docker. A fix would either treat a shim `docker` as
 podman for capabilities, or reject/redirect `--backend=docker` when the shim is
 detected.
 
+### PROXY-001: recreating a missing proxy on `start`/`connect` drops unset credentials
+
+**Status**: Open
+**Severity**: Low
+**Discovered**: 2026-09-29 while enforcing required provider secrets on `create`/`upgrade`
+
+`paude create` and `paude upgrade` now refuse to run when a provider's
+`required_secret_env_vars` are unset on the host. `start` and `connect` are not
+checked, which is correct when the proxy container still exists (it keeps its
+original credential bindings). But when the proxy is missing,
+`PodmanProxyManager.start_if_needed` recreates it from
+`gather_proxy_credentials()`, which silently skips unset host variables. A
+session recreated that way comes up with no `CLAUDE_CODE_OAUTH_TOKEN` (or API
+key) binding, even though the Podman secret from `create` may still exist. A
+fix would either reuse the session's existing credential secrets when
+recreating, or run `check_required_secrets` in that branch only.
+
 ## Agent Limitations
 
 Issues caused by upstream agent behavior, not paude bugs.

@@ -120,7 +120,7 @@ class TestUpgradeCommand:
     def test_upgrade_auto_stops_running_session(
         self, mock_find: MagicMock, mock_upgrade_podman: MagicMock
     ) -> None:
-        """Session is running, upgrade should call stop_session first."""
+        """A running session is handed to _upgrade_podman to stop after preflight."""
         mock_backend = MagicMock()
         mock_backend.get_session.return_value = _make_session(
             "test-session", status="running", version="0.1.0"
@@ -133,7 +133,7 @@ class TestUpgradeCommand:
         result = runner.invoke(app, ["upgrade", "test-session"])
 
         assert result.exit_code == 0
-        mock_backend.stop_session.assert_called_once_with("test-session")
+        assert mock_upgrade_podman.call_args.kwargs["stop_running"] is True
 
     @patch("paude.cli.upgrade._upgrade_podman")
     @patch("paude.cli.upgrade.find_session_backend")
@@ -519,10 +519,16 @@ class TestUpgradePodman:
 
         from paude.cli.upgrade import _upgrade_podman
 
+        up.backend.stop_session = MagicMock()  # type: ignore[method-assign]
         _upgrade_podman(
-            "test-session", up.backend, rebuild=False, overrides=_NO_OVERRIDES
+            "test-session",
+            up.backend,
+            rebuild=False,
+            overrides=_NO_OVERRIDES,
+            stop_running=True,
         )
 
+        up.backend.stop_session.assert_called_once_with("test-session")
         # Old container and proxy container removed
         up.runner.remove_container.assert_any_call("paude-test-session", force=True)
         up.runner.remove_container.assert_any_call(
@@ -700,6 +706,38 @@ class TestUpgradePodman:
         )
         # Network removed
         up.networks.remove_network.assert_called_once_with("paude-net-test-session")
+
+    @patch("paude.container.ImageManager")
+    @patch("paude.config.detector.detect_config", return_value=None)
+    def test_upgrade_podman_missing_required_secret_changes_nothing(
+        self,
+        mock_detect_config: MagicMock,
+        mock_image_manager_class: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Switching to anthropic-oauth without the token on the host fails
+        before the manifest is written, images are built, or anything is torn
+        down, so the existing session stays intact."""
+        import typer
+
+        from paude import upgrade_state
+        from paude.cli.upgrade import _upgrade_podman
+
+        up = _upgrade_backend(self._make_container_labels())
+        overrides = UpgradeOverrides(agent_providers={"claude": "anthropic-oauth"})
+
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+        up.backend.stop_session = MagicMock()  # type: ignore[method-assign]
+        with pytest.raises(typer.Exit):
+            _upgrade_podman(
+                "test-session", up.backend, True, overrides, stop_running=True
+            )
+
+        assert upgrade_state.load("test-session") is None
+        mock_image_manager_class.assert_not_called()
+        up.runner.remove_container.assert_not_called()
+        up.create_session.assert_not_called()
+        up.backend.stop_session.assert_not_called()
 
     @patch("paude.mounts.build_mounts", return_value=[])
     @patch("paude.cli.helpers._prepare_session_create")
@@ -1699,6 +1737,14 @@ class TestUpgradePodmanAddAgent:
             patch(
                 "paude.backends.podman.helpers.find_container_by_session_name",
                 return_value={"Labels": labels},
+            ),
+            patch.dict(
+                "os.environ",
+                {
+                    "ANTHROPIC_API_KEY": "sk-ant",
+                    "CLAUDE_CODE_OAUTH_TOKEN": "sk-ant-oat",
+                    "OPENAI_API_KEY": "sk-oai",
+                },
             ),
         ):
             mock_image_manager = MagicMock()

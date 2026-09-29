@@ -122,7 +122,10 @@ the real token never reaches the agent container (the agent only sees a
 `paude-proxy-managed` sentinel). Because the token does not rotate, one token can
 be shared across all your sessions — the same value must be present on later
 `start`/`connect`/`upgrade`. When it expires, re-run `claude setup-token`, export
-the new value, and upgrade (or recreate) the session.
+the new value, and upgrade (or recreate) the session. `paude create` and
+`paude upgrade` fail up front if a provider's required variable (here
+`CLAUDE_CODE_OAUTH_TOKEN`; `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for the
+API-key providers) is not set.
 
 The token is used only by the official `claude` binary running in the session
 (including when Gas City's `gc` spawns it). Sharing one subscription seat across
