@@ -75,6 +75,81 @@ class TestCollectAllSessions:
         ):
             yield
 
+    def test_duplicate_local_names_prefer_podman(self):
+        """A session seen by both engines is reported once, as podman."""
+        from paude.session_discovery import collect_all_sessions
+
+        podman_backend = MagicMock()
+        docker_backend = MagicMock()
+        with (
+            patch(
+                "paude.session_discovery._collect_podman_sessions",
+                return_value=[(_make_session("foo"), podman_backend)],
+            ),
+            patch(
+                "paude.session_discovery._collect_docker_sessions",
+                return_value=[
+                    (_make_session("foo", backend_type="docker"), docker_backend),
+                    (_make_session("bar", backend_type="docker"), docker_backend),
+                ],
+            ),
+        ):
+            sessions, reachable = collect_all_sessions()
+
+        assert [(s.name, s.backend_type) for s, _ in sessions] == [
+            ("foo", "podman"),
+            ("bar", "docker"),
+        ]
+        assert sessions[0][1] is podman_backend
+        assert reachable == {"podman", "docker"}
+
+
+class TestPodmanDockerShim:
+    """Docker discovery is skipped when docker is a Podman shim."""
+
+    @pytest.fixture
+    def shim(self):
+        with patch("paude.session_discovery.real_docker_backend", return_value=None):
+            yield
+
+    def test_real_docker_backend_is_none_for_shim(self):
+        from paude.session_discovery import real_docker_backend
+
+        backend = MagicMock()
+        backend.engine.is_podman_shim = True
+        with (
+            patch("paude.session_discovery.ContainerEngine"),
+            patch("paude.session_discovery.PodmanBackend", return_value=backend),
+        ):
+            assert real_docker_backend() is None
+
+    @pytest.mark.usefixtures("shim")
+    def test_collect_all_sessions_omits_docker_for_shim(self):
+        from paude.session_discovery import collect_all_sessions
+
+        podman_backend = MagicMock()
+        podman_backend.list_sessions.return_value = [_make_session("foo")]
+        with patch("paude.session_discovery._collect_ssh_sessions", return_value=[]):
+            sessions, reachable = collect_all_sessions(podman_backend=podman_backend)
+
+        assert [(s.name, s.backend_type) for s, _ in sessions] == [("foo", "podman")]
+        assert reachable == {"podman"}
+
+    @pytest.mark.usefixtures("shim")
+    def test_find_workspace_session_skips_shim(self):
+        from paude.session_discovery import find_workspace_session
+
+        podman = MagicMock()
+        podman.find_session_for_workspace.return_value = None
+        with (
+            patch("paude.session_discovery.PodmanBackend", return_value=podman),
+            patch(
+                "paude.session_discovery._find_ssh_workspace_session",
+                return_value=None,
+            ),
+        ):
+            assert find_workspace_session() is None
+
 
 # resolve_session_for_backend tests
 

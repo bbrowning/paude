@@ -54,10 +54,11 @@ def find_workspace_session(
 
     # Check Docker
     try:
-        docker = PodmanBackend(engine=ContainerEngine("docker"))
-        session = docker.find_session_for_workspace(workspace)
-        if session and (_status_matches(session.status, status_filter)):
-            return (session, docker)
+        docker = real_docker_backend()
+        if docker is not None:
+            session = docker.find_session_for_workspace(workspace)
+            if session and (_status_matches(session.status, status_filter)):
+                return (session, docker)
     except Exception:  # noqa: S110 - Docker may not be available
         pass
 
@@ -159,11 +160,23 @@ def _collect_podman_sessions(
     ]
 
 
+def real_docker_backend() -> PodmanBackend | None:
+    """Build the local Docker backend, or None if ``docker`` is a Podman shim.
+
+    A shim (e.g. podman-docker) sees the same containers as the Podman
+    backend, so probing it too would report every session twice.
+    """
+    backend = PodmanBackend(engine=ContainerEngine("docker"))
+    return None if backend.engine.is_podman_shim else backend
+
+
 def _collect_docker_sessions(
     status_filter: str | None,
-) -> list[tuple[Session, Backend]]:
-    """Collect sessions from the Docker backend."""
-    docker_backend = PodmanBackend(engine=ContainerEngine("docker"))
+) -> list[tuple[Session, Backend]] | None:
+    """Collect sessions from the Docker backend (None if it is a Podman shim)."""
+    docker_backend = real_docker_backend()
+    if docker_backend is None:
+        return None
     return [
         (s, docker_backend)
         for s in docker_backend.list_sessions()
@@ -193,7 +206,7 @@ def collect_all_sessions(
     reachable_backends: set[str] = set()
 
     with ThreadPoolExecutor(max_workers=4) as pool:
-        futures: dict[str, Future[list[tuple[Session, Backend]]]] = {}
+        futures: dict[str, Future[list[tuple[Session, Backend]] | None]] = {}
 
         if backend_filter in (None, "podman"):
             futures["podman"] = pool.submit(
@@ -204,25 +217,22 @@ def collect_all_sessions(
 
         futures["ssh"] = pool.submit(_collect_ssh_sessions, status_filter)
 
-        ssh_sessions: list[tuple[Session, Backend]] = []
+        # Futures are ordered podman, docker, ssh: the first backend to
+        # report a session name wins, so an engine aliased to the same
+        # daemon (or an SSH entry for a local session) isn't listed twice.
+        seen: set[str] = set()
         for key, fut in futures.items():
             try:
                 sessions = fut.result()
-                if key == "ssh":
-                    ssh_sessions = sessions
-                else:
-                    all_sessions.extend(sessions)
-                    reachable_backends.add(key)
-            except Exception:  # noqa: S110
-                pass
-
-    # Deduplicate: skip SSH sessions already found via other backends
-    if ssh_sessions:
-        known_names = {s.name for s, _ in all_sessions}
-        for s, b in ssh_sessions:
-            if s.name not in known_names:
-                all_sessions.append((s, b))
-        reachable_backends.add("ssh")
+            except Exception:  # noqa: S112 - backend may be unavailable
+                continue
+            if sessions is None or (key == "ssh" and not sessions):
+                continue
+            reachable_backends.add(key)
+            for s, b in sessions:
+                if s.name not in seen:
+                    seen.add(s.name)
+                    all_sessions.append((s, b))
 
     return all_sessions, reachable_backends
 

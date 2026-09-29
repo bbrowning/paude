@@ -2268,3 +2268,29 @@ class TestPrepareSessionCreateGitIdentity:
         assert "PAUDE_GIT_USER_EMAIL" not in env
         captured = capsys.readouterr()
         assert "No git identity found" not in captured.err
+
+
+class TestFindSessionBackendPodmanShim:
+    """find_session_backend ignores a docker binary that is really Podman."""
+
+    @patch("paude.cli.helpers.real_docker_backend", MagicMock(return_value=None))
+    @patch("paude.cli.helpers.PodmanBackend")
+    def test_shim_docker_is_not_probed(self, mock_podman_cls: MagicMock) -> None:
+        from paude.cli.helpers import find_session_backend
+
+        mock_podman_cls.return_value.get_session.return_value = None
+        assert find_session_backend("foo") is None
+
+    @patch("paude.cli.helpers.real_docker_backend")
+    @patch("paude.cli.helpers.PodmanBackend")
+    def test_real_docker_is_probed(
+        self, mock_podman_cls: MagicMock, mock_docker: MagicMock
+    ) -> None:
+        from paude.cli.app import BackendType
+        from paude.cli.helpers import find_session_backend
+
+        mock_podman_cls.return_value.get_session.return_value = None
+        assert find_session_backend("foo") == (
+            BackendType.docker,
+            mock_docker.return_value,
+        )

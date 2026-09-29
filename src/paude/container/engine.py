@@ -7,6 +7,7 @@ import re
 import subprocess
 from collections.abc import Iterator
 from contextlib import contextmanager
+from functools import cached_property
 from typing import IO, TYPE_CHECKING
 
 from paude.subprocess_utils import drain_pipe, raise_on_nonzero, reap
@@ -183,6 +184,23 @@ class ContainerEngine:
     def transport(self) -> Transport:
         """Access the underlying transport."""
         return self._transport
+
+    @cached_property
+    def is_podman_shim(self) -> bool:
+        """Whether the ``docker`` binary is really Podman (e.g. podman-docker).
+
+        Such shims make the "docker" engine see the same containers as the
+        "podman" engine, so callers probing both must skip one. Any failure
+        is treated as "not a shim".
+        """
+        if self.binary != "docker":
+            return False
+        try:
+            result = self.run("--version", check=False, timeout=10)
+        except Exception:
+            return False
+        output = (result.stdout or "").strip().lower()
+        return result.returncode == 0 and output.startswith("podman")
 
     @property
     def version(self) -> tuple[int, ...] | None:

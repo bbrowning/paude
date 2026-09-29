@@ -16,6 +16,7 @@ from paude.container.engine import ContainerEngine
 from paude.session_discovery import (
     collect_all_sessions,
     find_workspace_session,
+    real_docker_backend,
 )
 
 if TYPE_CHECKING:
@@ -64,8 +65,8 @@ def find_session_backend(
 
     # Try Docker
     try:
-        docker = PodmanBackend(engine=ContainerEngine("docker"))
-        if docker.get_session(session_name) is not None:
+        docker = real_docker_backend()
+        if docker is not None and docker.get_session(session_name) is not None:
             return (BackendType.docker, docker)
     except Exception:  # noqa: S110 - Docker may not be available
         pass
