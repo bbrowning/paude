@@ -7,10 +7,12 @@ import time
 from collections.abc import Mapping
 
 from paude.backends.labels import (
+    PAUDE_LABEL_CREDENTIAL_DOMAINS,
     PAUDE_LABEL_DOMAINS,
     PAUDE_LABEL_ENDPOINTS,
     PAUDE_LABEL_OTEL_PORTS,
     PAUDE_LABEL_PROXY_IMAGE,
+    parse_string_list_label,
 )
 from paude.backends.podman.ca_cert import _BUILD_CA_BUNDLE_CMD as _BUILD_CA_BUNDLE_CMD
 from paude.backends.podman.ca_cert import CACertDistributor
@@ -22,7 +24,7 @@ from paude.backends.podman.helpers import (
     proxy_container_name,
 )
 from paude.backends.podman.proxy_credentials import ProxyCredentialManager
-from paude.backends.podman.proxy_state import ProxyStateStore
+from paude.backends.podman.proxy_state import ProxyStateStore, write_auth_volume_file
 from paude.backends.proxy_config import CA_CERT_CONTAINER_PATH as CA_CERT_CONTAINER_PATH
 from paude.backends.proxy_config import (
     PROXY_BLOCKED_LOG_PATH,
@@ -120,9 +122,44 @@ class PodmanProxyManager:
     def _credential_env(
         self,
         credentials: ProxyCredentials | Mapping[str, str] | None,
+        credential_domains: list[str] | None = None,
     ) -> dict[str, str]:
         """Return extra plain (non-secret) env vars derived from credential signals."""
-        return self._credentials.credential_env(credentials)
+        env = self._credentials.credential_env(credentials)
+        if credential_domains:
+            from paude.proxy_credential_routes import (
+                CREDENTIAL_ROUTES_ENV,
+                CREDENTIAL_ROUTES_PATH,
+            )
+
+            env[CREDENTIAL_ROUTES_ENV] = CREDENTIAL_ROUTES_PATH
+        return env
+
+    def _write_credential_routes(
+        self, auth_volume: str, proxy_image: str, credential_domains: list[str]
+    ) -> None:
+        """Write the session's custom routing file into its auth volume.
+
+        Done on proxy create and recreate so the file matches this paude's
+        routing table; domain/endpoint updates reuse the file already there.
+        """
+        if not credential_domains:
+            return
+        import json
+
+        from paude.proxy_credential_routes import (
+            CREDENTIAL_ROUTES_PATH,
+            build_credential_routes_config,
+        )
+
+        write_auth_volume_file(
+            self._runner,
+            auth_volume,
+            proxy_image,
+            CREDENTIAL_ROUTES_PATH,
+            json.dumps(build_credential_routes_config(credential_domains)),
+            description="proxy credential routes",
+        )
 
     def remove_credential_secrets(self, session_name: str) -> None:
         """Remove all podman secrets for a session's proxy credentials."""
@@ -134,11 +171,12 @@ class PodmanProxyManager:
 
     def get_config_from_labels(
         self, session_name: str
-    ) -> tuple[str, list[str], list[str], list[int]] | None:
+    ) -> tuple[str, list[str], list[str], list[int], list[str]] | None:
         """Read proxy configuration from the main container's labels.
 
         Returns:
-            Tuple of (proxy_image, domains, endpoints, otel_ports) or None.
+            Tuple of (proxy_image, domains, endpoints, otel_ports,
+            credential_domains) or None.
         """
         container = find_container_by_session_name(self._runner, session_name)
         if container is None:
@@ -170,7 +208,11 @@ class PodmanProxyManager:
         otel_ports_str = labels.get(PAUDE_LABEL_OTEL_PORTS, "")
         otel_ports = [int(p) for p in otel_ports_str.split(",") if p]
 
-        return (proxy_image, domains, endpoints, otel_ports)
+        credential_domains = parse_string_list_label(
+            labels.get(PAUDE_LABEL_CREDENTIAL_DOMAINS)
+        )
+
+        return (proxy_image, domains, endpoints, otel_ports, credential_domains)
 
     def read_policy_state(
         self, session_name: str, proxy_image: str | None
@@ -207,7 +249,7 @@ class PodmanProxyManager:
 
         # Recreate the missing proxy
         self._runner.engine.ensure_supported_networking()
-        proxy_image, domains, endpoints, otel_ports = proxy_config
+        proxy_image, domains, endpoints, otel_ports, credential_domains = proxy_config
         nname = network_name(session_name)
         ca_vol = ca_volume_name(session_name)
         auth_vol = auth_volume_name(session_name)
@@ -230,7 +272,8 @@ class PodmanProxyManager:
         agent_ip = derive_agent_ip(proxy_ip) if proxy_ip else None
         dns = _get_host_dns(self._runner.engine)
         secret_refs = self._create_credential_secrets(session_name, credentials)
-        credential_env = self._credential_env(credentials)
+        credential_env = self._credential_env(credentials, credential_domains)
+        self._write_credential_routes(auth_vol, proxy_image, credential_domains)
 
         print(f"Recreating missing proxy {pname}...", file=sys.stderr)
         self._proxy_runner.create_session_proxy(
@@ -344,6 +387,7 @@ class PodmanProxyManager:
         otel_ports: list[int] | None = None,
         credentials: ProxyCredentials | Mapping[str, str] | None = None,
         allowed_endpoints: list[str] | None = None,
+        credential_domains: list[str] | None = None,
     ) -> tuple[str, str | None]:
         """Create a proxy container for a session.
 
@@ -387,10 +431,13 @@ class PodmanProxyManager:
         dns = _get_host_dns(self._runner.engine)
 
         secret_refs = self._create_credential_secrets(session_name, credentials)
-        credential_env = self._credential_env(credentials)
+        credential_env = self._credential_env(credentials, credential_domains)
 
         print(f"Creating proxy {pname}...", file=sys.stderr)
         try:
+            self._write_credential_routes(
+                auth_vol, proxy_image, credential_domains or []
+            )
             self._proxy_runner.create_session_proxy(
                 name=pname,
                 image=proxy_image,
@@ -498,8 +545,8 @@ class PodmanProxyManager:
 
         # Preserve OTEL ports from labels across proxy recreate
         proxy_config = self.get_config_from_labels(session_name)
-        _, _, configured_endpoints, otel_ports = (
-            proxy_config if proxy_config else ("", [], [], [])
+        _, _, configured_endpoints, otel_ports, credential_domains = (
+            proxy_config if proxy_config else ("", [], [], [], [])
         )
         endpoints = (
             configured_endpoints if allowed_endpoints is None else allowed_endpoints
@@ -536,7 +583,7 @@ class PodmanProxyManager:
             credential_targets or set(),
             required_credentials or set(),
         )
-        credential_env = self._credential_env(prepared.credentials)
+        credential_env = self._credential_env(prepared.credentials, credential_domains)
 
         print(
             f"Updating proxy {operation_label} for session '{session_name}'...",

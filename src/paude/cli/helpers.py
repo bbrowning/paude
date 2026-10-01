@@ -320,8 +320,14 @@ def _prepare_session_create(
     otel_endpoint: str | None = None,
     composition: AgentComposition | None = None,
     credential_providers: list[str] | None = None,
+    extra_env: list[str] | None = None,
+    credential_domains: list[str] | None = None,
 ) -> tuple[list[str], list[str], dict[str, str], bool]:
     """Shared pre-create logic for both backends.
+
+    ``extra_env`` (parsed ``--env`` entries) is merged last so it overrides
+    agent defaults; ``credential_domains`` hosts are always allowed, even
+    with an explicit ``--allowed-domains``.
 
     Returns:
         Tuple of (expanded_domains, parsed_args, env, unrestricted).
@@ -380,6 +386,14 @@ def _prepare_session_create(
         provider_aliases=provider_aliases,
         required_aliases=required_aliases,
     )
+    if expanded_domains and credential_domains:
+        from paude.proxy_credential_routes import credential_domain_hosts
+
+        expanded_domains = list(
+            dict.fromkeys(
+                expanded_domains + credential_domain_hosts(credential_domains)
+            )
+        )
 
     # Inject OTEL env vars and auto-add endpoint hostname to allowed domains
     if otel_endpoint:
@@ -408,6 +422,11 @@ def _prepare_session_create(
             "(git config --global user.name/user.email).",
             err=True,
         )
+
+    if extra_env:
+        from paude.extra_env import env_entries_to_dict
+
+        env.update(env_entries_to_dict(extra_env))
 
     unrestricted = is_unrestricted(expanded_domains)
 

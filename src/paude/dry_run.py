@@ -136,6 +136,15 @@ def _show_resolved_flags(
     if flags.get("claude_args"):
         typer.echo(f"  args: {flags['claude_args']}")
 
+    for entry in flags.get("extra_env") or []:
+        typer.echo(f"  env: {entry}")
+
+    from paude.proxy_credential_routes import split_credential_domain
+
+    for spec in flags.get("credential_domains") or []:
+        provider, authority = split_credential_domain(spec)
+        typer.echo(f"  credential-domain: {provider} key -> {authority}")
+
 
 def _show_agents_and_providers(resolved: ResolvedCreateOptions) -> None:
     """Show the agents/providers lists, their provenance, and per-agent mapping.

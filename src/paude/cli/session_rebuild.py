@@ -192,4 +192,6 @@ def session_config_from_spec(
         ports=composition.exposed_ports,
         otel_ports=otel_ports,
         otel_endpoint=spec.otel_endpoint,
+        credential_domains=list(spec.credential_domains),
+        extra_env=list(spec.extra_env),
     )

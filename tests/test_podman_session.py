@@ -1087,6 +1087,43 @@ class TestPodmanBackendCreateSessionWithProxy:
 
     @patch("paude.backends.podman.proxy.get_podman_machine_dns")
     @patch("paude.backends.podman.backend.ContainerRunner")
+    def test_create_session_routes_credentials_and_sets_extra_env(
+        self, mock_runner_class: MagicMock, mock_dns: MagicMock
+    ) -> None:
+        """Credential routes reach the proxy; user env reaches the agent."""
+        mock_runner = MagicMock()
+        mock_runner.container_exists.return_value = False
+        mock_runner_class.return_value = mock_runner
+        mock_dns.return_value = None
+
+        backend = make_backend(mock_runner, MagicMock())
+
+        config = SessionConfig(
+            name="my-session",
+            workspace=Path("/home/user/project"),
+            image="paude:latest",
+            env={"ANTHROPIC_BASE_URL": "https://gw.example.com"},
+            allowed_domains=["gw.example.com"],
+            proxy_image="proxy:latest",
+            agent_providers=[("claude", "anthropic")],
+            credential_providers=["anthropic"],
+            credential_domains=["anthropic=gw.example.com:443"],
+            extra_env=["ANTHROPIC_BASE_URL=https://gw.example.com"],
+        )
+        backend.create_session(config)
+
+        engine_calls = [" ".join(c) for c in recorded_commands(backend.engine)]
+        assert any("credential-routes.json" in c for c in engine_calls)
+        assert any(
+            "PAUDE_PROXY_CREDENTIALS_CONFIG=/data/auth/credential-routes.json" in c
+            for c in engine_calls
+        )
+        env = mock_runner.create_container.call_args[1]["env"]
+        assert env["ANTHROPIC_BASE_URL"] == "https://gw.example.com"
+        assert env["ANTHROPIC_API_KEY"] == "paude-proxy-managed"
+
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns")
+    @patch("paude.backends.podman.backend.ContainerRunner")
     def test_create_session_stores_domains_in_labels(
         self, mock_runner_class: MagicMock, mock_dns: MagicMock
     ) -> None:
@@ -2025,6 +2062,34 @@ class TestPodmanPortUrls:
 
 class TestSessionLabelPersistence:
     """Tests for session label round-tripping (agents, providers)."""
+
+    def test_extra_env_and_credential_domains_round_trip(self) -> None:
+        from paude.backends.labels import spec_from_labels
+
+        config = SessionConfig(
+            name="s",
+            workspace=Path("/tmp/ws"),
+            image="img",
+            credential_domains=["anthropic=gw.example.com:443"],
+            extra_env=["ANTHROPIC_BASE_URL=https://gw.example.com", "A=b,c"],
+        )
+        labels = SessionSetup.build_session_labels(config, "s", "2026-01-01")
+
+        spec = spec_from_labels(labels)
+        assert spec.credential_domains == ["anthropic=gw.example.com:443"]
+        assert spec.extra_env == ["ANTHROPIC_BASE_URL=https://gw.example.com", "A=b,c"]
+
+    def test_no_extra_env_or_routes_writes_no_labels(self) -> None:
+        from paude.backends.labels import (
+            PAUDE_LABEL_CREDENTIAL_DOMAINS,
+            PAUDE_LABEL_EXTRA_ENV,
+        )
+
+        config = SessionConfig(name="s", workspace=Path("/tmp/ws"), image="img")
+        labels = SessionSetup.build_session_labels(config, "s", "2026-01-01")
+
+        assert PAUDE_LABEL_CREDENTIAL_DOMAINS not in labels
+        assert PAUDE_LABEL_EXTRA_ENV not in labels
 
     def test_composition_label_round_trips_agent_providers(self) -> None:
         config = SessionConfig(

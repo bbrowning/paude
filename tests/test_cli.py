@@ -2341,3 +2341,153 @@ class TestFindSessionBackendPodmanShim:
             BackendType.docker,
             mock_docker.return_value,
         )
+
+
+class TestCreateEnvAndCredentialDomain:
+    """--env and --credential-domain on paude create."""
+
+    def test_dry_run_shows_env_routes_and_allowlist(self):
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--provider",
+                "anthropic",
+                "--credential-domain",
+                "anthropic=GW.example.com:8443",
+                "--env",
+                "ANTHROPIC_BASE_URL=https://gw.example.com:8443",
+                "-e",
+                "ENABLE_TOOL_SEARCH=true",
+                "--dry-run",
+            ],
+        )
+        out = strip_ansi(result.output)
+        assert result.exit_code == 0, out
+        assert "env: ANTHROPIC_BASE_URL=https://gw.example.com:8443" in out
+        assert "env: ENABLE_TOOL_SEARCH=true" in out
+        assert "credential-domain: anthropic key -> gw.example.com:8443" in out
+        assert "allowed-endpoints: gw.example.com:8443" in out
+        assert "gw.example.com" in out.split("allowed-domains:", 1)[1]
+        assert "will remain blocked" not in out
+
+    def test_credential_domain_survives_explicit_allowlist(self):
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--provider",
+                "anthropic",
+                "--allowed-domains",
+                "python",
+                "--credential-domain",
+                "anthropic=gw.example.com",
+                "--dry-run",
+            ],
+        )
+        out = strip_ansi(result.output)
+        assert result.exit_code == 0, out
+        assert "gw.example.com" in out.split("allowed-domains:", 1)[1]
+        assert "allowed-endpoints: (none)" in out
+
+    def test_credential_domain_requires_session_provider(self):
+        result = runner.invoke(
+            app,
+            ["create", "--credential-domain", "anthropic=gw.example.com", "--dry-run"],
+        )
+        assert result.exit_code == 1
+        assert "does not configure" in strip_ansi(result.output)
+
+    def test_env_rejects_api_key(self):
+        result = runner.invoke(
+            app, ["create", "--env", "ANTHROPIC_API_KEY=sk-real", "--dry-run"]
+        )
+        assert result.exit_code == 1
+        out = strip_ansi(result.output)
+        assert "held by the proxy" in out
+        assert "sk-real" not in out
+
+    def test_env_bare_key_copies_host_value(self):
+        result = runner.invoke(
+            app,
+            ["create", "--env", "MY_MODEL", "--dry-run"],
+            env={"MY_MODEL": "gw-sonnet"},
+        )
+        assert result.exit_code == 0, result.output
+        assert "env: MY_MODEL=gw-sonnet" in strip_ansi(result.output)
+
+    @patch("paude.cli.create_podman.create_podman_session")
+    @patch("paude.cli.create._prepare_session_create")
+    def test_real_create_passes_env_and_routes(self, mock_prepare, mock_create):
+        mock_prepare.return_value = ([], [], {}, False)
+        result = runner.invoke(
+            app,
+            [
+                "create",
+                "--provider",
+                "anthropic",
+                "--credential-domain",
+                "anthropic=gw.example.com:8443",
+                "--env",
+                "ANTHROPIC_BASE_URL=https://gw.example.com:8443",
+            ],
+            env={"ANTHROPIC_API_KEY": "sk-test"},
+        )
+        assert result.exit_code == 0, result.output
+        kwargs = mock_create.call_args.kwargs
+        assert kwargs["extra_env"] == ["ANTHROPIC_BASE_URL=https://gw.example.com:8443"]
+        assert kwargs["credential_domains"] == ["anthropic=gw.example.com:8443"]
+        assert kwargs["allowed_endpoints"] == ["gw.example.com:8443"]
+        prepare_kwargs = mock_prepare.call_args.kwargs
+        assert prepare_kwargs["extra_env"] == kwargs["extra_env"]
+        assert prepare_kwargs["credential_domains"] == kwargs["credential_domains"]
+
+
+class TestPrepareSessionCreateExtraEnvAndRoutes:
+    """--env merging and credential-domain allowlisting in pre-create."""
+
+    @patch("paude.git_remote.resolve_local_git_identity", return_value=("A", "a@b"))
+    def test_extra_env_overrides_agent_env(self, mock_resolve):
+        from paude.cli.helpers import _prepare_session_create
+
+        _domains, _args, base_env, _ = _prepare_session_create(
+            allowed_domains=None, yolo=False, claude_args=None, config_obj=None
+        )
+        overridden = next(iter(base_env))
+        _domains, _args, env, _ = _prepare_session_create(
+            allowed_domains=None,
+            yolo=False,
+            claude_args=None,
+            config_obj=None,
+            extra_env=[f"{overridden}=custom", "NEW_VAR=1"],
+        )
+        assert env[overridden] == "custom"
+        assert env["NEW_VAR"] == "1"
+
+    @patch("paude.git_remote.resolve_local_git_identity", return_value=("A", "a@b"))
+    def test_credential_hosts_added_to_explicit_allowlist(self, mock_resolve):
+        from paude.cli.helpers import _prepare_session_create
+
+        domains, _args, _env, unrestricted = _prepare_session_create(
+            allowed_domains=["python"],
+            yolo=False,
+            claude_args=None,
+            config_obj=None,
+            credential_domains=["anthropic=gw.example.com:8443"],
+        )
+        assert "gw.example.com" in domains
+        assert not unrestricted
+
+    @patch("paude.git_remote.resolve_local_git_identity", return_value=("A", "a@b"))
+    def test_unrestricted_stays_unrestricted(self, mock_resolve):
+        from paude.cli.helpers import _prepare_session_create
+
+        domains, _args, _env, unrestricted = _prepare_session_create(
+            allowed_domains=["all"],
+            yolo=False,
+            claude_args=None,
+            config_obj=None,
+            credential_domains=["anthropic=gw.example.com:443"],
+        )
+        assert domains == []
+        assert unrestricted

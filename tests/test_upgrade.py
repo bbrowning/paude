@@ -640,6 +640,52 @@ class TestUpgradePodman:
     @patch("paude.cli.helpers._prepare_session_create")
     @patch("paude.container.ImageManager")
     @patch("paude.config.detector.detect_config", return_value=None)
+    def test_upgrade_podman_keeps_extra_env_and_credential_domains(
+        self,
+        mock_detect_config: MagicMock,
+        mock_image_manager_class: MagicMock,
+        mock_prepare: MagicMock,
+        mock_build_mounts: MagicMock,
+    ) -> None:
+        """--env and --credential-domain from create survive an upgrade."""
+        from paude.backends.labels import (
+            PAUDE_LABEL_CREDENTIAL_DOMAINS,
+            PAUDE_LABEL_EXTRA_ENV,
+            encode_json_label,
+        )
+
+        labels = self._make_container_labels(
+            domains="gw.example.com", proxy_image="proxy:latest"
+        )
+        labels[PAUDE_LABEL_CREDENTIAL_DOMAINS] = encode_json_label(
+            ["anthropic=gw.example.com:443"]
+        )
+        labels[PAUDE_LABEL_EXTRA_ENV] = encode_json_label(
+            ["ANTHROPIC_BASE_URL=https://gw.example.com"]
+        )
+        mock_image_manager_class.return_value = MagicMock()
+        mock_prepare.return_value = (["gw.example.com"], [], {}, False)
+
+        up = _upgrade_backend(labels)
+
+        from paude.cli.upgrade import _upgrade_podman
+
+        _upgrade_podman(
+            "test-session", up.backend, rebuild=False, overrides=_NO_OVERRIDES
+        )
+
+        prepare_kwargs = mock_prepare.call_args.kwargs
+        assert prepare_kwargs["extra_env"] == [
+            "ANTHROPIC_BASE_URL=https://gw.example.com"
+        ]
+        assert prepare_kwargs["credential_domains"] == ["anthropic=gw.example.com:443"]
+        assert up.config.credential_domains == ["anthropic=gw.example.com:443"]
+        assert up.config.extra_env == ["ANTHROPIC_BASE_URL=https://gw.example.com"]
+
+    @patch("paude.mounts.build_mounts", return_value=[])
+    @patch("paude.cli.helpers._prepare_session_create")
+    @patch("paude.container.ImageManager")
+    @patch("paude.config.detector.detect_config", return_value=None)
     def test_upgrade_podman_rebuilds_image(
         self,
         mock_detect_config: MagicMock,

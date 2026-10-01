@@ -16,8 +16,10 @@ from paude.backends.labels import (
     PAUDE_LABEL_AGENT,
     PAUDE_LABEL_AGENT_PROVIDERS,
     PAUDE_LABEL_CREATED,
+    PAUDE_LABEL_CREDENTIAL_DOMAINS,
     PAUDE_LABEL_DOMAINS,
     PAUDE_LABEL_ENDPOINTS,
+    PAUDE_LABEL_EXTRA_ENV,
     PAUDE_LABEL_GPU,
     PAUDE_LABEL_OTEL_ENDPOINT,
     PAUDE_LABEL_PROVIDER,
@@ -63,6 +65,10 @@ class TestSpecFromLabels:
                 PAUDE_LABEL_DOMAINS: "github.com,pypi.org",
                 PAUDE_LABEL_ENDPOINTS: "api.example.com:8443,10.0.0.1:8000",
                 PAUDE_LABEL_PROXY_IMAGE: "paude-proxy:1.2.3",
+                PAUDE_LABEL_CREDENTIAL_DOMAINS: encode_json_label(
+                    ["openai=gw.example.com:443"]
+                ),
+                PAUDE_LABEL_EXTRA_ENV: encode_json_label(["A=1", "B=x=y"]),
             }
         )
         assert spec == SessionSpec(
@@ -76,7 +82,19 @@ class TestSpecFromLabels:
             allowed_domains=["github.com", "pypi.org"],
             allowed_endpoints=["api.example.com:8443", "10.0.0.1:8000"],
             proxy_image="paude-proxy:1.2.3",
+            credential_domains=["openai=gw.example.com:443"],
+            extra_env=["A=1", "B=x=y"],
         )
+
+    def test_invalid_string_list_labels_read_back_empty(self) -> None:
+        spec = spec_from_labels(
+            {
+                PAUDE_LABEL_CREDENTIAL_DOMAINS: "not-base64-json",
+                PAUDE_LABEL_EXTRA_ENV: encode_json_label([]),
+            }
+        )
+        assert spec.credential_domains == []
+        assert spec.extra_env == []
 
     @pytest.mark.parametrize(
         ("label", "attribute"),

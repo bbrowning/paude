@@ -307,7 +307,7 @@ class TestPodmanVersionGuard:
             patch.object(
                 manager,
                 "get_config_from_labels",
-                return_value=("proxy:latest", ["example.com"], [], []),
+                return_value=("proxy:latest", ["example.com"], [], [], []),
             ),
             pytest.raises(UnsupportedEngineError),
         ):
@@ -406,7 +406,7 @@ class TestResolveProxyIpGuard:
         with patch.object(
             manager,
             "get_config_from_labels",
-            return_value=("proxy:latest", [".googleapis.com"], [], []),
+            return_value=("proxy:latest", [".googleapis.com"], [], [], []),
         ):
             with pytest.raises(ProxyStartError):
                 manager.start_if_needed(session_name="test-session")
@@ -1185,7 +1185,7 @@ class TestUpdateDomainTransaction:
         network.get_network_gateway.return_value = "10.89.0.1"
         manager = PodmanProxyManager(runner, network)
         manager.get_config_from_labels = MagicMock(  # type: ignore[method-assign]
-            return_value=("proxy:latest", [".old.example"], [], [])
+            return_value=("proxy:latest", [".old.example"], [], [], [])
         )
         prepared = PreparedProxyCredentials(credentials=ProxyCredentials())
         manager._credentials = MagicMock()
@@ -1219,7 +1219,7 @@ class TestUpdateDomainTransaction:
         network.get_network_gateway.return_value = "10.89.0.1"
         manager = PodmanProxyManager(runner, network)
         manager.get_config_from_labels = MagicMock(  # type: ignore[method-assign]
-            return_value=("proxy:latest", [".old.example"], [], [])
+            return_value=("proxy:latest", [".old.example"], [], [], [])
         )
         prepared = PreparedProxyCredentials(credentials=ProxyCredentials())
         manager._credentials = MagicMock()
@@ -1255,6 +1255,7 @@ class TestUpdateDomainTransaction:
                 "proxy:latest",
                 ["api.example.com"],
                 ["api.example.com:8443"],
+                [],
                 [],
             )
         )
@@ -1499,7 +1500,7 @@ class TestSourceIpFiltering:
         with patch.object(
             manager,
             "get_config_from_labels",
-            return_value=("proxy:latest", [".googleapis.com"], [], []),
+            return_value=("proxy:latest", [".googleapis.com"], [], [], []),
         ):
             manager.start_if_needed(
                 session_name="test-session",
@@ -1559,3 +1560,138 @@ class TestStartIfNeededRunningProxy:
         mock_runner.engine.run.assert_not_called()
         mock_runner.stop_container.assert_not_called()
         mock_runner.remove_container.assert_not_called()
+
+
+class TestCredentialRoutes:
+    """--credential-domain routing file and env on every proxy (re)create."""
+
+    ROUTE = "anthropic=gw.example.com:8443"
+    ROUTES_ENV = "PAUDE_PROXY_CREDENTIALS_CONFIG=/data/auth/credential-routes.json"
+
+    @staticmethod
+    def _manager(
+        engine: str = "podman", *, proxy_exists: bool = False
+    ) -> tuple[MagicMock, PodmanProxyManager]:
+        runner = _make_mock_runner(engine)
+        runner.container_exists.return_value = proxy_exists
+        runner.get_container_image.return_value = "proxy:latest"
+        network = MagicMock()
+        network.get_network_gateway.return_value = "10.89.0.1"
+        return runner, PodmanProxyManager(runner, network)
+
+    @staticmethod
+    def _create_env(runner: MagicMock) -> list[str]:
+        calls = [c for c in runner.engine.run.call_args_list if c[0][0] == "create"]
+        assert calls
+        args = list(calls[0][0])
+        return [args[i + 1] for i, a in enumerate(args) if a == "-e"]
+
+    @staticmethod
+    def _routes_written(runner: MagicMock) -> list[dict[str, object]]:
+        writes = [
+            c
+            for c in runner.engine.run.call_args_list
+            if c[0][0] == "run" and any("credential-routes.json" in a for a in c[0])
+        ]
+        return [json.loads(c.kwargs["input"]) for c in writes]
+
+    @pytest.mark.parametrize("engine", ["podman", "docker"])
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns", return_value=None)
+    def test_create_proxy_writes_routes_and_sets_env(
+        self, mock_dns: MagicMock, engine: str
+    ) -> None:
+        runner, manager = self._manager(engine)
+        with patch("paude.container.volume.VolumeManager"):
+            manager.create_proxy(
+                session_name="s",
+                proxy_image="proxy:latest",
+                allowed_domains=["gw.example.com"],
+                credentials={"ANTHROPIC_API_KEY": "sk-real"},
+                credential_domains=[self.ROUTE],
+            )
+
+        (config,) = self._routes_written(runner)
+        first = config["credentials"][0]  # type: ignore[index]
+        assert first["env_var"] == "ANTHROPIC_API_KEY"
+        assert first["domains"] == ["gw.example.com"]
+        assert "sk-real" not in json.dumps(config)
+        assert self.ROUTES_ENV in self._create_env(runner)
+
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns", return_value=None)
+    def test_create_proxy_without_routes_keeps_builtin_table(
+        self, mock_dns: MagicMock
+    ) -> None:
+        runner, manager = self._manager()
+        with patch("paude.container.volume.VolumeManager"):
+            manager.create_proxy(
+                session_name="s",
+                proxy_image="proxy:latest",
+                allowed_domains=[".anthropic.com"],
+            )
+
+        assert self._routes_written(runner) == []
+        assert self.ROUTES_ENV not in self._create_env(runner)
+
+    def test_config_from_labels_includes_credential_domains(self) -> None:
+        from paude.backends.labels import (
+            PAUDE_LABEL_CREDENTIAL_DOMAINS,
+            encode_json_label,
+        )
+
+        runner, manager = self._manager()
+        runner.list_containers.return_value = [
+            {
+                "Labels": {
+                    PAUDE_LABEL_SESSION: "s",
+                    PAUDE_LABEL_DOMAINS: "gw.example.com",
+                    PAUDE_LABEL_PROXY_IMAGE: "proxy:latest",
+                    PAUDE_LABEL_CREDENTIAL_DOMAINS: encode_json_label([self.ROUTE]),
+                }
+            }
+        ]
+        config = manager.get_config_from_labels("s")
+        assert config is not None
+        assert config[4] == [self.ROUTE]
+
+    @patch("paude.backends.podman.proxy.get_podman_machine_dns", return_value=None)
+    def test_start_if_needed_recreate_rewrites_routes(
+        self, mock_dns: MagicMock
+    ) -> None:
+        runner, manager = self._manager()
+        with (
+            patch.object(
+                manager,
+                "get_config_from_labels",
+                return_value=("proxy:latest", ["gw.example.com"], [], [], [self.ROUTE]),
+            ),
+            patch("paude.container.volume.VolumeManager"),
+        ):
+            manager.start_if_needed("s", credentials={"ANTHROPIC_API_KEY": "sk"})
+
+        assert len(self._routes_written(runner)) == 1
+        assert self.ROUTES_ENV in self._create_env(runner)
+
+    @patch("paude.backends.podman.proxy._get_host_dns", return_value=None)
+    def test_update_domains_keeps_routes_env_without_rewrite(
+        self, mock_dns: MagicMock
+    ) -> None:
+        runner, manager = self._manager(proxy_exists=True)
+        manager.get_config_from_labels = MagicMock(  # type: ignore[method-assign]
+            return_value=("proxy:latest", ["gw.example.com"], [], [], [self.ROUTE])
+        )
+        manager._credentials = MagicMock()
+        manager._credentials.prepare_update.return_value = PreparedProxyCredentials(
+            credentials=ProxyCredentials()
+        )
+        manager._credentials.credential_env.return_value = {}
+        manager._state = MagicMock()
+        manager._state.read_pair.return_value = (["gw.example.com"], None)
+        manager._proxy_runner = MagicMock()
+
+        manager.update_domains("s", ["gw.example.com", ".new.example"])
+
+        kwargs = manager._proxy_runner.swap_session_proxy.call_args.kwargs
+        assert kwargs["credential_env"] == {
+            "PAUDE_PROXY_CREDENTIALS_CONFIG": "/data/auth/credential-routes.json"
+        }
+        assert self._routes_written(runner) == []

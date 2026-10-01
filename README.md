@@ -101,6 +101,27 @@ This is the default provider for OpenCode. For Claude Code and OpenClaw, also pa
 paude create --agent openclaw --provider anthropic ...
 ```
 
+**Routing through a company AI gateway.** The proxy normally injects
+`ANTHROPIC_API_KEY` (as `x-api-key`) only for `*.anthropic.com`. Use
+`--credential-domain` to have it inject the same key for your gateway host,
+and `--env` to point the agent at it:
+
+```bash
+export ANTHROPIC_API_KEY=your-gateway-key
+paude create gw-session --provider anthropic \
+  --credential-domain anthropic=ai-gw.example.com \
+  --env ANTHROPIC_BASE_URL=https://ai-gw.example.com \
+  --env ANTHROPIC_DEFAULT_SONNET_MODEL=gw-sonnet \
+  --env CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1 \
+  -a '--model gw-sonnet'
+```
+
+`--credential-domain PROVIDER=HOST[:PORT]` adds the host to the session's
+allowlist (and a non-443 port to its allowed endpoints) automatically. The key
+still lives only on the proxy sidecar; the agent sees the
+`paude-proxy-managed` sentinel. Both flags are recorded on the session and
+survive `start`, `allowed-domains` updates and `upgrade`.
+
 </details>
 
 <details>
@@ -464,6 +485,20 @@ Note that a plain `ssh -L` reaches the remote *host's* loopback, so the containe
 ```bash
 paude create --yolo my-project -a '-p "refactor the auth module"'
 ```
+
+### Custom Environment Variables
+
+Set extra env vars in the agent container with `--env` (repeatable). Use
+`KEY=VALUE`, or a bare `KEY` to copy the value from your host:
+
+```bash
+paude create my-project --env ENABLE_TOOL_SEARCH=true --env MY_SETTING
+```
+
+`--env` values are plain container environment, visible via
+`podman inspect`, so don't use it for secrets. Provider credentials (e.g.
+`ANTHROPIC_API_KEY`) and variables paude manages (proxy, CA trust, `PAUDE_*`)
+are rejected; credentials belong on the proxy via `--provider`.
 
 File copies also cross the SSH connection automatically. The local path is
 always resolved on the machine where you run `paude`:

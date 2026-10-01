@@ -148,6 +148,8 @@ class TestManifestSchema:
             "allowed_domains",
             "allowed_endpoints",
             "proxy_image",
+            "credential_domains",
+            "extra_env",
             "image",
             "backend_type",
             "engine",

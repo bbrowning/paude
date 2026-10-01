@@ -17,8 +17,10 @@ from paude.backends.labels import (
     PAUDE_LABEL_AGENT,
     PAUDE_LABEL_AGENT_PROVIDERS,
     PAUDE_LABEL_CREATED,
+    PAUDE_LABEL_CREDENTIAL_DOMAINS,
     PAUDE_LABEL_DOMAINS,
     PAUDE_LABEL_ENDPOINTS,
+    PAUDE_LABEL_EXTRA_ENV,
     PAUDE_LABEL_GPU,
     PAUDE_LABEL_OTEL_ENDPOINT,
     PAUDE_LABEL_OTEL_PORTS,
@@ -30,6 +32,7 @@ from paude.backends.labels import (
     PAUDE_LABEL_WORKSPACE,
     PAUDE_LABEL_YOLO,
     encode_agent_providers,
+    encode_json_label,
     encode_providers,
 )
 from paude.backends.podman.helpers import (
@@ -307,6 +310,12 @@ class SessionSetup:
             labels[PAUDE_LABEL_OTEL_PORTS] = ",".join(str(p) for p in config.otel_ports)
         if config.otel_endpoint:
             labels[PAUDE_LABEL_OTEL_ENDPOINT] = config.otel_endpoint
+        if config.credential_domains:
+            labels[PAUDE_LABEL_CREDENTIAL_DOMAINS] = encode_json_label(
+                config.credential_domains
+            )
+        if config.extra_env:
+            labels[PAUDE_LABEL_EXTRA_ENV] = encode_json_label(config.extra_env)
         return labels
 
     def setup_proxy_for_session(
@@ -331,6 +340,7 @@ class SessionSetup:
             allowed_endpoints=config.allowed_endpoints,
             otel_ports=config.otel_ports,
             credentials=proxy_creds,
+            credential_domains=config.credential_domains,
         )
         if proxy_ip is None:
             # Reached only on DNS-enabled networks (Docker); create_proxy()

@@ -37,6 +37,8 @@ PAUDE_LABEL_AGENT_PROVIDERS = "paude.io/agent-providers"
 PAUDE_LABEL_PROVIDERS = "paude.io/providers"
 PAUDE_LABEL_OTEL_PORTS = "paude.io/otel-ports"
 PAUDE_LABEL_OTEL_ENDPOINT = "paude.io/otel-endpoint"
+PAUDE_LABEL_CREDENTIAL_DOMAINS = "paude.io/credential-domains"
+PAUDE_LABEL_EXTRA_ENV = "paude.io/extra-env"
 
 
 @dataclass(kw_only=True)
@@ -70,6 +72,8 @@ class SessionSpec:
     allowed_domains: list[str] | None = None
     allowed_endpoints: list[str] = field(default_factory=list)
     proxy_image: str | None = None
+    credential_domains: list[str] = field(default_factory=list)
+    extra_env: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -135,12 +139,17 @@ def parse_agent_providers_label(raw: str | None) -> list[tuple[str, str]]:
 
 def parse_providers_label(raw: str | None) -> list[str]:
     """Parse a credential-provider label, returning empty when invalid."""
+    return list(dict.fromkeys(parse_string_list_label(raw)))
+
+
+def parse_string_list_label(raw: str | None) -> list[str]:
+    """Parse a string-list label, returning empty when absent or invalid."""
     if not raw:
         return []
     value = decode_json_label(raw)
     if not isinstance(value, list):
         return []
-    return list(dict.fromkeys(item for item in value if isinstance(item, str)))
+    return [item for item in value if isinstance(item, str)]
 
 
 def parse_domains_label(raw: str | None) -> list[str] | None:
@@ -227,6 +236,10 @@ def spec_from_labels(labels: Mapping[str, str]) -> SessionSpec:
         allowed_domains=parse_domains_label(labels.get(PAUDE_LABEL_DOMAINS)),
         allowed_endpoints=parse_endpoints_label(labels.get(PAUDE_LABEL_ENDPOINTS)),
         proxy_image=labels.get(PAUDE_LABEL_PROXY_IMAGE) or None,
+        credential_domains=parse_string_list_label(
+            labels.get(PAUDE_LABEL_CREDENTIAL_DOMAINS)
+        ),
+        extra_env=parse_string_list_label(labels.get(PAUDE_LABEL_EXTRA_ENV)),
     )
 
 

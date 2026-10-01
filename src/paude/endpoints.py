@@ -42,7 +42,7 @@ def warn_for_uncovered_allowed_endpoints(
 ) -> None:
     """Warn about endpoint rules whose hosts remain domain-blocked."""
     for endpoint in normalize_allowed_endpoints(endpoints):
-        host = _authority_host(endpoint)
+        host = authority_host(endpoint)
         if host_matches_allowed_domains(host, allowed_domains):
             continue
         if session_name:
@@ -58,7 +58,7 @@ def warn_for_uncovered_allowed_endpoints(
         )
 
 
-def _authority_host(authority: str) -> str:
+def authority_host(authority: str) -> str:
     """Extract the canonical host from a normalized authority."""
     if authority.startswith("["):
         return authority[1 : authority.index("]")]
