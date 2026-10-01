@@ -169,6 +169,8 @@ class TestManifestSchema:
             "allowed_domains",
             "allowed_endpoints",
             "proxy_image",
+            "credential_domains",
+            "extra_env",
         }
 
 
@@ -197,6 +199,8 @@ class TestManifestCarriesTheWholeSpec:
             allowed_domains=[".pypi.org"],
             allowed_endpoints=["api.example.com:8443"],
             proxy_image="proxy:latest",
+            credential_domains=["openai=gw.example.com:443"],
+            extra_env=["OPENAI_BASE_URL=https://gw.example.com"],
         )
         state = ResolvedSession(
             spec=spec,

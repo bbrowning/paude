@@ -65,6 +65,10 @@ class SessionConfig:
         workdir: Working directory inside container.
         allowed_domains: List of domains to allow. Empty list means unrestricted.
         allowed_endpoints: Exact host:port exceptions for nonstandard ports.
+        credential_domains: ``provider=host:port`` routes sending a provider's
+            secret to an extra host via the proxy.
+        extra_env: User ``--env`` entries (``KEY=VALUE``), recorded so they
+            survive upgrade; already merged into ``env``.
         yolo: Enable YOLO mode.
         network: Podman network name for proxy setup.
         ports: Ports to expose as (host_port, container_port) tuples.
@@ -92,6 +96,8 @@ class SessionConfig:
     ports: list[tuple[int, int]] = field(default_factory=list)
     otel_ports: list[int] = field(default_factory=list)
     otel_endpoint: str | None = None
+    credential_domains: list[str] = field(default_factory=list)
+    extra_env: list[str] = field(default_factory=list)
 
 
 class Backend(Protocol):

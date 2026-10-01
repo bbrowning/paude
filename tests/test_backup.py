@@ -17,8 +17,10 @@ from paude.backends.labels import (
     PAUDE_LABEL_AGENT,
     PAUDE_LABEL_AGENT_PROVIDERS,
     PAUDE_LABEL_CREATED,
+    PAUDE_LABEL_CREDENTIAL_DOMAINS,
     PAUDE_LABEL_DOMAINS,
     PAUDE_LABEL_ENDPOINTS,
+    PAUDE_LABEL_EXTRA_ENV,
     PAUDE_LABEL_GPU,
     PAUDE_LABEL_OTEL_ENDPOINT,
     PAUDE_LABEL_PROVIDER,
@@ -29,6 +31,7 @@ from paude.backends.labels import (
     PAUDE_LABEL_YOLO,
     LabeledSession,
     encode_agent_providers,
+    encode_json_label,
     encode_providers,
     read_labels,
 )
@@ -569,6 +572,10 @@ class TestBuildManifest:
                 PAUDE_LABEL_ENDPOINTS: "api.example.com:8443",
                 PAUDE_LABEL_OTEL_ENDPOINT: "http://collector:4318",
                 PAUDE_LABEL_PROXY_IMAGE: "proxy:1",
+                PAUDE_LABEL_CREDENTIAL_DOMAINS: encode_json_label(
+                    ["anthropic=gw.example.com:443"]
+                ),
+                PAUDE_LABEL_EXTRA_ENV: encode_json_label(["A=1"]),
             }
         )
 

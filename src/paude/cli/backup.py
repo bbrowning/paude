@@ -133,6 +133,8 @@ def _build_manifest(
         allowed_domains=view.spec.allowed_domains,
         allowed_endpoints=list(view.spec.allowed_endpoints),
         proxy_image=view.spec.proxy_image,
+        credential_domains=list(view.spec.credential_domains),
+        extra_env=list(view.spec.extra_env),
         image=image,
         backend_type=backend_type,
         engine=entry.engine if entry else backend_type,

@@ -57,6 +57,8 @@ def create_podman_session(
     gpu: str | None = None,
     otel_ports: list[int] | None = None,
     otel_endpoint: str | None = None,
+    extra_env: list[str] | None = None,
+    credential_domains: list[str] | None = None,
 ) -> None:
     """Local container session creation logic (Podman or Docker)."""
     from paude.container.engine import ContainerEngine
@@ -71,6 +73,8 @@ def create_podman_session(
         yolo=yolo,
         otel_endpoint=otel_endpoint,
         allowed_endpoints=allowed_endpoints or [],
+        extra_env=extra_env or [],
+        credential_domains=credential_domains or [],
     )
 
     try:
@@ -137,6 +141,8 @@ def _resolve_composition_and_spec(
     yolo: bool,
     otel_endpoint: str | None,
     allowed_endpoints: list[str] | None = None,
+    extra_env: list[str] | None = None,
+    credential_domains: list[str] | None = None,
 ) -> tuple[AgentComposition, SessionSpec]:
     """Resolve the requested agents and gather the session's declared config.
 
@@ -161,6 +167,8 @@ def _resolve_composition_and_spec(
         yolo=yolo,
         otel_endpoint=otel_endpoint,
         allowed_endpoints=allowed_endpoints or [],
+        extra_env=extra_env or [],
+        credential_domains=credential_domains or [],
     )
     return composition, spec
 

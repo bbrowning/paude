@@ -27,6 +27,10 @@ after the session-rebuild consolidation):
 - `container/runner.py` — 460 lines
 - `backends/podman/backend.py` — 448 lines (was 479; two teardowns moved to
   `backends/podman/resources.py`)
+- `backends/podman/proxy.py` — 680 lines (regrew past 400 after the 2026-07-23
+  split; `--credential-domain` routing added ~40 more). The three proxy
+  (re)create paths (`create_proxy`, `start_if_needed`, `update_domains`) each
+  assemble the same env/secrets/routes inputs and are the natural extraction.
 
 `cli/commands.py` is no longer listed: it is now a package (`cli/commands/`)
 whose largest module is 168 lines.

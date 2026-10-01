@@ -451,6 +451,8 @@ def _resolve_base_from_manifest(manifest: UpgradeManifest) -> ResolvedSession:
         allowed_domains=manifest.allowed_domains,
         allowed_endpoints=list(manifest.allowed_endpoints),
         proxy_image=manifest.proxy_image,
+        credential_domains=list(manifest.credential_domains),
+        extra_env=list(manifest.extra_env),
     )
     return ResolvedSession(
         spec=spec,
@@ -605,6 +607,8 @@ def _manifest_from_state(
         allowed_domains=state.spec.allowed_domains,
         allowed_endpoints=list(state.spec.allowed_endpoints),
         proxy_image=state.spec.proxy_image,
+        credential_domains=list(state.spec.credential_domains),
+        extra_env=list(state.spec.extra_env),
     )
 
 
@@ -731,6 +735,8 @@ def _recreate_session(
         otel_endpoint=state.spec.otel_endpoint,
         composition=state.composition,
         credential_providers=state.spec.credential_providers,
+        extra_env=state.spec.extra_env,
+        credential_domains=state.spec.credential_domains,
     )
 
     otel_ports: list[int] = []

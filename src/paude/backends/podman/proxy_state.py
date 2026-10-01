@@ -16,6 +16,38 @@ class ProxyStateError(RuntimeError):
     """Durable proxy state could not be read or written safely."""
 
 
+def write_auth_volume_file(
+    runner: ContainerRunner,
+    volume: str,
+    image: str,
+    path: str,
+    payload: str,
+    *,
+    description: str,
+) -> None:
+    """Atomically write ``payload`` to ``path`` inside the session auth volume."""
+    script = f'umask 077; tmp={path}.tmp.$$; cat > "$tmp" && mv -f "$tmp" {path}'
+    result = runner.engine.run(
+        "run",
+        "--rm",
+        "-i",
+        "-v",
+        f"{volume}:/data/auth",
+        "--entrypoint",
+        "sh",
+        image,
+        "-c",
+        script,
+        check=False,
+        input=payload,
+    )
+    if result.returncode != 0:
+        raise ProxyStateError(
+            f"Could not commit {description}: "
+            f"{result.stderr.strip() or 'container helper failed'}"
+        )
+
+
 class ProxyStateStore:
     """Read and atomically write non-secret proxy state through the engine."""
 
@@ -131,30 +163,14 @@ class ProxyStateStore:
         payload = json.dumps(
             {"schema": self._schema, self._field: values}, separators=(",", ":")
         )
-        script = (
-            "umask 077; "
-            f"tmp={self._path}.tmp.$$; "
-            f'cat > "$tmp" && mv -f "$tmp" {self._path}'
-        )
-        result = self._runner.engine.run(
-            "run",
-            "--rm",
-            "-i",
-            "-v",
-            f"{volume}:/data/auth",
-            "--entrypoint",
-            "sh",
+        write_auth_volume_file(
+            self._runner,
+            volume,
             image,
-            "-c",
-            script,
-            check=False,
-            input=payload,
+            self._path,
+            payload,
+            description=f"durable {self._description} state",
         )
-        if result.returncode != 0:
-            raise ProxyStateError(
-                f"Could not commit durable {self._description} state: "
-                f"{result.stderr.strip() or 'container helper failed'}"
-            )
 
     def restore(
         self,

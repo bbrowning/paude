@@ -227,6 +227,32 @@ Opt-in OpenClaw plugin aliases, for skill packages that talk to external service
 
 **Special values**: `all` (unrestricted), `default` (vertexai + python + github + agent-specific). Any other alias name listed above, or a raw domain, can also be passed directly. Specifying domains without `default` replaces the allowlist entirely.
 
+## Credential Domains and Custom Environment
+
+Two `paude create` flags (CLI only; not read from config files) cover routing
+an agent through a custom API endpoint such as a company AI gateway:
+
+- `--credential-domain PROVIDER=HOST[:PORT]` (repeatable) makes the proxy
+  inject the provider's API key for `HOST` as well as the provider's own
+  domains. The provider must be one the session configures (e.g. via
+  `--provider anthropic`). `HOST` is added to the allowlist even when
+  `--allowed-domains` is given explicitly, and a port other than 443 is added
+  to the allowed endpoints. paude implements this by writing a routing file
+  for paude-proxy into the session's auth volume.
+- `--env KEY=VALUE` / `--env KEY` (repeatable) sets an env var in the agent
+  container; the bare form copies the host value. Credentials and
+  paude-managed variables are rejected.
+
+Both are recorded on the session and carried through `start`,
+`allowed-domains`/`allowed-endpoints` updates and `upgrade`.
+
+```bash
+paude create --provider anthropic \
+  --credential-domain anthropic=ai-gw.example.com:8443 \
+  --env ANTHROPIC_BASE_URL=https://ai-gw.example.com:8443 \
+  --dry-run
+```
+
 ## Destination-Scoped Port Exceptions
 
 Default proxy ports and telemetry ports remain global. To allow a nonstandard

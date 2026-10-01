@@ -182,7 +182,21 @@ def proxy_credential_targets(
     from being replayed as credentials while still preserving credentials for
     providers other than the session's primary provider.
     """
+    targets = all_proxy_credential_env_vars()
+    targets.update(
+        key for config in _agent_configs(agent_config) for key in config.secret_env_vars
+    )
+    return targets
+
+
+def all_proxy_credential_env_vars() -> set[str]:
+    """Every env var paude may hand to the proxy as a credential.
+
+    Covers all providers and agent/provider pairings, independent of any one
+    session's composition.
+    """
     from paude.providers import get_provider, list_providers
+    from paude.providers.agent_providers import AGENT_PROVIDERS
 
     targets = {"GH_TOKEN", PROXY_GCP_ADC_ENV}
     targets.update(
@@ -191,7 +205,10 @@ def proxy_credential_targets(
         for key in get_provider(provider_name).secret_env_vars
     )
     targets.update(
-        key for config in _agent_configs(agent_config) for key in config.secret_env_vars
+        key
+        for configs in AGENT_PROVIDERS.values()
+        for config in configs.values()
+        for key in config.extra_secret_env_vars
     )
     return targets
 

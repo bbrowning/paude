@@ -9,8 +9,19 @@ import typer
 
 from paude.agents import get_agent, get_agents
 from paude.cli.app import BackendType, app
+from paude.cli.create_options import (
+    AgentOption,
+    AgentProviderOption,
+    AgentsOption,
+    AllowedDomainsOption,
+    AllowedEndpointsOption,
+    CredentialDomainOption,
+    EnvOption,
+    GpuOption,
+    ProviderOption,
+    ProvidersOption,
+)
 from paude.cli.helpers import (
-    _parse_agent_args,
     _parse_agent_provider_options,
     _prepare_session_create,
     _split_list_option,
@@ -37,29 +48,10 @@ def session_create(
             help="Enable YOLO mode (skip all permission prompts).",
         ),
     ] = None,
-    allowed_domains: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--allowed-domains",
-            help=(
-                "Domains to allow network access. Can be repeated. "
-                "Special values: 'all' (unrestricted), "
-                "'default' (vertexai+python+github), "
-                "'vertexai', 'python', 'golang', 'nodejs', "
-                "'rust'. Default: 'default'."
-            ),
-        ),
-    ] = None,
-    allowed_endpoints: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--allowed-endpoints",
-            help=(
-                "Exact host:port exceptions for nonstandard proxy ports. "
-                "Can be repeated; each host must also be allowed by domains."
-            ),
-        ),
-    ] = None,
+    allowed_domains: AllowedDomainsOption = None,
+    allowed_endpoints: AllowedEndpointsOption = None,
+    env_options: EnvOption = None,
+    credential_domain: CredentialDomainOption = None,
     rebuild: Annotated[
         bool,
         typer.Option(
@@ -97,58 +89,11 @@ def session_create(
             help="Target platform for image builds (e.g., linux/amd64, linux/arm64).",
         ),
     ] = None,
-    agent: Annotated[
-        str | None,
-        typer.Option(
-            "--agent",
-            help=(
-                "Agent to use: claude (default), codex, cursor, gascity, "
-                "gemini, openclaw, opencode. Alias for a single-item --agents."
-            ),
-        ),
-    ] = None,
-    agents: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--agents",
-            help=(
-                "Agents to use (comma-separated and/or repeatable; first is "
-                "primary), e.g. --agents gascity,claude,codex. Cannot be "
-                "combined with --agent."
-            ),
-        ),
-    ] = None,
-    provider: Annotated[
-        str | None,
-        typer.Option(
-            "--provider",
-            help=(
-                "Provider mapping for the primary agent (e.g., vertex, openai). "
-                "Cannot be combined with --agent-provider."
-            ),
-        ),
-    ] = None,
-    providers: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--providers",
-            help=(
-                "Credential providers to configure in the proxy and container "
-                "(comma-separated and/or repeatable)."
-            ),
-        ),
-    ] = None,
-    agent_provider: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--agent-provider",
-            help=(
-                "Map an installed agent to a provider as AGENT=PROVIDER. "
-                "Comma-separated and/or repeatable. Cannot be combined with "
-                "--provider."
-            ),
-        ),
-    ] = None,
+    agent: AgentOption = None,
+    agents: AgentsOption = None,
+    provider: ProviderOption = None,
+    providers: ProvidersOption = None,
+    agent_provider: AgentProviderOption = None,
     git: Annotated[
         bool | None,
         typer.Option(
@@ -163,17 +108,7 @@ def session_create(
             help="Skip cloning from origin in container (force full push).",
         ),
     ] = False,
-    gpu: Annotated[
-        str | None,
-        typer.Option(
-            "--gpu",
-            help=(
-                "Pass GPU devices to the container. "
-                "Use --gpu without a value for all GPUs, "
-                "or --gpu=device=0,1 for specific devices."
-            ),
-        ),
-    ] = None,
+    gpu: GpuOption = None,
     no_gpu: Annotated[
         bool,
         typer.Option(
@@ -282,9 +217,21 @@ def session_create(
         resolved.allowed_domains if resolved.allowed_domains else None
     )
     from paude.endpoints import normalize_allowed_endpoints
+    from paude.extra_env import parse_env_options
+    from paude.proxy_credential_routes import (
+        credential_domain_endpoints,
+        parse_credential_domains,
+    )
 
     try:
-        r_allowed_endpoints = normalize_allowed_endpoints(resolved.allowed_endpoints)
+        extra_env = parse_env_options(env_options)
+        r_credential_domains = parse_credential_domains(
+            credential_domain, resolved.providers
+        )
+        r_allowed_endpoints = normalize_allowed_endpoints(
+            resolved.allowed_endpoints
+            + credential_domain_endpoints(r_credential_domains)
+        )
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
@@ -296,36 +243,36 @@ def session_create(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
 
-    # Handle dry-run mode
-    if dry_run:
-        from paude.dry_run import show_dry_run
-        from paude.endpoints import warn_for_uncovered_allowed_endpoints
+    from functools import partial
 
-        parsed_args = _parse_agent_args(claude_args)
-        expanded, _parsed, _env, _unrestricted = _prepare_session_create(
-            allowed_domains=r_allowed_domains,
-            yolo=r_yolo,
-            claude_args=claude_args,
-            config_obj=config,
-            agent_name=r_agent,
-            provider_name=r_provider,
-            otel_endpoint=r_otel_endpoint,
-            composition=composition,
-            credential_providers=resolved.providers,
-        )
-        warn_for_uncovered_allowed_endpoints(r_allowed_endpoints, expanded)
-        show_dry_run(
-            flags={
-                "allowed_domains": expanded,
-                "allowed_endpoints": r_allowed_endpoints,
-                "rebuild": rebuild,
-                "verbose": verbose,
-                "claude_args": parsed_args,
-            },
+    prepare = partial(
+        _prepare_session_create,
+        allowed_domains=r_allowed_domains,
+        yolo=r_yolo,
+        claude_args=claude_args,
+        config_obj=config,
+        agent_name=r_agent,
+        provider_name=r_provider,
+        otel_endpoint=r_otel_endpoint,
+        composition=composition,
+        credential_providers=resolved.providers,
+        extra_env=extra_env,
+        credential_domains=r_credential_domains,
+    )
+
+    if dry_run:
+        from paude.cli.create_dry_run import run_create_dry_run
+
+        run_create_dry_run(
+            prepare=prepare,
+            allowed_endpoints=r_allowed_endpoints,
+            extra_env=extra_env,
+            credential_domains=r_credential_domains,
+            rebuild=rebuild,
+            verbose=verbose,
             resolved=resolved,
             composition=composition,
         )
-        raise typer.Exit()
 
     from paude.providers import check_required_secrets
 
@@ -363,17 +310,7 @@ def session_create(
             raise typer.Exit(1) from None
 
     # Shared pre-create: parse args, build env, expand domains, show warnings
-    expanded_domains, parsed_args, env, _unrestricted = _prepare_session_create(
-        allowed_domains=r_allowed_domains,
-        yolo=r_yolo,
-        claude_args=claude_args,
-        config_obj=config,
-        agent_name=r_agent,
-        provider_name=r_provider,
-        otel_endpoint=r_otel_endpoint,
-        composition=composition,
-        credential_providers=resolved.providers,
-    )
+    expanded_domains, parsed_args, env, _unrestricted = prepare()
 
     # Compute OTEL proxy ports (non-standard ports to allow through proxy)
     otel_ports: list[int] = []
@@ -408,4 +345,6 @@ def session_create(
         gpu=r_gpu,
         otel_ports=otel_ports,
         otel_endpoint=r_otel_endpoint,
+        extra_env=extra_env,
+        credential_domains=r_credential_domains,
     )

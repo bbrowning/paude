@@ -21,7 +21,7 @@ paude
 | `stop` | Stops the container, preserves the volume |
 | `connect` | Attaches to running session |
 | `cp` | Copies files between local machine and session |
-| `upgrade` | Pulls current bases, rebuilds with the latest stable agent tooling, and recreates the session while preserving workspace and agent state; can also add agents (`--add-agent`, `--agents`) and reconfigure options (`--otel-endpoint`, `--allowed-domains`, `--allowed-endpoints`, `--gpu`/`--no-gpu`, `--yolo`/`--no-yolo`, `--provider`) |
+| `upgrade` | Pulls current bases, rebuilds with the latest stable agent tooling, and recreates the session while preserving workspace and agent state; can also add agents (`--add-agent`, `--agents`) and reconfigure options (`--otel-endpoint`, `--allowed-domains`, `--allowed-endpoints`, `--gpu`/`--no-gpu`, `--yolo`/`--no-yolo`, `--provider`); `--env` and `--credential-domain` settings from `create` carry over |
 | `remote` | Manages git remotes for code sync |
 | `delete` | Removes all resources including volume |
 | `backup` | Snapshots a stopped session (volume + config) to a portable bundle |
